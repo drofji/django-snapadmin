@@ -1,0 +1,38 @@
+[tool.poetry]
+name = "drofji-snapadmin"
+version = "1.0.0"
+description = "Automatic and customizable admin interface for Django projects."
+authors = ["Alexander Wiese"]
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/drofji/django-snapadmin"
+repository = "https://github.com/drofji/django-snapadmin"
+keywords = ["django", "admin", "ui", "Snap", "extra-settings"]
+
+packages = [{include = "snapadmin"}]
+
+include = [
+    "snapadmin/templates/**/*",
+    "snapadmin/static/**/*",
+]
+
+[tool.poetry.dependencies]
+python = ">=3.10"
+Django = ">=5.2"
+dotenv = "~0.9.9"
+django-admin-rangefilter = "~0.13.3"
+django-admin-interface = "~0.28.9"
+django-colorfield = "~0.11.0"
+django-cors-headers = "~4.4.0"
+django-crontab = "~0.7.1"
+django-datepick = "~0.1.2"
+django-admin-autocomplete-filter = "~0.7.1"
+django-extra-settings = "~0.12.0"
+
+[tool.poetry.group.dev.dependencies]
+black = "^24.0.0"
+flake8 = "^7.0.0"
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
