@@ -25,7 +25,7 @@ logger = logging.getLogger("snapadmin.demo.search")
 # Index name used for product documents
 PRODUCTS_INDEX = "snapadmin_products"
 
-
+# TODO ??????? - Make product in elasticsearch via snapmodel (flag with elasticsearch db) and optimized methods
 def get_es_client():
     """
     Build and return an Elasticsearch client using settings.ELASTICSEARCH_URL.

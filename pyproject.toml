@@ -16,23 +16,28 @@ include = [
     "snapadmin/static/**/*",
 ]
 
-# TODO  Hier sollen nur die Requirements fuer snapadmin modul sein!
 [tool.poetry.dependencies]
 python = ">=3.10"
 Django = ">=5.2"
-dotenv = "~0.9.9"
-django-admin-rangefilter = "~0.13.3"
-django-admin-interface = "~0.28.9"
-django-colorfield = "~0.11.0"
-django-cors-headers = "~4.4.0"
-django-crontab = "~0.7.1"
-django-datepick = "~0.1.2"
-django-admin-autocomplete-filter = "~0.7.1"
-django-extra-settings = "~0.12.0"
+python-dotenv = ">=1.0.0"
+django-admin-rangefilter = ">=0.13.3"
+django-admin-interface = ">=0.28.9"
+django-colorfield = ">=0.11.0"
+django-cors-headers = ">=4.4.0"
+django-admin-autocomplete-filter = ">=0.7.1"
+django-extra-settings = ">=0.12.0"
+djangorestframework = ">=3.15.0"
+drf-spectacular = ">=0.27.0"
+djangorestframework-simplejwt = ">=5.3.0"
+structlog = ">=24.1.0"
+colorama = ">=0.4.6"
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.0.0"
 flake8 = "^7.0.0"
+pytest = "^8.0.0"
+pytest-django = "^4.8.0"
+pytest-cov = "^5.0.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

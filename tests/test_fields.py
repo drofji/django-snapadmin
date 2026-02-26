@@ -76,9 +76,9 @@ class TestSnapFieldDefaults:
         f = self._make_field()
         assert f.filterable is False
 
-    def test_default_editable_false(self):
+    def test_default_editable_true(self):
         f = self._make_field()
-        assert f.editable is False
+        assert f.editable is True
 
     def test_default_updatable_true(self):
         f = self._make_field()

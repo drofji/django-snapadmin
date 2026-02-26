@@ -22,8 +22,8 @@ from django.utils import timezone
 @pytest.mark.django_db
 class TestPurgeExpiredTokens:
     def test_deletes_expired_tokens(self, db, admin_user):
-        from api.models import APIToken
-        from api.tasks import purge_expired_tokens
+        from snapadmin.models import APIToken
+        from snapadmin.api.tasks import purge_expired_tokens
 
         APIToken.objects.create(
             user=admin_user,
@@ -39,25 +39,25 @@ class TestPurgeExpiredTokens:
         assert result["deleted"] >= 2
 
     def test_keeps_non_expired_tokens(self, api_token):
-        from api.tasks import purge_expired_tokens
+        from snapadmin.api.tasks import purge_expired_tokens
 
-        before = __import__("api.models", fromlist=["APIToken"]).APIToken.objects.count()
+        before = __import__("snapadmin.models", fromlist=["APIToken"]).APIToken.objects.count()
         purge_expired_tokens()
-        after = __import__("api.models", fromlist=["APIToken"]).APIToken.objects.count()
+        after = __import__("snapadmin.models", fromlist=["APIToken"]).APIToken.objects.count()
         assert after == before  # active, non-expired token must survive
 
     def test_keeps_inactive_tokens(self, inactive_token):
         """Inactive (but non-expired) tokens are NOT deleted – only expired ones are."""
-        from api.models import APIToken
-        from api.tasks import purge_expired_tokens
+        from snapadmin.models import APIToken
+        from snapadmin.api.tasks import purge_expired_tokens
 
         pk = inactive_token.pk
         purge_expired_tokens()
         assert APIToken.objects.filter(pk=pk).exists()
 
     def test_returns_deleted_count(self, db, admin_user):
-        from api.models import APIToken
-        from api.tasks import purge_expired_tokens
+        from snapadmin.models import APIToken
+        from snapadmin.api.tasks import purge_expired_tokens
 
         APIToken.objects.create(
             user=admin_user,
@@ -69,12 +69,12 @@ class TestPurgeExpiredTokens:
         assert result["deleted"] >= 1
 
     def test_returns_cutoff_timestamp(self, db):
-        from api.tasks import purge_expired_tokens
+        from snapadmin.api.tasks import purge_expired_tokens
         result = purge_expired_tokens()
         assert "cutoff" in result
 
     def test_zero_deleted_when_none_expired(self, api_token):
-        from api.tasks import purge_expired_tokens
+        from snapadmin.api.tasks import purge_expired_tokens
         result = purge_expired_tokens()
         # api_token never expires – nothing should be deleted
         assert result["deleted"] == 0
@@ -156,13 +156,13 @@ class TestGenerateDailyStats:
 @pytest.mark.django_db
 class TestReindexProductsToElasticsearch:
     def test_skips_when_es_unavailable(self, product):
-        with patch("demo.tasks.is_es_available", return_value=False):
+        with patch("demo.search.is_es_available", return_value=False):
             from demo.tasks import reindex_products_to_elasticsearch
             result = reindex_products_to_elasticsearch()
         assert result["skipped"] is True
 
     def test_skip_reason_in_result(self, product):
-        with patch("demo.tasks.is_es_available", return_value=False):
+        with patch("demo.search.is_es_available", return_value=False):
             from demo.tasks import reindex_products_to_elasticsearch
             result = reindex_products_to_elasticsearch()
         assert "reason" in result
@@ -170,8 +170,8 @@ class TestReindexProductsToElasticsearch:
     def test_indexes_products_when_es_available(self, product):
         from unittest.mock import MagicMock
         mock_es = MagicMock()
-        with patch("demo.tasks.is_es_available", return_value=True), \
-             patch("demo.tasks.get_es_client", return_value=mock_es):
+        with patch("demo.search.is_es_available", return_value=True), \
+             patch("demo.search.get_es_client", return_value=mock_es):
             from demo.tasks import reindex_products_to_elasticsearch
             result = reindex_products_to_elasticsearch()
         assert result["indexed"] >= 1
@@ -180,8 +180,8 @@ class TestReindexProductsToElasticsearch:
     def test_returns_indexed_count(self, many_products):
         from unittest.mock import MagicMock
         mock_es = MagicMock()
-        with patch("demo.tasks.is_es_available", return_value=True), \
-             patch("demo.tasks.get_es_client", return_value=mock_es):
+        with patch("demo.search.is_es_available", return_value=True), \
+             patch("demo.search.get_es_client", return_value=mock_es):
             from demo.tasks import reindex_products_to_elasticsearch
             result = reindex_products_to_elasticsearch()
         assert result["indexed"] == 30  # many_products creates 30

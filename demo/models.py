@@ -103,7 +103,7 @@ class Order(snap_models.SnapModel):
         verbose_name=_("Customer"),
         autocomplete=True,
         show_in_list=True,
-        editable=False,  # Read-only: set at creation time only
+        editable=True,  # Read-only: set at creation time only
         updatable=False,
         show_in_form=True
     )

@@ -13,6 +13,9 @@ Inherits everything from the main settings but:
 
 from sandbox.settings import *  # noqa: F401, F403
 
+# ── Secret Key for tests ─────────────────────────────────────────────────────
+SECRET_KEY = "test-secret-key-123"
+
 # ── Database: always SQLite for tests ────────────────────────────────────────
 DATABASES = {
     "default": {

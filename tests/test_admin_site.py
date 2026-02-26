@@ -35,7 +35,7 @@ class TestAdminRegistration:
         assert Order in admin.site._registry
 
     def test_api_token_in_registry(self):
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         assert APIToken in admin.site._registry
 
     def test_register_admin_idempotent(self):
@@ -121,5 +121,5 @@ class TestAdminViews:
         assert admin_client.get(url).status_code == 200
 
     def test_api_token_changelist_200(self, admin_client, api_token):
-        url = reverse("admin:api_apitoken_changelist")
+        url = reverse("admin:snapadmin_apitoken_changelist")
         assert admin_client.get(url).status_code == 200

@@ -57,7 +57,7 @@ class TestSeedDemoCommand:
         assert User.objects.filter(is_superuser=True).count() == count_after_first
 
     def test_creates_api_token(self):
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         self._call(count=3)
         assert APIToken.objects.filter(token_name="Demo Token").exists()
 
@@ -68,7 +68,7 @@ class TestSeedDemoCommand:
     def test_output_prints_token_key(self):
         output = self._call(count=3)
         # Token key is 40 alphanumeric chars – check something key-like is in output
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         token = APIToken.objects.filter(token_name="Demo Token").first()
         assert token.token_key in output
 

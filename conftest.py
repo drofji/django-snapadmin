@@ -34,7 +34,7 @@ def staff_user(db):
 
 @pytest.fixture
 def api_token(db, admin_user):
-    from api.models import APIToken
+    from snapadmin.models import APIToken
     return APIToken.create_for_user(
         user=admin_user, token_name="Test Token", allowed_models=[], expires_in_days=None
     )
@@ -42,7 +42,7 @@ def api_token(db, admin_user):
 
 @pytest.fixture
 def restricted_token(db, admin_user):
-    from api.models import APIToken
+    from snapadmin.models import APIToken
     return APIToken.create_for_user(
         user=admin_user, token_name="Restricted Token", allowed_models=["demo.Product"]
     )
@@ -52,7 +52,7 @@ def restricted_token(db, admin_user):
 def expired_token(db, admin_user):
     from datetime import timedelta
     from django.utils import timezone
-    from api.models import APIToken
+    from snapadmin.models import APIToken
     return APIToken.objects.create(
         user=admin_user,
         token_name="Expired Token",
@@ -62,7 +62,7 @@ def expired_token(db, admin_user):
 
 @pytest.fixture
 def inactive_token(db, admin_user):
-    from api.models import APIToken
+    from snapadmin.models import APIToken
     token = APIToken.create_for_user(user=admin_user, token_name="Inactive Token")
     token.is_active = False
     token.save()
