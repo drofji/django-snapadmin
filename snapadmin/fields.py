@@ -217,8 +217,6 @@ class SnapNotDatabaseField(SnapField):
     """
     Base for fields that exist only in the admin UI and have no DB column.
     Currently used by SnapFunctionField and its subclasses.
-
-    TODO: add ordering support via a DB expression proxy.
     """
     pass
 

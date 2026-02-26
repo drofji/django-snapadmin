@@ -29,8 +29,9 @@
 ## 🏗 Architecture
 
 ```
-snapadmin/          Core package — fields, models, admin registration, logging, token model, DRF views, serializers, auth
+snapadmin/          Core package — fields, models, admin registration, logging
 demo/               Example models (Product, Customer, Order) + seeder
+api/                REST API — token model, DRF views, serializers, auth
 sandbox/            Django project (settings, urls, celery)
 tests/              pytest test suite
 docker-compose.yml  Full production stack
