@@ -210,6 +210,7 @@ class SnapModel(models.Model):
 
     @classmethod
     def get_admin_fields(cls):
+        # TODO Future - Ускорить работу класса SnapModel
         """
         Inspect the model's fields and class attributes to derive five
         lists consumed by :meth:`register_admin`:
@@ -264,24 +265,21 @@ class SnapModel(models.Model):
 
         # --------------------------------------------------------------
         # Read-only fields — injected as a dynamic method on the class
-        #   • editable=False  → always read-only in create AND update forms
-        #   • updatable=False → read-only only after the object already exists
-        #
-        # NOTE: ForeignKey fields live in meta_fields_related, not meta_fields,
-        # so we merge both dicts for the readonly check to cover all field types.
-        all_fields_for_readonly = {**meta_fields, **meta_fields_related}
+        #   • editable=False  → always read-only
+        #   • updatable=False → read-only after the object already exists
+        # --------------------------------------------------------------
 
         editable_fields = [
-            fn for fn, fo in all_fields_for_readonly.items()
+            fn for fn, fo in meta_fields.items()
             if not getattr(fo, SnapFieldAttributeEnum.EDITABLE.value, False)
         ]
         updatable_fields = [
-            fn for fn, fo in all_fields_for_readonly.items()
+            fn for fn, fo in meta_fields.items()
             if not getattr(fo, SnapFieldAttributeEnum.UPDATABLE.value, True)
         ]
 
         if 'customer' in attr_fields:
-            pass  # Reserved for future FK attribute inspection
+            print('CCCC', attr_fields['customer'].__dict__['field'].__dict__)
 
         def dynamic_get_readonly_fields(self, request, obj=None):
             readonly_fields = [

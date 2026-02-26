@@ -23,7 +23,7 @@ class Product(snap_models.SnapModel):
     )
     available = snap_fields.SnapBooleanField(
         default=True, verbose_name=_("Available")
-    )
+    )  # TODO Test - Unknown? Is not wrong?
     full_info1 = snap_fields.SnapFunctionField(
         func=lambda obj: f"{obj.name} — {obj.price}$",
         verbose_name=_("Full Info"),
@@ -103,7 +103,7 @@ class Order(snap_models.SnapModel):
         verbose_name=_("Customer"),
         autocomplete=True,
         show_in_list=True,
-        editable=False,  # Read-only: set at creation time only
+        editable=False,  # TODO FIX - Not working, почему-то в конце концов видит true, хоть везде поставил false. Вообще по умолчанию должно быть true если ничего не передал, но я принудительно везде поставил false и все равно в конце концов возвращает true
         updatable=False,
         show_in_form=True
     )

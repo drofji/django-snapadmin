@@ -29,16 +29,9 @@ class FileEncodingEnum(str, Enum):
 
 # --- Validators ---
 
+# TODO Fix - если делаю миграции то почему-то все поля файловые возможно из-за валидатора постоянно вызывают миграции дублированные
 @deconstructible
 class SnapFileValidator:
-    """
-    Reusable file validator that checks extension, encoding, and file size.
-
-    The ``@deconstructible`` decorator ensures Django's migration framework
-    can serialise this validator. Equality is based on the validator's
-    configuration tuple so Django does not generate spurious duplicate
-    migrations when the model definition is unchanged.
-    """
     def __init__(
             self,
             allowed_extensions: typing.List[typing.Union[FileExtensionEnum, str]] = None,
@@ -93,23 +86,3 @@ class SnapFileValidator:
                     )
             except Exception:
                 raise ValidationError(_("Could not verify file encoding."))
-
-    def __eq__(self, other):
-        """
-        Equality check used by Django's migration framework.
-        Prevents spurious duplicate migrations on each makemigrations run.
-        """
-        if not isinstance(other, SnapFileValidator):
-            return False
-        return (
-            self.allowed_extensions == other.allowed_extensions
-            and self.allowed_encodings == other.allowed_encodings
-            and self.max_size_bytes == other.max_size_bytes
-        )
-
-    def __hash__(self):
-        return hash((
-            tuple(self.allowed_extensions or []),
-            tuple(self.allowed_encodings or []),
-            self.max_size_bytes,
-        ))

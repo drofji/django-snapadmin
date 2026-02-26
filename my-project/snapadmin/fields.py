@@ -122,14 +122,25 @@ class SnapField:
             SnapFieldAttributeEnum.SHOW_IN_FORM: False,
             SnapFieldAttributeEnum.SEARCHABLE: False,
             SnapFieldAttributeEnum.FILTERABLE: False,
-            SnapFieldAttributeEnum.EDITABLE: False, # TODO - Es wird immer noch am Ende True, auch wenn ich ueberall False schreibe. Also ich kann leider editable nicht auschalten
+            SnapFieldAttributeEnum.EDITABLE: False,
             SnapFieldAttributeEnum.REQUIRED: False,
             SnapFieldAttributeEnum.UPDATABLE: True,
             SnapFieldAttributeEnum.AUTOCOMPLETE: False,
         }
 
+        ed_kwargs0 = kwargs.get(SnapFieldAttributeEnum.EDITABLE.value)
+        up_kwargs0 = kwargs.get(SnapFieldAttributeEnum.UPDATABLE.value)
+
         for enum_attr, default_value in snap_defaults.items():
             kwargs.setdefault(enum_attr.value, default_value)
+
+        ed_kwargs1 = kwargs.get(SnapFieldAttributeEnum.EDITABLE.value)
+        up_kwargs1 = kwargs.get(SnapFieldAttributeEnum.UPDATABLE.value)
+
+        if ed_kwargs0 is not None and ed_kwargs0 is ed_kwargs1:
+            print(f'ED: kwargs0 & kwargs1 on initializeSnapAttributes -> {ed_kwargs0}')
+        if up_kwargs0 is not None and up_kwargs0 is up_kwargs1:
+            print(f'UP: kwargs0 & kwargs1 on initializeSnapAttributes -> {ed_kwargs0}')
 
         # Expose as instance attributes
         self.show_in_list = kwargs[SnapFieldAttributeEnum.SHOW_IN_LIST.value]
@@ -386,14 +397,8 @@ class SnapGenericIPAddressField(models.GenericIPAddressField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 
+# TODO FIX - В форме редактирования поля слишком большое, заходит за рамки формы редактирования.
 class SnapForeignKey(models.ForeignKey, SnapField):
-    """
-    ForeignKey field with SnapAdmin metadata support.
-
-    The admin form widget width is constrained via the bundled admin.css
-    using ``.select2-container { max-width: 100%; }`` so it never overflows
-    the form panel on narrow screens.
-    """
     def __init__(self, to, on_delete=models.CASCADE, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(to=to, on_delete=on_delete, **self.handleDjangoKwargs(**kwargs))

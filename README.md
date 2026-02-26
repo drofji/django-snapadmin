@@ -1,214 +1,293 @@
-# django-snapadmin
+# 🚀 SnapAdmin — Production-Ready Django Auto-Admin
 
-**Snap Admin or Automatically Django Admin** is a declarative Django package designed to eliminate the boilerplate of writing `admin.ModelAdmin` classes. By embedding admin configuration directly into your model fields, it automatically generates a feature-rich, beautiful, and highly functional Django admin interface.
+**SnapAdmin** is a declarative Django package that eliminates admin boilerplate. Define your model fields once — get a feature-rich, beautiful Django admin and a full REST API automatically.
+
+[![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python)](https://python.org)
+[![Django](https://img.shields.io/badge/Django-5.2+-green?logo=django)](https://djangoproject.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
 ---
 
 ## ✨ Features
 
-- **Declarative Admin** – Define `list_display`, `search_fields`, and `list_filter` directly inside model fields.
-- **Enhanced Change Logging** – Automatically logs detailed field-level changes (Old Value → New Value) in `LogEntry`.
-- **Smart Filtering** – Built-in support for:
-  - `DateRangeFilter`
-  - `NumericRangeFilter`
-  - AJAX-based `AutocompleteFilter`
-- **Status Badges** – Easily create colorful, styled HTML badges for status fields.
-- **Advanced Field Validation** – `SnapFileField` provides validation for file size, extensions, and encodings.
-- **Dynamic Read-only Logic** – Fields can be marked as non-editable or non-updatable (locked after creation).
-- **Functional Fields** – Create calculated display-only fields directly inside model definitions.
+| Feature | Description |
+|---------|-------------|
+| **Declarative Admin** | `list_display`, `search_fields`, `list_filter` via field attributes |
+| **Status Badges** | Coloured HTML badges for choice/status fields |
+| **Range Filters** | Date & numeric range filters built-in |
+| **Change Logging** | Detailed field-level `old → new` change history |
+| **REST API** | Auto-generated CRUD API for every SnapModel |
+| **Token Auth** | Named, expirable API tokens with model-scope restrictions |
+| **OpenAPI Docs** | Swagger UI + ReDoc via drf-spectacular |
+| **Celery** | Background tasks + Beat scheduler wired up |
+| **Elasticsearch** | Optional full-text search with graceful DB fallback |
+| **Structured Logs** | Colourised structlog output; JSON mode for production |
+| **Docker** | One-command `docker compose up` with PostgreSQL, Redis, ES |
 
 ---
 
-## 🚀 Installation
+## 🏗 Architecture
 
-### From PyPI
-
-```bash
-pip install django-snapadmin
 ```
-
-### From GitHub
-
-```bash
-pip install git+https://github.com/drofji/django-snapadmin.git
+snapadmin/          Core package — fields, models, admin registration, logging
+demo/               Example models (Product, Customer, Order) + seeder
+api/                REST API — token model, DRF views, serializers, auth
+sandbox/            Django project (settings, urls, celery)
+tests/              pytest test suite
+docker-compose.yml  Full production stack
+Dockerfile          Multi-stage build (builder + runtime)
 ```
 
 ---
 
-## ⚙️ Settings Configuration
+## 🐳 Quickstart — Docker (recommended)
 
-Add the following to your `INSTALLED_APPS` in `settings.py` (order matters):
+```bash
+# 1. Clone
+git clone https://github.com/drofji/django-snapadmin.git
+cd django-snapadmin
 
-```python
-INSTALLED_APPS = [
-    "admin_interface",
-    "colorfield",
-    "django.contrib.admin",
-    # ... other Django apps ...
-    "rangefilter",
-    "admin_auto_filters",
-    "snapadmin",
-    "your_app",
-]
+# 2. Configure environment
+cp dist.env .env
+# Edit .env if needed (defaults work out-of-the-box)
+
+# 3. Start the full stack
+docker compose up --build
+
+# 4. Open
+#   Admin:   http://localhost:8000/admin/     (admin / admin)
+#   API:     http://localhost:8000/api/docs/  (Swagger UI)
 ```
+
+The `app` service automatically runs migrations and seeds demo data on first boot.
+
+To include Kibana for Elasticsearch visualisation:
+```bash
+docker compose --profile dev up --build
+```
+
+---
+
+## 💻 Quickstart — Local Development
+
+```bash
+# 1. Create & activate venv
+python -m venv .venv
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Configure environment (SQLite, no Redis/ES required)
+cp dist.env .env
+# Set DEBUG=True, leave POSTGRES_DB blank for SQLite
+
+# 4. Migrate & seed
+python manage.py migrate
+python manage.py seed_demo
+
+# 5. Run
+python manage.py runserver
+```
+
+**Elasticsearch is optional** — the app falls back to database queries automatically when ES is unavailable.
 
 ---
 
 ## 🛠 Usage
 
-### 1️⃣ Basic Model Setup
-
-Inherit from `SnapModel` and use `Snap` field types in your `models.py`.
+### Defining a SnapModel
 
 ```python
+# yourapp/models.py
+from snapadmin import fields as snap, models as snap_models
 from django.utils.translation import gettext_lazy as _
-from snapadmin import fields as dra_fields
-from snapadmin import models as dra_models
 
-
-class Product(dra_models.SnapModel):
-    name = dra_fields.SnapCharField(
+class Product(snap_models.SnapModel):
+    name = snap.SnapCharField(
         max_length=200,
-        searchable=True,
-        show_in_list=True,
-        verbose_name=_("Product Name"),
+        verbose_name=_("Name"),
+        searchable=True,      # → search_fields
+        show_in_list=True,    # → list_display
     )
-
-    price = dra_fields.SnapDecimalField(
+    price = snap.SnapDecimalField(
         max_digits=10,
         decimal_places=2,
-        filterable=True,  # Enables NumericRangeFilter
         verbose_name=_("Price"),
+        filterable=True,      # → NumericRangeFilter
     )
-```
-
----
-
-### 2️⃣ Status Badges & Update Logic
-
-Create visually distinct status labels and handle update permissions easily.
-
-```python
-class Customer(dra_models.SnapModel):
-    status = dra_fields.SnapCharField(
+    status = snap.SnapCharField(
         max_length=20,
-        choices=[
-            ("active", "Active"),
-            ("banned", "Banned"),
-        ],
+        choices=[("active","Active"),("archived","Archived")],
+        filterable=True,
     )
-
-    # Beautiful HTML badges in the list view
-    status_display = dra_fields.SnapStatusBadgeField(
+    status_badge = snap.SnapStatusBadgeField(
         field_name="status",
         choices=[
-            dra_fields.SnapStatusBadgeFieldChoice(
-                "active",
-                text_html_color="#155724",
-                background_html_color="#D4EDDA",
-            ),
-            dra_fields.SnapStatusBadgeFieldChoice(
-                "banned",
-                text_html_color="#721C24",
-                background_html_color="#F8D7DA",
-            ),
+            snap.SnapStatusBadgeFieldChoice("active",  "#155724","#D4EDDA","#C3E6CB"),
+            snap.SnapStatusBadgeFieldChoice("archived","#721C24","#F8D7DA","#F5C6CB"),
         ],
     )
 
-    # Cannot be changed after creation
-    internal_id = dra_fields.SnapUUIDField(updatable=False)
+    class Meta:
+        verbose_name = _("Product")
+        verbose_name_plural = _("Products")
 ```
 
----
-
-### 3️⃣ Automatic Admin Registration
-
-In your `admin.py`, just call:
+### Register admin
 
 ```python
+# yourapp/admin.py
 from snapadmin.models import SnapModel
-
-# Automatically registers all models inheriting from SnapModel
 SnapModel.register_all_admins()
 ```
 
----
-
-## 📂 Repository Structure
-
-```
-.
-├── snapadmin/             # Core package source
-│   ├── fields.py          # Custom Snap form/model fields
-│   ├── models.py          # Base SnapModel and registration logic
-│   └── static/            # Custom CSS/JS for the admin interface
-├── demo/                  # Sample models and migrations
-├── sandbox/               # Django settings and URLs
-├── pyproject.toml         # Build system dependencies (Poetry)
-└── README.md
-```
+That's it. Navigate to `/admin/` and your model has a fully configured admin.
 
 ---
 
-## 🏗 Running the Example Project (Sandbox)
+## 🔑 Field Flags Reference
 
-### 1️⃣ Clone the repository
+| Flag | Default | Effect |
+|------|---------|--------|
+| `show_in_list` | `True` | Adds to `list_display` |
+| `show_in_form` | `False` | Shows in the change form |
+| `searchable` | `False` | Adds to `search_fields` |
+| `filterable` | `False` | Adds to `list_filter` (smart type-aware) |
+| `editable` | `False` | If False → always read-only in admin |
+| `updatable` | `True` | If False → read-only after first save |
+| `required` | `False` | If False → `null=True, blank=True` |
+| `autocomplete` | `False` | Select2 widget for FKs & choices |
+
+---
+
+## 🌐 REST API
+
+### Authentication
+
+All API requests require a token in the Authorization header:
+
+```http
+Authorization: Token <your-token-key>
+```
+
+### Create a token (admin panel or seed_demo)
+
+After seeding, the demo token key is printed to the console. Or create one programmatically:
+
+```python
+from api.models import APIToken
+token = APIToken.create_for_user(
+    user=user,
+    token_name="My CI Token",
+    allowed_models=["demo.Product"],   # restrict to specific models
+    expires_in_days=30,                # None = never expires
+)
+print(token.token_key)
+```
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/tokens/` | List your tokens |
+| POST | `/api/tokens/` | Create a new token |
+| DELETE | `/api/tokens/{id}/` | Delete a token |
+| GET | `/api/models/schema/` | List all available model endpoints |
+| GET | `/api/models/{app}/{Model}/` | List objects |
+| POST | `/api/models/{app}/{Model}/` | Create object |
+| GET | `/api/models/{app}/{Model}/{pk}/` | Retrieve object |
+| PATCH | `/api/models/{app}/{Model}/{pk}/` | Update object |
+| DELETE | `/api/models/{app}/{Model}/{pk}/` | Delete object |
+| GET | `/api/docs/` | Swagger UI |
+| GET | `/api/schema/` | OpenAPI 3 JSON |
+
+### Example: List products
 
 ```bash
-git clone https://github.com/drofji/django-snapadmin.git
-cd django-snapadmin
+curl -H "Authorization: Token YOUR_TOKEN" \
+     http://localhost:8000/api/models/demo/Product/
 ```
 
-### 2️⃣ Setup environment
-
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Linux/macOS
-# .venv\Scripts\activate   # Windows
-pip install -e .
-```
-
-### 3️⃣ Run example
-
-```bash
-cd example
-python manage.py migrate
-python manage.py createsuperuser
-python manage.py runserver
-```
-
-Open:
-
-```
-http://127.0.0.1:8000/admin/
+```json
+{
+  "count": 50,
+  "next": "http://localhost:8000/api/models/demo/Product/?page=2",
+  "results": [
+    {"id": 1, "name": "Premium Laptop Stand", "price": "49.99", "available": true},
+    ...
+  ]
+}
 ```
 
 ---
 
-## ⚙️ Field Flags Reference
+## 🧪 Testing
 
-Every `SnapField` supports the following parameters:
+```bash
+# Run full test suite
+pytest
 
-| Parameter     | Description                                           | Default |
-|--------------|-------------------------------------------------------|---------|
-| show_in_list | Adds field to `list_display`                          | True    |
-| searchable   | Adds field to `search_fields`                         | False   |
-| filterable   | Adds field to `list_filter` (supports range filters)  | False   |
-| editable     | If False, field is globally read-only in admin        | True    |
-| updatable    | If False, field is read-only after object creation    | True    |
-| required     | If False, sets `null=True, blank=True` automatically  | False   |
-| autocomplete | Enables AJAX search for ForeignKeys/Choices           | True    |
+# With coverage report
+pytest --cov=snapadmin --cov=api --cov=demo --cov-report=html
+
+# Run specific tests
+pytest tests/test_api_token.py -v
+pytest tests/test_model_api.py -v
+```
+
+---
+
+## 🌱 Demo Seeder
+
+```bash
+# Seed with default 50 objects per type
+python manage.py seed_demo
+
+# Custom count
+python manage.py seed_demo --count 100
+
+# Wipe and re-seed
+python manage.py seed_demo --flush
+
+# Skip Elasticsearch indexing
+python manage.py seed_demo --no-index
+```
+
+Auto-seed on first migrate by setting `SNAPADMIN_AUTO_SEED=True` in `.env`.
+
+---
+
+## ⚙️ Celery
+
+Start locally:
+```bash
+# Worker
+celery -A sandbox worker --loglevel=info
+
+# Beat scheduler
+celery -A sandbox beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+```
+
+Built-in periodic tasks:
+- **02:30 daily** — Purge expired API tokens
+- **Every hour**  — Re-index products to Elasticsearch
+- **Midnight**    — Generate daily stats snapshot
+
+---
+
+## 🔍 Elasticsearch
+
+Elasticsearch is **optional**. When `ELASTICSEARCH_ENABLED=False` (the default for local dev), all search operations fall back to Django ORM `icontains` queries silently.
+
+Enable in Docker:
+```bash
+ELASTICSEARCH_ENABLED=True
+ELASTICSEARCH_URL=http://elasticsearch:9200
+```
 
 ---
 
 ## 📜 License
 
-MIT License
-
----
-
-## 💡 Philosophy
-
-> Write models once.  
-> Get a powerful Django Admin automatically.  
-> Zero boilerplate. Maximum productivity.
+MIT License — see [LICENSE](LICENSE).

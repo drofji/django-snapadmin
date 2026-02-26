@@ -33,7 +33,6 @@ INSTALLED_APPS = [
     'extra_settings',               # Optional
 
     # Local Apps
-    'api',
     'demo',                          # Testing
 ]
 
@@ -163,3 +162,8 @@ EXTRA_SETTINGS_DEFAULTS = [
     {'name': 'FAVICON', 'type': 'image', 'value': 'defaults/favicon.ico'},
     {'name': 'TERMS_PDF', 'type': 'file', 'value': 'docs/terms.pdf'},
 ]
+
+# TODO Future - Integrate Menu Ordering
+# TODO Future - Make autimatical disabling SpanModel on Menu
+
+# TODO Future - Make Docker env

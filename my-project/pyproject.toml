@@ -16,7 +16,6 @@ include = [
     "snapadmin/static/**/*",
 ]
 
-# TODO  Hier sollen nur die Requirements fuer snapadmin modul sein!
 [tool.poetry.dependencies]
 python = ">=3.10"
 Django = ">=5.2"

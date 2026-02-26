@@ -1,0 +1,139 @@
+:root {
+    --primary-color: #0c4b33;
+    --accent-bg: rgba(100, 100, 100, 0.08);
+    --border-light: rgba(0, 0, 0, 0.1);
+    --radius: 6px;
+    --transition: all 0.2s ease;
+}
+
+.faded-zeros {
+    opacity: 0.3;
+}
+
+th.field-formatted_id a,
+td.field-formatted_id a {
+    display: inline-block;
+    padding: 3px 8px;
+    background: var(--accent-bg);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius);
+    text-decoration: none;
+    font-family: monospace;
+    font-weight: 600;
+    color: #444;
+    transition: var(--transition);
+}
+
+th.field-formatted_id a:hover,
+td.field-formatted_id a:hover {
+    background: #fff;
+    border-color: var(--primary-color);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+#changelist-form table tbody tr {
+    cursor: pointer;
+}
+
+.results table tr {
+    transition: var(--transition);
+}
+
+.results table tr:hover {
+    background-color: rgba(0, 0, 0, 0.03) !important;
+}
+
+div.fieldBox.flex-container {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 5px;
+}
+
+div.fieldBox.flex-container label {
+    float: none !important;
+    margin: 0 !important;
+    font-weight: 600;
+}
+
+.django-select2-container,
+.select2-container--default,
+.select2-container {
+    max-width: 100% !important;
+}
+.select2-container--admin-autocomplete {
+min-width: 100% !important;
+width: 100% !important;
+}
+.select2-container--default .select2-selection--single,
+.django-select2-container .select2-selection--single {
+    height: 36px !important;
+    border: 1px solid #ccc !important;
+    border-radius: var(--radius) !important;
+    display: flex !important;
+    align-items: center !important;
+}
+
+.select2-selection__rendered {
+    padding-left: 12px !important;
+    color: #333 !important;
+}
+
+.actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 15px;
+    background: #f8f9fa;
+    border: 0 !important;
+    margin-bottom: 15px;
+}
+
+.actions label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-weight: 600;
+    color: #444;
+}
+
+.actions .button {
+    height: 36px;
+    padding: 0 20px !important;
+    background: var(--primary-color) !important;
+    color: #ffffff !important;
+    border-radius: var(--radius) !important;
+    border: none !important;
+    font-weight: bold;
+    transition: filter 0.2s;
+}
+
+.actions .button:hover {
+    filter: brightness(1.1);
+}
+
+.actions .action-counter {
+    margin-left: auto;
+    color: #666;
+    font-size: 13px;
+    background: #eee;
+    padding: 4px 12px;
+    border-radius: 20px;
+}
+
+#changelist-filter li {
+    display: flex;
+    justify-content: center;
+    padding: 3px 0 !important;
+}
+
+@media (max-width: 768px) {
+    .actions {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .actions .action-counter {
+        margin-left: 0;
+        text-align: center;
+    }
+}
