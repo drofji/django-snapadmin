@@ -1,0 +1,144 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SnapAdmin Dashboard</title>
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f4f7f6;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 600px;
+        }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .section {
+            margin-bottom: 1.5rem;
+        }
+        .section-title {
+            font-weight: bold;
+            color: #7f8c8d;
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            font-size: 0.8rem;
+            letter-spacing: 1px;
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 1rem;
+        }
+        .card {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            padding: 1rem;
+            border-radius: 8px;
+            text-align: center;
+            transition: transform 0.2s, box-shadow 0.2s;
+            text-decoration: none;
+            color: #34495e;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            border-color: #3498db;
+        }
+        .card i {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            color: #3498db;
+        }
+        .status-list {
+            list-style: none;
+            padding: 0;
+        }
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .status-online {
+            color: #27ae60;
+            font-weight: bold;
+        }
+        .status-offline {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        .info-item {
+            font-size: 0.9rem;
+            color: #555;
+            margin-bottom: 0.2rem;
+        }
+        .footer {
+            margin-top: 2rem;
+            text-align: center;
+            font-size: 0.8rem;
+            color: #bdc3c7;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>SnapAdmin Dashboard</h1>
+
+        <div class="section">
+            <div class="section-title">Quick Links</div>
+            <div class="grid">
+                {% for link in links %}
+                <a href="{{ link.url }}" class="card">
+                    <i class="material-icons">{{ link.icon }}</i>
+                    <span>{{ link.name }}</span>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">Service Health</div>
+            <div class="status-list">
+                {% for service in services %}
+                <div class="status-item">
+                    <span>{{ service.name }}</span>
+                    <span class="status-{% if service.status == 'online' %}online{% else %}offline{% endif %}">
+                        ● {{ service.status|upper }}
+                    </span>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">System Info</div>
+            <div class="info-item"><strong>Debug Mode:</strong> {{ debug }}</div>
+            <div class="info-item"><strong>Allowed Hosts:</strong> {{ allowed_hosts|join:", " }}</div>
+            <div class="info-item"><strong>SnapAdmin Version:</strong> {{ version }}</div>
+        </div>
+
+        <div class="footer">
+            Powered by SnapAdmin &copy; 2024
+        </div>
+    </div>
+</body>
+</html>

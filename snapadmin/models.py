@@ -14,14 +14,18 @@ from datetime import timedelta
 from enum import Enum
 
 from django.apps import apps
+from django.core.exceptions import ValidationError
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.contrib.admin.models import ADDITION, CHANGE, DELETION, LogEntry
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils import timezone
+from django.db.models.signals import post_save, post_delete
+from django.dispatch import receiver
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
+from django.conf import settings
 
 from admin_auto_filters.filters import AutocompleteFilter
 from rangefilter.filters import DateRangeFilter, NumericRangeFilter
@@ -34,6 +38,37 @@ from snapadmin.fields import DjangoFieldAttributeEnum, SnapFieldAttributeEnum, S
 # ===========================================================================
 # API Token Models
 # ===========================================================================
+
+def validate_allowed_models(value):
+    """
+    Validate that each entry in allowed_models is a valid 'app_label.ModelName'.
+    """
+    if not isinstance(value, list):
+        raise ValidationError(_("Allowed models must be a list."))
+
+    for item in value:
+        if not isinstance(item, str) or "." not in item:
+            raise ValidationError(
+                _("Invalid model format: '%(item)s'. Expected 'app_label.ModelName'."),
+                params={"item": item},
+            )
+
+        parts = item.split(".")
+        if len(parts) != 2:
+            raise ValidationError(
+                _("Invalid model format: '%(item)s'. Expected 'app_label.ModelName'."),
+                params={"item": item},
+            )
+
+        app_label, model_name = parts
+        try:
+            apps.get_model(app_label, model_name)
+        except LookupError:
+            raise ValidationError(
+                _("Model '%(item)s' does not exist or is not registered."),
+                params={"item": item},
+            )
+
 
 def _generate_token_key() -> str:
     """
@@ -92,12 +127,12 @@ class APIToken(models.Model):
     allowed_models = models.JSONField(
         default=list,
         blank=True,
+        validators=[validate_allowed_models],
         verbose_name=_("Allowed Models"),
         help_text=_(
-            "List of '<app_label>.<ModelName>' strings this token can access. "
+            "List of 'app_label.ModelName' strings this token can access. "
             "An empty list grants access to all models."
         ),
-        # TODO - Default please all apps and all models in json and validate, if without app or only string - is wrong
     )
     is_active = models.BooleanField(
         default=True,
@@ -353,8 +388,117 @@ class SnapModel(models.Model):
     snap_inlines = []
     admin_sections = []
 
+    # Elasticsearch integration
+    es_index_enabled = False
+    es_index_name = None
+    es_mapping = None  # Dict of field_name -> {"type": "..."}
+
     class Meta:
         abstract = True
+
+    # ------------------------------------------------------------------
+    # Elasticsearch methods
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def get_es_index_name(cls):
+        return cls.es_index_name or f"snap_{cls._meta.app_label}_{cls._meta.model_name.lower()}"
+
+    @classmethod
+    def get_es_client(cls):
+        from elasticsearch import Elasticsearch
+        url = getattr(settings, "ELASTICSEARCH_URL", "http://localhost:9200")
+        return Elasticsearch([url], request_timeout=5)
+
+    def get_es_document(self):
+        """
+        Return a dictionary representing this object for Elasticsearch.
+        Override this to customize the indexed data.
+        """
+        doc = {"id": self.pk}
+        if self.es_mapping:
+            for field_name in self.es_mapping.keys():
+                val = getattr(self, field_name, None)
+                if hasattr(val, "pk"):
+                    val = val.pk
+                doc[field_name] = val
+        return doc
+
+    def index_in_es(self):
+        if not self.es_index_enabled or not getattr(settings, "ELASTICSEARCH_ENABLED", False):
+            return
+        try:
+            es = self.get_es_client()
+            index_name = self.get_es_index_name()
+            # Ensure index exists with mapping if provided
+            if not es.indices.exists(index=index_name):
+                body = {}
+                if self.es_mapping:
+                    body["mappings"] = {"properties": self.es_mapping}
+                    # Always ensure ID is there
+                    body["mappings"]["properties"]["id"] = {"type": "integer"}
+                es.indices.create(index=index_name, body=body)
+
+            es.index(index=index_name, id=self.pk, document=self.get_es_document())
+        except Exception as e:
+            # We don't want to crash the main DB transaction if ES is down
+            # In production, this should probably be a background task (Celery)
+            pass
+
+    def delete_from_es(self):
+        if not self.es_index_enabled or not getattr(settings, "ELASTICSEARCH_ENABLED", False):
+            return
+        try:
+            es = self.get_es_client()
+            es.delete(index=self.get_es_index_name(), id=self.pk, ignore=[404])
+        except Exception:
+            pass
+
+    @classmethod
+    def snap_search(cls, query_string, limit=20):
+        """
+        Search for records. Uses Elasticsearch if enabled, falls back to DB.
+        """
+        if cls.es_index_enabled and getattr(settings, "ELASTICSEARCH_ENABLED", False):
+            try:
+                es = cls.get_es_client()
+                response = es.search(
+                    index=cls.get_es_index_name(),
+                    body={
+                        "query": {
+                            "multi_match": {
+                                "query": query_string,
+                                "fields": ["*"],
+                                "fuzziness": "AUTO",
+                            }
+                        },
+                        "size": limit,
+                    }
+                )
+                hits = response.get("hits", {}).get("hits", [])
+                pks = [hit["_source"]["id"] for hit in hits]
+                # Return queryset ordered by ES results
+                preserved = models.Case(*[models.When(pk=pk, then=pos) for pos, pk in enumerate(pks)])
+                return cls.objects.filter(pk__in=pks).order_by(preserved)
+            except Exception:
+                pass
+
+        # Fallback to DB search using search_fields
+        _, _, search_fields, _, _ = cls.get_admin_fields()
+        q_objects = models.Q()
+        for field in search_fields:
+            if field == "id":
+                try:
+                    q_objects |= models.Q(id=int(query_string))
+                except ValueError:
+                    pass
+                continue
+            # Handle relational fields in search_fields if any (though they usually aren't here yet)
+            q_objects |= models.Q(**{f"{field}__icontains": query_string})
+
+        if q_objects:
+            return cls.objects.filter(q_objects).distinct()[:limit]
+        return cls.objects.all()[:limit]
 
     # ------------------------------------------------------------------
     # Human-readable representation
@@ -625,3 +769,16 @@ class SnapModel(models.Model):
             if issubclass(model, SnapModel) and model is not SnapModel:
                 if app_label is None or model._meta.app_label == app_label:
                     model.register_admin()
+
+
+# ── Signals for Elasticsearch ──────────────────────────────────────────────
+
+@receiver(post_save)
+def snap_model_post_save(sender, instance, **kwargs):
+    if isinstance(instance, SnapModel):
+        instance.index_in_es()
+
+@receiver(post_delete)
+def snap_model_post_delete(sender, instance, **kwargs):
+    if isinstance(instance, SnapModel):
+        instance.delete_from_es()

@@ -1,8 +1,11 @@
 from django.contrib import admin
 from django.urls import path, include
+from snapadmin.views import DashboardView
+from demo.views import product_search
 
-# TODO - Make dashboard on "/" with links to admin, api-docs, api-redoc, api, kibana, postgre, elasticsearch in telegram-style. With online/offline health status of services (you can make health method in api to check all connections), and infos like main configurations from settings.py like debug, allowed hosts, etc.
 urlpatterns = [
+    path('', DashboardView.as_view(), name='dashboard'),
     path('admin/', admin.site.urls),
     path('api/', include('snapadmin.urls')),
+    path('demo/search/', product_search, name='product-search'),
 ]
