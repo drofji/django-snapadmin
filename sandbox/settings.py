@@ -25,6 +25,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
 
     # SnapAdmin Stack
+    'rest_framework',               # REQUIRED
+    'drf_spectacular',              # REQUIRED
     'admin_auto_filters',           # REQUIRED
     'rangefilter',                  # REQUIRED
     'snapadmin',                    # REQUIRED
@@ -113,7 +115,58 @@ REST_FRAMEWORK = {
     'PAGE_SIZE': 25,
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'snapadmin.api.authentication.APITokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
     ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+}
+
+SPECTACULAR_SETTINGS = {
+    # 1. Basic Metadata
+    'TITLE': 'Your Project API',
+    'DESCRIPTION': 'Detailed API documentation for my Django project.',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,  # Hides the schema endpoint from the docs list
+
+    # 2. Authentication / Security (The "Authorize" Button)
+    # This defines the global security schemes for the Swagger UI
+    'SECURITY': [
+        {'TokenAuth': []},
+    ],
+    'COMPONENT_SPLIT_PATCH': True,
+    'COMPONENT_SPLIT_REQUEST': True,
+
+    'APPEND_COMPONENTS': {
+        "securitySchemes": {
+            "TokenAuth": {
+                "type": "apiKey",
+                "in": "header",
+                "name": "Authorization",
+                "description": 'Enter your token in the format: "Token <your_token_value>"'
+            }
+        }
+    },
+
+    # 3. UI Customization
+    'SWAGGER_UI_SETTINGS': {
+        'deepLinking': True,
+        'persistAuthorization': True,  # Keeps you logged in after page refresh
+        'displayOperationId': True,  # Shows function names next to paths
+        'filter': True,  # Adds a search bar to filter endpoints
+    },
+
+    # 4. Local Assets (Optional but recommended)
+    # Use 'SIDECAR' if you have drf-spectacular-sidecar installed to avoid CDN issues
+    # 'SWAGGER_UI_DIST': 'SIDECAR',
+    # 'SWAGGER_UI_FAVICON_HREF': 'SIDECAR',
+    # 'REDOC_DIST': 'SIDECAR',
+
+    # 5. Advanced Schema Features
+    'ENUM_NAME_OVERRIDES': {
+        # Custom names for choices/enums if they look messy in the docs
+    },
 }
 
 

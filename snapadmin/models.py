@@ -97,6 +97,7 @@ class APIToken(models.Model):
             "List of '<app_label>.<ModelName>' strings this token can access. "
             "An empty list grants access to all models."
         ),
+        # TODO - Default please all apps and all models in json and validate, if without app or only string - is wrong
     )
     is_active = models.BooleanField(
         default=True,
