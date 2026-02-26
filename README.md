@@ -176,7 +176,7 @@ Authorization: Token <your-token-key>
 After seeding, the demo token key is printed to the console. Or create one programmatically:
 
 ```python
-from api.models import APIToken
+from snapadmin.models import APIToken
 token = APIToken.create_for_user(
     user=user,
     token_name="My CI Token",

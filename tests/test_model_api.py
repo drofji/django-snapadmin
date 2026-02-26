@@ -222,17 +222,17 @@ class TestModelSchemaView:
 @pytest.mark.django_db
 class TestSerializerFactory:
     def test_get_serializer_for_product(self):
-        from api.serializers import get_serializer_for_model
+        from snapadmin.api.serializers import get_serializer_for_model
         cls = get_serializer_for_model("demo", "Product")
         assert cls is not None
 
     def test_serializer_cached(self):
-        from api.serializers import get_serializer_for_model
+        from snapadmin.api.serializers import get_serializer_for_model
         cls1 = get_serializer_for_model("demo", "Customer")
         cls2 = get_serializer_for_model("demo", "Customer")
         assert cls1 is cls2  # same object due to caching
 
     def test_unknown_model_raises(self):
-        from api.serializers import get_serializer_for_model
+        from snapadmin.api.serializers import get_serializer_for_model
         with pytest.raises(LookupError):
             get_serializer_for_model("demo", "DoesNotExist")

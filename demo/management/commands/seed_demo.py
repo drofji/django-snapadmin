@@ -23,7 +23,6 @@ from django.utils import timezone
 
 from demo.models import Customer, Order, Product
 
-# TODO Fix - python manage.py seed_demo -> Unknown command: 'seed_demo'
 
 # ─── Sample data pools ───────────────────────────────────────────────────────
 
@@ -206,7 +205,7 @@ class Command(BaseCommand):
 
     def _ensure_api_token(self, user: User):
         """Create a demo API token for the admin user if it doesn't exist."""
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         token, created = APIToken.objects.get_or_create(
             user=user,
             token_name="Demo Token",

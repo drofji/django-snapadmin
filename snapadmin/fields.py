@@ -59,13 +59,6 @@ class DjangoFieldAttributeEnum(str, Enum):
     AUTO_NOW_ADD = "auto_now_add"
 
 
-class SnapModelAttributeEnum(str, Enum):
-    """Model-level attributes set/read by SnapAdmin internals."""
-
-    # TODO: move this enum into models.py where it's primarily used
-    ADMIN_OVERRIDES = "admin_overrides"
-
-
 # ===========================================================================
 # Base mixin
 # ===========================================================================
@@ -103,35 +96,11 @@ class SnapField:
         Returns the kwargs dict with SnapAdmin keys consumed/adjusted.
         """
         kwargs = self.__handleRequiredFlag(**kwargs)
-        kwargs = self.__initializeSnapAttributes(**kwargs)
+        kwargs = self.__applySnapDefaults(**kwargs)
         kwargs = self.__reinitializeAutocomplete(**kwargs)
         kwargs = self.__reinitializeAutoNow(**kwargs)
-        return kwargs
 
-    # ------------------------------------------------------------------
-    # Step 1: Apply defaults and store snap attributes on self
-    # ------------------------------------------------------------------
-
-    def __initializeSnapAttributes(self, **kwargs) -> dict:
-        """
-        Pop SnapAdmin-specific keys from kwargs, apply sensible defaults,
-        and store them as instance attributes so admin code can read them.
-        """
-        snap_defaults = {
-            SnapFieldAttributeEnum.SHOW_IN_LIST: True,
-            SnapFieldAttributeEnum.SHOW_IN_FORM: False,
-            SnapFieldAttributeEnum.SEARCHABLE: False,
-            SnapFieldAttributeEnum.FILTERABLE: False,
-            SnapFieldAttributeEnum.EDITABLE: False, # TODO - Es wird immer noch am Ende True, auch wenn ich ueberall False schreibe. Also ich kann leider editable nicht auschalten
-            SnapFieldAttributeEnum.REQUIRED: False,
-            SnapFieldAttributeEnum.UPDATABLE: True,
-            SnapFieldAttributeEnum.AUTOCOMPLETE: False,
-        }
-
-        for enum_attr, default_value in snap_defaults.items():
-            kwargs.setdefault(enum_attr.value, default_value)
-
-        # Expose as instance attributes
+        # Store as instance attributes after all logic has run
         self.show_in_list = kwargs[SnapFieldAttributeEnum.SHOW_IN_LIST.value]
         self.show_in_form = kwargs[SnapFieldAttributeEnum.SHOW_IN_FORM.value]
         self.searchable = kwargs[SnapFieldAttributeEnum.SEARCHABLE.value]
@@ -140,6 +109,30 @@ class SnapField:
         self.required = kwargs[SnapFieldAttributeEnum.REQUIRED.value]
         self.updatable = kwargs[SnapFieldAttributeEnum.UPDATABLE.value]
         self.autocomplete = kwargs[SnapFieldAttributeEnum.AUTOCOMPLETE.value]
+
+        return kwargs
+
+    # ------------------------------------------------------------------
+    # Step 1: Apply defaults
+    # ------------------------------------------------------------------
+
+    def __applySnapDefaults(self, **kwargs) -> dict:
+        """
+        Apply sensible defaults to SnapAdmin-specific keys in kwargs.
+        """
+        snap_defaults = {
+            SnapFieldAttributeEnum.SHOW_IN_LIST: True,
+            SnapFieldAttributeEnum.SHOW_IN_FORM: False,
+            SnapFieldAttributeEnum.SEARCHABLE: False,
+            SnapFieldAttributeEnum.FILTERABLE: False,
+            SnapFieldAttributeEnum.EDITABLE: True,
+            SnapFieldAttributeEnum.REQUIRED: False,
+            SnapFieldAttributeEnum.UPDATABLE: True,
+            SnapFieldAttributeEnum.AUTOCOMPLETE: False,
+        }
+
+        for enum_attr, default_value in snap_defaults.items():
+            kwargs.setdefault(enum_attr.value, default_value)
 
         return kwargs
 
@@ -192,7 +185,6 @@ class SnapField:
         if kwargs.get(SnapFieldAttributeEnum.REQUIRED.value) is True:
             kwargs.setdefault(DjangoFieldAttributeEnum.BLANK.value, False)
             kwargs.setdefault(DjangoFieldAttributeEnum.NULL.value, False)
-            # kwargs.setdefault(SnapFieldAttributeEnum.EDITABLE.value, True)
         else:
             kwargs.setdefault(DjangoFieldAttributeEnum.BLANK.value, True)
             kwargs.setdefault(DjangoFieldAttributeEnum.NULL.value, True)
@@ -210,6 +202,8 @@ class SnapField:
         """
 
         for snap_key in [e.value for e in SnapFieldAttributeEnum]:
+            if snap_key == SnapFieldAttributeEnum.EDITABLE.value:
+                continue
             kwargs.pop(snap_key, None)
 
         return kwargs
@@ -240,8 +234,8 @@ class SnapNotDatabaseField(SnapField):
 
 class SnapCharField(models.CharField, SnapField):
     def __init__(self, **kwargs):
-        kwargs = self._initializeSnapLogic(**kwargs)
         kwargs.setdefault(DjangoFieldAttributeEnum.NULL.value, False)
+        kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 

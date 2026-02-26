@@ -19,13 +19,13 @@ class TestTokenKeyGeneration:
         assert api_token.token_key.isalnum()
 
     def test_two_tokens_differ(self, db, admin_user):
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         t1 = APIToken.create_for_user(admin_user, "T1")
         t2 = APIToken.create_for_user(admin_user, "T2")
         assert t1.token_key != t2.token_key
 
     def test_key_unique_in_db(self, api_token):
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         assert APIToken.objects.filter(token_key=api_token.token_key).count() == 1
 
 
@@ -37,7 +37,7 @@ class TestTokenExpiry:
         assert api_token.is_expired is False
 
     def test_future_expiry_not_expired(self, db, admin_user):
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         t = APIToken.create_for_user(admin_user, "Future", expires_in_days=30)
         assert t.is_expired is False
 
@@ -96,33 +96,33 @@ class TestTokenTouch:
 @pytest.mark.django_db
 class TestCreateForUser:
     def test_persisted_to_db(self, admin_user):
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         t = APIToken.create_for_user(admin_user, "New")
         assert APIToken.objects.filter(pk=t.pk).exists()
 
     def test_user_assigned(self, admin_user):
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         t = APIToken.create_for_user(admin_user, "U")
         assert t.user == admin_user
 
     def test_expires_in_days(self, admin_user):
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         t = APIToken.create_for_user(admin_user, "E", expires_in_days=7)
         assert t.expiration_date is not None
         assert (t.expiration_date - timezone.now()).days <= 7
 
     def test_no_expiry(self, admin_user):
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         t = APIToken.create_for_user(admin_user, "NE")
         assert t.expiration_date is None
 
     def test_allowed_models_stored(self, admin_user):
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         t = APIToken.create_for_user(admin_user, "M", allowed_models=["demo.Product"])
         assert "demo.Product" in t.allowed_models
 
     def test_default_allowed_models_empty(self, admin_user):
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         t = APIToken.create_for_user(admin_user, "D")
         assert t.allowed_models == []
 
@@ -169,7 +169,7 @@ class TestAPITokenAuthentication:
         assert api_token.last_used_at is not None
 
     def test_inactive_user_401(self, db, admin_user):
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         admin_user.is_active = False
         admin_user.save()
         token = APIToken.create_for_user(admin_user, "IU")
@@ -183,16 +183,16 @@ class TestAPITokenAuthentication:
 @pytest.mark.django_db
 class TestTokenHasPermission:
     def test_superuser_unrestricted_token_allowed(self, api_token, admin_user):
-        from api.authentication import token_has_permission
+        from snapadmin.api.authentication import token_has_permission
         assert token_has_permission(api_token, admin_user, "demo", "product", "view") is True
 
     def test_restricted_token_blocks_unlisted_model(self, restricted_token, admin_user):
-        from api.authentication import token_has_permission
+        from snapadmin.api.authentication import token_has_permission
         assert token_has_permission(restricted_token, admin_user, "demo", "customer", "view") is False
 
     def test_user_without_perm_denied(self, db, regular_user):
-        from api.authentication import token_has_permission
-        from api.models import APIToken
+        from snapadmin.api.authentication import token_has_permission
+        from snapadmin.models import APIToken
         token = APIToken.create_for_user(regular_user, "NP")
         assert token_has_permission(token, regular_user, "demo", "product", "delete") is False
 
@@ -239,7 +239,7 @@ class TestTokenAPIEndpoints:
         assert auth_client.delete(f"/api/tokens/{api_token.pk}/").status_code == 204
 
     def test_delete_removes_from_db(self, auth_client, api_token):
-        from api.models import APIToken
+        from snapadmin.models import APIToken
         auth_client.delete(f"/api/tokens/{api_token.pk}/")
         assert not APIToken.objects.filter(pk=api_token.pk).exists()
 

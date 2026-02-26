@@ -33,7 +33,6 @@ INSTALLED_APPS = [
     'extra_settings',               # Optional
 
     # Local Apps
-    'api',
     'demo',                          # Testing
 ]
 
@@ -103,6 +102,19 @@ STATICFILES_DIRS = [
 STATIC_ROOT = BASE_DIR / ".staticfiles"
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# ------------------------------------------------------------------------------
+# REST FRAMEWORK
+# ------------------------------------------------------------------------------
+
+REST_FRAMEWORK = {
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 25,
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'snapadmin.api.authentication.APITokenAuthentication',
+    ],
+}
 
 
 # ------------------------------------------------------------------------------

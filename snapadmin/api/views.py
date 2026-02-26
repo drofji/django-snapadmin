@@ -1,57 +1,35 @@
 """
-api/views.py
+snapadmin/api/views.py
 
 SnapAdmin REST API views.
-
-Provides:
-  - APITokenViewSet       : CRUD management for the caller's own API tokens.
-  - DynamicModelViewSet   : Auto-generated CRUD for any registered Django model.
-  - api_schema_metadata   : Returns a list of available model endpoints.
-
-All endpoints require Token authentication. CRUD actions are additionally
-guarded by Django's standard model permissions.
 """
 
 import logging
 
 from django.apps import apps
 from rest_framework import mixins, permissions, status, viewsets
-from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema
 
-from api.authentication import APITokenAuthentication, token_has_permission
-from api.models import APIToken
-from api.serializers import (
+from snapadmin.api.authentication import APITokenAuthentication, token_has_permission
+from snapadmin.models import APIToken, SnapModel
+from snapadmin.api.serializers import (
     APITokenCreateSerializer,
     APITokenSerializer,
     get_serializer_for_model,
 )
-from snapadmin.models import SnapModel
 
 logger = logging.getLogger("snapadmin.api.views")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Permission helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
 class IsTokenOwnerOrAdmin(permissions.BasePermission):
-    """Allow access only to the token's owner or a Django superuser."""
-
     def has_object_permission(self, request, view, obj: APIToken):
         return obj.user == request.user or request.user.is_superuser
 
 
 class TokenModelPermission(permissions.BasePermission):
-    """
-    Combines APIToken model-scope checks with Django's standard permissions.
-
-    Requires ``request.auth`` to be an APIToken instance.
-    """
-
     _action_map = {
         "list":    "view",
         "retrieve": "view",
@@ -75,10 +53,6 @@ class TokenModelPermission(permissions.BasePermission):
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Token management viewset
-# ─────────────────────────────────────────────────────────────────────────────
-
 class APITokenViewSet(
     mixins.CreateModelMixin,
     mixins.RetrieveModelMixin,
@@ -86,20 +60,10 @@ class APITokenViewSet(
     mixins.ListModelMixin,
     viewsets.GenericViewSet,
 ):
-    """
-    Manage API tokens for the authenticated user.
-
-    list:   GET  /api/tokens/
-    create: POST /api/tokens/
-    detail: GET  /api/tokens/{id}/
-    delete: DELETE /api/tokens/{id}/
-    """
-
     authentication_classes = [APITokenAuthentication]
     permission_classes = [permissions.IsAuthenticated, IsTokenOwnerOrAdmin]
 
     def get_queryset(self):
-        """Restrict to tokens owned by the current user (unless superuser)."""
         if self.request.user.is_superuser:
             return APIToken.objects.select_related("user").all()
         return APIToken.objects.filter(user=self.request.user)
@@ -114,34 +78,15 @@ class APITokenViewSet(
         serializer = self.get_serializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
         token = serializer.save()
-        # Return the full token key once — callers must save it now
         output = APITokenSerializer(token)
         return Response(output.data, status=status.HTTP_201_CREATED)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Dynamic model viewset
-# ─────────────────────────────────────────────────────────────────────────────
-
 class DynamicModelViewSet(viewsets.ModelViewSet):
-    """
-    Auto-generated CRUD ViewSet for any registered Django model.
-
-    URL pattern:
-        /api/models/{app_label}/{model_name}/
-        /api/models/{app_label}/{model_name}/{pk}/
-
-    Access is controlled by:
-      1. A valid APIToken in the Authorization header.
-      2. The token's ``allowed_models`` list (empty = unrestricted).
-      3. The user's standard Django CRUD permissions.
-    """
-
     authentication_classes = [APITokenAuthentication]
     permission_classes = [permissions.IsAuthenticated, TokenModelPermission]
 
     def _get_model_class(self):
-        """Resolve and return the model class from URL kwargs."""
         app_label  = self.kwargs["app_label"]
         model_name = self.kwargs["model_name"]
         try:
@@ -156,7 +101,6 @@ class DynamicModelViewSet(viewsets.ModelViewSet):
 
         qs = model_class.objects.all()
 
-        # Apply select_related / prefetch_related for FK/M2M fields
         fk_fields = [
             f.name
             for f in model_class._meta.get_fields()
@@ -193,24 +137,11 @@ class DynamicModelViewSet(viewsets.ModelViewSet):
         return super().list(request, *args, **kwargs)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# API schema metadata endpoint
-# ─────────────────────────────────────────────────────────────────────────────
-
 class ModelSchemaView(APIView):
-    """
-    Return a list of all SnapModel-backed endpoints available via the API.
-
-    GET /api/schema/models/
-    """
-
     authentication_classes = [APITokenAuthentication]
     permission_classes = [permissions.IsAuthenticated]
 
-    @extend_schema(
-        summary="List all available model API endpoints",
-        description="Returns app label, model name, and the endpoint URL for every SnapModel.",
-    )
+    @extend_schema(summary="List all available model API endpoints")
     def get(self, request: Request) -> Response:
         token = request.auth
         results = []
