@@ -23,6 +23,29 @@ from snapadmin.api.serializers import (
 
 logger = logging.getLogger("snapadmin.api.views")
 
+# Global cache for model field introspection to avoid repeated _meta.get_fields() calls
+_model_field_cache = {}
+
+
+def _get_cached_fields(model_class):
+    """
+    Returns a tuple of (fk_fields, m2m_fields) for the given model class.
+    Results are cached to improve performance in high-traffic API endpoints.
+    """
+    if model_class not in _model_field_cache:
+        fk_fields = [
+            f.name
+            for f in model_class._meta.get_fields()
+            if hasattr(f, "many_to_one") and f.many_to_one
+        ]
+        m2m_fields = [
+            f.name
+            for f in model_class._meta.get_fields()
+            if hasattr(f, "many_to_many") and f.many_to_many and not f.auto_created
+        ]
+        _model_field_cache[model_class] = (fk_fields, m2m_fields)
+    return _model_field_cache[model_class]
+
 
 class IsTokenOwnerOrAdmin(permissions.BasePermission):
     def has_object_permission(self, request, view, obj: APIToken):
@@ -101,20 +124,16 @@ class DynamicModelViewSet(viewsets.ModelViewSet):
 
         qs = model_class.objects.all()
 
-        fk_fields = [
-            f.name
-            for f in model_class._meta.get_fields()
-            if hasattr(f, "many_to_one") and f.many_to_one
-        ]
-        m2m_fields = [
-            f.name
-            for f in model_class._meta.get_fields()
-            if hasattr(f, "many_to_many") and f.many_to_many and not f.auto_created
-        ]
+        # Optimization: Use cached field introspection to avoid _meta overhead on every request
+        fk_fields, m2m_fields = _get_cached_fields(model_class)
 
         if fk_fields:
+            # Use select_related for ForeignKeys to avoid N+1 queries if the model's
+            # __str__ or other properties access related objects during serialization.
             qs = qs.select_related(*fk_fields)
         if m2m_fields:
+            # Use prefetch_related for Many-to-Many to avoid N+1 queries
+            # when serializing lists of related IDs.
             qs = qs.prefetch_related(*m2m_fields)
 
         return qs
