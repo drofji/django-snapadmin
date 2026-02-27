@@ -179,7 +179,7 @@ After seeding, the demo token key is printed to the console. Or create one progr
 from snapadmin.models import APIToken
 token = APIToken.create_for_user(
     user=user,
-    token_name="My CI Token",
+    token_name="My Token",
     allowed_models=["demo.Product"],   # restrict to specific models
     expires_in_days=30,                # None = never expires
 )
