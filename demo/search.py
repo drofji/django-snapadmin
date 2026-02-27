@@ -25,7 +25,7 @@ logger = logging.getLogger("snapadmin.demo.search")
 # Index name used for product documents
 PRODUCTS_INDEX = "snapadmin_products"
 
-# TODO - It is necessary to implement the connection of the model to elasticsearch not in the demo, but in the SnapModel itself, give several implementation options (show examples in the demo): Purely through the main database, through the main database and duplication in elasticsearch, as well as only sending to elasticsearch. You need to show examples in the demo for all three options, as well as how to make queries (simplify and make special methods in SnapModel so that you don’t have to make large queries). Also keep in mind that models can be recreated and you will need to add indexes/fields to elasticsearch, and also that fields may be deleted or names changed.
+
 def get_es_client():
     """
     Build and return an Elasticsearch client using settings.ELASTICSEARCH_URL.

@@ -228,3 +228,20 @@ EXTRA_SETTINGS_DEFAULTS = [
     {'name': 'FAVICON', 'type': 'image', 'value': 'defaults/favicon.ico'},
     {'name': 'TERMS_PDF', 'type': 'file', 'value': 'docs/terms.pdf'},
 ]
+
+# ------------------------------------------------------------------------------
+# CELERY BEAT SCHEDULE (Dummy for Dashboard Verification)
+# ------------------------------------------------------------------------------
+
+CELERY_BEAT_SCHEDULE = {
+    'sync-products-to-es': {
+        'task': 'demo.tasks.sync_products',
+        'schedule': 3600.0,
+        'description': 'Synchronize products from DB to Elasticsearch every hour.'
+    },
+    'cleanup-expired-tokens': {
+        'task': 'snapadmin.api.tasks.cleanup_tokens',
+        'schedule': 86400.0,
+        'description': 'Remove expired API tokens daily.'
+    },
+}
