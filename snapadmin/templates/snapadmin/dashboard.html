@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SnapAdmin Dashboard</title>
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -15,58 +16,79 @@
             justify-content: center;
             align-items: center;
             min-height: 100vh;
+            padding: 20px;
         }
         .container {
             background: white;
-            padding: 2rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            padding: 2.5rem;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
             width: 100%;
-            max-width: 600px;
+            max-width: 800px;
+        }
+        .header {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin-bottom: 2.5rem;
+            position: relative;
         }
         h1 {
             color: #2c3e50;
             text-align: center;
-            margin-bottom: 2rem;
+            margin: 0;
+        }
+        .github-link {
+            position: absolute;
+            right: 0;
+            color: #333;
+            font-size: 1.5rem;
+            transition: color 0.2s;
+        }
+        .github-link:hover {
+            color: #24292e;
         }
         .section {
-            margin-bottom: 1.5rem;
+            margin-bottom: 2rem;
         }
         .section-title {
-            font-weight: bold;
-            color: #7f8c8d;
-            margin-bottom: 0.5rem;
+            font-weight: 700;
+            color: #95a5a6;
+            margin-bottom: 1rem;
             text-transform: uppercase;
-            font-size: 0.8rem;
-            letter-spacing: 1px;
+            font-size: 0.75rem;
+            letter-spacing: 1.5px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 0.5rem;
         }
         .grid {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-            gap: 1rem;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 1.25rem;
         }
         .card {
             background: #fff;
-            border: 1px solid #e0e0e0;
-            padding: 1rem;
-            border-radius: 8px;
+            border: 1px solid #edf2f7;
+            padding: 1.25rem;
+            border-radius: 12px;
             text-align: center;
-            transition: transform 0.2s, box-shadow 0.2s;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
             text-decoration: none;
-            color: #34495e;
+            color: #4a5568;
             display: flex;
             flex-direction: column;
             align-items: center;
         }
         .card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
-            border-color: #3498db;
+            transform: translateY(-4px);
+            box-shadow: 0 10px 20px rgba(0,0,0,0.05);
+            border-color: #3182ce;
+            color: #2b6cb0;
         }
         .card i {
-            font-size: 2rem;
-            margin-bottom: 0.5rem;
-            color: #3498db;
+            font-size: 2.25rem;
+            margin-bottom: 0.75rem;
+            color: #3182ce;
         }
         .status-list {
             list-style: none;
@@ -75,39 +97,88 @@
         .status-item {
             display: flex;
             justify-content: space-between;
-            padding: 0.5rem 0;
-            border-bottom: 1px solid #f0f0f0;
+            align-items: center;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid #f7fafc;
         }
-        .status-online {
-            color: #27ae60;
-            font-weight: bold;
+        .status-badge {
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            text-transform: uppercase;
         }
-        .status-offline {
-            color: #e74c3c;
-            font-weight: bold;
+        .status-online { background-color: #c6f6d5; color: #22543d; }
+        .status-offline { background-color: #fed7d7; color: #822727; }
+        .status-disabled { background-color: #edf2f7; color: #4a5568; }
+
+        .live-indicator {
+            width: 8px;
+            height: 8px;
+            background-color: #48bb78;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+            box-shadow: 0 0 0 0 rgba(72, 187, 120, 0.7);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(72, 187, 120, 0.7); }
+            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(72, 187, 120, 0); }
+            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(72, 187, 120, 0); }
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
         }
         .info-item {
-            font-size: 0.9rem;
-            color: #555;
-            margin-bottom: 0.2rem;
+            font-size: 0.875rem;
+            color: #4a5568;
         }
+        .info-item strong { color: #2d3748; }
+
+        .cron-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.875rem;
+        }
+        .cron-table th {
+            text-align: left;
+            color: #718096;
+            font-weight: 600;
+            padding: 0.5rem;
+            border-bottom: 2px solid #edf2f7;
+        }
+        .cron-table td {
+            padding: 0.75rem 0.5rem;
+            border-bottom: 1px solid #f7fafc;
+        }
+
         .footer {
-            margin-top: 2rem;
+            margin-top: 3rem;
             text-align: center;
-            font-size: 0.8rem;
-            color: #bdc3c7;
+            font-size: 0.875rem;
+            color: #a0aec0;
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>SnapAdmin Dashboard</h1>
+        <div class="header">
+            <h1>SnapAdmin Dashboard</h1>
+            <a href="https://github.com/drofji/snapadmin" target="_blank" class="github-link" title="View on GitHub">
+                <i class="fab fa-github"></i>
+            </a>
+        </div>
 
         <div class="section">
             <div class="section-title">Quick Links</div>
             <div class="grid">
                 {% for link in links %}
-                <a href="{{ link.url }}" class="card">
+                <a href="{{ link.url }}" class="card" target="_blank">
                     <i class="material-icons">{{ link.icon }}</i>
                     <span>{{ link.name }}</span>
                 </a>
@@ -115,29 +186,59 @@
             </div>
         </div>
 
-        <div class="section">
-            <div class="section-title">Service Health</div>
-            <div class="status-list">
-                {% for service in services %}
-                <div class="status-item">
-                    <span>{{ service.name }}</span>
-                    <span class="status-{% if service.status == 'online' %}online{% else %}offline{% endif %}">
-                        ● {{ service.status|upper }}
-                    </span>
+        <div class="info-grid">
+            <div class="section">
+                <div class="section-title">Service Health</div>
+                <div class="status-list">
+                    {% for service in services %}
+                    <div class="status-item">
+                        <span>
+                            {% if service.is_live %}<span class="live-indicator"></span>{% endif %}
+                            {{ service.name }}
+                        </span>
+                        <span class="status-badge status-{{ service.status }}">
+                            {{ service.status }}
+                        </span>
+                    </div>
+                    {% endfor %}
                 </div>
-                {% endfor %}
+            </div>
+
+            <div class="section">
+                <div class="section-title">Environment</div>
+                <div class="info-item"><strong>Mode:</strong> {{ env_details.mode }}</div>
+                <div class="info-item"><strong>OS:</strong> {{ env_details.os }}</div>
+                <div class="info-item"><strong>Hostname:</strong> {{ env_details.hostname }}</div>
+                <div class="info-item"><strong>Debug:</strong> {{ debug }}</div>
             </div>
         </div>
 
+        {% if cron_jobs %}
         <div class="section">
-            <div class="section-title">System Info</div>
-            <div class="info-item"><strong>Debug Mode:</strong> {{ debug }}</div>
-            <div class="info-item"><strong>Allowed Hosts:</strong> {{ allowed_hosts|join:", " }}</div>
-            <div class="info-item"><strong>SnapAdmin Version:</strong> {{ version }}</div>
+            <div class="section-title">Cron Job Monitor</div>
+            <table class="cron-table">
+                <thead>
+                    <tr>
+                        <th>Job Name</th>
+                        <th>Schedule</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for job in cron_jobs %}
+                    <tr>
+                        <td><strong>{{ job.name }}</strong></td>
+                        <td><code>{{ job.schedule }}</code></td>
+                        <td>{{ job.description }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
         </div>
+        {% endif %}
 
         <div class="footer">
-            Powered by SnapAdmin &copy; 2024
+            Powered by <strong>SnapAdmin</strong> &copy; 2026
         </div>
     </div>
 </body>
