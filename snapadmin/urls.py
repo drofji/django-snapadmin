@@ -13,6 +13,7 @@ from drf_spectacular.views import (
 )
 
 from snapadmin.api.views import APITokenViewSet, DynamicModelViewSet, ModelSchemaView
+from snapadmin.api.health import HealthCheckView
 
 router = DefaultRouter()
 router.register(r"tokens", APITokenViewSet, basename="api-token")
@@ -23,6 +24,9 @@ urlpatterns = [
 
     # Model introspection
     path("models/schema/", ModelSchemaView.as_view(), name="model-schema"),
+
+    # Health check
+    path("health/", HealthCheckView.as_view(), name="api-health"),
 
     # Dynamic model CRUD  ─  list + create
     path(

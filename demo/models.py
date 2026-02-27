@@ -9,7 +9,8 @@ from snapadmin import validators
 class Product(snap_models.SnapModel):
     name = snap_fields.SnapCharField(
         max_length=200,
-        verbose_name=_("Name")
+        verbose_name=_("Name"),
+        searchable=True
     )
     full_info2 = snap_fields.SnapFunctionField(
         func=lambda obj: f"{obj.name} — {obj.price}$",
@@ -29,6 +30,14 @@ class Product(snap_models.SnapModel):
         verbose_name=_("Full Info"),
         show_in_list=True
     )
+
+    # ES Integration: Main database and duplication in elasticsearch
+    es_index_enabled = True
+    es_mapping = {
+        "name": {"type": "text", "analyzer": "standard"},
+        "price": {"type": "float"},
+        "available": {"type": "boolean"},
+    }
 
     class Meta:
         verbose_name = _("Product")
