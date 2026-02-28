@@ -23,28 +23,9 @@ from snapadmin.api.serializers import (
 
 logger = logging.getLogger("snapadmin.api.views")
 
-# Global cache for model field introspection to avoid repeated _meta.get_fields() calls
+# Cache for model field introspection results to avoid repeated _meta.get_fields() calls
 _model_field_cache = {}
 
-
-def _get_cached_fields(model_class):
-    """
-    Returns a tuple of (fk_fields, m2m_fields) for the given model class.
-    Results are cached to improve performance in high-traffic API endpoints.
-    """
-    if model_class not in _model_field_cache:
-        fk_fields = [
-            f.name
-            for f in model_class._meta.get_fields()
-            if hasattr(f, "many_to_one") and f.many_to_one
-        ]
-        m2m_fields = [
-            f.name
-            for f in model_class._meta.get_fields()
-            if hasattr(f, "many_to_many") and f.many_to_many and not f.auto_created
-        ]
-        _model_field_cache[model_class] = (fk_fields, m2m_fields)
-    return _model_field_cache[model_class]
 
 class IsTokenOwnerOrAdmin(permissions.BasePermission):
     def has_object_permission(self, request, view, obj: APIToken):
