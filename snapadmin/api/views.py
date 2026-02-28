@@ -46,7 +46,6 @@ def _get_cached_fields(model_class):
         _model_field_cache[model_class] = (fk_fields, m2m_fields)
     return _model_field_cache[model_class]
 
-
 class IsTokenOwnerOrAdmin(permissions.BasePermission):
     def has_object_permission(self, request, view, obj: APIToken):
         return obj.user == request.user or request.user.is_superuser
@@ -124,8 +123,24 @@ class DynamicModelViewSet(viewsets.ModelViewSet):
 
         qs = model_class.objects.all()
 
-        # Optimization: Use cached field introspection to avoid _meta overhead on every request
-        fk_fields, m2m_fields = _get_cached_fields(model_class)
+        # Introspection of related fields is expensive in a tight loop.
+        # We cache the field lists per model.
+        cache_key = f"{model_class._meta.app_label}.{model_class._meta.model_name}"
+        if cache_key not in _model_field_cache:
+            fields = model_class._meta.get_fields()
+            fk_fields = [
+                f.name
+                for f in fields
+                if hasattr(f, "many_to_one") and f.many_to_one
+            ]
+            m2m_fields = [
+                f.name
+                for f in fields
+                if hasattr(f, "many_to_many") and f.many_to_many and not f.auto_created
+            ]
+            _model_field_cache[cache_key] = (fk_fields, m2m_fields)
+        else:
+            fk_fields, m2m_fields = _model_field_cache[cache_key]
 
         if fk_fields:
             # Use select_related for ForeignKeys to avoid N+1 queries if the model's
