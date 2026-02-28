@@ -23,6 +23,9 @@ from snapadmin.api.serializers import (
 
 logger = logging.getLogger("snapadmin.api.views")
 
+# Cache for model field introspection results to avoid repeated _meta.get_fields() calls
+_model_field_cache = {}
+
 
 class IsTokenOwnerOrAdmin(permissions.BasePermission):
     def has_object_permission(self, request, view, obj: APIToken):
@@ -101,16 +104,24 @@ class DynamicModelViewSet(viewsets.ModelViewSet):
 
         qs = model_class.objects.all()
 
-        fk_fields = [
-            f.name
-            for f in model_class._meta.get_fields()
-            if hasattr(f, "many_to_one") and f.many_to_one
-        ]
-        m2m_fields = [
-            f.name
-            for f in model_class._meta.get_fields()
-            if hasattr(f, "many_to_many") and f.many_to_many and not f.auto_created
-        ]
+        # Introspection of related fields is expensive in a tight loop.
+        # We cache the field lists per model.
+        cache_key = f"{model_class._meta.app_label}.{model_class._meta.model_name}"
+        if cache_key not in _model_field_cache:
+            fields = model_class._meta.get_fields()
+            fk_fields = [
+                f.name
+                for f in fields
+                if hasattr(f, "many_to_one") and f.many_to_one
+            ]
+            m2m_fields = [
+                f.name
+                for f in fields
+                if hasattr(f, "many_to_many") and f.many_to_many and not f.auto_created
+            ]
+            _model_field_cache[cache_key] = (fk_fields, m2m_fields)
+        else:
+            fk_fields, m2m_fields = _model_field_cache[cache_key]
 
         if fk_fields:
             qs = qs.select_related(*fk_fields)
