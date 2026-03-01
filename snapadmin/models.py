@@ -186,8 +186,15 @@ class APIToken(models.Model):
         return f"{app_label}.{model_name}" in self.allowed_models
 
     def touch(self) -> None:
-        """Update ``last_used_at`` to the current time without loading the full object."""
-        APIToken.objects.filter(pk=self.pk).update(last_used_at=timezone.now())
+        """
+        Update ``last_used_at`` to the current time without loading the full object.
+        Throttled to once per minute to reduce database write IO.
+        """
+        now = timezone.now()
+        # Only update DB if last_used_at is None or older than 1 minute
+        if self.last_used_at is None or (now - self.last_used_at) > timedelta(minutes=1):
+            APIToken.objects.filter(pk=self.pk).update(last_used_at=now)
+            self.last_used_at = now
 
     # ── Factory helpers ──────────────────────────────────────────────────────
 
