@@ -302,6 +302,37 @@ Built-in periodic tasks:
 
 Elasticsearch is **optional**. When `ELASTICSEARCH_ENABLED=False` (the default for local dev), all search operations fall back to Django ORM `icontains` queries silently.
 
+### Storage Modes (`EsStorageMode`)
+
+SnapAdmin supports three storage modes for each model:
+
+- **`DB_ONLY`** (Default): Standard Django behavior.
+- **`DUAL`**: Data is saved to both the database and Elasticsearch. API and `snap_search()` leverage ES for performance.
+- **`ES_ONLY`**: Data is stored ONLY in Elasticsearch. No database table is required (`managed = False`).
+
+### Usage Example
+
+```python
+from snapadmin import fields as snap, models as snap_models
+
+# 1. DUAL Mode (Copy to ES)
+class Product(snap_models.SnapModel):
+    name = snap.SnapCharField(max_length=200, searchable=True)
+
+    es_storage_mode = snap_models.EsStorageMode.DUAL
+    es_mapping = {"name": {"type": "text"}}
+
+# 2. ES_ONLY Mode (No database)
+class SearchLog(snap_models.SnapModel):
+    query = snap.SnapCharField(max_length=255)
+
+    es_storage_mode = snap_models.EsStorageMode.ES_ONLY
+    es_mapping = {"query": {"type": "text"}}
+
+    class Meta:
+        managed = False  # Skip DB table creation
+```
+
 Enable in Docker:
 ```bash
 ELASTICSEARCH_ENABLED=True
