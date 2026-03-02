@@ -1,6 +1,6 @@
-# 🚀 SnapAdmin — Production-Ready Django Auto-Admin
+# 🚀 SnapAdmin — Declarative Django Admin & API Package
 
-**SnapAdmin** is a declarative Django package that eliminates admin boilerplate. Define your model fields once — get a feature-rich, beautiful Django admin and a full REST API automatically.
+**SnapAdmin** is a high-performance, declarative Django package that eliminates admin and API boilerplate. Define your model fields once — get a feature-rich, beautiful Django admin (powered by Unfold) and a full REST API automatically.
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python)](https://python.org)
 [![Django](https://img.shields.io/badge/Django-5.2+-green?logo=django)](https://djangoproject.com)
@@ -8,314 +8,111 @@
 
 ---
 
-## ✨ Features
+## 📦 SnapAdmin Package Features
+
+The core `snapadmin` package provides everything you need to bootstrap your project's admin and API:
 
 | Feature | Description |
 |---------|-------------|
-| **Declarative Admin** | `list_display`, `search_fields`, `list_filter` via field attributes |
-| **Status Badges** | Coloured HTML badges for choice/status fields |
-| **Range Filters** | Date & numeric range filters built-in |
-| **Change Logging** | Detailed field-level `old → new` change history |
-| **REST API** | Auto-generated CRUD API for every SnapModel |
-| **Token Auth** | Named, expirable API tokens with model-scope restrictions |
-| **OpenAPI Docs** | Swagger UI + ReDoc via drf-spectacular |
-| **Celery** | Background tasks + Beat scheduler wired up |
-| **Elasticsearch** | Optional full-text search with graceful DB fallback |
-| **Structured Logs** | Colourised structlog output; JSON mode for production |
-| **Docker** | One-command `docker compose up` with PostgreSQL, Redis, ES |
+| **Declarative Admin** | Configure `list_display`, `search_fields`, `list_filter` directly in your models using `SnapField`. |
+| **Beautiful UI** | Native integration with `django-unfold` for a modern, responsive admin experience. |
+| **Status Badges** | Easily add color-coded HTML badges for choices and status fields. |
+| **Range Filters** | Built-in date and numeric range filters for efficient data exploration. |
+| **Change Logging** | Automatic tracking of field-level changes (`old → new`) with a dedicated history view. |
+| **Automatic REST API** | Instantly generated CRUD endpoints for every `SnapModel` with zero extra code. |
+| **Token Auth** | Secure, expirable API tokens with granular model-level access control. |
+| **Configurable** | Easily enable/disable REST API, Swagger docs, and search modes via settings. |
+| **Elasticsearch Ready** | Multi-mode storage (`DB_ONLY`, `DUAL`, `ES_ONLY`) for blazing fast search. |
+| **Structured Logging** | Integrated `structlog` for readable local logs and JSON logs in production. |
 
 ---
 
-## 🏗 Architecture
+## 🏗 Package Architecture
 
 ```
-snapadmin/          Core package — fields, models, admin registration, logging
-demo/               Example models (Product, Customer, Order) + seeder
-api/                REST API — token model, DRF views, serializers, auth
-sandbox/            Django project (settings, urls, celery)
-tests/              pytest test suite
-docker-compose.yml  Full production stack
-Dockerfile          Multi-stage build (builder + runtime)
+snapadmin/
+├── api/             # REST API core: views, serializers, auth
+├── management/      # Custom management commands
+├── migrations/      # Core package migrations (e.g., APIToken)
+├── static/          # UI assets
+├── templates/       # Custom admin templates
+├── fields.py        # SnapField definitions with admin introspection
+├── models.py        # SnapModel base and core models
+└── urls.py          # Auto-configurable API and documentation routes
 ```
 
 ---
 
-## 🐳 Quickstart — Docker (recommended)
+## 🚀 Quickstart: Using the Package
 
+### 1. Install
 ```bash
-# 1. Clone
-git clone https://github.com/drofji/django-snapadmin.git
-cd django-snapadmin
-
-# 2. Configure environment
-cp dist.env .env
-# Edit .env if needed (defaults work out-of-the-box)
-
-# 3. Start the full stack
-docker compose up --build
-
-# 4. Open
-#   Admin:   http://localhost:8000/admin/     (admin / admin)
-#   API:     http://localhost:8000/api/docs/  (Swagger UI)
+pip install drofji-snapadmin
 ```
 
-The `app` service automatically runs migrations and seeds demo data on first boot.
-
-To include Kibana for Elasticsearch visualisation:
-```bash
-docker compose --profile dev up --build
-```
-
----
-
-## 💻 Quickstart — Local Development
-
-```bash
-# 1. Create & activate venv
-python -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
-
-# 2. Install dependencies
-pip install -r requirements.txt
-
-# 3. Configure environment (SQLite, no Redis/ES required)
-cp dist.env .env
-# Set DEBUG=True, leave POSTGRES_DB blank for SQLite
-
-# 4. Migrate & seed
-python manage.py migrate
-python manage.py seed_demo
-
-# 5. Run
-python manage.py runserver
-```
-
-**Elasticsearch is optional** — the app falls back to database queries automatically when ES is unavailable.
-
----
-
-## 🛠 Usage
-
-### Defining a SnapModel
-
+### 2. Configure Settings
+Add required apps to `INSTALLED_APPS` in `settings.py`:
 ```python
-# yourapp/models.py
+INSTALLED_APPS = [
+    "unfold",
+    "snapadmin",
+    "rest_framework",
+    "drf_spectacular",
+    # ...
+]
+```
+
+### 3. Define your Model
+```python
 from snapadmin import fields as snap, models as snap_models
-from django.utils.translation import gettext_lazy as _
 
 class Product(snap_models.SnapModel):
-    name = snap.SnapCharField(
-        max_length=200,
-        verbose_name=_("Name"),
-        searchable=True,      # → search_fields
-        show_in_list=True,    # → list_display
-    )
-    price = snap.SnapDecimalField(
-        max_digits=10,
-        decimal_places=2,
-        verbose_name=_("Price"),
-        filterable=True,      # → NumericRangeFilter
-    )
-    status = snap.SnapCharField(
-        max_length=20,
-        choices=[("active","Active"),("archived","Archived")],
-        filterable=True,
-    )
-    status_badge = snap.SnapStatusBadgeField(
-        field_name="status",
-        choices=[
-            snap.SnapStatusBadgeFieldChoice("active",  "#155724","#D4EDDA","#C3E6CB"),
-            snap.SnapStatusBadgeFieldChoice("archived","#721C24","#F8D7DA","#F5C6CB"),
-        ],
-    )
-
-    class Meta:
-        verbose_name = _("Product")
-        verbose_name_plural = _("Products")
+    name = snap.SnapCharField(max_length=200, searchable=True, show_in_list=True)
+    price = snap.SnapDecimalField(max_digits=10, decimal_places=2, filterable=True)
 ```
 
-### Register admin
-
+### 4. Register Admin
 ```python
-# yourapp/admin.py
+# admin.py
 from snapadmin.models import SnapModel
 SnapModel.register_all_admins()
 ```
 
-That's it. Navigate to `/admin/` and your model has a fully configured admin.
-
 ---
 
-## 🔑 Field Flags Reference
+## 🛠 Advanced Package Configuration
 
-| Flag | Default | Effect |
-|------|---------|--------|
-| `show_in_list` | `True` | Adds to `list_display` |
-| `show_in_form` | `False` | Shows in the change form |
-| `searchable` | `False` | Adds to `search_fields` |
-| `filterable` | `False` | Adds to `list_filter` (smart type-aware) |
-| `editable` | `False` | If False → always read-only in admin |
-| `updatable` | `True` | If False → read-only after first save |
-| `required` | `False` | If False → `null=True, blank=True` |
-| `autocomplete` | `False` | Select2 widget for FKs & choices |
-
----
-
-## 🌐 REST API
-
-### Authentication
-
-All API requests require a token in the Authorization header:
-
-```http
-Authorization: Token <your-token-key>
-```
-
-### Create a token (admin panel or seed_demo)
-
-After seeding, the demo token key is printed to the console. Or create one programmatically:
+You can control core features via Django settings:
 
 ```python
-from snapadmin.models import APIToken
-token = APIToken.create_for_user(
-    user=user,
-    token_name="My Token",
-    allowed_models=["demo.Product"],   # restrict to specific models
-    expires_in_days=30,                # None = never expires
-)
-print(token.token_key)
-```
-
-### Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/tokens/` | List your tokens |
-| POST | `/api/tokens/` | Create a new token |
-| DELETE | `/api/tokens/{id}/` | Delete a token |
-| GET | `/api/models/schema/` | List all available model endpoints |
-| GET | `/api/models/{app}/{Model}/` | List objects |
-| POST | `/api/models/{app}/{Model}/` | Create object |
-| GET | `/api/models/{app}/{Model}/{pk}/` | Retrieve object |
-| PATCH | `/api/models/{app}/{Model}/{pk}/` | Update object |
-| DELETE | `/api/models/{app}/{Model}/{pk}/` | Delete object |
-| GET | `/api/docs/` | Swagger UI |
-| GET | `/api/schema/` | OpenAPI 3 JSON |
-
-### Example: List products
-
-```bash
-curl -H "Authorization: Token YOUR_TOKEN" \
-     http://localhost:8000/api/models/demo/Product/
-```
-
-```json
-{
-  "count": 50,
-  "next": "http://localhost:8000/api/models/demo/Product/?page=2",
-  "results": [
-    {"id": 1, "name": "Premium Laptop Stand", "price": "49.99", "available": true},
-    ...
-  ]
-}
+SNAPADMIN_REST_API_ENABLED = True  # Enable/Disable the REST API
+SNAPADMIN_SWAGGER_ENABLED = True   # Enable/Disable Swagger UI
+ELASTICSEARCH_ENABLED = False      # Toggle ES search fallback
 ```
 
 ---
 
-## 🧪 Testing
+## 🌟 Demo Application Features
 
-```bash
-# Run full test suite
-pytest
+The repository includes a `demo/` app and a `sandbox/` project to showcase SnapAdmin's power:
 
-# With coverage report
-pytest --cov=snapadmin --cov=api --cov=demo --cov-report=html
-
-# Run specific tests
-pytest tests/test_api_token.py -v
-pytest tests/test_model_api.py -v
-```
+- **Complete Project Setup**: Ready-to-use Docker environment with PostgreSQL, Redis, and Elasticsearch.
+- **Example Domain Models**: Product, Customer, and Order models showing complex relationships.
+- **Interactive Dashboard**: A custom system dashboard with health checks and environment stats.
+- **Seeder Command**: `python manage.py seed_demo` to instantly populate your environment.
+- **Celery Integration**: Example background tasks for data indexing and stats generation.
+- **Full Test Suite**: Comprehensive `pytest` coverage for all package features.
 
 ---
 
-## 🌱 Demo Seeder
+## 🐳 Running the Demo (Docker)
 
 ```bash
-# Seed with default 50 objects per type
-python manage.py seed_demo
-
-# Custom count
-python manage.py seed_demo --count 100
-
-# Wipe and re-seed
-python manage.py seed_demo --flush
-
-# Skip Elasticsearch indexing
-python manage.py seed_demo --no-index
+cp dist.env .env
+docker compose up --build
 ```
-
-Auto-seed on first migrate by setting `SNAPADMIN_AUTO_SEED=True` in `.env`.
-
----
-
-## ⚙️ Celery
-
-Start locally:
-```bash
-# Worker
-celery -A sandbox worker --loglevel=info
-
-# Beat scheduler
-celery -A sandbox beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
-```
-
-Built-in periodic tasks:
-- **02:30 daily** — Purge expired API tokens
-- **Every hour**  — Re-index products to Elasticsearch
-- **Midnight**    — Generate daily stats snapshot
-
----
-
-## 🔍 Elasticsearch
-
-Elasticsearch is **optional**. When `ELASTICSEARCH_ENABLED=False` (the default for local dev), all search operations fall back to Django ORM `icontains` queries silently.
-
-### Storage Modes (`EsStorageMode`)
-
-SnapAdmin supports three storage modes for each model:
-
-- **`DB_ONLY`** (Default): Standard Django behavior.
-- **`DUAL`**: Data is saved to both the database and Elasticsearch. API and `snap_search()` leverage ES for performance.
-- **`ES_ONLY`**: Data is stored ONLY in Elasticsearch. No database table is required (`managed = False`).
-
-### Usage Example
-
-```python
-from snapadmin import fields as snap, models as snap_models
-
-# 1. DUAL Mode (Copy to ES)
-class Product(snap_models.SnapModel):
-    name = snap.SnapCharField(max_length=200, searchable=True)
-
-    es_storage_mode = snap_models.EsStorageMode.DUAL
-    es_mapping = {"name": {"type": "text"}}
-
-# 2. ES_ONLY Mode (No database)
-class SearchLog(snap_models.SnapModel):
-    query = snap.SnapCharField(max_length=255)
-
-    es_storage_mode = snap_models.EsStorageMode.ES_ONLY
-    es_mapping = {"query": {"type": "text"}}
-
-    class Meta:
-        managed = False  # Skip DB table creation
-```
-
-Enable in Docker:
-```bash
-ELASTICSEARCH_ENABLED=True
-ELASTICSEARCH_URL=http://elasticsearch:9200
-```
+- **Admin**: http://localhost:8000/admin/ (admin / admin)
+- **API Docs**: http://localhost:8000/api/docs/
 
 ---
 
