@@ -67,12 +67,15 @@ class APITokenAdmin(admin.ModelAdmin):
         """Render a coloured pill badge reflecting the token's current state."""
         if not obj.is_active:
             return format_html(
-                '<span style="background:#dc3545;color:white;padding:2px 8px;border-radius:12px;">Disabled</span>'
+                '<span style="background:#dc3545;color:white;padding:2px 8px;border-radius:12px;">{}</span>',
+                _("Disabled"),
             )
         if obj.is_expired:
             return format_html(
-                '<span style="background:#fd7e14;color:white;padding:2px 8px;border-radius:12px;">Expired</span>'
+                '<span style="background:#fd7e14;color:white;padding:2px 8px;border-radius:12px;">{}</span>',
+                _("Expired"),
             )
         return format_html(
-            '<span style="background:#28a745;color:white;padding:2px 8px;border-radius:12px;">Active</span>'
+            '<span style="background:#28a745;color:white;padding:2px 8px;border-radius:12px;">{}</span>',
+            _("Active"),
         )

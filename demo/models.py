@@ -33,6 +33,7 @@ class Product(snap_models.SnapModel):
 
     # ES Integration: Main database and duplication in elasticsearch
     es_index_enabled = True
+    es_storage_mode = snap_models.EsStorageMode.DUAL
     es_mapping = {
         "name": {"type": "text", "analyzer": "standard"},
         "price": {"type": "float"},
@@ -140,3 +141,25 @@ class Order(snap_models.SnapModel):
     class Meta:
         verbose_name = _("Order")
         verbose_name_plural = _("Orders")
+
+
+class SearchLog(snap_models.SnapModel):
+    """
+    Model that exists ONLY in Elasticsearch.
+    Demonstrates es_storage_mode = ES_ONLY.
+    """
+    query = snap_fields.SnapCharField(max_length=255, verbose_name=_("Query"), searchable=True)
+    results_count = snap_fields.SnapIntegerField(verbose_name=_("Results Count"))
+    timestamp = django_models.DateTimeField(auto_now_add=True, verbose_name=_("Timestamp"))
+
+    es_storage_mode = snap_models.EsStorageMode.ES_ONLY
+    es_mapping = {
+        "query": {"type": "text"},
+        "results_count": {"type": "integer"},
+        "timestamp": {"type": "date"},
+    }
+
+    class Meta:
+        managed = False  # No DB table
+        verbose_name = _("Search Log")
+        verbose_name_plural = _("Search Logs")

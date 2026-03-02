@@ -102,7 +102,18 @@ class DynamicModelViewSet(viewsets.ModelViewSet):
         if model_class is None:
             return []
 
-        qs = model_class.objects.all()
+        from snapadmin.models import EsStorageMode
+
+        if getattr(model_class, "es_storage_mode", EsStorageMode.DB_ONLY) != EsStorageMode.DB_ONLY:
+            # For DUAL and ES_ONLY, use snap_search to leverage ES performance
+            # Passing None to snap_search returns all (or match_all)
+            qs = model_class.snap_search()
+            if isinstance(qs, list):
+                # For non-QuerySet results, wrap them if needed or handle accordingly
+                # Our EsQuerySet for ES_ONLY should work fine
+                return qs
+        else:
+            qs = model_class.objects.all()
 
         # Introspection of related fields is expensive in a tight loop.
         # We cache the field lists per model.
