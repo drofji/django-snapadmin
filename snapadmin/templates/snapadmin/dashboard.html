@@ -201,14 +201,17 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>SnapAdmin</h1>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <img src="/static/snapadmin/snap-logo.svg" alt="SnapAdmin" style="width: 48px; height: 48px;">
+                <h1>SnapAdmin</h1>
+            </div>
             <a href="https://github.com/drofji/snapadmin" target="_blank" style="color: var(--text-primary)">
                 <i class="fab fa-github fa-2x"></i>
             </a>
         </div>
 
         <div class="section">
-            <div class="section-title"><i class="material-icons">link</i> Quick Access</div>
+            <div class="section-title"><i class="material-icons">link</i> System Entry Points</div>
             <div class="grid">
                 {% for link in links %}
                 <a href="{{ link.url }}" class="card">

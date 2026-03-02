@@ -29,11 +29,12 @@ class DashboardView(TemplateView):
         # Dashboard Quick Links
         links = [
             {"name": "Admin Panel", "url": reverse("admin:index"), "icon": "admin_panel_settings"},
-            {"name": "API Root", "url": "/api/", "icon": "api"},
-            {"name": "API Schema (OpenAPI)", "url": reverse("api-schema"), "icon": "description"},
-            {"name": "Swagger UI", "url": reverse("swagger-ui"), "icon": "menu_book"},
-            {"name": "Redoc", "url": reverse("redoc"), "icon": "library_books"},
         ]
+
+        if getattr(settings, "SNAPADMIN_REST_API_ENABLED", True):
+            links.append({"name": "REST API Root", "url": "/api/", "icon": "api"})
+            if getattr(settings, "SNAPADMIN_SWAGGER_ENABLED", True):
+                links.append({"name": "Swagger Docs", "url": reverse("swagger-ui"), "icon": "menu_book"})
 
         if getattr(settings, "SNAPADMIN_GRAPHQL_ENABLED", True):
             links.append({"name": "GraphQL API", "url": "/api/graphql/", "icon": "account_tree"})

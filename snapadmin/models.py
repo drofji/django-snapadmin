@@ -222,7 +222,7 @@ class EsManager(models.Manager):
 
     def get_queryset(self):
         if getattr(self.model, "es_storage_mode", None) == EsStorageMode.ES_ONLY:
-            qs = self.model.snap_search(limit=1000)
+            qs = self.model.es_search(limit=1000)
             if not isinstance(qs, EsQuerySet):
                 return EsQuerySet(self.model, [])
             return qs
@@ -428,7 +428,7 @@ class SnapModel(models.Model):
         super().delete(*args, **kwargs)
 
     @classmethod
-    def snap_search(cls, query_string=None, limit=None):
+    def es_search(cls, query_string=None, limit=None):
         """
         Search for records. Uses Elasticsearch if enabled, falls back to DB.
         """
@@ -484,6 +484,24 @@ class SnapModel(models.Model):
         if q_objects:
             return cls.objects.filter(q_objects).distinct()
         return cls.objects.all()
+
+    @classmethod
+    def es_reindex_all(cls):
+        """
+        Synchronise all records to the Elasticsearch index.
+        """
+        if not getattr(settings, "ELASTICSEARCH_ENABLED", False):
+            return {"skipped": True, "reason": "Elasticsearch not available"}
+
+        es = cls.get_es_client()
+        qs = cls.objects.all()
+        indexed = 0
+
+        for obj in qs:
+            obj.index_in_es()
+            indexed += 1
+
+        return {"indexed": indexed}
 
     # ------------------------------------------------------------------
     # Human-readable representation
