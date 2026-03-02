@@ -123,9 +123,10 @@ class EsQuerySet:
     """A lightweight mock QuerySet for Elasticsearch-only models."""
 
     def __init__(self, model, hits=None):
+        from django.db.models.sql.query import Query
         self.model = model
         self._hits = hits if hits is not None else []
-        self.query = models.query.Query(model)  # Mock query for DRF
+        self.query = Query(model)  # Mock query for DRF
         self._result_cache = self._hits
         self._prefetch_related_lookups = []
         self._sticky_filter = False
