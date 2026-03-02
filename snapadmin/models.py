@@ -172,7 +172,7 @@ class EsQuerySet:
                     break
             if match:
                 new_hits.append(hit)
-        return EsQuerySet(self.model, new_hits)
+        return self._clone(new_hits)
 
     def exclude(self, *args, **kwargs):
         return self
@@ -184,6 +184,18 @@ class EsQuerySet:
         return self
 
     def prefetch_related(self, *lookups):
+        return self
+
+    def _clone(self, hits=None):
+        return EsQuerySet(self.model, hits if hits is not None else self._hits)
+
+    def using(self, alias):
+        return self
+
+    def none(self):
+        return self._clone([])
+
+    def all(self):
         return self
 
     def get(self, *args, **kwargs):
