@@ -123,9 +123,10 @@ class EsQuerySet:
     """A lightweight mock QuerySet for Elasticsearch-only models."""
 
     def __init__(self, model, hits=None):
+        from django.db.models.sql.query import Query
         self.model = model
         self._hits = hits if hits is not None else []
-        self.query = models.query.Query(model)  # Mock query for DRF
+        self.query = Query(model)  # Mock query for DRF
         self._result_cache = self._hits
         self._prefetch_related_lookups = []
         self._sticky_filter = False
@@ -221,7 +222,7 @@ class EsManager(models.Manager):
 
     def get_queryset(self):
         if getattr(self.model, "es_storage_mode", None) == EsStorageMode.ES_ONLY:
-            qs = self.model.snap_search(limit=1000)
+            qs = self.model.es_search(limit=1000)
             if not isinstance(qs, EsQuerySet):
                 return EsQuerySet(self.model, [])
             return qs
@@ -427,7 +428,7 @@ class SnapModel(models.Model):
         super().delete(*args, **kwargs)
 
     @classmethod
-    def snap_search(cls, query_string=None, limit=None):
+    def es_search(cls, query_string=None, limit=None):
         """
         Search for records. Uses Elasticsearch if enabled, falls back to DB.
         """
@@ -484,6 +485,24 @@ class SnapModel(models.Model):
             return cls.objects.filter(q_objects).distinct()
         return cls.objects.all()
 
+    @classmethod
+    def es_reindex_all(cls):
+        """
+        Synchronise all records to the Elasticsearch index.
+        """
+        if not getattr(settings, "ELASTICSEARCH_ENABLED", False):
+            return {"skipped": True, "reason": "Elasticsearch not available"}
+
+        es = cls.get_es_client()
+        qs = cls.objects.all()
+        indexed = 0
+
+        for obj in qs:
+            obj.index_in_es()
+            indexed += 1
+
+        return {"indexed": indexed}
+
     # ------------------------------------------------------------------
     # Human-readable representation
     # ------------------------------------------------------------------
@@ -528,6 +547,23 @@ class SnapModel(models.Model):
             else: list_filter.append(field_name)
 
         autocomplete_fields = [fn for fn, fo in meta_fields_related.items() if getattr(fo, SnapFieldAttributeEnum.AUTOCOMPLETE.value, True)]
+
+        # Handle WYSIWYG fields for safe HTML rendering in list view
+        wysiwyg_fields = [fn for fn, fo in meta_fields.items() if getattr(fo, "wysiwyg", False)]
+        for fn in wysiwyg_fields:
+            if fn in list_display:
+                idx = list_display.index(fn)
+                method_name = f"safe_html_{fn}"
+
+                def make_wysiwyg_display(field_name):
+                    field_obj = cls._meta.get_field(field_name)
+                    @unfold_display(description=field_obj.verbose_name)
+                    def _display(self, obj):
+                        return mark_safe(getattr(obj, field_name, ""))
+                    return _display
+
+                cls.admin_overrides[method_name] = make_wysiwyg_display(fn)
+                list_display[idx] = method_name
 
         for attr_name, attr_value in attr_fields.items():
             if not isinstance(attr_value, snapfields.SnapFunctionField): continue

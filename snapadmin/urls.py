@@ -73,6 +73,9 @@ if GRAPHQL_ENABLED:
         from snapadmin.api.graphql import schema
         urlpatterns += [
             path("graphql/", GraphQLView.as_view(graphiql=True, schema=schema), name="graphql"),
+            path("graphql", GraphQLView.as_view(graphiql=True, schema=schema)),
         ]
-    except ImportError:
+    except Exception as e:
+        # Log error or print for debugging
+        print(f"GraphQL Error: {e}")
         pass
