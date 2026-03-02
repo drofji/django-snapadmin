@@ -530,6 +530,23 @@ class SnapModel(models.Model):
 
         autocomplete_fields = [fn for fn, fo in meta_fields_related.items() if getattr(fo, SnapFieldAttributeEnum.AUTOCOMPLETE.value, True)]
 
+        # Handle WYSIWYG fields for safe HTML rendering in list view
+        wysiwyg_fields = [fn for fn, fo in meta_fields.items() if getattr(fo, "wysiwyg", False)]
+        for fn in wysiwyg_fields:
+            if fn in list_display:
+                idx = list_display.index(fn)
+                method_name = f"safe_html_{fn}"
+
+                def make_wysiwyg_display(field_name):
+                    field_obj = cls._meta.get_field(field_name)
+                    @unfold_display(description=field_obj.verbose_name)
+                    def _display(self, obj):
+                        return mark_safe(getattr(obj, field_name, ""))
+                    return _display
+
+                cls.admin_overrides[method_name] = make_wysiwyg_display(fn)
+                list_display[idx] = method_name
+
         for attr_name, attr_value in attr_fields.items():
             if not isinstance(attr_value, snapfields.SnapFunctionField): continue
             method_name = f"SnapFunctionField{attr_name.capitalize()}"
