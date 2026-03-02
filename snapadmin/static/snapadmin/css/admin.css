@@ -62,16 +62,74 @@ div.fieldBox.flex-container label {
     max-width: 100% !important;
 }
 .select2-container--admin-autocomplete {
-min-width: 100% !important;
-width: 100% !important;
+    min-width: 100% !important;
+    width: 100% !important;
 }
 .select2-container--default .select2-selection--single,
 .django-select2-container .select2-selection--single {
-    height: 36px !important;
-    border: 1px solid #ccc !important;
+    height: 38px !important;
+    border: 1px solid #d1d5db !important;
     border-radius: var(--radius) !important;
     display: flex !important;
     align-items: center !important;
+}
+
+/* Fix field sizing and borders */
+.unfold .vTextField,
+.unfold .vURLField,
+.unfold .vEmailField,
+.unfold .vIntegerField,
+.unfold .vDecimalField,
+.unfold .vTimeField,
+.unfold .vDateField,
+.unfold textarea,
+.unfold select {
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    border: 1px solid #d1d5db !important;
+    border-radius: var(--radius) !important;
+}
+
+/* Dark mode compatibility for borders and backgrounds */
+@media (prefers-color-scheme: dark) {
+    .unfold .vTextField, .unfold select, .unfold textarea {
+        border-color: #374151 !important;
+    }
+}
+
+/* WYSIWYG sizing */
+.ck-editor {
+    width: 100% !important;
+    max-width: 100% !important;
+}
+
+.ck-content {
+    min-height: 200px;
+}
+
+/* Ensure borders are visible in all admin apps */
+.unfold input[type="text"],
+.unfold input[type="password"],
+.unfold input[type="email"],
+.unfold textarea,
+.unfold select {
+    border: 1px solid #d1d5db !important;
+}
+
+/* Horizontal field rows */
+.snap-field-row {
+    display: flex !important;
+    flex-direction: row !important;
+    gap: 20px !important;
+    flex-wrap: wrap !important;
+    align-items: flex-start !important;
+}
+
+.snap-field-row > div {
+    flex: 1 !important;
+    min-width: 200px !important;
+    border-bottom: none !important;
 }
 
 .select2-selection__rendered {

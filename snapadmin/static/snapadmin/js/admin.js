@@ -34,15 +34,22 @@
         }
 
         function activateRowClick() {
-            $("#changelist-form table tbody tr").each(function() {
+            // Target all changelist tables across all apps
+            $(".results table tbody tr, #changelist-form table tbody tr").each(function() {
                 var $row = $(this);
-                var $link = $row.find("th > a").first();
+                // Look for the primary link (usually in the first header cell or first cell)
+                var $link = $row.find("th a, td.field-id a, td:first-child a").first();
 
                 if ($link.length) {
                     $row.css('cursor', 'pointer');
-                    $row.on('click', function(e) {
-                        if ($(e.target).is('input, button, a, .action-select')) return;
-                        window.location = $link.attr("href");
+                    $row.off('click').on('click', function(e) {
+                        // Don't trigger if clicking on a checkbox, button, or another link
+                        if ($(e.target).closest('input, button, a, .action-select').length) return;
+
+                        var url = $link.attr("href");
+                        if (url) {
+                            window.location = url;
+                        }
                     });
                 }
             });

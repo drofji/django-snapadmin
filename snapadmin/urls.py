@@ -18,6 +18,7 @@ from snapadmin.api.health import HealthCheckView
 
 REST_API_ENABLED = getattr(settings, "SNAPADMIN_REST_API_ENABLED", True)
 SWAGGER_ENABLED = getattr(settings, "SNAPADMIN_SWAGGER_ENABLED", True)
+GRAPHQL_ENABLED = getattr(settings, "SNAPADMIN_GRAPHQL_ENABLED", True)
 
 router = DefaultRouter()
 router.register(r"tokens", APITokenViewSet, basename="api-token")
@@ -65,3 +66,13 @@ if SWAGGER_ENABLED:
         path("docs/",    SpectacularSwaggerView.as_view(url_name="api-schema"), name="swagger-ui"),
         path("redoc/",   SpectacularRedocView.as_view(url_name="api-schema"),   name="redoc"),
     ]
+
+if GRAPHQL_ENABLED:
+    try:
+        from graphene_django.views import GraphQLView
+        from snapadmin.api.graphql import schema
+        urlpatterns += [
+            path("graphql/", GraphQLView.as_view(graphiql=True, schema=schema), name="graphql"),
+        ]
+    except ImportError:
+        pass

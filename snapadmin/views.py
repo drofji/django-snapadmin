@@ -35,14 +35,32 @@ class DashboardView(TemplateView):
             {"name": "Redoc", "url": reverse("redoc"), "icon": "library_books"},
         ]
 
+        if getattr(settings, "SNAPADMIN_GRAPHQL_ENABLED", True):
+            links.append({"name": "GraphQL API", "url": "/api/graphql/", "icon": "account_tree"})
+
+        # Registered Models
+        from snapadmin.models import SnapModel
+        from django.apps import apps
+        registered_models = []
+        for model in apps.get_models():
+            if issubclass(model, SnapModel) and model is not SnapModel:
+                registered_models.append({
+                    "name": model._meta.verbose_name.title(),
+                    "app": model._meta.app_label,
+                    "count": model.objects.count() if model._meta.managed else "N/A",
+                    "url": reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_changelist")
+                })
+
         context.update({
             "services": services,
             "links": links,
+            "registered_models": registered_models,
             "env_details": env_details,
             "cron_jobs": cron_jobs,
             "debug": settings.DEBUG,
             "allowed_hosts": settings.ALLOWED_HOSTS,
             "version": "0.1.0a1",
+            "graphql_enabled": getattr(settings, "SNAPADMIN_GRAPHQL_ENABLED", True),
         })
         return context
 

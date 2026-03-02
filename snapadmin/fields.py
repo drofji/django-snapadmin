@@ -37,6 +37,7 @@ class SnapFieldAttributeEnum(str, Enum):
     AUTOCOMPLETE = "autocomplete"
     WYSIWYG = "wysiwyg" # Added for Unfold/CKEditor integration
     TAB = "tab" # Added for Unfold fieldset tabs
+    ROW = "row" # Group fields in one row
 
 
 class DjangoFieldAttributeEnum(str, Enum):
@@ -77,6 +78,7 @@ class SnapField:
         self.autocomplete = kwargs[SnapFieldAttributeEnum.AUTOCOMPLETE.value]
         self.wysiwyg = kwargs.get(SnapFieldAttributeEnum.WYSIWYG.value, False)
         self.tab = kwargs.get(SnapFieldAttributeEnum.TAB.value, None)
+        self.row = kwargs.get(SnapFieldAttributeEnum.ROW.value, None)
 
         return kwargs
 
@@ -92,6 +94,7 @@ class SnapField:
             SnapFieldAttributeEnum.AUTOCOMPLETE: False,
             SnapFieldAttributeEnum.WYSIWYG: False,
             SnapFieldAttributeEnum.TAB: None,
+            SnapFieldAttributeEnum.ROW: None,
         }
 
         for enum_attr, default_value in snap_defaults.items():

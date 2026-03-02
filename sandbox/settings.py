@@ -119,6 +119,13 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_REDIRECT_URL = '/admin/'
 
 # ------------------------------------------------------------------------------
+# SNAPADMIN CONFIGURATION
+# ------------------------------------------------------------------------------
+SNAPADMIN_REST_API_ENABLED = True
+SNAPADMIN_SWAGGER_ENABLED = True
+SNAPADMIN_GRAPHQL_ENABLED = True
+
+# ------------------------------------------------------------------------------
 # REST FRAMEWORK
 # ------------------------------------------------------------------------------
 
@@ -227,12 +234,12 @@ UNFOLD = {
     ],
     "SITE_URL": "/",
     "SITE_ICON": {
-        "light": lambda request: static_lambda("icon-light.svg"),
-        "dark": lambda request: static_lambda("icon-dark.svg"),
+        "light": lambda request: static_lambda("snapadmin/snap-logo.svg"),
+        "dark": lambda request: static_lambda("snapadmin/snap-logo.svg"),
     },
     "SITE_LOGO": {
-        "light": lambda request: static_lambda("logo-light.svg"),
-        "dark": lambda request: static_lambda("logo-dark.svg"),
+        "light": lambda request: static_lambda("snapadmin/snap-logo.svg"),
+        "dark": lambda request: static_lambda("snapadmin/snap-logo.svg"),
     },
     "SITE_SYMBOL": "speed",
     "SITE_FAVICONS": [
@@ -246,7 +253,7 @@ UNFOLD = {
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": True,
     "SHOW_BACK_BUTTON": False,
-    "THEME": "dark",
+    "THEME": "light",
     "LOGIN": {
         "image": lambda request: static_lambda("sample/login-bg.jpg"),
         "redirect_after": lambda request: reverse_lazy_lambda("admin:index"),
@@ -331,6 +338,16 @@ UNFOLD = {
                 "title": _("Business Logic"),
                 "items": [
                     {
+                        "title": _("Categories"),
+                        "icon": "category",
+                        "link": reverse_lazy_lambda("admin:demo_category_changelist"),
+                    },
+                    {
+                        "title": _("Tags"),
+                        "icon": "label",
+                        "link": reverse_lazy_lambda("admin:demo_tag_changelist"),
+                    },
+                    {
                         "title": _("Products"),
                         "icon": "inventory_2",
                         "link": reverse_lazy_lambda("admin:demo_product_changelist"),
@@ -344,6 +361,21 @@ UNFOLD = {
                         "title": _("Customers"),
                         "icon": "person",
                         "link": reverse_lazy_lambda("admin:demo_customer_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": _("System & Logs"),
+                "items": [
+                    {
+                        "title": _("Showcase"),
+                        "icon": "biotech",
+                        "link": reverse_lazy_lambda("admin:demo_showcase_changelist"),
+                    },
+                    {
+                        "title": _("Search Logs"),
+                        "icon": "manage_search",
+                        "link": reverse_lazy_lambda("admin:demo_searchlog_changelist"),
                     },
                 ],
             },

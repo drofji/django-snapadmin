@@ -548,9 +548,36 @@ class SnapModel(models.Model):
         if not cls.admin_enabled: return
         form_fields, list_display, search_fields, list_filter, autocomplete_fields = cls.get_admin_fields()
 
-        # Build fieldsets based on 'tab' attribute
+        # Build fieldsets based on 'tab' and 'row' attributes
         tabs_map = {}
         untabbed_fields = []
+
+        def group_fields_by_row(fields_list):
+            grouped = []
+            row_map = {}
+            for fn in fields_list:
+                try:
+                    field_obj = cls._meta.get_field(fn)
+                    row_name = getattr(field_obj, "row", None)
+                    if row_name:
+                        if row_name not in row_map:
+                            row_map[row_name] = []
+                            grouped.append(row_map[row_name])
+                        row_map[row_name].append(fn)
+                    else:
+                        grouped.append(fn)
+                except models.FieldDoesNotExist:
+                    grouped.append(fn)
+
+            # Convert multi-field rows to tuples for Django fieldsets
+            final_grouped = []
+            for item in grouped:
+                if isinstance(item, list):
+                    final_grouped.append(tuple(item))
+                else:
+                    final_grouped.append(item)
+            return final_grouped
+
         for field_name in form_fields:
             try:
                 field = cls._meta.get_field(field_name)
@@ -564,10 +591,13 @@ class SnapModel(models.Model):
 
         fieldsets = []
         if untabbed_fields:
-            fieldsets.append((None, {"fields": untabbed_fields}))
+            fieldsets.append((None, {"fields": group_fields_by_row(untabbed_fields)}))
 
         for tab_name, fields in tabs_map.items():
-            fieldsets.append((tab_name, {"fields": fields, "classes": ("tab",)}))
+            fieldsets.append((tab_name, {
+                "fields": group_fields_by_row(fields),
+                "classes": ("tab",)
+            }))
 
         BASE_JS = ["admin/js/vendor/jquery/jquery.js", "admin/js/jquery.init.js", "snapadmin/js/jquery_bridge.js", "snapadmin/js/select2.min.js", "snapadmin/js/admin.js"]
         BASE_CSS = ["snapadmin/css/select2.min.css", "snapadmin/css/admin.css"]
@@ -601,7 +631,21 @@ class SnapModel(models.Model):
                 kwargs["widget"] = CKEditor5Widget(config_name="extends")
             return super(ModelAdmin, self).formfield_for_dbfield(db_field, request, **kwargs)
 
+        def get_fieldsets(self, request, obj=None):
+            # If we have rows, Unfold needs specific layout classes
+            fs = super(ModelAdmin, self).get_fieldsets(request, obj)
+            for name, opts in fs:
+                fields = opts.get("fields", [])
+                has_row = any(isinstance(f, tuple) for f in fields)
+                if has_row:
+                    classes = list(opts.get("classes", []))
+                    if "snap-field-row" not in classes:
+                        classes.append("snap-field-row")
+                    opts["classes"] = tuple(classes)
+            return fs
+
         admin_attrs["formfield_for_dbfield"] = formfield_for_dbfield
+        admin_attrs["get_fieldsets"] = get_fieldsets
         admin_attrs.update(getattr(cls, "admin_overrides", {}))
 
         admin_class = type(f"{cls.__name__}Admin", (SnapSaveMixin, ModelAdmin), admin_attrs)

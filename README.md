@@ -1,6 +1,6 @@
 # 🚀 SnapAdmin — Declarative Django Admin & API Package
 
-**SnapAdmin** is a high-performance, declarative Django package that eliminates admin and API boilerplate. Define your model fields once — get a feature-rich, beautiful Django admin (powered by Unfold) and a full REST API automatically.
+**SnapAdmin** is a high-performance, declarative Django package that eliminates admin and API boilerplate. Define your model fields once — get a feature-rich, beautiful Django admin (powered by Unfold), a full REST API, and a dynamic GraphQL API automatically.
 
 [![Python](https://img.shields.io/badge/Python-3.10+-blue?logo=python)](https://python.org)
 [![Django](https://img.shields.io/badge/Django-5.2+-green?logo=django)](https://djangoproject.com)
@@ -20,8 +20,9 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Range Filters** | Built-in date and numeric range filters for efficient data exploration. |
 | **Change Logging** | Automatic tracking of field-level changes (`old → new`) with a dedicated history view. |
 | **Automatic REST API** | Instantly generated CRUD endpoints for every `SnapModel` with zero extra code. |
+| **Dynamic GraphQL API** | Automatically generated GraphQL schema with support for complex data fetching. |
 | **Token Auth** | Secure, expirable API tokens with granular model-level access control. |
-| **Configurable** | Easily enable/disable REST API, Swagger docs, and search modes via settings. |
+| **Configurable** | Easily enable/disable REST API, GraphQL, Swagger docs, and search modes via settings. |
 | **Elasticsearch Ready** | Multi-mode storage (`DB_ONLY`, `DUAL`, `ES_ONLY`) for blazing fast search. |
 | **Structured Logging** | Integrated `structlog` for readable local logs and JSON logs in production. |
 
@@ -31,7 +32,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 
 ```
 snapadmin/
-├── api/             # REST API core: views, serializers, auth
+├── api/             # REST & GraphQL API core: views, serializers, auth
 ├── management/      # Custom management commands
 ├── migrations/      # Core package migrations (e.g., APIToken)
 ├── static/          # UI assets
@@ -58,6 +59,7 @@ INSTALLED_APPS = [
     "snapadmin",
     "rest_framework",
     "drf_spectacular",
+    "graphene_django",
     # ...
 ]
 ```
@@ -86,6 +88,7 @@ You can control core features via Django settings:
 
 ```python
 SNAPADMIN_REST_API_ENABLED = True  # Enable/Disable the REST API
+SNAPADMIN_GRAPHQL_ENABLED = True   # Enable/Disable the GraphQL API
 SNAPADMIN_SWAGGER_ENABLED = True   # Enable/Disable Swagger UI
 ELASTICSEARCH_ENABLED = False      # Toggle ES search fallback
 ```
@@ -112,7 +115,8 @@ cp dist.env .env
 docker compose up --build
 ```
 - **Admin**: http://localhost:8000/admin/ (admin / admin)
-- **API Docs**: http://localhost:8000/api/docs/
+- **REST API Docs**: http://localhost:8000/api/docs/
+- **GraphQL API**: http://localhost:8000/api/graphql/
 
 ---
 
