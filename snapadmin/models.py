@@ -8,6 +8,7 @@ Provides:
   - formatted_id   : Display helper that renders IDs with faded leading zeros
 """
 
+import random
 import secrets
 import string
 from datetime import timedelta
@@ -280,7 +281,20 @@ class EsQuerySet:
         return len(self._hits), {self.model._meta.label: len(self._hits)}
 
     def filter(self, *args, **kwargs):
-        return self
+        if not kwargs:
+            return self
+
+        new_hits = []
+        for hit in self._hits:
+            match = True
+            for key, val in kwargs.items():
+                # Handle simple filter: field=value
+                if getattr(hit, key, None) != val:
+                    match = False
+                    break
+            if match:
+                new_hits.append(hit)
+        return EsQuerySet(self.model, new_hits)
 
     def exclude(self, *args, **kwargs):
         return self
@@ -591,8 +605,6 @@ class SnapModel(models.Model):
             # Skip DB save for ES_ONLY models
             if not self.pk:
                 # Generate a pseudo-random integer ID if not set
-                import random
-
                 self.pk = random.randint(100000, 999999)
             self.index_in_es()
             return

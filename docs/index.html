@@ -390,11 +390,30 @@ celery -A sandbox beat --loglevel=info --scheduler django_celery_beat.schedulers
   <!-- ── Elasticsearch ──────────────────────────────────────────────────────── -->
   <h2 id="elasticsearch">🔍 Elasticsearch</h2>
   <p>Elasticsearch is entirely optional. When <code>ELASTICSEARCH_ENABLED=False</code>, every search operation silently falls back to an ORM <code>icontains</code> query.</p>
-  <pre><code>from demo.search import search_products
 
-# Works with or without Elasticsearch
-results = search_products("laptop", limit=10)
-# → [{id, name, price, available}, ...]</code></pre>
+  <h3>Storage Modes (EsStorageMode)</h3>
+  <p>SnapAdmin supports three storage modes per model:</p>
+  <ul style="margin: 0 0 14px 20px; font-size: 14px;">
+    <li><strong>DB_ONLY</strong> (Default) — Standard Django behavior.</li>
+    <li><strong>DUAL</strong> — Replication to ES; searches use ES performance.</li>
+    <li><strong>ES_ONLY</strong> — Data exists <strong>only</strong> in ES. No DB table required.</li>
+  </ul>
+
+  <pre><code>from snapadmin import fields as snap, models as snap_models
+
+# DUAL Mode Example
+class Product(snap_models.SnapModel):
+    name = snap.SnapCharField(max_length=200, searchable=True)
+    es_storage_mode = snap_models.EsStorageMode.DUAL
+    es_mapping = {"name": {"type": "text"}}
+
+# ES_ONLY Mode Example
+class SearchLog(snap_models.SnapModel):
+    query = snap.SnapCharField(max_length=255)
+    es_storage_mode = snap_models.EsStorageMode.ES_ONLY
+    es_mapping = {"query": {"type": "text"}}
+    class Meta:
+        managed = False  # Skip database table creation</code></pre>
 
   <!-- ── Logging ────────────────────────────────────────────────────────────── -->
   <h2 id="logging">🪵 Structured Logging</h2>
