@@ -42,20 +42,40 @@ class DashboardView(TemplateView):
         # Registered Models
         from snapadmin.models import SnapModel
         from django.apps import apps
+        from django.db.models import Count
         registered_models = []
+
+        # Stats for charts
+        chart_data = {
+            "labels": [],
+            "counts": []
+        }
+
         for model in apps.get_models():
             if issubclass(model, SnapModel) and model is not SnapModel:
-                registered_models.append({
+                count = 0
+                try:
+                    count = model.objects.count() if model._meta.managed else 0
+                except Exception:
+                    pass
+
+                model_info = {
                     "name": model._meta.verbose_name.title(),
                     "app": model._meta.app_label,
-                    "count": model.objects.count() if model._meta.managed else "N/A",
+                    "count": count,
                     "url": reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_changelist")
-                })
+                }
+                registered_models.append(model_info)
+
+                if model._meta.app_label != 'snapadmin':
+                    chart_data["labels"].append(model._meta.verbose_name.title())
+                    chart_data["counts"].append(count)
 
         context.update({
             "services": services,
             "links": links,
             "registered_models": registered_models,
+            "chart_data": chart_data,
             "env_details": env_details,
             "cron_jobs": cron_jobs,
             "debug": settings.DEBUG,

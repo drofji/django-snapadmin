@@ -24,15 +24,37 @@ from django.utils.translation import gettext_lazy as _
 from django.conf import settings
 
 # Unfold imports
-from unfold.admin import ModelAdmin
-from unfold.contrib.filters.admin import (
-    RangeDateFilter,
-    RangeNumericFilter,
-    TextFilter,
-    RelatedDropdownFilter,
-    ChoicesDropdownFilter,
-)
-from unfold.decorators import display as unfold_display
+try:
+    from django.conf import settings
+    if 'unfold' not in settings.INSTALLED_APPS:
+        raise ImportError("Unfold not in INSTALLED_APPS")
+
+    from unfold.admin import ModelAdmin
+    from unfold.contrib.filters.admin import (
+        RangeDateFilter,
+        RangeNumericFilter,
+        TextFilter,
+        RelatedDropdownFilter,
+        ChoicesDropdownFilter,
+    )
+    from unfold.decorators import display as unfold_display
+    UNFOLD_INSTALLED = True
+except (ImportError, RuntimeError):
+    from django.contrib.admin import ModelAdmin
+    RangeDateFilter = admin.DateFieldListFilter
+    RangeNumericFilter = admin.AllValuesFieldListFilter
+    TextFilter = admin.AllValuesFieldListFilter
+    RelatedDropdownFilter = admin.RelatedFieldListFilter
+    ChoicesDropdownFilter = admin.ChoicesFieldListFilter
+
+    def unfold_display(description=None, header=False, label=False, **kwargs):
+        def decorator(func):
+            if description:
+                func.short_description = description
+            return func
+        return decorator
+    UNFOLD_INSTALLED = False
+
 from django_ckeditor_5.widgets import CKEditor5Widget
 
 from snapadmin import fields as snapfields
@@ -172,7 +194,7 @@ class EsQuerySet:
                     break
             if match:
                 new_hits.append(hit)
-        return EsQuerySet(self.model, new_hits)
+        return self._clone(new_hits)
 
     def exclude(self, *args, **kwargs):
         return self
@@ -184,6 +206,18 @@ class EsQuerySet:
         return self
 
     def prefetch_related(self, *lookups):
+        return self
+
+    def _clone(self, hits=None):
+        return EsQuerySet(self.model, hits if hits is not None else self._hits)
+
+    def using(self, alias):
+        return self
+
+    def none(self):
+        return self._clone([])
+
+    def all(self):
         return self
 
     def get(self, *args, **kwargs):
@@ -248,7 +282,10 @@ def formatted_id(obj):
     significant_start = next((i for i, ch in enumerate(raw) if ch != "0"), len(raw))
     leading = raw[:significant_start]
     number = raw[significant_start:] or "0"
-    return [mark_safe(f'<span class="faded-zeros">{leading}</span>{number}'), None, None]
+    val = mark_safe(f'<span class="faded-zeros">{leading}</span>{number}')
+    if UNFOLD_INSTALLED:
+        return [val, None, None]
+    return val
 
 # ===========================================================================
 # Admin Mixin
@@ -570,7 +607,11 @@ class SnapModel(models.Model):
             method_name = f"SnapFunctionField{attr_name.capitalize()}"
             def _make_display_method(field):
                 @unfold_display(description=getattr(field, "verbose_name", "") or getattr(field, "name", ""), header=True)
-                def _display(self, obj): return [field.get_display_value(obj), None, None]
+                def _display(self, obj):
+                    val = field.get_display_value(obj)
+                    if UNFOLD_INSTALLED:
+                        return [val, None, None]
+                    return val
                 return _display
             cls.admin_overrides.setdefault(method_name, _make_display_method(attr_value))
             list_display.append(method_name)
@@ -649,13 +690,17 @@ class SnapModel(models.Model):
             A.LIST_FILTER.value: list_filter,
             A.AUTOCOMPLETE_FIELDS.value: autocomplete_fields,
             A.INLINES.value: cls.snap_inlines,
-            "compressed_fields": cls.compressed_fields,
-            "warn_unsaved_form": cls.warn_unsaved_form,
-            "list_filter_submit": cls.list_filter_submit,
-            "tabs": cls.admin_tabs,
             "formatted_id": formatted_id,
             A.MEDIA_CLASS.value: type(A.MEDIA_CLASS.value, (), {A.CSS_MEDIA.value: {A.ALL_MEDIA.value: final_css}, A.JS_MEDIA.value: final_js}),
         }
+
+        if UNFOLD_INSTALLED:
+            admin_attrs.update({
+                "compressed_fields": cls.compressed_fields,
+                "warn_unsaved_form": cls.warn_unsaved_form,
+                "list_filter_submit": cls.list_filter_submit,
+                "tabs": cls.admin_tabs,
+            })
 
         if fieldsets:
             admin_attrs[A.FIELDSETS.value] = fieldsets
@@ -670,21 +715,23 @@ class SnapModel(models.Model):
         def get_fieldsets(self, request, obj=None):
             # If we have rows, Unfold needs specific layout classes
             fs = super(ModelAdmin, self).get_fieldsets(request, obj)
-            for name, opts in fs:
-                fields = opts.get("fields", [])
-                has_row = any(isinstance(f, tuple) for f in fields)
-                if has_row:
-                    classes = list(opts.get("classes", []))
-                    if "snap-field-row" not in classes:
-                        classes.append("snap-field-row")
-                    opts["classes"] = tuple(classes)
+            if UNFOLD_INSTALLED:
+                for name, opts in fs:
+                    fields = opts.get("fields", [])
+                    has_row = any(isinstance(f, tuple) for f in fields)
+                    if has_row:
+                        classes = list(opts.get("classes", []))
+                        if "snap-field-row" not in classes:
+                            classes.append("snap-field-row")
+                        opts["classes"] = tuple(classes)
             return fs
 
         admin_attrs["formfield_for_dbfield"] = formfield_for_dbfield
         admin_attrs["get_fieldsets"] = get_fieldsets
         admin_attrs.update(getattr(cls, "admin_overrides", {}))
 
-        admin_class = type(f"{cls.__name__}Admin", (SnapSaveMixin, ModelAdmin), admin_attrs)
+        parent_classes = (SnapSaveMixin, ModelAdmin)
+        admin_class = type(f"{cls.__name__}Admin", parent_classes, admin_attrs)
         try: admin.site.register(cls, admin_class)
         except admin.sites.AlreadyRegistered: pass
 
