@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     # SnapAdmin Stack
     'rest_framework',               # REQUIRED
     'drf_spectacular',              # REQUIRED
+    'graphene_django',              # REQUIRED for GraphQL
     'admin_auto_filters',           # REQUIRED
     'rangefilter',                  # REQUIRED
     'snapadmin',                    # REQUIRED
