@@ -122,6 +122,11 @@
       <li><a href="#api-endpoints">Model Endpoints</a></li>
       <li><a href="#api-swagger">Swagger / OpenAPI</a></li>
     </ul>
+    <div class="section-label">GraphQL API</div>
+    <ul>
+      <li><a href="#graphql-overview">Overview</a></li>
+      <li><a href="#graphql-queries">Queries</a></li>
+    </ul>
     <div class="section-label">Infrastructure</div>
     <ul>
       <li><a href="#celery">Celery Tasks</a></li>
@@ -147,6 +152,7 @@
     <div class="card-grid">
       <div class="feature-card"><div class="icon">🎯</div><h4>Declarative Admin</h4><p>Embed admin config in model fields. No ModelAdmin classes needed.</p></div>
       <div class="feature-card"><div class="icon">🌐</div><h4>Auto REST API</h4><p>Full CRUD API generated for every SnapModel automatically.</p></div>
+      <div class="feature-card"><div class="icon">🌿</div><h4>GraphQL API</h4><p>Dynamic GraphQL schema with GraphiQL playground.</p></div>
       <div class="feature-card"><div class="icon">🔑</div><h4>Token Auth</h4><p>Named tokens with expiry, model restrictions, and Django perms.</p></div>
       <div class="feature-card"><div class="icon">📊</div><h4>Swagger UI</h4><p>Interactive OpenAPI 3 documentation via drf-spectacular.</p></div>
       <div class="feature-card"><div class="icon">⚙️</div><h4>Celery Workers</h4><p>Background tasks and Beat scheduler wired up out of the box.</p></div>
@@ -372,6 +378,40 @@ curl -X POST \
     <tr><td><code>/api/redoc/</code></td><td>ReDoc alternative</td></tr>
     <tr><td><code>/api/schema/</code></td><td>Raw OpenAPI 3 JSON download</td></tr>
   </table>
+
+  <!-- ── GraphQL API ───────────────────────────────────────────────────────── -->
+  <h2 id="graphql-overview">🌿 GraphQL API</h2>
+  <p>SnapAdmin includes a dynamic GraphQL API powered by <code>graphene-django</code>. The schema is automatically built from your <code>SnapModel</code> subclasses.</p>
+
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/graphql/</span><span class="endpoint-desc">GraphiQL Playground (requires Token auth)</span></div>
+  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/graphql/</span><span class="endpoint-desc">GraphQL Query Endpoint</span></div>
+
+  <h3 id="graphql-queries">Dynamic Queries</h3>
+  <p>For every registered model, two query fields are generated using the <code>{app_label}_{model_name}</code> naming convention:</p>
+
+  <table>
+    <tr><th>Type</th><th>Naming Convention</th><th>Example</th></tr>
+    <tr><td>List Query</td><td><code>all_{app_label}_{model_name}</code></td><td><code>all_demo_product</code></td></tr>
+    <tr><td>Detail Query</td><td><code>{app_label}_{model_name}(id: Int!)</code></td><td><code>demo_product(id: 1)</code></td></tr>
+  </table>
+
+  <pre><code># Example: Fetching products and their customers via GraphQL
+query {
+  all_demo_order {
+    id
+    total
+    customer {
+      id
+      firstName
+      lastName
+    }
+  }
+}</code></pre>
+
+  <div class="callout callout-info">
+    <strong>ℹ️ Authentication & Permissions</strong>
+    GraphQL queries require the same <code>Authorization: Token &lt;key&gt;</code> header as the REST API. Permission checks are enforced at the resolver level.
+  </div>
 
   <!-- ── Celery ─────────────────────────────────────────────────────────────── -->
   <h2 id="celery">⚙️ Celery Tasks</h2>

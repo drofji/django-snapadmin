@@ -17,6 +17,7 @@
 | **Range Filters** | Date & numeric range filters built-in |
 | **Change Logging** | Detailed field-level `old → new` change history |
 | **REST API** | Auto-generated CRUD API for every SnapModel |
+| **GraphQL API** | Dynamic GraphQL schema with GraphiQL playground |
 | **Token Auth** | Named, expirable API tokens with model-scope restrictions |
 | **OpenAPI Docs** | Swagger UI + ReDoc via drf-spectacular |
 | **Celery** | Background tasks + Beat scheduler wired up |
@@ -199,10 +200,31 @@ print(token.token_key)
 | GET | `/api/models/{app}/{Model}/{pk}/` | Retrieve object |
 | PATCH | `/api/models/{app}/{Model}/{pk}/` | Update object |
 | DELETE | `/api/models/{app}/{Model}/{pk}/` | Delete object |
+| GET | `/api/graphql/` | GraphQL / GraphiQL |
 | GET | `/api/docs/` | Swagger UI |
 | GET | `/api/schema/` | OpenAPI 3 JSON |
 
-### Example: List products
+### GraphQL API
+
+SnapAdmin provides a dynamic GraphQL API that allows you to query any model registered via `SnapModel`.
+
+**Endpoint:** `/api/graphql/` (includes GraphiQL playground).
+
+**Example Query:**
+
+```graphql
+query {
+  allDemoProduct {
+    id
+    name
+    price
+  }
+}
+```
+
+Authentication works the same way as the REST API — just include your `Token` in the `Authorization` header.
+
+### Example: List products (REST)
 
 ```bash
 curl -H "Authorization: Token YOUR_TOKEN" \

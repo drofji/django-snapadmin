@@ -33,6 +33,7 @@ class DashboardView(TemplateView):
             {"name": "API Schema (OpenAPI)", "url": reverse("api-schema"), "icon": "description"},
             {"name": "Swagger UI", "url": reverse("swagger-ui"), "icon": "menu_book"},
             {"name": "Redoc", "url": reverse("redoc"), "icon": "library_books"},
+            {"name": "GraphQL API", "url": reverse("graphql"), "icon": "hub"},
         ]
 
         context.update({
