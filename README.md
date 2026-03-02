@@ -17,6 +17,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Declarative Admin** | Configure `list_display`, `search_fields`, `list_filter` directly in your models using `SnapField`. |
 | **Beautiful UI** | Native integration with `django-unfold` for a modern, responsive admin experience. |
 | **Status Badges** | Easily add color-coded HTML badges for choices and status fields. |
+| **Advanced Layout** | Support for horizontal field rows and tabbed interfaces within the admin form. |
 | **Range Filters** | Built-in date and numeric range filters for efficient data exploration. |
 | **Change Logging** | Automatic tracking of field-level changes (`old → new`) with a dedicated history view. |
 | **Automatic REST API** | Instantly generated CRUD endpoints for every `SnapModel` with zero extra code. |
@@ -35,23 +36,32 @@ snapadmin/
 ├── api/             # REST & GraphQL API core: views, serializers, auth
 ├── management/      # Custom management commands
 ├── migrations/      # Core package migrations (e.g., APIToken)
-├── static/          # UI assets
-├── templates/       # Custom admin templates
+├── static/          # UI assets (CSS, JS, SVG logos)
+├── templates/       # Custom admin templates & dashboard
 ├── fields.py        # SnapField definitions with admin introspection
-├── models.py        # SnapModel base and core models
+├── models.py        # SnapModel base, EsManager, and core logic
 └── urls.py          # Auto-configurable API and documentation routes
 ```
 
 ---
 
-## 🚀 Quickstart: Using the Package
+## 🚀 Quickstart: Installation
 
-### 1. Install
+### From PyPI (Recommended)
 ```bash
 pip install drofji-snapadmin
 ```
 
-### 2. Configure Settings
+### From GitHub (Latest/Development)
+```bash
+pip install git+https://github.com/drofji/django-snapadmin.git
+```
+
+---
+
+## 🛠 Usage & Configuration
+
+### 1. Configure Settings
 Add required apps to `INSTALLED_APPS` in `settings.py`:
 ```python
 INSTALLED_APPS = [
@@ -64,16 +74,18 @@ INSTALLED_APPS = [
 ]
 ```
 
-### 3. Define your Model
+### 2. Define your Model
 ```python
 from snapadmin import fields as snap, models as snap_models
 
 class Product(snap_models.SnapModel):
     name = snap.SnapCharField(max_length=200, searchable=True, show_in_list=True)
-    price = snap.SnapDecimalField(max_digits=10, decimal_places=2, filterable=True)
+    # Group fields into a single horizontal row
+    price = snap.SnapDecimalField(max_digits=10, decimal_places=2, row="pricing")
+    available = snap.SnapBooleanField(default=True, row="pricing")
 ```
 
-### 4. Register Admin
+### 3. Register Admin
 ```python
 # admin.py
 from snapadmin.models import SnapModel
@@ -82,15 +94,15 @@ SnapModel.register_all_admins()
 
 ---
 
-## 🛠 Advanced Package Configuration
+## ⚙️ Advanced Settings
 
-You can control core features via Django settings:
+Control core features via Django settings:
 
 ```python
-SNAPADMIN_REST_API_ENABLED = True  # Enable/Disable the REST API
-SNAPADMIN_GRAPHQL_ENABLED = True   # Enable/Disable the GraphQL API
-SNAPADMIN_SWAGGER_ENABLED = True   # Enable/Disable Swagger UI
-ELASTICSEARCH_ENABLED = False      # Toggle ES search fallback
+SNAPADMIN_REST_API_ENABLED = True   # Enable/Disable the REST API
+SNAPADMIN_GRAPHQL_ENABLED = True    # Enable/Disable the GraphQL API
+SNAPADMIN_SWAGGER_ENABLED = True    # Enable/Disable Swagger UI documentation
+ELASTICSEARCH_ENABLED = False       # Toggle ES search engine support
 ```
 
 ---
@@ -104,19 +116,41 @@ The repository includes a `demo/` app and a `sandbox/` project to showcase SnapA
 - **Interactive Dashboard**: A custom system dashboard with health checks and environment stats.
 - **Seeder Command**: `python manage.py seed_demo` to instantly populate your environment.
 - **Celery Integration**: Example background tasks for data indexing and stats generation.
-- **Full Test Suite**: Comprehensive `pytest` coverage for all package features.
 
 ---
 
 ## 🐳 Running the Demo (Docker)
 
 ```bash
+git clone https://github.com/drofji/django-snapadmin.git
+cd django-snapadmin
 cp dist.env .env
 docker compose up --build
 ```
 - **Admin**: http://localhost:8000/admin/ (admin / admin)
 - **REST API Docs**: http://localhost:8000/api/docs/
 - **GraphQL API**: http://localhost:8000/api/graphql/
+
+---
+
+## 💻 Local Development Setup
+
+```bash
+# Clone and setup environment
+git clone https://github.com/drofji/django-snapadmin.git
+cd django-snapadmin
+python -m venv .venv
+source .venv/bin/activate
+
+# Install in editable mode
+pip install -r requirements.txt
+pip install -e .
+
+# Initialize DB and run
+python manage.py migrate
+python manage.py seed_demo
+python manage.py runserver
+```
 
 ---
 

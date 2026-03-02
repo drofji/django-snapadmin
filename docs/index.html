@@ -98,41 +98,34 @@
 <aside class="sidebar">
   <div class="sidebar-logo">
     <h2>⚡ SnapAdmin</h2>
-    <span>Documentation v1.0</span>
+    <span>Documentation v1.1</span>
   </div>
   <nav>
     <div class="section-label">Getting Started</div>
     <ul>
       <li><a href="#overview" class="active">Overview</a></li>
-      <li><a href="#installation-docker">Docker Setup</a></li>
-      <li><a href="#installation-local">Local Setup</a></li>
+      <li><a href="#installation">Installation</a></li>
+      <li><a href="#demo-setup">Running the Demo</a></li>
     </ul>
     <div class="section-label">Core Concepts</div>
     <ul>
       <li><a href="#snap-model">SnapModel</a></li>
       <li><a href="#snap-fields">Snap Fields</a></li>
+      <li><a href="#advanced-layout">Advanced Layout</a></li>
       <li><a href="#status-badges">Status Badges</a></li>
-      <li><a href="#function-fields">Function Fields</a></li>
       <li><a href="#admin-registration">Admin Registration</a></li>
     </ul>
-    <div class="section-label">REST API</div>
+    <div class="section-label">API layer</div>
     <ul>
-      <li><a href="#api-authentication">Authentication</a></li>
+      <li><a href="#api-rest">REST API</a></li>
+      <li><a href="#api-graphql">GraphQL API</a></li>
       <li><a href="#api-tokens">Token Management</a></li>
-      <li><a href="#api-endpoints">Model Endpoints</a></li>
-      <li><a href="#api-swagger">Swagger / OpenAPI</a></li>
     </ul>
     <div class="section-label">Infrastructure</div>
     <ul>
-      <li><a href="#celery">Celery Tasks</a></li>
-      <li><a href="#elasticsearch">Elasticsearch</a></li>
+      <li><a href="#elasticsearch">Elasticsearch (ES)</a></li>
+      <li><a href="#celery">Celery & Periodic Tasks</a></li>
       <li><a href="#logging">Structured Logging</a></li>
-    </ul>
-    <div class="section-label">Developer</div>
-    <ul>
-      <li><a href="#seed">Demo Seeder</a></li>
-      <li><a href="#testing">Testing</a></li>
-      <li><a href="#env-vars">Environment Variables</a></li>
     </ul>
   </nav>
 </aside>
@@ -147,53 +140,45 @@
     <div class="card-grid">
       <div class="feature-card"><div class="icon">🎯</div><h4>Declarative Admin</h4><p>Embed admin config in model fields. No ModelAdmin classes needed.</p></div>
       <div class="feature-card"><div class="icon">🌐</div><h4>Auto REST API</h4><p>Full CRUD API generated for every SnapModel automatically.</p></div>
+      <div class="feature-card"><div class="icon">⚛️</div><h4>Dynamic GraphQL</h4><p>Unified GraphQL schema generation for all managed models.</p></div>
       <div class="feature-card"><div class="icon">🔑</div><h4>Token Auth</h4><p>Named tokens with expiry, model restrictions, and Django perms.</p></div>
       <div class="feature-card"><div class="icon">📊</div><h4>Swagger UI</h4><p>Interactive OpenAPI 3 documentation via drf-spectacular.</p></div>
-      <div class="feature-card"><div class="icon">⚙️</div><h4>Celery Workers</h4><p>Background tasks and Beat scheduler wired up out of the box.</p></div>
-      <div class="feature-card"><div class="icon">🔍</div><h4>Elasticsearch</h4><p>Optional full-text search with automatic DB fallback.</p></div>
+      <div class="feature-card"><div class="icon">🔍</div><h4>Elasticsearch</h4><p>Integrated full-text search with automatic DB fallback.</p></div>
       <div class="feature-card"><div class="icon">🪵</div><h4>Structured Logs</h4><p>Colourised structlog for dev, JSON for production.</p></div>
       <div class="feature-card"><div class="icon">🐳</div><h4>Docker Ready</h4><p>One-command stack: Django + PostgreSQL + Redis + ES.</p></div>
     </div>
   </section>
 
-  <!-- ── Docker Setup ─────────────────────────────────────────────────────── -->
-  <h2 id="installation-docker">🐳 Docker Setup (Recommended)</h2>
-  <p>The Docker stack starts Django, PostgreSQL, Redis, Celery, and Elasticsearch with a single command.</p>
-  <pre><code># 1. Clone the repository
-git clone https://github.com/drofji/django-snapadmin.git
+  <!-- ── Installation ─────────────────────────────────────────────────────── -->
+  <h2 id="installation">📦 Installation</h2>
+  <p>SnapAdmin can be installed via PyPI or directly from source.</p>
+
+  <h3>From PyPI</h3>
+  <pre><code>pip install drofji-snapadmin</code></pre>
+
+  <h3>From GitHub</h3>
+  <pre><code>pip install git+https://github.com/drofji/django-snapadmin.git</code></pre>
+
+  <!-- ── Demo Setup ───────────────────────────────────────────────────────── -->
+  <h2 id="demo-setup">🌟 Running the Demo</h2>
+  <p>The repository includes a complete sandbox project to explore all features.</p>
+
+  <h3>Via Docker (Recommended)</h3>
+  <pre><code>git clone https://github.com/drofji/django-snapadmin.git
 cd django-snapadmin
-
-# 2. Copy environment file
 cp dist.env .env
-
-# 3. Start the full stack
 docker compose up --build</code></pre>
-  <p>On first boot the app container will:</p>
-  <ul style="margin: 0 0 14px 20px; font-size: 14px;">
-    <li>Run <code>python manage.py migrate</code></li>
-    <li>Collect static files</li>
-    <li>Seed 50 demo objects via <code>seed_demo</code></li>
-  </ul>
-  <div class="callout callout-success">
-    <strong>🎉 Ready!</strong>
-    Admin UI: <a href="http://localhost:8000/admin/">http://localhost:8000/admin/</a> (admin / admin)<br>
-    Swagger: <a href="http://localhost:8000/api/docs/">http://localhost:8000/api/docs/</a>
-  </div>
 
-  <!-- ── Local Setup ───────────────────────────────────────────────────────── -->
-  <h2 id="installation-local">💻 Local Setup</h2>
-  <p>Uses SQLite by default — no external services required.</p>
-  <pre><code>python -m venv .venv && source .venv/bin/activate
+  <h3>Manual / Local Setup</h3>
+  <pre><code>git clone https://github.com/drofji/django-snapadmin.git
+cd django-snapadmin
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp dist.env .env   # Set DEBUG=True, leave POSTGRES_DB blank
+pip install -e .
 
 python manage.py migrate
 python manage.py seed_demo
 python manage.py runserver</code></pre>
-  <div class="callout callout-info">
-    <strong>ℹ️ Graceful degradation</strong>
-    Elasticsearch and Redis are optional for local development. All features degrade silently to DB-only mode when these services are unavailable.
-  </div>
 
   <!-- ── SnapModel ─────────────────────────────────────────────────────────── -->
   <h2 id="snap-model">🏗 SnapModel</h2>
@@ -203,19 +188,7 @@ python manage.py runserver</code></pre>
 class Product(snap_models.SnapModel):
     name = snap.SnapCharField(max_length=200, searchable=True)
     price = snap.SnapDecimalField(max_digits=10, decimal_places=2, filterable=True)
-    available = snap.SnapBooleanField(default=True)
-
-    class Meta:
-        verbose_name = "Product"</code></pre>
-
-  <h3>Smart __str__ priority</h3>
-  <table>
-    <tr><th>Attribute found</th><th>Returns</th></tr>
-    <tr><td><code>name</code></td><td><code>str(self.name)</code></td></tr>
-    <tr><td><code>alias</code></td><td><code>str(self.alias)</code></td></tr>
-    <tr><td><code>first_name + last_name</code></td><td><code>"Last, First"</code></td></tr>
-    <tr><td>none of the above</td><td><code>super().__str__()</code> (pk)</td></tr>
-  </table>
+    available = snap.SnapBooleanField(default=True)</code></pre>
 
   <!-- ── Snap Fields ───────────────────────────────────────────────────────── -->
   <h2 id="snap-fields">📋 Snap Fields</h2>
@@ -227,240 +200,66 @@ class Product(snap_models.SnapModel):
     <tr><td><code>show_in_form</code></td><td>bool</td><td>False</td><td>Shows field in change form</td></tr>
     <tr><td><code>searchable</code></td><td>bool</td><td>False</td><td>Adds to <code>search_fields</code></td></tr>
     <tr><td><code>filterable</code></td><td>bool</td><td>False</td><td>Smart sidebar filter (type-aware)</td></tr>
-    <tr><td><code>editable</code></td><td>bool</td><td>False</td><td>Always read-only when False</td></tr>
+    <tr><td><code>editable</code></td><td>bool</td><td>True</td><td>Always read-only when False</td></tr>
     <tr><td><code>updatable</code></td><td>bool</td><td>True</td><td>Read-only after first save when False</td></tr>
-    <tr><td><code>required</code></td><td>bool</td><td>False</td><td>Sets <code>null=True, blank=True</code> when False</td></tr>
-    <tr><td><code>autocomplete</code></td><td>bool</td><td>False</td><td>Select2 AJAX widget for FK/choices</td></tr>
+    <tr><td><code>row</code></td><td>str</td><td>None</td><td>Group fields into a horizontal row</td></tr>
+    <tr><td><code>tab</code></td><td>str</td><td>None</td><td>Place field into a specific Unfold tab</td></tr>
+    <tr><td><code>wysiwyg</code></td><td>bool</td><td>False</td><td>Enable CKEditor 5 for TextFields</td></tr>
   </table>
 
-  <h3>Available field types</h3>
-  <pre><code>SnapCharField, SnapTextField, SnapEmailField, SnapSlugField, SnapURLField
-SnapUUIDField, SnapIntegerField, SnapPositiveIntegerField, SnapFloatField
-SnapDecimalField, SnapBigIntegerField, SnapDateField, SnapDateTimeField
-SnapTimeField, SnapDurationField, SnapFileField, SnapImageField
-SnapBooleanField, SnapJSONField, SnapGenericIPAddressField
-SnapForeignKey, SnapOneToOneField, SnapManyToManyField</code></pre>
+  <!-- ── Advanced Layout ────────────────────────────────────────────────────── -->
+  <h2 id="advanced-layout">📐 Advanced Layout</h2>
+  <p>Control the visual arrangement of your admin forms using <code>row</code> and <code>tab</code> attributes.</p>
+  <pre><code>class Customer(snap_models.SnapModel):
+    # These two will appear on the same line
+    first_name = snap.SnapCharField(max_length=100, row="name")
+    last_name = snap.SnapCharField(max_length=100, row="name")
 
-  <h3>Smart filter types</h3>
-  <table>
-    <tr><th>Field type</th><th>Filter widget</th></tr>
-    <tr><td>DateField / DateTimeField</td><td>DateRangeFilter</td></tr>
-    <tr><td>IntegerField / DecimalField / FloatField</td><td>NumericRangeFilter</td></tr>
-    <tr><td>ForeignKey</td><td>AutocompleteFilter (AJAX)</td></tr>
-    <tr><td>CharField with choices</td><td>Choice list filter</td></tr>
-  </table>
+    # This field will appear in the "Contact" tab
+    email = snap.SnapEmailField(tab="Contact")</code></pre>
 
   <!-- ── Status Badges ─────────────────────────────────────────────────────── -->
   <h2 id="status-badges">🏷 Status Badges</h2>
   <p>Render coloured pill badges for any choice/status field directly in the admin list view.</p>
   <pre><code>from snapadmin import fields as snap
 
-class Order(snap_models.SnapModel):
-    status = snap.SnapCharField(
-        max_length=20,
-        choices=[("pending","Pending"),("shipped","Shipped"),("cancelled","Cancelled")],
-    )
-
-    status_display = snap.SnapStatusBadgeField(
-        field_name="status",
-        choices=[
-            snap.SnapStatusBadgeFieldChoice(
-                "pending",
-                text_html_color="#856404",
-                background_html_color="#FFF3CD",
-                border_html_color="#FFEEBA",
-            ),
-            snap.SnapStatusBadgeFieldChoice(
-                "shipped",
-                text_html_color="#155724",
-                background_html_color="#D4EDDA",
-                border_html_color="#C3E6CB",
-            ),
-            snap.SnapStatusBadgeFieldChoice(
-                "cancelled",
-                text_html_color="#721C24",
-                background_html_color="#F8D7DA",
-                border_html_color="#F5C6CB",
-            ),
-        ],
-    )</code></pre>
-
-  <!-- ── Function Fields ───────────────────────────────────────────────────── -->
-  <h2 id="function-fields">⚡ Function Fields</h2>
-  <p>Computed columns — no database column, value derived from a callable at display time.</p>
-  <pre><code>full_label = snap.SnapFunctionField(
-    func=lambda obj: f"{obj.name} (${obj.price})",
-    verbose_name="Label",
-    show_in_list=True,
-    safe_html=False,   # Set True to render HTML
+status_badge = snap.SnapStatusBadgeField(
+    field_name="is_active",
+    choices=[
+        snap.SnapStatusBadgeFieldChoice(True, "#065F46", "#D1FAE5", "#10B981"),
+        snap.SnapStatusBadgeFieldChoice(False, "#991B1B", "#FEE2E2", "#EF4444"),
+    ]
 )</code></pre>
 
-  <!-- ── Admin Registration ─────────────────────────────────────────────────── -->
-  <h2 id="admin-registration">🔧 Admin Registration</h2>
-  <pre><code># yourapp/admin.py
-from snapadmin.models import SnapModel
+  <!-- ── API REST ──────────────────────────────────────────────────────────── -->
+  <h2 id="api-rest">🌐 REST API</h2>
+  <p>CRUD endpoints are generated automatically for all managed models.</p>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/models/schema/</span><span class="endpoint-desc">List all available endpoints</span></div>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/models/{app}/{Model}/</span><span class="endpoint-desc">List objects</span></div>
+  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/models/{app}/{Model}/</span><span class="endpoint-desc">Create object</span></div>
 
-# Register ALL SnapModel subclasses across all apps
-SnapModel.register_all_admins()
-
-# Or restrict to one app
-SnapModel.register_all_admins(app_label="yourapp")</code></pre>
-
-  <!-- ── API Authentication ─────────────────────────────────────────────────── -->
-  <h2 id="api-authentication">🔑 API Authentication</h2>
-  <p>All API requests require a token in the Authorization header:</p>
-  <pre><code>Authorization: Token &lt;40-character-token-key&gt;</code></pre>
-  <p>Token validation checks: token exists → is_active=True → not expired → user.is_active=True.</p>
-  <div class="callout callout-warn">
-    <strong>⚠️ Security</strong>
-    Always serve the API over HTTPS. Token keys are equivalent to passwords.
-  </div>
-
-  <!-- ── Token Management ──────────────────────────────────────────────────── -->
-  <h2 id="api-tokens">🗝 Token Management</h2>
-  <pre><code># Create a token
-POST /api/tokens/
-{
-  "token_name": "CI Pipeline",
-  "allowed_models": ["demo.Product", "demo.Order"],  // [] = all models
-  "expires_in_days": 90                               // null = never expires
-}
-
-# Response (save the token_key now — not retrievable later!)
-{
-  "id": 1,
-  "token_name": "CI Pipeline",
-  "token_key": "Abc123...",   // 40 chars
-  "expiration_date": "2025-05-27T00:00:00Z",
-  "is_valid": true
-}</code></pre>
-
-  <h3>Permissions</h3>
-  <p>Each token combines two levels of access control:</p>
+  <!-- ── API GraphQL ───────────────────────────────────────────────────────── -->
+  <h2 id="api-graphql">⚛️ GraphQL API</h2>
+  <p>SnapAdmin provides a dynamic GraphQL interface powered by Graphene-Django.</p>
   <ul style="margin: 8px 0 14px 20px; font-size: 14px;">
-    <li><strong>Token scope</strong> — <code>allowed_models</code> list (empty = unrestricted)</li>
-    <li><strong>Django permissions</strong> — standard <code>view/add/change/delete</code> per model</li>
+    <li><strong>Auto-Schema</strong>: All <code>SnapModel</code> subclasses are automatically added to the schema.</li>
+    <li><strong>Unified Fetching</strong>: Retrieve data from Database or Elasticsearch via a single query.</li>
+    <li><strong>Endpoint</strong>: Accessible at <code>/api/graphql/</code> with GraphiQL enabled.</li>
   </ul>
-  <p>Both must pass for a request to succeed.</p>
-
-  <!-- ── API Endpoints ──────────────────────────────────────────────────────── -->
-  <h2 id="api-endpoints">🌐 Model Endpoints</h2>
-
-  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/models/schema/</span><span class="endpoint-desc">List all available model endpoints</span></div>
-  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/models/{app}/{Model}/</span><span class="endpoint-desc">List objects (paginated, 25/page)</span></div>
-  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/models/{app}/{Model}/</span><span class="endpoint-desc">Create a new object</span></div>
-  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/models/{app}/{Model}/{pk}/</span><span class="endpoint-desc">Retrieve a single object</span></div>
-  <div class="endpoint-row"><span class="method patch">PATCH</span><span class="endpoint-path">/api/models/{app}/{Model}/{pk}/</span><span class="endpoint-desc">Partial update</span></div>
-  <div class="endpoint-row"><span class="method delete">DELETE</span><span class="endpoint-path">/api/models/{app}/{Model}/{pk}/</span><span class="endpoint-desc">Delete object</span></div>
-
-  <pre><code># Example: list products
-curl -H "Authorization: Token YOUR_TOKEN" \
-     http://localhost:8000/api/models/demo/Product/
-
-# Example: create a product
-curl -X POST \
-     -H "Authorization: Token YOUR_TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"name": "New Item", "price": "29.99", "available": true}' \
-     http://localhost:8000/api/models/demo/Product/</code></pre>
-
-  <!-- ── Swagger ────────────────────────────────────────────────────────────── -->
-  <h2 id="api-swagger">📖 Swagger / OpenAPI</h2>
-  <table>
-    <tr><th>URL</th><th>Description</th></tr>
-    <tr><td><code>/api/docs/</code></td><td>Interactive Swagger UI</td></tr>
-    <tr><td><code>/api/redoc/</code></td><td>ReDoc alternative</td></tr>
-    <tr><td><code>/api/schema/</code></td><td>Raw OpenAPI 3 JSON download</td></tr>
-  </table>
-
-  <!-- ── Celery ─────────────────────────────────────────────────────────────── -->
-  <h2 id="celery">⚙️ Celery Tasks</h2>
-  <h3>Built-in periodic tasks</h3>
-  <table>
-    <tr><th>Schedule</th><th>Task</th><th>Description</th></tr>
-    <tr><td>02:30 daily</td><td><code>api.tasks.purge_expired_tokens</code></td><td>Hard-delete expired API tokens</td></tr>
-    <tr><td>Every hour</td><td><code>demo.tasks.reindex_products_to_elasticsearch</code></td><td>Sync products to ES</td></tr>
-    <tr><td>Midnight</td><td><code>demo.tasks.generate_daily_stats</code></td><td>Log daily business metrics</td></tr>
-  </table>
-
-  <h3>Start workers locally</h3>
-  <pre><code>celery -A sandbox worker --loglevel=info
-celery -A sandbox beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler</code></pre>
 
   <!-- ── Elasticsearch ──────────────────────────────────────────────────────── -->
-  <h2 id="elasticsearch">🔍 Elasticsearch</h2>
-  <p>Elasticsearch is entirely optional. When <code>ELASTICSEARCH_ENABLED=False</code>, every search operation silently falls back to an ORM <code>icontains</code> query.</p>
-
-  <h3>Storage Modes (EsStorageMode)</h3>
-  <p>SnapAdmin supports three storage modes per model:</p>
-  <ul style="margin: 0 0 14px 20px; font-size: 14px;">
-    <li><strong>DB_ONLY</strong> (Default) — Standard Django behavior.</li>
-    <li><strong>DUAL</strong> — Replication to ES; searches use ES performance.</li>
-    <li><strong>ES_ONLY</strong> — Data exists <strong>only</strong> in ES. No DB table required.</li>
+  <h2 id="elasticsearch">🔍 Elasticsearch Integration</h2>
+  <p>Configure how each model interacts with the search engine via <code>EsStorageMode</code>.</p>
+  <ul>
+    <li><code>DB_ONLY</code>: Standard Django behavior (Default).</li>
+    <li><code>DUAL</code>: Save to DB + ES; fast searching via <code>es_search()</code>.</li>
+    <li><code>ES_ONLY</code>: Data exists only in ES. Ideal for logs/analytics.</li>
   </ul>
+  <pre><code># Trigger re-indexing from code
+MyModel.es_reindex_all()
 
-  <pre><code>from snapadmin import fields as snap, models as snap_models
-
-# DUAL Mode Example
-class Product(snap_models.SnapModel):
-    name = snap.SnapCharField(max_length=200, searchable=True)
-    es_storage_mode = snap_models.EsStorageMode.DUAL
-    es_mapping = {"name": {"type": "text"}}
-
-# ES_ONLY Mode Example
-class SearchLog(snap_models.SnapModel):
-    query = snap.SnapCharField(max_length=255)
-    es_storage_mode = snap_models.EsStorageMode.ES_ONLY
-    es_mapping = {"query": {"type": "text"}}
-    class Meta:
-        managed = False  # Skip database table creation</code></pre>
-
-  <!-- ── Logging ────────────────────────────────────────────────────────────── -->
-  <h2 id="logging">🪵 Structured Logging</h2>
-  <pre><code>from snapadmin.logging_config import get_logger
-
-logger = get_logger(__name__)
-logger.info("product_created", product_id=42, name="Laptop Stand")
-# → 2025-01-15T12:00:00Z     INFO  product_created  product_id=42  name='Laptop Stand'</code></pre>
-
-  <table>
-    <tr><th>Env var</th><th>Default</th><th>Description</th></tr>
-    <tr><td><code>LOG_LEVEL</code></td><td>INFO (prod) / DEBUG (dev)</td><td>Minimum log level</td></tr>
-    <tr><td><code>JSON_LOGS</code></td><td>False</td><td>Set True for machine-readable JSON lines</td></tr>
-  </table>
-
-  <!-- ── Seeder ─────────────────────────────────────────────────────────────── -->
-  <h2 id="seed">🌱 Demo Seeder</h2>
-  <pre><code>python manage.py seed_demo                   # 50 objects each
-python manage.py seed_demo --count 200        # custom count
-python manage.py seed_demo --flush            # wipe then re-seed
-python manage.py seed_demo --no-index         # skip ES indexing</code></pre>
-  <p>Set <code>SNAPADMIN_AUTO_SEED=True</code> in <code>.env</code> to seed automatically after the first <code>migrate</code>.</p>
-
-  <!-- ── Testing ────────────────────────────────────────────────────────────── -->
-  <h2 id="testing">🧪 Testing</h2>
-  <pre><code>pytest                                       # full suite
-pytest --cov=snapadmin --cov=api --cov-report=html
-pytest tests/test_api_token.py -v            # unit tests only
-pytest tests/test_model_api.py -v            # integration tests</code></pre>
-
-  <!-- ── Env Vars ───────────────────────────────────────────────────────────── -->
-  <h2 id="env-vars">⚙️ Environment Variables</h2>
-  <table>
-    <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-    <tr><td><code>SECRET_KEY</code></td><td>insecure dev key</td><td>Django secret key — change in production!</td></tr>
-    <tr><td><code>DEBUG</code></td><td>False</td><td>Enable Django debug mode</td></tr>
-    <tr><td><code>ALLOWED_HOSTS</code></td><td>localhost</td><td>Comma-separated allowed hosts</td></tr>
-    <tr><td><code>POSTGRES_DB</code></td><td>—</td><td>Postgres DB name (blank = SQLite)</td></tr>
-    <tr><td><code>POSTGRES_USER</code></td><td>snapadmin</td><td>Postgres username</td></tr>
-    <tr><td><code>POSTGRES_PASSWORD</code></td><td>snapadmin</td><td>Postgres password</td></tr>
-    <tr><td><code>REDIS_URL</code></td><td>redis://localhost:6379/0</td><td>Celery broker URL</td></tr>
-    <tr><td><code>ELASTICSEARCH_URL</code></td><td>http://localhost:9200</td><td>ES cluster URL</td></tr>
-    <tr><td><code>ELASTICSEARCH_ENABLED</code></td><td>False</td><td>Enable ES integration</td></tr>
-    <tr><td><code>SNAPADMIN_AUTO_SEED</code></td><td>False</td><td>Auto-seed on first migrate</td></tr>
-    <tr><td><code>LOG_LEVEL</code></td><td>INFO</td><td>Logging level</td></tr>
-    <tr><td><code>JSON_LOGS</code></td><td>False</td><td>Emit JSON log lines</td></tr>
-  </table>
+# Perform optimized search
+results = MyModel.es_search("query string")</code></pre>
 
   <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
     SnapAdmin — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
@@ -470,7 +269,7 @@ pytest tests/test_model_api.py -v            # integration tests</code></pre>
 
 <script>
   // Highlight active section in sidebar on scroll
-  const sections = document.querySelectorAll('[id]');
+  const sections = document.querySelectorAll('h2[id], section[id]');
   const navLinks = document.querySelectorAll('.sidebar nav a');
   const observer = new IntersectionObserver(entries => {
     entries.forEach(e => {
@@ -480,7 +279,7 @@ pytest tests/test_model_api.py -v            # integration tests</code></pre>
         if (link) link.classList.add('active');
       }
     });
-  }, { rootMargin: '-40% 0px -50% 0px' });
+  }, { rootMargin: '-20% 0px -70% 0px' });
   sections.forEach(s => observer.observe(s));
 </script>
 </body>
