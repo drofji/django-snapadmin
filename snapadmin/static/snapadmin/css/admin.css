@@ -91,22 +91,25 @@ div.fieldBox.flex-container label {
     border-radius: var(--radius) !important;
 }
 
-/* Force labels above fields globally in admin */
-.unfold .form-row, .form-row {
+/* Force labels above fields globally in admin, but skip tabular inlines to preserve columns */
+div.form-row:not(.tabular div.form-row) {
     display: flex !important;
     flex-direction: column !important;
-    align-items: stretch !important;
     max-width: 100% !important;
+    padding-left: 25px !important;
+    padding-right: 25px !important;
+    padding-top: 15px !important;
+    padding-bottom: 15px !important;
 }
 
-.unfold .form-row > div, .form-row > div {
+div.form-row:not(.tabular div.form-row) > div {
     width: 100% !important;
     max-width: 100% !important;
-    padding: 10px 0 !important;
+    padding: 0 !important;
     box-sizing: border-box !important;
 }
 
-.unfold .form-row label, .form-row label {
+div.form-row:not(.tabular div.form-row) label {
     display: block !important;
     padding: 0 0 8px 0 !important;
     margin: 0 !important;
@@ -114,6 +117,17 @@ div.fieldBox.flex-container label {
     float: none !important;
     text-align: left !important;
     font-weight: 600 !important;
+}
+
+/* Ensure tabular inlines keep their horizontal column layout */
+.tabular tr.form-row {
+    display: table-row !important;
+}
+
+.tabular tr.form-row td {
+    display: table-cell !important;
+    vertical-align: middle !important;
+    padding: 10px !important;
 }
 
 /* Dark mode compatibility for borders and backgrounds */
