@@ -8,177 +8,210 @@
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <style>
+        :root {
+            --bg-color: #f8fafc;
+            --container-bg: #ffffff;
+            --text-primary: #1e293b;
+            --text-secondary: #64748b;
+            --accent-color: #3b82f6;
+            --accent-hover: #2563eb;
+            --border-color: #e2e8f0;
+            --card-bg: #ffffff;
+            --shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: #f4f7f6;
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-primary);
             margin: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            padding: 20px;
+            padding: 2rem;
+            line-height: 1.5;
         }
+
         .container {
-            background: white;
-            padding: 2.5rem;
-            border-radius: 16px;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.05);
-            width: 100%;
-            max-width: 800px;
+            max-width: 1000px;
+            margin: 0 auto;
         }
+
         .header {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            margin-bottom: 2.5rem;
-            position: relative;
-        }
-        h1 {
-            color: #2c3e50;
-            text-align: center;
-            margin: 0;
-        }
-        .github-link {
-            position: absolute;
-            right: 0;
-            color: #333;
-            font-size: 1.5rem;
-            transition: color 0.2s;
-        }
-        .github-link:hover {
-            color: #24292e;
-        }
-        .section {
-            margin-bottom: 2rem;
-        }
-        .section-title {
-            font-weight: 700;
-            color: #95a5a6;
-            margin-bottom: 1rem;
-            text-transform: uppercase;
-            font-size: 0.75rem;
-            letter-spacing: 1.5px;
-            border-bottom: 1px solid #eee;
-            padding-bottom: 0.5rem;
-        }
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-            gap: 1.25rem;
-        }
-        .card {
-            background: #fff;
-            border: 1px solid #edf2f7;
-            padding: 1.25rem;
-            border-radius: 12px;
-            text-align: center;
-            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            text-decoration: none;
-            color: #4a5568;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-        }
-        .card:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 10px 20px rgba(0,0,0,0.05);
-            border-color: #3182ce;
-            color: #2b6cb0;
-        }
-        .card i {
-            font-size: 2.25rem;
-            margin-bottom: 0.75rem;
-            color: #3182ce;
-        }
-        .status-list {
-            list-style: none;
-            padding: 0;
-        }
-        .status-item {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 0.75rem 0;
-            border-bottom: 1px solid #f7fafc;
+            margin-bottom: 3rem;
         }
+
+        .header h1 {
+            font-size: 2.25rem;
+            font-weight: 800;
+            margin: 0;
+            background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .section {
+            background: var(--container-bg);
+            border-radius: 1rem;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: var(--shadow);
+            border: 1px solid var(--border-color);
+        }
+
+        .section-title {
+            font-size: 0.875rem;
+            font-weight: 700;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            text-decoration: none;
+            color: var(--text-primary);
+            transition: all 0.2s;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .card:hover {
+            border-color: var(--accent-color);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+        }
+
+        .card i {
+            font-size: 2rem;
+            color: var(--accent-color);
+        }
+
+        .card span {
+            font-weight: 600;
+            font-size: 0.875rem;
+        }
+
+        .models-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+            gap: 1rem;
+        }
+
+        .model-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            text-decoration: none;
+            color: inherit;
+            transition: background 0.2s;
+        }
+
+        .model-card:hover {
+            background: var(--bg-color);
+        }
+
+        .model-info h3 {
+            margin: 0;
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .model-info span {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .model-count {
+            background: var(--bg-color);
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            color: var(--accent-color);
+        }
+
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.75rem 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
         .status-badge {
             font-size: 0.75rem;
             font-weight: 700;
-            padding: 0.25rem 0.75rem;
+            padding: 0.125rem 0.625rem;
             border-radius: 9999px;
-            text-transform: uppercase;
-        }
-        .status-online { background-color: #c6f6d5; color: #22543d; }
-        .status-offline { background-color: #fed7d7; color: #822727; }
-        .status-disabled { background-color: #edf2f7; color: #4a5568; }
-
-        .live-indicator {
-            width: 8px;
-            height: 8px;
-            background-color: #48bb78;
-            border-radius: 50%;
-            display: inline-block;
-            margin-right: 6px;
-            box-shadow: 0 0 0 0 rgba(72, 187, 120, 0.7);
-            animation: pulse 2s infinite;
         }
 
-        @keyframes pulse {
-            0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(72, 187, 120, 0.7); }
-            70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(72, 187, 120, 0); }
-            100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(72, 187, 120, 0); }
+        .status-online { background: #dcfce7; color: #166534; }
+        .status-offline { background: #fee2e2; color: #991b1b; }
+
+        .api-info {
+            background: #eff6ff;
+            border-left: 4px solid #3b82f6;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            margin-top: 1rem;
         }
 
-        .info-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 1rem;
+        .api-info h4 {
+            margin: 0 0 0.5rem 0;
+            color: #1e40af;
         }
-        .info-item {
+
+        .api-info p {
+            margin: 0;
             font-size: 0.875rem;
-            color: #4a5568;
-        }
-        .info-item strong { color: #2d3748; }
-
-        .cron-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.875rem;
-        }
-        .cron-table th {
-            text-align: left;
-            color: #718096;
-            font-weight: 600;
-            padding: 0.5rem;
-            border-bottom: 2px solid #edf2f7;
-        }
-        .cron-table td {
-            padding: 0.75rem 0.5rem;
-            border-bottom: 1px solid #f7fafc;
+            color: #1e3a8a;
         }
 
         .footer {
-            margin-top: 3rem;
             text-align: center;
+            margin-top: 4rem;
+            color: var(--text-secondary);
             font-size: 0.875rem;
-            color: #a0aec0;
+        }
+
+        @media (max-width: 768px) {
+            .info-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>SnapAdmin Dashboard</h1>
-            <a href="https://github.com/drofji/snapadmin" target="_blank" class="github-link" title="View on GitHub">
-                <i class="fab fa-github"></i>
+            <h1>SnapAdmin</h1>
+            <a href="https://github.com/drofji/snapadmin" target="_blank" style="color: var(--text-primary)">
+                <i class="fab fa-github fa-2x"></i>
             </a>
         </div>
 
         <div class="section">
-            <div class="section-title">Quick Links</div>
+            <div class="section-title"><i class="material-icons">link</i> Quick Access</div>
             <div class="grid">
                 {% for link in links %}
-                <a href="{{ link.url }}" class="card" target="_blank">
+                <a href="{{ link.url }}" class="card">
                     <i class="material-icons">{{ link.icon }}</i>
                     <span>{{ link.name }}</span>
                 </a>
@@ -186,59 +219,56 @@
             </div>
         </div>
 
-        <div class="info-grid">
-            <div class="section">
-                <div class="section-title">Service Health</div>
-                <div class="status-list">
-                    {% for service in services %}
-                    <div class="status-item">
-                        <span>
-                            {% if service.is_live %}<span class="live-indicator"></span>{% endif %}
-                            {{ service.name }}
-                        </span>
-                        <span class="status-badge status-{{ service.status }}">
-                            {{ service.status }}
-                        </span>
-                    </div>
-                    {% endfor %}
-                </div>
-            </div>
-
-            <div class="section">
-                <div class="section-title">Environment</div>
-                <div class="info-item"><strong>Mode:</strong> {{ env_details.mode }}</div>
-                <div class="info-item"><strong>OS:</strong> {{ env_details.os }}</div>
-                <div class="info-item"><strong>Hostname:</strong> {{ env_details.hostname }}</div>
-                <div class="info-item"><strong>Debug:</strong> {{ debug }}</div>
-            </div>
-        </div>
-
-        {% if cron_jobs %}
         <div class="section">
-            <div class="section-title">Cron Job Monitor</div>
-            <table class="cron-table">
-                <thead>
-                    <tr>
-                        <th>Job Name</th>
-                        <th>Schedule</th>
-                        <th>Description</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for job in cron_jobs %}
-                    <tr>
-                        <td><strong>{{ job.name }}</strong></td>
-                        <td><code>{{ job.schedule }}</code></td>
-                        <td>{{ job.description }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+            <div class="section-title"><i class="material-icons">storage</i> Managed Models</div>
+            <div class="models-grid">
+                {% for model in registered_models %}
+                <a href="{{ model.url }}" class="model-card">
+                    <div class="model-info">
+                        <h3>{{ model.name }}</h3>
+                        <span>{{ model.app }}</span>
+                    </div>
+                    <div class="model-count">{{ model.count }}</div>
+                </a>
+                {% endfor %}
+            </div>
         </div>
-        {% endif %}
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;" class="info-grid">
+            <div class="section">
+                <div class="section-title"><i class="material-icons">sensors</i> System Health</div>
+                {% for service in services %}
+                <div class="status-item">
+                    <span>{{ service.name }}</span>
+                    <span class="status-badge status-{{ service.status }}">{{ service.status }}</span>
+                </div>
+                {% endfor %}
+            </div>
+
+            <div class="section">
+                <div class="section-title"><i class="material-icons">info</i> Environment</div>
+                <div class="status-item"><span>Mode</span> <strong>{{ env_details.mode }}</strong></div>
+                <div class="status-item"><span>OS</span> <strong>{{ env_details.os }}</strong></div>
+                <div class="status-item"><span>Hostname</span> <strong>{{ env_details.hostname }}</strong></div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-title"><i class="material-icons">api</i> API Capabilities</div>
+            <div class="api-info">
+                <h4>REST API</h4>
+                <p>Automatic CRUD endpoints for all models. Supports filtering, pagination, and token authentication.</p>
+            </div>
+            {% if graphql_enabled %}
+            <div class="api-info" style="background: #f5f3ff; border-left-color: #8b5cf6;">
+                <h4 style="color: #5b21b6;">GraphQL API</h4>
+                <p style="color: #4c1d95;">Dynamic schema generation powered by Graphene. Unified endpoint for complex data fetching across database and Elasticsearch.</p>
+            </div>
+            {% endif %}
+        </div>
 
         <div class="footer">
-            Powered by <strong>SnapAdmin</strong> &copy; 2026
+            Built with <strong>SnapAdmin</strong> v{{ version }} &bull; &copy; 2026
         </div>
     </div>
 </body>
