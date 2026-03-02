@@ -4,6 +4,14 @@ import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+def static_lambda(path):
+    from django.templatetags.static import static
+    return static(path)
+
+def reverse_lazy_lambda(viewname):
+    from django.urls import reverse_lazy
+    return reverse_lazy(viewname)
+
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-dummy-key-for-tests')
 DEBUG = os.getenv('DEBUG', 'True') == 'True'
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
@@ -203,44 +211,119 @@ CKEDITOR_5_CONFIGS = {
 }
 
 # ------------------------------------------------------------------------------
-# UNFOLD CONFIGURATION (Comprehensive example)
+# UNFOLD CONFIGURATION
 # ------------------------------------------------------------------------------
 
 UNFOLD = {
-    "SITE_TITLE": "SnapAdmin Demo",
-    "SITE_HEADER": "SnapAdmin Demo",
-    "SITE_URL": "/admin/",
-    "SITE_ICON": None,  # path to static icon
-    "SITE_SYMBOL": "speed",  # icon from Material Symbols
-    "SHOW_HISTORY": True, # show button to history of model
-    "SHOW_VIEW_ON_SITE": True, # show button to view on site
-    "THEME": "dark", # dark, light or auto
+    "SITE_TITLE": "SnapAdmin",
+    "SITE_HEADER": "SnapAdmin",
+    "SITE_SUBHEADER": "The ultimate Django admin",
+    "SITE_DROPDOWN": [
+        {
+            "icon": "diamond",
+            "title": _("My site"),
+            "link": "https://example.com",
+        },
+    ],
+    "SITE_URL": "/",
+    "SITE_ICON": {
+        "light": lambda request: static_lambda("icon-light.svg"),
+        "dark": lambda request: static_lambda("icon-dark.svg"),
+    },
+    "SITE_LOGO": {
+        "light": lambda request: static_lambda("logo-light.svg"),
+        "dark": lambda request: static_lambda("logo-dark.svg"),
+    },
+    "SITE_SYMBOL": "speed",
+    "SITE_FAVICONS": [
+        {
+            "rel": "icon",
+            "sizes": "32x32",
+            "type": "image/svg+xml",
+            "href": lambda request: static_lambda("favicon.svg"),
+        },
+    ],
+    "SHOW_HISTORY": True,
+    "SHOW_VIEW_ON_SITE": True,
+    "SHOW_BACK_BUTTON": False,
+    "THEME": "dark",
+    "LOGIN": {
+        "image": lambda request: static_lambda("sample/login-bg.jpg"),
+        "redirect_after": lambda request: reverse_lazy_lambda("admin:index"),
+    },
+    "STYLES": [
+        lambda request: static_lambda("css/style.css"),
+    ],
+    "SCRIPTS": [
+        lambda request: static_lambda("js/script.js"),
+    ],
+    "BORDER_RADIUS": "6px",
     "COLORS": {
+        "base": {
+            "50": "oklch(98.5% .002 247.839)",
+            "100": "oklch(96.7% .003 264.542)",
+            "200": "oklch(92.8% .006 264.531)",
+            "300": "oklch(87.2% .01 258.338)",
+            "400": "oklch(70.7% .022 261.325)",
+            "500": "oklch(55.1% .027 264.364)",
+            "600": "oklch(44.6% .03 256.802)",
+            "700": "oklch(37.3% .034 259.733)",
+            "800": "oklch(27.8% .033 256.848)",
+            "900": "oklch(21% .034 264.665)",
+            "950": "oklch(13% .028 261.692)",
+        },
         "primary": {
-            "50": "250 245 255",
-            "100": "243 232 255",
-            "200": "233 213 255",
-            "300": "216 180 254",
-            "400": "192 132 252",
-            "500": "168 85 247",
-            "600": "147 51 234",
-            "700": "126 34 206",
-            "800": "107 33 168",
-            "900": "88 28 135",
-            "950": "59 7 100",
+            "50": "oklch(97.7% .014 308.299)",
+            "100": "oklch(94.6% .033 307.174)",
+            "200": "oklch(90.2% .063 306.703)",
+            "300": "oklch(82.7% .119 306.383)",
+            "400": "oklch(71.4% .203 305.504)",
+            "500": "oklch(62.7% .265 303.9)",
+            "600": "oklch(55.8% .288 302.321)",
+            "700": "oklch(49.6% .265 301.924)",
+            "800": "oklch(43.8% .218 303.724)",
+            "900": "oklch(38.1% .176 304.987)",
+            "950": "oklch(29.1% .149 302.717)",
+        },
+        "font": {
+            "subtle-light": "var(--color-base-500)",
+            "subtle-dark": "var(--color-base-400)",
+            "default-light": "var(--color-base-600)",
+            "default-dark": "var(--color-base-300)",
+            "important-light": "var(--color-base-900)",
+            "important-dark": "var(--color-base-100)",
+        },
+    },
+    "EXTENSIONS": {
+        "modeltranslation": {
+            "flags": {
+                "en": "🇬🇧",
+                "fr": "🇫🇷",
+                "nl": "🇧🇪",
+            },
         },
     },
     "SIDEBAR": {
         "show_search": True,
+        "command_search": True,
         "show_all_applications": True,
         "navigation": [
             {
-                "title": _("Main"),
+                "title": _("Navigation"),
+                "separator": True,
+                "collapsible": True,
                 "items": [
                     {
                         "title": _("Dashboard"),
                         "icon": "dashboard",
-                        "link": "/admin/",
+                        "link": reverse_lazy_lambda("admin:index"),
+                        "badge": lambda request: "Snap",
+                        "permission": lambda request: request.user.is_superuser,
+                    },
+                    {
+                        "title": _("Users"),
+                        "icon": "people",
+                        "link": reverse_lazy_lambda("admin:auth_user_changelist"),
                     },
                 ],
             },
@@ -250,17 +333,17 @@ UNFOLD = {
                     {
                         "title": _("Products"),
                         "icon": "inventory_2",
-                        "link": "admin:demo_product_changelist",
+                        "link": reverse_lazy_lambda("admin:demo_product_changelist"),
                     },
                     {
                         "title": _("Orders"),
                         "icon": "shopping_cart",
-                        "link": "admin:demo_order_changelist",
+                        "link": reverse_lazy_lambda("admin:demo_order_changelist"),
                     },
                     {
                         "title": _("Customers"),
                         "icon": "person",
-                        "link": "admin:demo_customer_changelist",
+                        "link": reverse_lazy_lambda("admin:demo_customer_changelist"),
                     },
                 ],
             },
@@ -270,12 +353,7 @@ UNFOLD = {
                     {
                         "title": _("API Tokens"),
                         "icon": "key",
-                        "link": "admin:snapadmin_apitoken_changelist",
-                    },
-                    {
-                        "title": _("Users"),
-                        "icon": "people",
-                        "link": "admin:auth_user_changelist",
+                        "link": reverse_lazy_lambda("admin:snapadmin_apitoken_changelist"),
                     },
                 ],
             },
@@ -287,19 +365,13 @@ UNFOLD = {
             "items": [
                 {
                     "title": _("Basic Info"),
-                    "link": "admin:demo_product_changelist",
+                    "link": reverse_lazy_lambda("admin:demo_product_changelist"),
                 },
                 {
                     "title": _("Advanced Settings"),
-                    "link": "admin:demo_product_changelist",
+                    "link": reverse_lazy_lambda("admin:demo_product_changelist"),
                 },
             ],
         },
-    ],
-    "STYLES": [
-        # lambda request: static("css/style.css"),
-    ],
-    "SCRIPTS": [
-        # lambda request: static("js/script.js"),
     ],
 }
