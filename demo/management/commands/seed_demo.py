@@ -21,7 +21,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from demo.models import Customer, Order, Product
+from demo.models import Customer, Order, Product, SearchLog
 
 
 # ─── Sample data pools ───────────────────────────────────────────────────────
@@ -104,6 +104,7 @@ class Command(BaseCommand):
 
             products  = self._seed_products(count)
             customers = self._seed_customers(count)
+            search_logs = self._seed_search_logs(count)
             orders    = self._seed_orders(customers, products, count)
             admin     = self._ensure_superuser()
             token     = self._ensure_api_token(admin)
@@ -113,6 +114,7 @@ class Command(BaseCommand):
         self.stdout.write(f"   Products  : {len(products)}")
         self.stdout.write(f"   Customers : {len(customers)}")
         self.stdout.write(f"   Orders    : {len(orders)}")
+        self.stdout.write(f"   SearchLogs: {len(search_logs)}")
         self.stdout.write("")
         self.stdout.write(f"   Admin URL : http://localhost:8000/admin/")
         self.stdout.write(f"   Username  : admin")
@@ -133,6 +135,11 @@ class Command(BaseCommand):
         Order.objects.all().delete()
         Customer.objects.all().delete()
         Product.objects.all().delete()
+        try:
+            SearchLog.objects.all().delete()
+        except Exception:
+            # Table might not exist in DB for ES_ONLY
+            pass
         self.stdout.write("   Done.")
 
     def _seed_products(self, count: int) -> list:
@@ -172,6 +179,19 @@ class Command(BaseCommand):
             ))
 
         return Customer.objects.bulk_create(customers, ignore_conflicts=True)
+
+    def _seed_search_logs(self, count: int) -> list:
+        """Create SearchLog records directly in Elasticsearch."""
+        self.stdout.write("   Creating search logs (ES only)…")
+        logs = []
+        queries = ["laptop", "mouse", "keyboard", "monitor", "cable", "hub"]
+        for i in range(count):
+            query = random.choice(queries)
+            count_res = random.randint(0, 100)
+            log = SearchLog(query=query, results_count=count_res)
+            log.save()  # This will save only to ES due to ES_ONLY mode
+            logs.append(log)
+        return logs
 
     def _seed_orders(self, customers: list, products: list, count: int) -> list:
         """Create Order records linking customers to random totals."""

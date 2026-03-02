@@ -3,6 +3,7 @@ snapadmin/models.py
 Core module for SnapAdmin — an auto-registration layer on top of Django's built-in admin with Unfold integration.
 """
 
+import random
 import secrets
 import string
 from datetime import timedelta
@@ -109,6 +110,124 @@ class APIToken(models.Model):
 class SnapModelAttributeEnum(str, Enum):
     ADMIN_OVERRIDES = "admin_overrides"
 
+    
+class EsStorageMode(str, Enum):
+    """Modes for Elasticsearch integration."""
+
+    DB_ONLY = "db_only"  # Standard Django behavior
+    DUAL = "dual"        # Save to both DB and ES, search via ES
+    ES_ONLY = "es_only"  # Save/retrieve only via ES, no DB table needed
+
+
+class EsQuerySet:
+    """A lightweight mock QuerySet for Elasticsearch-only models."""
+
+    def __init__(self, model, hits=None):
+        self.model = model
+        self._hits = hits if hits is not None else []
+        self.query = models.query.Query(model)  # Mock query for DRF
+        self._result_cache = self._hits
+        self._prefetch_related_lookups = []
+        self._sticky_filter = False
+        self._for_write = False
+        self._prefetch_done = False
+        self._known_related_objects = {}
+
+    def __iter__(self):
+        return iter(self._hits)
+
+    def __len__(self):
+        return len(self._hits)
+
+    def __getitem__(self, k):
+        if isinstance(k, slice):
+            return EsQuerySet(self.model, self._hits[k])
+        return self._hits[k]
+
+    def count(self):
+        return len(self._hits)
+
+    def delete(self):
+        if self.model.es_storage_mode == EsStorageMode.ES_ONLY:
+            try:
+                es = self.model.get_es_client()
+                for hit in self._hits:
+                    es.delete(index=self.model.get_es_index_name(), id=hit.pk, ignore=[404])
+            except Exception:
+                pass
+        return len(self._hits), {self.model._meta.label: len(self._hits)}
+
+    def filter(self, *args, **kwargs):
+        if not kwargs:
+            return self
+
+        new_hits = []
+        for hit in self._hits:
+            match = True
+            for key, val in kwargs.items():
+                # Handle simple filter: field=value
+                if getattr(hit, key, None) != val:
+                    match = False
+                    break
+            if match:
+                new_hits.append(hit)
+        return EsQuerySet(self.model, new_hits)
+
+    def exclude(self, *args, **kwargs):
+        return self
+
+    def order_by(self, *field_names):
+        return self
+
+    def select_related(self, *fields):
+        return self
+
+    def prefetch_related(self, *lookups):
+        return self
+
+    def get(self, *args, **kwargs):
+        pk = kwargs.get("pk") or kwargs.get("id")
+        if pk:
+            try:
+                es = self.model.get_es_client()
+                hit = es.get(index=self.model.get_es_index_name(), id=str(pk))
+                data = hit["_source"]
+                obj = self.model(**{k: v for k, v in data.items() if k != "id"})
+                obj.pk = data.get("id")
+                return obj
+            except Exception:
+                raise self.model.DoesNotExist
+        raise self.model.DoesNotExist
+
+    def exists(self):
+        return bool(self._hits)
+
+    @property
+    def ordered(self):
+        return True
+
+    def none(self):
+        return EsQuerySet(self.model, [])
+
+    def all(self):
+        return self
+
+    def using(self, alias):
+        return self
+
+
+class EsManager(models.Manager):
+    """Manager that uses Elasticsearch for ES_ONLY models."""
+
+    def get_queryset(self):
+        if getattr(self.model, "es_storage_mode", None) == EsStorageMode.ES_ONLY:
+            qs = self.model.snap_search(limit=1000)
+            if not isinstance(qs, EsQuerySet):
+                return EsQuerySet(self.model, [])
+            return qs
+        return super().get_queryset()
+      
+
 class DjangoAdminClassAttributeEnum(str, Enum):
     FIELDS = "fields"
     FIELDSETS = "fieldsets"
@@ -194,6 +313,8 @@ class SnapModel(models.Model):
     snap_inlines = []
     admin_sections = []
 
+    objects = EsManager()
+
     # Unfold specific
     compressed_fields = False
     warn_unsaved_form = True
@@ -202,6 +323,7 @@ class SnapModel(models.Model):
 
     # Elasticsearch integration
     es_index_enabled = False
+    es_storage_mode = EsStorageMode.DB_ONLY
     es_index_name = None
     es_mapping = None
 
@@ -215,6 +337,7 @@ class SnapModel(models.Model):
     @classmethod
     def get_es_client(cls):
         from elasticsearch import Elasticsearch
+
         url = getattr(settings, "ELASTICSEARCH_URL", "http://localhost:9200")
         return Elasticsearch([url], request_timeout=5)
 
@@ -223,42 +346,131 @@ class SnapModel(models.Model):
         if self.es_mapping:
             for field_name in self.es_mapping.keys():
                 val = getattr(self, field_name, None)
-                if hasattr(val, "pk"): val = val.pk
+                if hasattr(val, "pk"):
+                    val = val.pk
+                elif isinstance(val, (timedelta,)):
+                    val = str(val)
                 doc[field_name] = val
         return doc
 
+    @classmethod
+    def _ensure_es_index_and_mapping(cls):
+        """
+        Create index and update mapping if necessary. Called during post_migrate.
+        """
+        if not (cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY):
+            return
+        if not getattr(settings, "ELASTICSEARCH_ENABLED", False):
+            return
+
+        try:
+            es = cls.get_es_client()
+            index_name = cls.get_es_index_name()
+            body = {"mappings": {"properties": {"id": {"type": "integer"}}}}
+            if cls.es_mapping:
+                body["mappings"]["properties"].update(cls.es_mapping)
+
+            if not es.indices.exists(index=index_name):
+                es.indices.create(index=index_name, body=body)
+            else:
+                # Update existing mapping (only adds new fields)
+                es.indices.put_mapping(index=index_name, body=body["mappings"])
+        except Exception:
+            pass
+
     def index_in_es(self):
-        if not self.es_index_enabled or not getattr(settings, "ELASTICSEARCH_ENABLED", False): return
+        if (
+            not (self.es_index_enabled or self.es_storage_mode != EsStorageMode.DB_ONLY)
+            or not getattr(settings, "ELASTICSEARCH_ENABLED", False)
+        ):
+            return
         try:
             es = self.get_es_client()
             index_name = self.get_es_index_name()
-            if not es.indices.exists(index=index_name):
-                body = {}
-                if self.es_mapping:
-                    body["mappings"] = {"properties": self.es_mapping}
-                    body["mappings"]["properties"]["id"] = {"type": "integer"}
-                es.indices.create(index=index_name, body=body)
+            # Ensure index exists with mapping if provided
+            self._ensure_es_index_and_mapping()
             es.index(index=index_name, id=self.pk, document=self.get_es_document())
-        except Exception: pass
+        except Exception:
+            pass
 
     def delete_from_es(self):
-        if not self.es_index_enabled or not getattr(settings, "ELASTICSEARCH_ENABLED", False): return
+        if (
+            not (self.es_index_enabled or self.es_storage_mode != EsStorageMode.DB_ONLY)
+            or not getattr(settings, "ELASTICSEARCH_ENABLED", False)
+        ):
+            return
         try:
             es = self.get_es_client()
             es.delete(index=self.get_es_index_name(), id=self.pk, ignore=[404])
         except Exception: pass
 
+    def save(self, *args, **kwargs):
+        if self.es_storage_mode == EsStorageMode.ES_ONLY:
+            # Skip DB save for ES_ONLY models
+            if not self.pk:
+                # Generate a pseudo-random integer ID if not set
+                self.pk = random.randint(100000, 999999)
+            self.index_in_es()
+            return
+
+        super().save(*args, **kwargs)
+        if self.es_storage_mode == EsStorageMode.DUAL:
+            self.index_in_es()
+
+    def delete(self, *args, **kwargs):
+        if self.es_storage_mode == EsStorageMode.ES_ONLY:
+            # Skip DB delete for ES_ONLY models
+            self.delete_from_es()
+            return
+
+        self.delete_from_es()  # For DUAL mode, ensure ES sync
+        super().delete(*args, **kwargs)
+
     @classmethod
-    def snap_search(cls, query_string, limit=20):
-        if cls.es_index_enabled and getattr(settings, "ELASTICSEARCH_ENABLED", False):
+    def snap_search(cls, query_string=None, limit=None):
+        """
+        Search for records. Uses Elasticsearch if enabled, falls back to DB.
+        """
+        limit = limit or 20
+        use_es = (cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY) and getattr(
+            settings, "ELASTICSEARCH_ENABLED", False
+        )
+
+        if use_es:
             try:
                 es = cls.get_es_client()
-                response = es.search(index=cls.get_es_index_name(), body={"query": {"multi_match": {"query": query_string, "fields": ["*"], "fuzziness": "AUTO"}}, "size": limit})
+                query = {"multi_match": {"query": query_string, "fields": ["*"], "fuzziness": "AUTO"}} if query_string else {"match_all": {}}
+                response = es.search(
+                    index=cls.get_es_index_name(),
+                    body={
+                        "query": query,
+                        "size": limit,
+                    },
+                )
                 hits = response.get("hits", {}).get("hits", [])
+
+                if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+                    # Return EsQuerySet built from ES data
+                    results = []
+                    for hit in hits:
+                        data = hit["_source"]
+                        obj = cls(**{k: v for k, v in data.items() if k != "id"})
+                        obj.pk = data.get("id")
+                        results.append(obj)
+                    return EsQuerySet(cls, results)
+
                 pks = [hit["_source"]["id"] for hit in hits]
                 preserved = models.Case(*[models.When(pk=pk, then=pos) for pos, pk in enumerate(pks)])
                 return cls.objects.filter(pk__in=pks).order_by(preserved)
-            except Exception: pass
+            except Exception:
+                if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+                    return EsQuerySet(cls, [])
+
+        # Fallback to DB search using search_fields (only for non-ES_ONLY)
+        if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+            return EsQuerySet(cls, [])
+
+        query_string = query_string or ""
         _, _, search_fields, _, _ = cls.get_admin_fields()
         q_objects = models.Q()
         for field in search_fields:
@@ -267,7 +479,14 @@ class SnapModel(models.Model):
                 except ValueError: pass
                 continue
             q_objects |= models.Q(**{f"{field}__icontains": query_string})
-        return cls.objects.filter(q_objects).distinct()[:limit] if q_objects else cls.objects.all()[:limit]
+
+        if q_objects:
+            return cls.objects.filter(q_objects).distinct()
+        return cls.objects.all()
+
+    # ------------------------------------------------------------------
+    # Human-readable representation
+    # ------------------------------------------------------------------
 
     def __str__(self):
         for attr in ["name", "alias"]:
@@ -402,10 +621,8 @@ class SnapModel(models.Model):
                 if app_label is None or model._meta.app_label == app_label:
                     model.register_admin()
 
-@receiver(post_save)
-def snap_model_post_save(sender, instance, **kwargs):
-    if isinstance(instance, SnapModel): instance.index_in_es()
 
-@receiver(post_delete)
-def snap_model_post_delete(sender, instance, **kwargs):
-    if isinstance(instance, SnapModel): instance.delete_from_es()
+# ── Signals for Elasticsearch ──────────────────────────────────────────────
+
+# Signals for Elasticsearch are now handled by SnapModel.save() and delete()
+# to better support ES_ONLY mode and ensure correct transaction handling.
