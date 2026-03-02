@@ -12,8 +12,14 @@ from drf_spectacular.views import (
     SpectacularRedocView,
 )
 
-from snapadmin.api.views import APITokenViewSet, DynamicModelViewSet, ModelSchemaView
+from snapadmin.api.views import (
+    APITokenViewSet,
+    DynamicModelViewSet,
+    ModelSchemaView,
+    SnapGraphQLView,
+)
 from snapadmin.api.health import HealthCheckView
+from snapadmin.api.graphql import schema
 
 router = DefaultRouter()
 router.register(r"tokens", APITokenViewSet, basename="api-token")
@@ -27,6 +33,13 @@ urlpatterns = [
 
     # Health check
     path("health/", HealthCheckView.as_view(), name="api-health"),
+
+    # GraphQL endpoint
+    path(
+        "graphql/",
+        SnapGraphQLView.as_view(graphiql=True, schema=schema),
+        name="graphql",
+    ),
 
     # Dynamic model CRUD  ─  list + create
     path(

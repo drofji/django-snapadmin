@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 
 from snapadmin.models import APIToken
@@ -66,13 +67,13 @@ class APITokenAdmin(admin.ModelAdmin):
     def status_badge(self, obj: APIToken) -> str:
         """Render a coloured pill badge reflecting the token's current state."""
         if not obj.is_active:
-            return format_html(
+            return mark_safe(
                 '<span style="background:#dc3545;color:white;padding:2px 8px;border-radius:12px;">Disabled</span>'
             )
         if obj.is_expired:
-            return format_html(
+            return mark_safe(
                 '<span style="background:#fd7e14;color:white;padding:2px 8px;border-radius:12px;">Expired</span>'
             )
-        return format_html(
+        return mark_safe(
             '<span style="background:#28a745;color:white;padding:2px 8px;border-radius:12px;">Active</span>'
         )

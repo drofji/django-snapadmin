@@ -14,12 +14,15 @@ from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
 
 from snapadmin.api.authentication import APITokenAuthentication, token_has_permission
+from snapadmin.api.graphql import schema
 from snapadmin.models import APIToken, SnapModel
 from snapadmin.api.serializers import (
     APITokenCreateSerializer,
     APITokenSerializer,
     get_serializer_for_model,
 )
+
+from graphene_django.views import GraphQLView
 
 logger = logging.getLogger("snapadmin.api.views")
 
@@ -190,3 +193,25 @@ class ModelSchemaView(APIView):
             })
 
         return Response({"models": results, "count": len(results)})
+
+
+class SnapGraphQLView(GraphQLView):
+    """
+    Custom GraphQL view that integrates SnapAdmin APIToken authentication.
+    """
+    authentication_classes = [APITokenAuthentication]
+
+    def dispatch(self, request, *args, **kwargs):
+        # Handle authentication via APITokenAuthentication
+        try:
+            auth_res = APITokenAuthentication().authenticate(request)
+            if auth_res:
+                user, token = auth_res
+                request.user = user
+                request.auth = token
+        except Exception:
+            # Let GraphQLView handle unauthorized requests if needed,
+            # but our resolvers will also check for request.auth.
+            pass
+
+        return super().dispatch(request, *args, **kwargs)

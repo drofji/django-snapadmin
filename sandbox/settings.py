@@ -30,6 +30,7 @@ INSTALLED_APPS = [
     'admin_auto_filters',           # REQUIRED
     'rangefilter',                  # REQUIRED
     'snapadmin',                    # REQUIRED
+    'graphene_django',              # REQUIRED
 
     # Other modules
     'extra_settings',               # Optional
