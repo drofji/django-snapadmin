@@ -9,6 +9,8 @@ import uuid
 
 class Category(snap_models.SnapModel):
     name = snap_fields.SnapCharField(max_length=100, verbose_name=_("Name"), searchable=True, show_in_form=True)
+    slug = snap_fields.SnapSlugField(verbose_name=_("Slug"), show_in_form=True, row="basic")
+    is_active = snap_fields.SnapBooleanField(default=True, verbose_name=_("Active"), show_in_form=True, row="basic")
 
     class Meta:
         verbose_name = _("Category")
@@ -25,8 +27,17 @@ class Product(snap_models.SnapModel):
     category = snap_fields.SnapForeignKey(Category, on_delete=django_models.SET_NULL, null=True, blank=True, verbose_name=_("Category"), show_in_form=True, filterable=True)
     tags = snap_fields.SnapManyToManyField(Tag, blank=True, verbose_name=_("Tags"), show_in_form=True)
     name = snap_fields.SnapCharField(max_length=200, verbose_name=_("Name"), searchable=True, show_in_form=True)
-    price = snap_fields.SnapDecimalField(max_digits=10, decimal_places=2, verbose_name=_("Price"), show_in_form=True, filterable=True)
-    available = snap_fields.SnapBooleanField(default=True, verbose_name=_("Available"), show_in_form=True, filterable=True)
+    price = snap_fields.SnapDecimalField(max_digits=10, decimal_places=2, verbose_name=_("Price"), show_in_form=True, filterable=True, row="pricing")
+    available = snap_fields.SnapBooleanField(default=True, verbose_name=_("Available"), show_in_form=True, filterable=True, row="pricing")
+
+    status_badge = snap_fields.SnapStatusBadgeField(
+        field_name="available",
+        verbose_name=_("In Stock"),
+        choices=[
+            snap_fields.SnapStatusBadgeFieldChoice(True, "#065F46", "#D1FAE5", "#10B981"),
+            snap_fields.SnapStatusBadgeFieldChoice(False, "#991B1B", "#FEE2E2", "#EF4444"),
+        ]
+    )
     description = snap_fields.SnapTextField(verbose_name=_("Description"), wysiwyg=True, show_in_form=True)
 
     # Unfold features
@@ -50,8 +61,8 @@ class Product(snap_models.SnapModel):
         verbose_name_plural = _("Products")
 
 class Customer(snap_models.SnapModel):
-    first_name = snap_fields.SnapCharField(max_length=100, verbose_name=_("First Name"), show_in_form=True)
-    last_name = snap_fields.SnapCharField(max_length=100, verbose_name=_("Last Name"), show_in_form=True)
+    first_name = snap_fields.SnapCharField(max_length=100, verbose_name=_("First Name"), show_in_form=True, row="name")
+    last_name = snap_fields.SnapCharField(max_length=100, verbose_name=_("Last Name"), show_in_form=True, row="name")
     origin = snap_fields.SnapCharField(
         max_length=100,
         verbose_name=_("Origin"),
@@ -59,8 +70,17 @@ class Customer(snap_models.SnapModel):
         show_in_list=False,
         filterable=True
     )
-    email = snap_fields.SnapEmailField(max_length=200, verbose_name=_("Email"), show_in_form=True)
-    active = snap_fields.SnapBooleanField(default=True, verbose_name=_("Is Active"), show_in_form=True, filterable=True)
+    email = snap_fields.SnapEmailField(max_length=200, verbose_name=_("Email"), show_in_form=True, row="status")
+    active = snap_fields.SnapBooleanField(default=True, verbose_name=_("Is Active"), show_in_form=True, filterable=True, row="status")
+
+    status_badge = snap_fields.SnapStatusBadgeField(
+        field_name="active",
+        verbose_name=_("Status"),
+        choices=[
+            snap_fields.SnapStatusBadgeFieldChoice(True, "#065F46", "#D1FAE5", "#10B981"),
+            snap_fields.SnapStatusBadgeFieldChoice(False, "#991B1B", "#FEE2E2", "#EF4444"),
+        ]
+    )
 
     class Meta:
         verbose_name = _("Customer")

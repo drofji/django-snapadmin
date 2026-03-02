@@ -234,12 +234,12 @@ UNFOLD = {
     ],
     "SITE_URL": "/",
     "SITE_ICON": {
-        "light": lambda request: static_lambda("icon-light.svg"),
-        "dark": lambda request: static_lambda("icon-dark.svg"),
+        "light": lambda request: static_lambda("snapadmin/snap-logo.svg"),
+        "dark": lambda request: static_lambda("snapadmin/snap-logo.svg"),
     },
     "SITE_LOGO": {
-        "light": lambda request: static_lambda("logo-light.svg"),
-        "dark": lambda request: static_lambda("logo-dark.svg"),
+        "light": lambda request: static_lambda("snapadmin/snap-logo.svg"),
+        "dark": lambda request: static_lambda("snapadmin/snap-logo.svg"),
     },
     "SITE_SYMBOL": "speed",
     "SITE_FAVICONS": [
