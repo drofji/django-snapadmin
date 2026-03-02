@@ -1,32 +1,31 @@
 from django.contrib import admin
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
+from unfold.admin import ModelAdmin, TabularInline, StackedInline
+from unfold.contrib.filters.admin import RelatedDropdownFilter, ChoicesDropdownFilter
+from unfold.decorators import display
 
 from snapadmin.models import APIToken
+from snapadmin.widgets import SmartModelSelectorWidget
 
 
-class SnapTabularInline(admin.TabularInline):
+class SnapTabularInline(TabularInline):
     """
-    Standard inline class for SnapAdmin.
-    By default, it shows one empty form.
-    """
-    extra = 1
-
-
-class SnapStackedInline(admin.StackedInline):
-    """
-    Standard stacked inline class for SnapAdmin.
+    Standard inline class for SnapAdmin using Unfold.
     """
     extra = 1
 
 
-@admin.register(APIToken)
-class APITokenAdmin(admin.ModelAdmin):
+class SnapStackedInline(StackedInline):
     """
-    Admin interface for managing API tokens.
+    Standard stacked inline class for SnapAdmin using Unfold.
+    """
+    extra = 1
 
-    Security note: the token_key is shown masked in the list view.
-    It is only fully visible in the detail/change view.
+
+class APITokenAdmin(ModelAdmin):
+    """
+    Admin interface for managing API tokens using Unfold.
     """
 
     list_display = [
@@ -39,10 +38,16 @@ class APITokenAdmin(admin.ModelAdmin):
         "last_used_at",
         "created_at",
     ]
-    list_filter  = ["is_active", "user"]
+    list_filter  = [
+        ("is_active", ChoicesDropdownFilter),
+        ("user", RelatedDropdownFilter),
+    ]
     search_fields = ["token_name", "user__username"]
     readonly_fields = ["token_key", "created_at", "last_used_at"]
     ordering = ["-created_at"]
+
+    warn_unsaved_form = True
+    list_filter_submit = True
 
     fieldsets = [
         (None, {
@@ -57,25 +62,25 @@ class APITokenAdmin(admin.ModelAdmin):
         }),
     ]
 
-    @admin.display(description=_("Token Key"))
-    def masked_key(self, obj: APIToken) -> str:
-        """Show only the first 8 characters of the token key."""
-        return f"{obj.token_key[:8]}••••••••"
+    def formfield_for_dbfield(self, db_field, request, **kwargs):
+        if db_field.name == "allowed_models":
+            kwargs["widget"] = SmartModelSelectorWidget()
+        return super().formfield_for_dbfield(db_field, request, **kwargs)
 
-    @admin.display(description=_("Status"))
-    def status_badge(self, obj: APIToken) -> str:
+    @display(description=_("Token Key"), header=True)
+    def masked_key(self, obj: APIToken):
+        """Show only the first 8 characters of the token key."""
+        return [
+            f"{obj.token_key[:8]}••••••••",
+            None, # Subtitle
+            None, # User details or extra info
+        ]
+
+    @display(description=_("Status"), label=True)
+    def status_badge(self, obj: APIToken):
         """Render a coloured pill badge reflecting the token's current state."""
         if not obj.is_active:
-            return format_html(
-                '<span style="background:#dc3545;color:white;padding:2px 8px;border-radius:12px;">{}</span>',
-                _("Disabled")
-            )
+            return _("Disabled"), "danger"
         if obj.is_expired:
-            return format_html(
-                '<span style="background:#fd7e14;color:white;padding:2px 8px;border-radius:12px;">{}</span>',
-                _("Expired")
-            )
-        return format_html(
-            '<span style="background:#28a745;color:white;padding:2px 8px;border-radius:12px;">{}</span>',
-            _("Active")
-        )
+            return _("Expired"), "warning"
+        return _("Active"), "success"

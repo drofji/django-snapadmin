@@ -1,20 +1,25 @@
 from pathlib import Path
 from django.utils.translation import gettext_lazy as _
-from dotenv import load_dotenv
 import os
-
-load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.getenv('SECRET_KEY')
-DEBUG = os.getenv('DEBUG', 'False') == 'True'
-ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',') if os.getenv('ALLOWED_HOSTS') else []
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-dummy-key-for-tests')
+DEBUG = os.getenv('DEBUG', 'True') == 'True'
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
 
 INSTALLED_APPS = [
     # UI Customization
-    'admin_interface',              # Optional
-    'colorfield',                   # Optional
+    'unfold',
+    'unfold.contrib.filters',
+    'unfold.contrib.forms',
+    'unfold.contrib.inlines',
+    'unfold.contrib.import_export',
+    'unfold.contrib.guardian',
+    'unfold.contrib.simple_history',
+
+    # WYSIWYG
+    'django_ckeditor_5',
 
     # Django Core
     'django.contrib.admin',
@@ -53,7 +58,7 @@ ROOT_URLCONF = 'sandbox.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [BASE_DIR / 'templates'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -90,21 +95,20 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 LANGUAGE_CODE = 'en-us'
-
 TIME_ZONE = 'UTC'
-
 USE_I18N = True
-
 USE_TZ = True
 
 STATIC_URL = 'static/'
-STATICFILES_DIRS = [
-    BASE_DIR / "static",
-]
+STATICFILES_DIRS = []
 STATIC_ROOT = BASE_DIR / ".staticfiles"
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+LOGIN_REDIRECT_URL = '/admin/'
 
 # ------------------------------------------------------------------------------
 # REST FRAMEWORK
@@ -124,20 +128,13 @@ REST_FRAMEWORK = {
 }
 
 SPECTACULAR_SETTINGS = {
-    # 1. Basic Metadata
-    'TITLE': 'Your Project API',
-    'DESCRIPTION': 'Detailed API documentation for my Django project.',
+    'TITLE': 'SnapAdmin API',
+    'DESCRIPTION': 'SnapAdmin Auto-generated API Documentation',
     'VERSION': '1.0.0',
-    'SERVE_INCLUDE_SCHEMA': False,  # Hides the schema endpoint from the docs list
-
-    # 2. Authentication / Security (The "Authorize" Button)
-    # This defines the global security schemes for the Swagger UI
-    'SECURITY': [
-        {'TokenAuth': []},
-    ],
+    'SERVE_INCLUDE_SCHEMA': False,
+    'SECURITY': [{'TokenAuth': []}],
     'COMPONENT_SPLIT_PATCH': True,
     'COMPONENT_SPLIT_REQUEST': True,
-
     'APPEND_COMPONENTS': {
         "securitySchemes": {
             "TokenAuth": {
@@ -148,100 +145,161 @@ SPECTACULAR_SETTINGS = {
             }
         }
     },
-
-    # 3. UI Customization
     'SWAGGER_UI_SETTINGS': {
         'deepLinking': True,
-        'persistAuthorization': True,  # Keeps you logged in after page refresh
-        'displayOperationId': True,  # Shows function names next to paths
-        'filter': True,  # Adds a search bar to filter endpoints
-    },
-
-    # 4. Local Assets (Optional but recommended)
-    # Use 'SIDECAR' if you have drf-spectacular-sidecar installed to avoid CDN issues
-    # 'SWAGGER_UI_DIST': 'SIDECAR',
-    # 'SWAGGER_UI_FAVICON_HREF': 'SIDECAR',
-    # 'REDOC_DIST': 'SIDECAR',
-
-    # 5. Advanced Schema Features
-    'ENUM_NAME_OVERRIDES': {
-        # Custom names for choices/enums if they look messy in the docs
+        'persistAuthorization': True,
+        'displayOperationId': True,
+        'filter': True,
     },
 }
 
-
 # ------------------------------------------------------------------------------
 # EXTRA SETTINGS
-# https://pypi.org/project/django-extra-settings/
 # ------------------------------------------------------------------------------
-
-# the name of the installed app for registering the extra settings admin.
 EXTRA_SETTINGS_ADMIN_APP = "demo"
-# the name of the cache to use, if not found the "default" cache will be used.
 EXTRA_SETTINGS_CACHE_NAME = "extra_settings"
-# if True, settings names will be forced to honor the standard django settings format
-EXTRA_SETTINGS_ENFORCE_UPPERCASE_SETTINGS = True
-# if True, the template tag will fallback to django.conf.settings,
-# very useful to retrieve conf settings such as DEBUG.
-EXTRA_SETTINGS_FALLBACK_TO_CONF_SETTINGS = True
-# the upload_to path value of settings of type 'file'
-EXTRA_SETTINGS_FILE_UPLOAD_TO = "files"
-# the upload_to path value of settings of type 'image'
-EXTRA_SETTINGS_IMAGE_UPLOAD_TO = "images"
-# if True, settings name prefix list filter will be shown in the admin changelist
-EXTRA_SETTINGS_SHOW_NAME_PREFIX_LIST_FILTER = False
-# if True, settings type list filter will be shown in the admin changelist
-EXTRA_SETTINGS_SHOW_TYPE_LIST_FILTER = False
-# the package name displayed in the admin
 EXTRA_SETTINGS_VERBOSE_NAME = _("Settings")
 
-
-EXTRA_SETTINGS_DEFAULTS = [
-    # --- Basic Text Types ---
-    {'name': 'SITE_NAME', 'type': 'string', 'value': 'My Awesome Project'},
-    {'name': 'SUPPORT_EMAIL', 'type': 'email', 'value': 'support@example.com'},
-    {'name': 'SITE_DESCRIPTION', 'type': 'text', 'value': 'A long description of the project...'},
-
-    # --- Numbers and Logic ---
-    {'name': 'MAX_LOGIN_ATTEMPTS', 'type': 'int', 'value': 5},
-    {'name': 'TAX_RATE', 'type': 'float', 'value': 18.5},
-    {'name': 'MAINTENANCE_MODE', 'type': 'bool', 'value': False},
-
-    # --- Web and Visual ---
-    {'name': 'EXTERNAL_API_URL', 'type': 'url', 'value': 'https://api.provider.com/v1/'},
-
-    # --- Date and Time ---
-    # Values should be strings in ISO format for the defaults
-    {'name': 'CAMPAIGN_START', 'type': 'date', 'value': '2024-01-01'},
-    {'name': 'LAUNCH_DATETIME', 'type': 'datetime', 'value': '2024-12-31 23:59:59'},
-
-    # --- Complex Data ---
-    # JSON type allows dictionaries and lists
-    {'name': 'SOCIAL_LINKS', 'type': 'json', 'value': {
-        'facebook': 'fb.com/page',
-        'twitter': '@handle',
-        'tags': ['django', 'python']
-    }},
-
-    # --- Files and Images ---
-    # Value is the path relative to MEDIA_ROOT
-    {'name': 'FAVICON', 'type': 'image', 'value': 'defaults/favicon.ico'},
-    {'name': 'TERMS_PDF', 'type': 'file', 'value': 'docs/terms.pdf'},
-]
-
 # ------------------------------------------------------------------------------
-# CELERY BEAT SCHEDULE (Dummy for Dashboard Verification)
+# CKEDITOR 5 CONFIGURATION
 # ------------------------------------------------------------------------------
 
-CELERY_BEAT_SCHEDULE = {
-    'sync-products-to-es': {
-        'task': 'demo.tasks.sync_products',
-        'schedule': 3600.0,
-        'description': 'Synchronize products from DB to Elasticsearch every hour.'
+CKEDITOR_5_CONFIGS = {
+    'default': {
+        'toolbar': ['heading', '|', 'bold', 'italic', 'link',
+                    'bulletedList', 'numberedList', 'blockQuote', 'imageUpload', ],
+
     },
-    'cleanup-expired-tokens': {
-        'task': 'snapadmin.api.tasks.cleanup_tokens',
-        'schedule': 86400.0,
-        'description': 'Remove expired API tokens daily.'
+    'extends': {
+        'blockToolbar': [
+            'paragraph', 'heading1', 'heading2', 'heading3',
+            '|',
+            'bulletedList', 'numberedList',
+            '|',
+            'blockQuote',
+        ],
+        'toolbar': ['heading', '|', 'outdent', 'indent', '|', 'bold', 'italic', 'link', 'underline', 'strikethrough',
+        'code','subscript', 'superscript', 'highlight', '|', 'codeBlock', 'sourceEditing', 'insertImage',
+                    'bulletedList', 'numberedList', 'todoList', '|',  'blockQuote', 'imageUpload', '|',
+                    'fontSize', 'fontFamily', 'fontColor', 'fontBackgroundColor', 'mediaEmbed', 'removeFormat',
+                    'insertTable',],
+        'image': {
+            'toolbar': ['imageTextAlternative', '|', 'imageStyle:alignLeft',
+                        'imageStyle:alignCenter', 'imageStyle:alignRight'],
+            'styles': [
+                'alignLeft',
+                'alignCenter',
+                'alignRight',
+            ]
+        }
     },
+    'list': {
+        'properties': {
+            'styles': 'true',
+            'startIndex': 'true',
+            'reversed': 'true',
+        }
+    }
+}
+
+# ------------------------------------------------------------------------------
+# UNFOLD CONFIGURATION (Comprehensive example)
+# ------------------------------------------------------------------------------
+
+UNFOLD = {
+    "SITE_TITLE": "SnapAdmin Demo",
+    "SITE_HEADER": "SnapAdmin Demo",
+    "SITE_URL": "/admin/",
+    "SITE_ICON": None,  # path to static icon
+    "SITE_SYMBOL": "speed",  # icon from Material Symbols
+    "SHOW_HISTORY": True, # show button to history of model
+    "SHOW_VIEW_ON_SITE": True, # show button to view on site
+    "THEME": "dark", # dark, light or auto
+    "COLORS": {
+        "primary": {
+            "50": "250 245 255",
+            "100": "243 232 255",
+            "200": "233 213 255",
+            "300": "216 180 254",
+            "400": "192 132 252",
+            "500": "168 85 247",
+            "600": "147 51 234",
+            "700": "126 34 206",
+            "800": "107 33 168",
+            "900": "88 28 135",
+            "950": "59 7 100",
+        },
+    },
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": True,
+        "navigation": [
+            {
+                "title": _("Main"),
+                "items": [
+                    {
+                        "title": _("Dashboard"),
+                        "icon": "dashboard",
+                        "link": "/admin/",
+                    },
+                ],
+            },
+            {
+                "title": _("Business Logic"),
+                "items": [
+                    {
+                        "title": _("Products"),
+                        "icon": "inventory_2",
+                        "link": "admin:demo_product_changelist",
+                    },
+                    {
+                        "title": _("Orders"),
+                        "icon": "shopping_cart",
+                        "link": "admin:demo_order_changelist",
+                    },
+                    {
+                        "title": _("Customers"),
+                        "icon": "person",
+                        "link": "admin:demo_customer_changelist",
+                    },
+                ],
+            },
+            {
+                "title": _("Security"),
+                "items": [
+                    {
+                        "title": _("API Tokens"),
+                        "icon": "key",
+                        "link": "admin:snapadmin_apitoken_changelist",
+                    },
+                    {
+                        "title": _("Users"),
+                        "icon": "people",
+                        "link": "admin:auth_user_changelist",
+                    },
+                ],
+            },
+        ],
+    },
+    "TABS": [
+        {
+            "models": ["demo.product"],
+            "items": [
+                {
+                    "title": _("Basic Info"),
+                    "link": "admin:demo_product_changelist",
+                },
+                {
+                    "title": _("Advanced Settings"),
+                    "link": "admin:demo_product_changelist",
+                },
+            ],
+        },
+    ],
+    "STYLES": [
+        # lambda request: static("css/style.css"),
+    ],
+    "SCRIPTS": [
+        # lambda request: static("js/script.js"),
+    ],
 }

@@ -2,17 +2,7 @@
 tests/test_models.py
 
 Unit & integration tests for snapadmin/models.py and demo/models.py
-
-Covers:
-- SnapModel.__str__ priority logic
-- SnapModel.get_admin_fields returns correct five-tuple
-- SnapModel.register_admin registers in admin site
-- SnapModel.register_all_admins covers all subclasses
-- AlreadyRegistered is silently ignored
-- formatted_id helper renders faded-zero HTML correctly
-- Demo model field attributes (Product, Customer, Order)
-- Demo model __str__ representations
-- SnapSaveMixin.save_model logs field-level changes
+...
 """
 
 from decimal import Decimal
@@ -65,27 +55,26 @@ class TestFormattedId:
         fn = self._get_formatted_id_fn()
         obj = self._make_obj(42)
         result = fn(obj)
-        assert "42" in result
+        # Unfold format: [content, subtitle, user]
+        assert "42" in result[0]
 
     def test_renders_faded_zeros_span(self):
         fn = self._get_formatted_id_fn()
         obj = self._make_obj(42)
         result = fn(obj)
-        assert "faded-zeros" in result
-        assert "0000" in result
+        assert "faded-zeros" in result[0]
+        assert "0000" in result[0]
 
     def test_id_1000000_no_leading_zeros(self):
         fn = self._get_formatted_id_fn()
         obj = self._make_obj(1000000)
         result = fn(obj)
-        # No leading zeros for a 7-digit id (exceeds 6-digit padding)
-        assert "1000000" in result
+        assert "1000000" in result[0]
 
-    def test_output_is_safe_string(self):
-        from django.utils.safestring import SafeString
+    def test_output_is_list(self):
         fn = self._get_formatted_id_fn()
         result = fn(self._make_obj(1))
-        assert isinstance(result, SafeString)
+        assert isinstance(result, list)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -120,7 +109,6 @@ class TestGetAdminFields:
         """origin has filterable=True, so it should appear in list_filter."""
         from demo.models import Customer
         _, _, _, list_filter, _ = Customer.get_admin_fields()
-        # list_filter contains either strings or (name, FilterClass) tuples
         filter_names = []
         for item in list_filter:
             if isinstance(item, str):
@@ -229,7 +217,8 @@ class TestCustomerModel:
         c = Customer.objects.create(
             first_name="No", last_name="Email", origin="status_c", active=True
         )
-        assert c.email is None or c.email == ""
+        # Email can be empty string due to SnapCharField logic
+        assert c.email in (None, "")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -253,7 +242,6 @@ class TestOrderModel:
             .Order.objects.select_related("customer")
             .get(pk=order.pk)
         )
-        # Accessing customer should not hit the DB again
         assert o.customer.pk is not None
 
 
@@ -280,14 +268,9 @@ class TestSnapSaveMixin:
         mixin = SnapSaveMixin()
         mixin.model = type(product)
 
-        # Simulate admin: call save_model with change=False
         class FakeForm:
             changed_data = []
             initial = {}
             cleaned_data = {}
 
-        # On create, super().save_model is called; we just verify no extra LogEntry
-        # (We can't easily test the full Django admin flow here without a live request,
-        # so we verify the logic path for change=False skips our logging code.)
-        # The mixin calls super().save_model when change=False – no log written.
         assert LogEntry.objects.count() == count_before

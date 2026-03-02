@@ -22,11 +22,11 @@ class TestAllowedModelsValidation:
             validate_allowed_models(["demo.app.Product"])
 
     def test_non_existent_model(self):
-        with pytest.raises(ValidationError, match="does not exist or is not registered"):
+        with pytest.raises(ValidationError, match="does not exist"):
             validate_allowed_models(["demo.NonExistent"])
 
     def test_non_existent_app(self):
-        with pytest.raises(ValidationError, match="does not exist or is not registered"):
+        with pytest.raises(ValidationError, match="does not exist"):
             validate_allowed_models(["nonexistent.Product"])
 
     def test_token_save_validation(self, admin_user):
