@@ -23,6 +23,6 @@ class TestSnapModelES:
         Product.objects.create(name="Other", price=5.0)
 
         # ES is likely not running in test env, so it should fallback to DB
-        results = Product.snap_search("SearchMe")
+        results = Product.es_search("SearchMe")
         assert results.count() == 1
         assert results[0].name == "SearchMe"

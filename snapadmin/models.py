@@ -346,6 +346,7 @@ class SnapSaveMixin:
 
 class SnapModel(models.Model):
     admin_enabled = True
+    offline_enabled = None  # None: use global setting, True/False: override
     js_admin_files = []
     css_admin_files = []
     snap_inlines = []
@@ -678,6 +679,9 @@ class SnapModel(models.Model):
 
         BASE_JS = ["admin/js/vendor/jquery/jquery.js", "admin/js/jquery.init.js", "snapadmin/js/jquery_bridge.js", "snapadmin/js/select2.min.js", "snapadmin/js/admin.js"]
         BASE_CSS = ["snapadmin/css/select2.min.css", "snapadmin/css/admin.css"]
+
+        if cls.offline_enabled is True or (cls.offline_enabled is None and getattr(settings, 'SNAPADMIN_OFFLINE_ENABLED', False)):
+            BASE_JS.append("snapadmin/js/offline.js")
         extra_js = [cls.js_admin_files] if isinstance(cls.js_admin_files, str) else list(cls.js_admin_files)
         extra_css = [cls.css_admin_files] if isinstance(cls.css_admin_files, str) else list(cls.css_admin_files)
         final_js = list(dict.fromkeys(BASE_JS + extra_js))

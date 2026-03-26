@@ -240,13 +240,11 @@ class Command(BaseCommand):
         Attempt to index products to Elasticsearch.
         Silently skips when ES is unavailable.
         """
-        from demo.search import index_product, is_es_available
-        if not is_es_available():
+        from django.conf import settings
+        if not getattr(settings, 'ELASTICSEARCH_ENABLED', False):
             self.stdout.write(self.style.WARNING("   ⚠  Elasticsearch not available — skipping index."))
             return
 
         self.stdout.write("   Indexing products to Elasticsearch…")
-        db_products = Product.objects.all()
-        for product in db_products:
-            index_product(product)
-        self.stdout.write(f"   Indexed {db_products.count()} products.")
+        Product.es_reindex_all()
+        self.stdout.write(f"   Indexed {Product.objects.count()} products.")

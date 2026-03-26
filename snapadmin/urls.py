@@ -15,6 +15,7 @@ from drf_spectacular.views import (
 
 from snapadmin.api.views import APITokenViewSet, DynamicModelViewSet, ModelSchemaView
 from snapadmin.api.health import HealthCheckView
+from snapadmin.api.sw_view import service_worker
 
 REST_API_ENABLED = getattr(settings, "SNAPADMIN_REST_API_ENABLED", True)
 SWAGGER_ENABLED = getattr(settings, "SNAPADMIN_SWAGGER_ENABLED", True)
@@ -66,6 +67,10 @@ if SWAGGER_ENABLED:
         path("docs/",    SpectacularSwaggerView.as_view(url_name="api-schema"), name="swagger-ui"),
         path("redoc/",   SpectacularRedocView.as_view(url_name="api-schema"),   name="redoc"),
     ]
+
+urlpatterns += [
+    path("sw.js", service_worker, name="service-worker"),
+]
 
 if GRAPHQL_ENABLED:
     try:

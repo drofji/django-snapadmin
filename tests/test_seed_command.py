@@ -112,20 +112,19 @@ class TestSeedDemoCommand:
 
 @pytest.mark.django_db(transaction=True)
 class TestSeedDemoEsIndexing:
-    def test_skips_index_when_es_unavailable(self):
+    def test_skips_index_when_es_unavailable(self, settings):
         """--no-index flag means no ES calls are made."""
+        settings.ELASTICSEARCH_ENABLED = False
         out = StringIO()
-        with patch("demo.search.is_es_available", return_value=False):
-            call_command("seed_demo", count=3, no_index=True, stdout=out)
+        call_command("seed_demo", count=3, no_index=True, stdout=out)
         # No exception means graceful skip
         assert True
 
-    def test_indexes_when_es_available(self):
-        """With ES available and no --no-index, index_product should be called."""
-        from unittest.mock import MagicMock, call
-        mock_index = MagicMock()
+    def test_indexes_when_es_available(self, settings):
+        """With ES available and no --no-index, es_reindex_all should be called."""
+        from unittest.mock import patch
+        settings.ELASTICSEARCH_ENABLED = True
         out = StringIO()
-        with patch("demo.search.is_es_available", return_value=True), \
-             patch("demo.search.index_product", mock_index):
+        with patch("demo.models.Product.es_reindex_all") as mock_reindex:
             call_command("seed_demo", count=3, no_index=False, stdout=out)
-        assert mock_index.call_count >= 3
+        assert mock_reindex.called
