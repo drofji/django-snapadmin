@@ -155,33 +155,33 @@ class TestGenerateDailyStats:
 
 @pytest.mark.django_db
 class TestReindexProductsToElasticsearch:
-    def test_skips_when_es_unavailable(self, product):
-        with patch("demo.search.is_es_available", return_value=False):
-            from demo.tasks import reindex_products_to_elasticsearch
-            result = reindex_products_to_elasticsearch()
+    def test_skips_when_es_unavailable(self, product, settings):
+        settings.ELASTICSEARCH_ENABLED = False
+        from demo.tasks import reindex_products_to_elasticsearch
+        result = reindex_products_to_elasticsearch()
         assert result["skipped"] is True
 
-    def test_skip_reason_in_result(self, product):
-        with patch("demo.search.is_es_available", return_value=False):
-            from demo.tasks import reindex_products_to_elasticsearch
-            result = reindex_products_to_elasticsearch()
+    def test_skip_reason_in_result(self, product, settings):
+        settings.ELASTICSEARCH_ENABLED = False
+        from demo.tasks import reindex_products_to_elasticsearch
+        result = reindex_products_to_elasticsearch()
         assert "reason" in result
 
-    def test_indexes_products_when_es_available(self, product):
+    def test_indexes_products_when_es_available(self, product, settings):
+        settings.ELASTICSEARCH_ENABLED = True
         from unittest.mock import MagicMock
         mock_es = MagicMock()
-        with patch("demo.search.is_es_available", return_value=True), \
-             patch("demo.search.get_es_client", return_value=mock_es):
+        with patch("demo.models.Product.get_es_client", return_value=mock_es):
             from demo.tasks import reindex_products_to_elasticsearch
             result = reindex_products_to_elasticsearch()
         assert result["indexed"] >= 1
         mock_es.index.assert_called()
 
-    def test_returns_indexed_count(self, many_products):
+    def test_returns_indexed_count(self, many_products, settings):
+        settings.ELASTICSEARCH_ENABLED = True
         from unittest.mock import MagicMock
         mock_es = MagicMock()
-        with patch("demo.search.is_es_available", return_value=True), \
-             patch("demo.search.get_es_client", return_value=mock_es):
+        with patch("demo.models.Product.get_es_client", return_value=mock_es):
             from demo.tasks import reindex_products_to_elasticsearch
             result = reindex_products_to_elasticsearch()
         assert result["indexed"] == 30  # many_products creates 30
