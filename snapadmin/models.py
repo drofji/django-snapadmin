@@ -523,6 +523,11 @@ class SnapModel(models.Model):
         return cls.objects.all()
 
     @classmethod
+    def snap_search(cls, query_string=None, limit=None):
+        """Public alias for es_search — preferred entry point for external callers."""
+        return cls.es_search(query_string=query_string, limit=limit)
+
+    @classmethod
     def es_reindex_all(cls):
         """
         Synchronise all records to the Elasticsearch index.

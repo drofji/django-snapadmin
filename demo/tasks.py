@@ -19,15 +19,22 @@ logger = logging.getLogger("snapadmin.demo.tasks")
 @shared_task(bind=True, name="demo.tasks.reindex_products_to_elasticsearch")
 def reindex_products_to_elasticsearch(self):
     """
-    Synchronise all Product records to the Elasticsearch index.
+    Synchronise all Product records to the Elasticsearch index via demo.search.
     """
     from demo.models import Product
-    result = Product.es_reindex_all()
-    if result.get("skipped"):
+    from demo.search import is_es_available, index_product
+
+    if not is_es_available():
         logger.warning("elasticsearch_unavailable_skip_reindex")
-    else:
-        logger.info("elasticsearch_reindex_complete", indexed=result["indexed"])
-    return result
+        return {"skipped": True, "reason": "Elasticsearch not available"}
+
+    indexed = 0
+    for product in Product.objects.all():
+        index_product(product)
+        indexed += 1
+
+    logger.info("elasticsearch_reindex_complete", indexed=indexed)
+    return {"indexed": indexed}
 
 
 @shared_task(bind=True, name="demo.tasks.generate_daily_stats")
