@@ -368,6 +368,12 @@ class SnapModel(models.Model):
     es_index_name = None
     es_mapping = None
 
+    # DSGVO / GDPR data retention
+    # Set data_retention_days to a positive integer to enable automatic deletion of old records.
+    # Records older than this many days (measured on data_retention_field) will be removed.
+    data_retention_days: int | None = None
+    data_retention_field: str = "created_at"
+
     class Meta:
         abstract = True
         ordering = ["-pk"]

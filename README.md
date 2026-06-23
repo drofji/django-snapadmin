@@ -25,6 +25,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Token Auth** | Secure, expirable API tokens with granular model-level access control. |
 | **Configurable** | Easily enable/disable REST API, GraphQL, Swagger docs, and search modes via settings. |
 | **Elasticsearch Ready** | Multi-mode storage (`DB_ONLY`, `DUAL`, `ES_ONLY`) for blazing fast search. |
+| **DSGVO/GDPR Retention** | Per-model `data_retention_days` parameter with automatic Celery cleanup task. |
 | **Structured Logging** | Integrated `structlog` for readable local logs and JSON logs in production. |
 
 ---
@@ -139,6 +140,27 @@ SNAPADMIN_REST_API_ENABLED = True   # Enable/Disable the REST API
 SNAPADMIN_GRAPHQL_ENABLED = True    # Enable/Disable the GraphQL API
 SNAPADMIN_SWAGGER_ENABLED = True    # Enable/Disable Swagger UI documentation
 ELASTICSEARCH_ENABLED = False       # Toggle ES search engine support
+```
+
+## DSGVO / GDPR Data Retention
+
+Add automatic record cleanup to any model with two class attributes:
+
+```python
+class AuditLog(snap_models.SnapModel):
+    action = snap.SnapCharField(max_length=100)
+    created_at = snap.SnapDateTimeField(auto_now_add=True)
+
+    # Auto-delete records older than 90 days
+    data_retention_days = 90
+    data_retention_field = "created_at"  # default; can point to any DateTimeField
+```
+
+Records are removed by the `purge_expired_data` Celery task (schedule it with Celery Beat) or manually:
+
+```bash
+python manage.py purge_expired_data         # live run
+python manage.py purge_expired_data --dry-run  # preview only
 ```
 
 ---

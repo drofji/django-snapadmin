@@ -118,6 +118,24 @@ class SearchLog(snap_models.SnapModel):
         verbose_name = _("Search Log")
         verbose_name_plural = _("Search Logs")
 
+
+class AuditLog(snap_models.SnapModel):
+    """
+    Demonstrates DSGVO/GDPR data retention.
+    Records older than data_retention_days are auto-deleted by the purge_expired_data task.
+    """
+    action = snap_fields.SnapCharField(max_length=100, verbose_name=_("Action"), searchable=True, show_in_list=True, show_in_form=True)
+    user_email = snap_fields.SnapEmailField(verbose_name=_("User Email"), show_in_list=True, show_in_form=True)
+    created_at = snap_fields.SnapDateTimeField(auto_now_add=True, verbose_name=_("Created At"), filterable=True)
+
+    # DSGVO: auto-delete audit logs older than 90 days
+    data_retention_days = 90
+    data_retention_field = "created_at"
+
+    class Meta:
+        verbose_name = _("Audit Log")
+        verbose_name_plural = _("Audit Logs")
+
 class OrderItem(snap_models.SnapModel):
     order = snap_fields.SnapForeignKey(Order, on_delete=django_models.CASCADE, related_name="items", verbose_name=_("Order"))
     product = snap_fields.SnapForeignKey(Product, on_delete=django_models.CASCADE, verbose_name=_("Product"), show_in_form=True)
