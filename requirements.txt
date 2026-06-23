@@ -25,7 +25,6 @@ psycopg2-binary>=2.9.9
 
 # Elasticsearch (Demo only)
 elasticsearch>=8.12.0
-elasticsearch-dsl>=8.9.0
 
 # Testing
 pytest>=8.0.0
