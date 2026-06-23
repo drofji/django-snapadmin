@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SnapAdmin Documentation</title>
+<style>
+  :root {
+    --primary: #1a56db;
+    --primary-dark: #1342a8;
+    --accent: #0e9f6e;
+    --danger: #e02424;
+    --warn: #c27803;
+    --bg: #f9fafb;
+    --card: #ffffff;
+    --border: #e5e7eb;
+    --text: #111827;
+    --muted: #6b7280;
+    --code-bg: #1e293b;
+    --code-text: #e2e8f0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+
+  /* Layout */
+  .sidebar { position: fixed; top: 0; left: 0; width: 260px; height: 100vh; overflow-y: auto; background: var(--card); border-right: 1px solid var(--border); padding: 0; z-index: 100; }
+  .main { margin-left: 260px; padding: 40px 48px; max-width: 900px; }
+  .sidebar-logo { padding: 24px 20px 16px; border-bottom: 1px solid var(--border); }
+  .sidebar-logo h2 { font-size: 18px; color: var(--primary); font-weight: 700; }
+  .sidebar-logo span { font-size: 12px; color: var(--muted); }
+  .sidebar nav ul { list-style: none; padding: 12px 0; }
+  .sidebar nav ul li a { display: block; padding: 7px 20px; color: var(--text); text-decoration: none; font-size: 14px; border-left: 3px solid transparent; transition: all .15s; }
+  .sidebar nav ul li a:hover, .sidebar nav ul li a.active { background: #eff6ff; color: var(--primary); border-left-color: var(--primary); }
+  .sidebar nav .section-label { padding: 12px 20px 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+
+  /* Content */
+  h1 { font-size: 32px; font-weight: 800; margin-bottom: 8px; }
+  h2 { font-size: 22px; font-weight: 700; margin: 40px 0 12px; padding-top: 40px; border-top: 1px solid var(--border); }
+  h3 { font-size: 16px; font-weight: 700; margin: 24px 0 8px; color: var(--primary-dark); }
+  p { margin-bottom: 14px; color: #374151; }
+  .subtitle { font-size: 17px; color: var(--muted); margin-bottom: 32px; }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Badges */
+  .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-right: 4px; }
+  .badge-green { background: #d1fae5; color: #065f46; }
+  .badge-blue  { background: #dbeafe; color: #1e40af; }
+  .badge-red   { background: #fee2e2; color: #991b1b; }
+  .badge-yellow { background: #fef3c7; color: #92400e; }
+
+  /* Code blocks */
+  pre { background: var(--code-bg); color: var(--code-text); padding: 20px 24px; border-radius: 8px; overflow-x: auto; margin: 12px 0 20px; font-size: 13.5px; line-height: 1.65; }
+  code { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; }
+  p code, li code { background: #f1f5f9; color: #0f172a; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 14px; }
+  th { background: #f8fafc; font-weight: 600; padding: 10px 14px; text-align: left; border-bottom: 2px solid var(--border); }
+  td { padding: 9px 14px; border-bottom: 1px solid var(--border); }
+  tr:hover td { background: #f9fafb; }
+
+  /* Cards */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; margin-bottom: 16px; }
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin: 16px 0; }
+  .feature-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .feature-card .icon { font-size: 24px; margin-bottom: 8px; }
+  .feature-card h4 { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .feature-card p { font-size: 13px; color: var(--muted); margin: 0; }
+
+  /* Callouts */
+  .callout { border-left: 4px solid; border-radius: 0 6px 6px 0; padding: 12px 16px; margin: 16px 0; font-size: 14px; }
+  .callout-info    { border-color: var(--primary); background: #eff6ff; }
+  .callout-success { border-color: var(--accent);  background: #f0fdf4; }
+  .callout-warn    { border-color: var(--warn);    background: #fffbeb; }
+  .callout-danger  { border-color: var(--danger);  background: #fef2f2; }
+  .callout strong  { display: block; margin-bottom: 4px; }
+
+  /* HTTP method badges */
+  .method { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 700; font-family: monospace; margin-right: 8px; }
+  .get    { background: #d1fae5; color: #065f46; }
+  .post   { background: #dbeafe; color: #1e40af; }
+  .patch  { background: #fef3c7; color: #92400e; }
+  .delete { background: #fee2e2; color: #991b1b; }
+
+  .endpoint-row { display: flex; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .endpoint-path { font-family: monospace; flex: 1; }
+  .endpoint-desc { color: var(--muted); font-size: 12px; }
+
+  @media (max-width: 768px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 20px; }
+  }
+</style>
+</head>
+<body>
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <h2>⚡ SnapAdmin</h2>
+    <span>Documentation v0.1.0a1</span>
+  </div>
+  <nav>
+    <div class="section-label">Getting Started</div>
+    <ul>
+      <li><a href="#overview" class="active">Overview</a></li>
+      <li><a href="#installation">Installation</a></li>
+      <li><a href="#demo-setup">Running the Demo</a></li>
+    </ul>
+    <div class="section-label">Core Concepts</div>
+    <ul>
+      <li><a href="#snap-model">SnapModel</a></li>
+      <li><a href="#snap-fields">Snap Fields</a></li>
+      <li><a href="#advanced-layout">Advanced Layout</a></li>
+      <li><a href="#status-badges">Status Badges</a></li>
+      <li><a href="#admin-registration">Admin Registration</a></li>
+    </ul>
+    <div class="section-label">API layer</div>
+    <ul>
+      <li><a href="#api-rest">REST API</a></li>
+      <li><a href="#api-graphql">GraphQL API</a></li>
+      <li><a href="#api-tokens">Token Management</a></li>
+    </ul>
+    <div class="section-label">Infrastructure</div>
+    <ul>
+      <li><a href="#elasticsearch">Elasticsearch (ES)</a></li>
+      <li><a href="#celery">Celery & Periodic Tasks</a></li>
+      <li><a href="#logging">Structured Logging</a></li>
+    </ul>
+  </nav>
+</aside>
+
+<main class="main">
+
+  <!-- ── Overview ─────────────────────────────────────────────────────────── -->
+  <section id="overview">
+    <h1>⚡ SnapAdmin</h1>
+    <p class="subtitle">Automatic, beautiful, production-ready Django Admin — zero boilerplate.</p>
+
+    <div class="card-grid">
+      <div class="feature-card"><div class="icon">🎯</div><h4>Declarative Admin</h4><p>Embed admin config in model fields. No ModelAdmin classes needed.</p></div>
+      <div class="feature-card"><div class="icon">🌐</div><h4>Auto REST API</h4><p>Full CRUD API generated for every SnapModel automatically.</p></div>
+      <div class="feature-card"><div class="icon">⚛️</div><h4>Dynamic GraphQL</h4><p>Unified GraphQL schema generation for all managed models.</p></div>
+      <div class="feature-card"><div class="icon">🔑</div><h4>Token Auth</h4><p>Named tokens with expiry, model restrictions, and Django perms.</p></div>
+      <div class="feature-card"><div class="icon">📊</div><h4>Swagger UI</h4><p>Interactive OpenAPI 3 documentation via drf-spectacular.</p></div>
+      <div class="feature-card"><div class="icon">🔍</div><h4>Elasticsearch</h4><p>Integrated full-text search with automatic DB fallback.</p></div>
+      <div class="feature-card"><div class="icon">🪵</div><h4>Structured Logs</h4><p>Colourised structlog for dev, JSON for production.</p></div>
+      <div class="feature-card"><div class="icon">🐳</div><h4>Docker Ready</h4><p>One-command stack: Django + PostgreSQL + Redis + ES.</p></div>
+    </div>
+  </section>
+
+  <!-- ── Installation ─────────────────────────────────────────────────────── -->
+  <h2 id="installation">📦 Installation</h2>
+  <p>SnapAdmin can be installed via PyPI or directly from source.</p>
+
+  <h3>From PyPI</h3>
+  <pre><code>pip install drofji-snapadmin</code></pre>
+
+  <h3>From GitHub</h3>
+  <pre><code>pip install git+https://github.com/drofji/django-snapadmin.git</code></pre>
+
+  <!-- ── Demo Setup ───────────────────────────────────────────────────────── -->
+  <h2 id="demo-setup">🌟 Running the Demo</h2>
+  <p>The repository includes a complete sandbox project to explore all features.</p>
+
+  <h3>Via Docker (Recommended)</h3>
+  <pre><code>git clone https://github.com/drofji/django-snapadmin.git
+cd django-snapadmin
+cp dist.env .env
+docker compose up --build</code></pre>
+
+  <h3>Manual / Local Setup</h3>
+  <pre><code>git clone https://github.com/drofji/django-snapadmin.git
+cd django-snapadmin
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
+
+python manage.py migrate
+python manage.py seed_demo
+python manage.py runserver</code></pre>
+
+  <!-- ── SnapModel ─────────────────────────────────────────────────────────── -->
+  <h2 id="snap-model">🏗 SnapModel</h2>
+  <p>Inherit from <code>SnapModel</code> to get automatic admin registration and a smart <code>__str__</code>.</p>
+  <pre><code>from snapadmin import models as snap_models, fields as snap
+
+class Product(snap_models.SnapModel):
+    name = snap.SnapCharField(max_length=200, searchable=True)
+    price = snap.SnapDecimalField(max_digits=10, decimal_places=2, filterable=True)
+    available = snap.SnapBooleanField(default=True)</code></pre>
+
+  <!-- ── Snap Fields ───────────────────────────────────────────────────────── -->
+  <h2 id="snap-fields">📋 Snap Fields</h2>
+  <p>Every Snap field is a drop-in replacement for the corresponding Django field, with extra admin control attributes.</p>
+
+  <table>
+    <tr><th>Flag</th><th>Type</th><th>Default</th><th>Effect</th></tr>
+    <tr><td><code>show_in_list</code></td><td>bool</td><td>True</td><td>Adds to <code>list_display</code></td></tr>
+    <tr><td><code>show_in_form</code></td><td>bool</td><td>False</td><td>Shows field in change form</td></tr>
+    <tr><td><code>searchable</code></td><td>bool</td><td>False</td><td>Adds to <code>search_fields</code></td></tr>
+    <tr><td><code>filterable</code></td><td>bool</td><td>False</td><td>Smart sidebar filter (type-aware)</td></tr>
+    <tr><td><code>editable</code></td><td>bool</td><td>True</td><td>Always read-only when False</td></tr>
+    <tr><td><code>updatable</code></td><td>bool</td><td>True</td><td>Read-only after first save when False</td></tr>
+    <tr><td><code>row</code></td><td>str</td><td>None</td><td>Group fields into a horizontal row</td></tr>
+    <tr><td><code>tab</code></td><td>str</td><td>None</td><td>Place field into a specific Unfold tab</td></tr>
+    <tr><td><code>wysiwyg</code></td><td>bool</td><td>False</td><td>Enable CKEditor 5 for TextFields</td></tr>
+  </table>
+
+  <!-- ── Advanced Layout ────────────────────────────────────────────────────── -->
+  <h2 id="advanced-layout">📐 Advanced Layout</h2>
+  <p>Control the visual arrangement of your admin forms using <code>row</code> and <code>tab</code> attributes.</p>
+  <pre><code>class Customer(snap_models.SnapModel):
+    # These two will appear on the same line
+    first_name = snap.SnapCharField(max_length=100, row="name")
+    last_name = snap.SnapCharField(max_length=100, row="name")
+
+    # This field will appear in the "Contact" tab
+    email = snap.SnapEmailField(tab="Contact")</code></pre>
+
+  <!-- ── Status Badges ─────────────────────────────────────────────────────── -->
+  <h2 id="status-badges">🏷 Status Badges</h2>
+  <p>Render coloured pill badges for any choice/status field directly in the admin list view.</p>
+  <pre><code>from snapadmin import fields as snap
+
+status_badge = snap.SnapStatusBadgeField(
+    field_name="is_active",
+    choices=[
+        snap.SnapStatusBadgeFieldChoice(True, "#065F46", "#D1FAE5", "#10B981"),
+        snap.SnapStatusBadgeFieldChoice(False, "#991B1B", "#FEE2E2", "#EF4444"),
+    ]
+)</code></pre>
+
+  <!-- ── Admin Registration ──────────────────────────────────────────────── -->
+  <h2 id="admin-registration">🔧 Admin Registration</h2>
+  <p>Call <code>register_all_admins()</code> once in your <code>admin.py</code> to register every <code>SnapModel</code> subclass with Django's admin site.</p>
+  <pre><code># admin.py
+from snapadmin.models import SnapModel
+SnapModel.register_all_admins()</code></pre>
+
+  <p>To restrict registration to a specific app, pass the <code>app_label</code> argument:</p>
+  <pre><code>SnapModel.register_all_admins(app_label="myapp")</code></pre>
+
+  <div class="callout callout-info">
+    <strong>Note</strong>
+    The <code>APIToken</code> admin is also registered automatically when <code>register_all_admins()</code> is called.
+  </div>
+
+  <!-- ── API REST ──────────────────────────────────────────────────────────── -->
+  <h2 id="api-rest">🌐 REST API</h2>
+  <p>CRUD endpoints are generated automatically for all managed models.</p>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/models/schema/</span><span class="endpoint-desc">List all available endpoints</span></div>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/models/{app}/{Model}/</span><span class="endpoint-desc">List objects</span></div>
+  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/models/{app}/{Model}/</span><span class="endpoint-desc">Create object</span></div>
+
+  <!-- ── API GraphQL ───────────────────────────────────────────────────────── -->
+  <h2 id="api-graphql">⚛️ GraphQL API</h2>
+  <p>SnapAdmin provides a dynamic GraphQL interface powered by Graphene-Django.</p>
+  <ul style="margin: 8px 0 14px 20px; font-size: 14px;">
+    <li><strong>Auto-Schema</strong>: All <code>SnapModel</code> subclasses are automatically added to the schema.</li>
+    <li><strong>Unified Fetching</strong>: Retrieve data from Database or Elasticsearch via a single query.</li>
+    <li><strong>Endpoint</strong>: Accessible at <code>/api/graphql/</code> with GraphiQL enabled.</li>
+  </ul>
+
+  <!-- ── API Tokens ──────────────────────────────────────────────────────── -->
+  <h2 id="api-tokens">🔑 Token Management</h2>
+  <p>SnapAdmin uses named API tokens for REST API authentication. Tokens are created and managed in the Django admin under <em>API Tokens</em>, or programmatically:</p>
+  <pre><code>from snapadmin.models import APIToken
+
+# Create a token for a user, valid for 30 days
+token = APIToken.create_for_user(
+    user=user,
+    token_name="CI Pipeline",
+    allowed_models=["myapp.Product", "myapp.Order"],
+    expires_in_days=30,
+)</code></pre>
+
+  <p>Include the token in every API request as an HTTP header:</p>
+  <pre><code>Authorization: Token &lt;token_key&gt;</code></pre>
+
+  <h3>Token REST Endpoints</h3>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/tokens/</span><span class="endpoint-desc">List tokens owned by the current user</span></div>
+  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/tokens/</span><span class="endpoint-desc">Create a new token</span></div>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/tokens/{id}/</span><span class="endpoint-desc">Retrieve a token</span></div>
+  <div class="endpoint-row"><span class="method delete">DELETE</span><span class="endpoint-path">/api/tokens/{id}/</span><span class="endpoint-desc">Revoke (delete) a token</span></div>
+
+  <h3>Token Fields</h3>
+  <table>
+    <tr><th>Field</th><th>Description</th></tr>
+    <tr><td><code>token_name</code></td><td>Human-readable label (e.g. <em>"Read-only dashboard"</em>)</td></tr>
+    <tr><td><code>token_key</code></td><td>40-character secret key — treat like a password</td></tr>
+    <tr><td><code>allowed_models</code></td><td>List of <code>"app_label.ModelName"</code> strings; empty = unrestricted</td></tr>
+    <tr><td><code>expiration_date</code></td><td>Optional expiry; leave blank for non-expiring tokens</td></tr>
+    <tr><td><code>is_active</code></td><td>Deactivate without deleting the token</td></tr>
+  </table>
+
+  <!-- ── Elasticsearch ──────────────────────────────────────────────────────── -->
+  <h2 id="elasticsearch">🔍 Elasticsearch Integration</h2>
+  <p>Configure how each model interacts with the search engine via <code>EsStorageMode</code>.</p>
+  <ul>
+    <li><code>DB_ONLY</code>: Standard Django behavior (Default).</li>
+    <li><code>DUAL</code>: Save to DB + ES; fast searching via <code>es_search()</code>.</li>
+    <li><code>ES_ONLY</code>: Data exists only in ES. Ideal for logs/analytics.</li>
+  </ul>
+  <pre><code># Trigger re-indexing from code
+MyModel.es_reindex_all()
+
+# Perform optimized search
+results = MyModel.es_search("query string")</code></pre>
+
+  <!-- ── Celery ────────────────────────────────────────────────────────────── -->
+  <h2 id="celery">⚙️ Celery &amp; Periodic Tasks</h2>
+  <p>SnapAdmin ships built-in Celery tasks. Configure a Celery app in your project to use them.</p>
+
+  <h3>Built-in Tasks</h3>
+  <table>
+    <tr><th>Task</th><th>Description</th></tr>
+    <tr><td><code>api.tasks.purge_expired_tokens</code></td><td>Delete all <code>APIToken</code> records past their expiration date</td></tr>
+    <tr><td><code>demo.tasks.reindex_products_to_elasticsearch</code></td><td>Re-index all products to the Elasticsearch index (demo app)</td></tr>
+    <tr><td><code>demo.tasks.generate_daily_stats</code></td><td>Compute and log daily business metrics (demo app)</td></tr>
+  </table>
+
+  <h3>Celery Setup (sandbox)</h3>
+  <pre><code># sandbox/celery.py
+from celery import Celery
+
+app = Celery("sandbox")
+app.config_from_object("django.conf:settings", namespace="CELERY")
+app.autodiscover_tasks()</code></pre>
+
+  <pre><code># settings.py
+CELERY_BROKER_URL = "redis://localhost:6379/0"
+CELERY_RESULT_BACKEND = "redis://localhost:6379/0"</code></pre>
+
+  <!-- ── Structured Logging ────────────────────────────────────────────────── -->
+  <h2 id="logging">🪵 Structured Logging</h2>
+  <p>SnapAdmin provides a <code>structlog</code>-based logging setup with colourised output for development and JSON output for production.</p>
+
+  <h3>Activate in settings.py</h3>
+  <pre><code>from snapadmin.logging_config import configure_logging
+
+# Human-readable coloured output (development)
+configure_logging(log_level="INFO", json_logs=False)
+
+# JSON lines (production / Docker)
+configure_logging(log_level="WARNING", json_logs=True)</code></pre>
+
+  <h3>Using the logger in your code</h3>
+  <pre><code>from snapadmin.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+logger.info("order_created", order_id=42, total=199.90)
+logger.warning("es_unavailable", model="Product")
+logger.error("payment_failed", reason="card_declined")</code></pre>
+
+  <div class="callout callout-info">
+    <strong>Log levels</strong>
+    Supported values for <code>log_level</code>: <code>DEBUG</code>, <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code>, <code>CRITICAL</code>.
+    Noisy third-party loggers (<code>django.db.backends</code>, <code>elasticsearch</code>, <code>urllib3</code>) are silenced to <code>WARNING</code> automatically.
+  </div>
+
+  <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
+    SnapAdmin — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
+  </div>
+
+</main>
+
+<script>
+  // Highlight active section in sidebar on scroll
+  const sections = document.querySelectorAll('h2[id], section[id]');
+  const navLinks = document.querySelectorAll('.sidebar nav a');
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        navLinks.forEach(l => l.classList.remove('active'));
+        const link = document.querySelector(`.sidebar a[href="#${e.target.id}"]`);
+        if (link) link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
