@@ -51,6 +51,7 @@ class DashboardView(TemplateView):
             "counts": []
         }
 
+        from snapadmin.models import EsStorageMode
         for model in apps.get_models():
             if issubclass(model, SnapModel) and model is not SnapModel:
                 count = 0
@@ -59,11 +60,14 @@ class DashboardView(TemplateView):
                 except Exception:
                     pass
 
+                es_mode = getattr(model, "es_storage_mode", EsStorageMode.DB_ONLY)
                 model_info = {
                     "name": model._meta.verbose_name.title(),
                     "app": model._meta.app_label,
                     "count": count,
-                    "url": reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_changelist")
+                    "url": reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_changelist"),
+                    "es_mode": es_mode.value if hasattr(es_mode, "value") else str(es_mode),
+                    "retention_days": getattr(model, "data_retention_days", None),
                 }
                 registered_models.append(model_info)
 
@@ -80,7 +84,7 @@ class DashboardView(TemplateView):
             "cron_jobs": cron_jobs,
             "debug": settings.DEBUG,
             "allowed_hosts": settings.ALLOWED_HOSTS,
-            "version": "0.1.0a1",
+            "version": "0.1.0a2",
             "graphql_enabled": getattr(settings, "SNAPADMIN_GRAPHQL_ENABLED", True),
         })
         return context

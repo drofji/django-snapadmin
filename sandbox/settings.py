@@ -193,6 +193,33 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 
+# Celery Beat scheduled tasks
+# Each task runs on its own cron schedule and is visible in the dashboard.
+from celery.schedules import crontab  # noqa: E402
+
+CELERY_BEAT_SCHEDULE = {
+    "reindex-products-to-es": {
+        "task": "demo.tasks.reindex_products_to_elasticsearch",
+        "schedule": crontab(hour=0, minute=0),  # daily midnight
+        "description": "Sync all Product records from DB to Elasticsearch (DUAL mode demo)",
+    },
+    "purge-expired-data": {
+        "task": "api.tasks.purge_expired_data",
+        "schedule": crontab(hour=1, minute=0),  # daily 1am
+        "description": "DSGVO/GDPR - delete records older than data_retention_days on each model",
+    },
+    "generate-daily-stats": {
+        "task": "demo.tasks.generate_daily_stats",
+        "schedule": crontab(hour=2, minute=0),  # daily 2am
+        "description": "Compute and log daily business stats (products, customers, orders, revenue)",
+    },
+    "purge-expired-tokens": {
+        "task": "api.tasks.purge_expired_tokens",
+        "schedule": crontab(hour=3, minute=0),  # daily 3am
+        "description": "Remove expired API tokens",
+    },
+}
+
 # ------------------------------------------------------------------------------
 # EXTRA SETTINGS
 # ------------------------------------------------------------------------------
