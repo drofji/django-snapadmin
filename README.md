@@ -6,6 +6,8 @@
 [![Django](https://img.shields.io/badge/Django-5.2+-green?logo=django)](https://djangoproject.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
 
+📚 **[Full Documentation](https://drofji.github.io/django-snapadmin/)** — Configuration guide, API reference, examples
+
 ---
 
 ## ⚡ The Core Idea — 3 Steps, Full Stack
@@ -21,9 +23,9 @@ class Product(snap_models.SnapModel):
     price   = snap.SnapDecimalField(max_digits=10, decimal_places=2, filterable=True)
     available = snap.SnapBooleanField(default=True, filterable=True)
 
-    # 2. Pick an Elasticsearch mode
-    es_storage_mode = snap_models.EsStorageMode.DUAL  # DB + ES in sync
-    data_retention_days = 365  # 3. DSGVO: auto-delete after 1 year
+    # 2. (Optional) Enable Elasticsearch + DSGVO cleanup
+    # es_storage_mode = snap_models.EsStorageMode.DUAL  # DB + ES in sync
+    # data_retention_days = 365  # Auto-delete records older than 1 year
 ```
 
 That's it. You instantly get:
@@ -33,8 +35,8 @@ That's it. You instantly get:
 | Django Admin | Auto-registered, filtered, searchable — no `admin.py` needed |
 | REST API | Full CRUD at `/api/product/` with Swagger docs |
 | GraphQL | Dynamic schema at `/api/graphql/` |
-| ES Search | Celery Beat syncs DB → Elasticsearch nightly |
-| DSGVO Cleanup | `purge_expired_data` task auto-runs; or `manage.py purge_expired_data` |
+| ES Search | Optional — enable with `es_storage_mode = EsStorageMode.DUAL` |
+| DSGVO Cleanup | Optional — enable with `data_retention_days` on any model |
 
 ### Elasticsearch Storage Modes
 
