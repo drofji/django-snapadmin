@@ -119,7 +119,13 @@ class APIToken(models.Model):
         APIToken.objects.filter(pk=self.pk).update(last_used_at=timezone.now())
 
     @classmethod
-    def create_for_user(cls, user, token_name, allowed_models=None, expires_in_days=None):
+    def create_for_user(
+        cls,
+        user: "User",
+        token_name: str,
+        allowed_models: list[str] | None = None,
+        expires_in_days: int | None = None,
+    ) -> "APIToken":
         expiration_date = None
         if expires_in_days is not None:
             expiration_date = timezone.now() + timedelta(days=expires_in_days)
@@ -234,21 +240,12 @@ class EsQuerySet:
                 raise self.model.DoesNotExist
         raise self.model.DoesNotExist
 
-    def exists(self):
+    def exists(self) -> bool:
         return bool(self._hits)
 
     @property
-    def ordered(self):
+    def ordered(self) -> bool:
         return True
-
-    def none(self):
-        return EsQuerySet(self.model, [])
-
-    def all(self):
-        return self
-
-    def using(self, alias):
-        return self
 
 
 class EsManager(models.Manager):
@@ -379,7 +376,7 @@ class SnapModel(models.Model):
         ordering = ["-pk"]
 
     @classmethod
-    def get_es_index_name(cls):
+    def get_es_index_name(cls) -> str:
         return cls.es_index_name or f"snap_{cls._meta.app_label}_{cls._meta.model_name.lower()}"
 
     @classmethod
@@ -389,7 +386,7 @@ class SnapModel(models.Model):
         url = getattr(settings, "ELASTICSEARCH_URL", "http://localhost:9200")
         return Elasticsearch([url], request_timeout=5)
 
-    def get_es_document(self):
+    def get_es_document(self) -> dict:
         doc = {"id": self.pk}
         if self.es_mapping:
             for field_name in self.es_mapping.keys():
@@ -426,7 +423,7 @@ class SnapModel(models.Model):
         except Exception:
             pass
 
-    def index_in_es(self):
+    def index_in_es(self) -> None:
         if (
             not (self.es_index_enabled or self.es_storage_mode != EsStorageMode.DB_ONLY)
             or not getattr(settings, "ELASTICSEARCH_ENABLED", False)
@@ -441,7 +438,7 @@ class SnapModel(models.Model):
         except Exception:
             pass
 
-    def delete_from_es(self):
+    def delete_from_es(self) -> None:
         if (
             not (self.es_index_enabled or self.es_storage_mode != EsStorageMode.DB_ONLY)
             or not getattr(settings, "ELASTICSEARCH_ENABLED", False)
@@ -538,10 +535,8 @@ class SnapModel(models.Model):
         return cls.es_search(query_string=query_string, limit=limit)
 
     @classmethod
-    def es_reindex_all(cls):
-        """
-        Synchronise all records to the Elasticsearch index.
-        """
+    def es_reindex_all(cls) -> dict:
+        """Synchronise all records to the Elasticsearch index."""
         if not getattr(settings, "ELASTICSEARCH_ENABLED", False):
             return {"skipped": True, "reason": "Elasticsearch not available"}
 
@@ -636,7 +631,7 @@ class SnapModel(models.Model):
         return form_fields, list_display, search_fields, list_filter, autocomplete_fields
 
     @classmethod
-    def register_admin(cls):
+    def register_admin(cls) -> None:
         if not cls.admin_enabled: return
         form_fields, list_display, search_fields, list_filter, autocomplete_fields = cls.get_admin_fields()
 
@@ -751,7 +746,7 @@ class SnapModel(models.Model):
         except admin.sites.AlreadyRegistered: pass
 
     @staticmethod
-    def register_all_admins(app_label=None):
+    def register_all_admins(app_label: str | None = None) -> None:
         from snapadmin.admin import APITokenAdmin
         try:
             admin.site.register(APIToken, APITokenAdmin)
