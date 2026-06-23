@@ -176,6 +176,13 @@ cd django-snapadmin
 cp dist.env .env
 docker compose up --build</code></pre>
 
+  <h3>With Traefik (production-like routing)</h3>
+  <p>Use the Traefik overlay to access the app at <code>http://snapadmin.localhost/</code> without a port number:</p>
+  <pre><code>docker compose -f docker-compose.yml -f docker-compose.traefik.yml up --build
+
+# App available at: http://snapadmin.localhost/admin/
+# Traefik dashboard: http://localhost:8080/</code></pre>
+
   <h3>Manual / Local Setup</h3>
   <pre><code>git clone https://github.com/drofji/django-snapadmin.git
 cd django-snapadmin
