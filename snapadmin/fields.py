@@ -268,6 +268,53 @@ class SnapManyToManyField(models.ManyToManyField, SnapField):
         kwargs.pop(DjangoFieldAttributeEnum.NULL, None)
         super().__init__(to=to, **self.handleDjangoKwargs(**kwargs))
 
+class SnapSmallIntegerField(models.SmallIntegerField, SnapField):
+    def __init__(self, **kwargs):
+        kwargs = self._initializeSnapLogic(**kwargs)
+        super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+class SnapPositiveSmallIntegerField(models.PositiveSmallIntegerField, SnapField):
+    def __init__(self, **kwargs):
+        kwargs = self._initializeSnapLogic(**kwargs)
+        super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+class SnapPositiveBigIntegerField(models.PositiveBigIntegerField, SnapField):
+    def __init__(self, **kwargs):
+        kwargs = self._initializeSnapLogic(**kwargs)
+        super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+class SnapRichTextField(models.TextField, SnapField):
+    """TextField with wysiwyg=True preset - no extra argument needed."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault(SnapFieldAttributeEnum.WYSIWYG.value, True)
+        kwargs = self._initializeSnapLogic(**kwargs)
+        super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+class SnapPhoneField(models.CharField, SnapField):
+    """CharField pre-wired with phone number validation and a sensible max_length."""
+
+    def __init__(self, **kwargs):
+        from snapadmin.validators import SnapPhoneValidator
+        kwargs.setdefault(DjangoFieldAttributeEnum.MAX_LENGTH.value, 20)
+        kwargs = self._initializeSnapLogic(**kwargs)
+        cleaned = self.handleDjangoKwargs(**kwargs)
+        cleaned.setdefault(DjangoFieldAttributeEnum.VALIDATORS.value, [])
+        cleaned[DjangoFieldAttributeEnum.VALIDATORS.value].append(SnapPhoneValidator())
+        super().__init__(**cleaned)
+
+class SnapColorField(models.CharField, SnapField):
+    """CharField pre-wired with hex color validation (#RRGGBB / #RGB)."""
+
+    def __init__(self, **kwargs):
+        from snapadmin.validators import SnapColorValidator
+        kwargs.setdefault(DjangoFieldAttributeEnum.MAX_LENGTH.value, 7)
+        kwargs = self._initializeSnapLogic(**kwargs)
+        cleaned = self.handleDjangoKwargs(**kwargs)
+        cleaned.setdefault(DjangoFieldAttributeEnum.VALIDATORS.value, [])
+        cleaned[DjangoFieldAttributeEnum.VALIDATORS.value].append(SnapColorValidator())
+        super().__init__(**cleaned)
+
 class SnapFunctionField(SnapNotDatabaseField):
     def __init__(self, func, verbose_name=None, show_in_list=True,
                  show_in_form=True, safe_html=False, *args, **kwargs):

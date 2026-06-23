@@ -170,6 +170,14 @@ class Showcase(snap_models.SnapModel):
     boolean_field = snap_fields.SnapBooleanField(default=False, verbose_name=_("Boolean Field"), show_in_form=True, filterable=True, tab=_("Assets"))
     json_field = snap_fields.SnapJSONField(default=dict, verbose_name=_("JSON Field"), show_in_form=True, tab=_("Assets"))
 
+    # Tab: Extended Types
+    rich_text_field = snap_fields.SnapRichTextField(verbose_name=_("Rich Text"), show_in_form=True, tab=_("Extended"))
+    phone_field = snap_fields.SnapPhoneField(verbose_name=_("Phone Number"), show_in_form=True, tab=_("Extended"))
+    color_field = snap_fields.SnapColorField(default="#3B82F6", verbose_name=_("Color"), show_in_form=True, tab=_("Extended"))
+    small_int_field = snap_fields.SnapSmallIntegerField(verbose_name=_("Small Integer"), show_in_form=True, tab=_("Extended"))
+    pos_small_int_field = snap_fields.SnapPositiveSmallIntegerField(verbose_name=_("Pos. Small Integer"), show_in_form=True, tab=_("Extended"))
+    pos_big_int_field = snap_fields.SnapPositiveBigIntegerField(verbose_name=_("Pos. Big Integer"), show_in_form=True, tab=_("Extended"))
+
     # Unfold specific settings
     compressed_fields = True
     warn_unsaved_form = True

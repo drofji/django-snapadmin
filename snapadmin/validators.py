@@ -1,10 +1,58 @@
 import os
+import re
 import typing
 
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext_lazy as _
 from django.utils.deconstruct import deconstructible
 from enum import Enum
+
+
+# --- Validators ---
+
+@deconstructible
+class SnapPhoneValidator:
+    """Validates phone numbers in E.164 or common national formats."""
+
+    _PATTERN = re.compile(
+        r"^\+?[1-9]\d{1,14}$"
+        r"|"
+        r"^(\(\d{1,4}\)|\d{1,4})[\s\-]?\d{2,4}[\s\-]?\d{2,4}[\s\-]?\d{0,4}$"
+    )
+
+    def __call__(self, value: str) -> None:
+        clean = re.sub(r"[\s\-\(\)]", "", value)
+        if not self._PATTERN.match(value) or len(clean) < 7:
+            raise ValidationError(
+                _("Enter a valid phone number (e.g. +49151234567 or 089-123456)."),
+                code="invalid_phone",
+            )
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, SnapPhoneValidator)
+
+    def __hash__(self) -> int:
+        return hash(self.__class__)
+
+
+@deconstructible
+class SnapColorValidator:
+    """Validates CSS hex color strings (#RGB or #RRGGBB)."""
+
+    _PATTERN = re.compile(r"^#([A-Fa-f0-9]{6}|[A-Fa-f0-9]{3})$")
+
+    def __call__(self, value: str) -> None:
+        if not self._PATTERN.match(value):
+            raise ValidationError(
+                _("Enter a valid hex color code (e.g. #FF5733 or #F53)."),
+                code="invalid_color",
+            )
+
+    def __eq__(self, other: object) -> bool:
+        return isinstance(other, SnapColorValidator)
+
+    def __hash__(self) -> int:
+        return hash(self.__class__)
 
 
 # --- Enums ---

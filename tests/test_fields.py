@@ -25,6 +25,7 @@ from snapadmin.fields import (
     SnapBigIntegerField,
     SnapBooleanField,
     SnapCharField,
+    SnapColorField,
     SnapDateField,
     SnapDateTimeField,
     SnapDecimalField,
@@ -39,8 +40,13 @@ from snapadmin.fields import (
     SnapIntegerField,
     SnapJSONField,
     SnapManyToManyField,
+    SnapPhoneField,
+    SnapPositiveBigIntegerField,
     SnapPositiveIntegerField,
+    SnapPositiveSmallIntegerField,
+    SnapRichTextField,
     SnapSlugField,
+    SnapSmallIntegerField,
     SnapStatusBadgeField,
     SnapStatusBadgeFieldChoice,
     SnapTextField,
@@ -416,3 +422,114 @@ class TestSnapStatusBadgeField:
         obj = self._make_obj("status_a")
         result = field.get_display_value(obj)
         assert isinstance(result, SafeString)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# New field types (v0.1.0a2)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestNewFieldTypes:
+    """Verify the extended set of Snap field types instantiate and behave correctly."""
+
+    def test_snap_small_integer_field(self):
+        assert isinstance(SnapSmallIntegerField(), SnapSmallIntegerField)
+
+    def test_snap_positive_small_integer_field(self):
+        assert isinstance(SnapPositiveSmallIntegerField(), SnapPositiveSmallIntegerField)
+
+    def test_snap_positive_big_integer_field(self):
+        assert isinstance(SnapPositiveBigIntegerField(), SnapPositiveBigIntegerField)
+
+    def test_snap_rich_text_field_wysiwyg_default_true(self):
+        f = SnapRichTextField()
+        assert f.wysiwyg is True
+
+    def test_snap_rich_text_field_wysiwyg_override(self):
+        f = SnapRichTextField(wysiwyg=False)
+        assert f.wysiwyg is False
+
+    def test_snap_phone_field_default_max_length(self):
+        f = SnapPhoneField()
+        assert f.max_length == 20
+
+    def test_snap_phone_field_custom_max_length(self):
+        f = SnapPhoneField(max_length=30)
+        assert f.max_length == 30
+
+    def test_snap_phone_field_has_validator(self):
+        from snapadmin.validators import SnapPhoneValidator
+        f = SnapPhoneField()
+        assert any(isinstance(v, SnapPhoneValidator) for v in f.validators)
+
+    def test_snap_color_field_default_max_length(self):
+        f = SnapColorField()
+        assert f.max_length == 7
+
+    def test_snap_color_field_has_validator(self):
+        from snapadmin.validators import SnapColorValidator
+        f = SnapColorField()
+        assert any(isinstance(v, SnapColorValidator) for v in f.validators)
+
+
+class TestSnapPhoneValidator:
+    """SnapPhoneValidator accepts valid phones and rejects garbage."""
+
+    def _validate(self, value: str) -> None:
+        from snapadmin.validators import SnapPhoneValidator
+        SnapPhoneValidator()(value)
+
+    def test_accepts_e164(self):
+        self._validate("+49151234567")
+
+    def test_accepts_local_format(self):
+        self._validate("089-123456")
+
+    def test_rejects_empty(self):
+        from django.core.exceptions import ValidationError
+        with pytest.raises(ValidationError):
+            self._validate("")
+
+    def test_rejects_letters(self):
+        from django.core.exceptions import ValidationError
+        with pytest.raises(ValidationError):
+            self._validate("phone-abc")
+
+    def test_equality(self):
+        from snapadmin.validators import SnapPhoneValidator
+        assert SnapPhoneValidator() == SnapPhoneValidator()
+
+
+class TestSnapColorValidator:
+    """SnapColorValidator accepts valid hex colors and rejects invalid ones."""
+
+    def _validate(self, value: str) -> None:
+        from snapadmin.validators import SnapColorValidator
+        SnapColorValidator()(value)
+
+    def test_accepts_six_char_hex(self):
+        self._validate("#FF5733")
+
+    def test_accepts_three_char_hex(self):
+        self._validate("#F53")
+
+    def test_accepts_lowercase(self):
+        self._validate("#ff5733")
+
+    def test_rejects_no_hash(self):
+        from django.core.exceptions import ValidationError
+        with pytest.raises(ValidationError):
+            self._validate("FF5733")
+
+    def test_rejects_wrong_length(self):
+        from django.core.exceptions import ValidationError
+        with pytest.raises(ValidationError):
+            self._validate("#FFFFF")
+
+    def test_rejects_non_hex_chars(self):
+        from django.core.exceptions import ValidationError
+        with pytest.raises(ValidationError):
+            self._validate("#GGGGGG")
+
+    def test_equality(self):
+        from snapadmin.validators import SnapColorValidator
+        assert SnapColorValidator() == SnapColorValidator()

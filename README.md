@@ -92,6 +92,42 @@ from snapadmin.models import SnapModel
 SnapModel.register_all_admins()
 ```
 
+### Available Field Types
+
+| Field | Django Equivalent | SnapAdmin Extras |
+|-------|-------------------|-----------------|
+| `SnapCharField` | `CharField` | searchable, filterable |
+| `SnapTextField` | `TextField` | - |
+| `SnapRichTextField` | `TextField` | `wysiwyg=True` preset - no extra arg needed |
+| `SnapEmailField` | `EmailField` | - |
+| `SnapPhoneField` | `CharField` | phone validation, max_length=20 preset |
+| `SnapColorField` | `CharField` | hex color validation (#RRGGBB), max_length=7 preset |
+| `SnapSlugField` | `SlugField` | max_length=50 preset |
+| `SnapURLField` | `URLField` | - |
+| `SnapUUIDField` | `UUIDField` | - |
+| `SnapIntegerField` | `IntegerField` | filterable |
+| `SnapSmallIntegerField` | `SmallIntegerField` | filterable |
+| `SnapPositiveIntegerField` | `PositiveIntegerField` | filterable |
+| `SnapPositiveSmallIntegerField` | `PositiveSmallIntegerField` | filterable |
+| `SnapPositiveBigIntegerField` | `PositiveBigIntegerField` | filterable |
+| `SnapBigIntegerField` | `BigIntegerField` | filterable |
+| `SnapFloatField` | `FloatField` | filterable |
+| `SnapDecimalField` | `DecimalField` | filterable |
+| `SnapDateField` | `DateField` | date range filter |
+| `SnapDateTimeField` | `DateTimeField` | date range filter |
+| `SnapTimeField` | `TimeField` | - |
+| `SnapDurationField` | `DurationField` | - |
+| `SnapBooleanField` | `BooleanField` | filterable |
+| `SnapJSONField` | `JSONField` | - |
+| `SnapGenericIPAddressField` | `GenericIPAddressField` | - |
+| `SnapFileField` | `FileField` | extension/size/encoding validation |
+| `SnapImageField` | `ImageField` | - |
+| `SnapForeignKey` | `ForeignKey` | autocomplete |
+| `SnapOneToOneField` | `OneToOneField` | autocomplete |
+| `SnapManyToManyField` | `ManyToManyField` | - |
+| `SnapFunctionField` | - | computed display column |
+| `SnapStatusBadgeField` | - | colored HTML badge column |
+
 ---
 
 ## ⚙️ Advanced Settings
