@@ -165,6 +165,29 @@ python manage.py purge_expired_data --dry-run  # preview only
 
 ---
 
+## 🔧 Environment Variables Reference
+
+Copy `dist.env` to `.env` and configure:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SECRET_KEY` | insecure placeholder | Django secret key - **must be changed in production** |
+| `DEBUG` | `True` | Enable Django debug mode - set `False` in production |
+| `ALLOWED_HOSTS` | `localhost,...` | Comma-separated allowed hostnames |
+| `LOG_LEVEL` | `INFO` | Log verbosity: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `JSON_LOGS` | `False` | Structured JSON log output for production log aggregation |
+| `POSTGRES_DB` | `snapadmin` | PostgreSQL database name |
+| `POSTGRES_USER` | `snapadmin` | PostgreSQL username |
+| `POSTGRES_PASSWORD` | `snapadmin` | PostgreSQL password |
+| `POSTGRES_HOST` | `db` | PostgreSQL host (Docker service name or IP) |
+| `POSTGRES_PORT` | `5432` | PostgreSQL port |
+| `REDIS_URL` | `redis://redis:6379/0` | Redis URL for Celery broker and result backend |
+| `ELASTICSEARCH_URL` | `http://elasticsearch:9200` | Elasticsearch cluster URL |
+| `ELASTICSEARCH_ENABLED` | `False` | Enable ES integration; when `False` all models use `DB_ONLY` |
+| `SNAPADMIN_AUTO_SEED` | `False` | Auto-run `seed_demo` on startup (demo only) |
+
+---
+
 ## 🌟 Demo Application Features
 
 The repository includes a `demo/` app and a `sandbox/` project to showcase SnapAdmin's power:
