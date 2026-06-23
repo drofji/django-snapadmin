@@ -98,34 +98,41 @@
 <aside class="sidebar">
   <div class="sidebar-logo">
     <h2>⚡ SnapAdmin</h2>
-    <span>Documentation v0.1.0a1</span>
+    <span>Documentation v0.1.0a2</span>
   </div>
   <nav>
-    <div class="section-label">Getting Started</div>
+    <div class="section-label">📦 Package Users</div>
     <ul>
       <li><a href="#overview" class="active">Overview</a></li>
       <li><a href="#installation">Installation</a></li>
-      <li><a href="#demo-setup">Running the Demo</a></li>
-    </ul>
-    <div class="section-label">Core Concepts</div>
-    <ul>
       <li><a href="#snap-model">SnapModel</a></li>
       <li><a href="#snap-fields">Snap Fields</a></li>
       <li><a href="#advanced-layout">Advanced Layout</a></li>
       <li><a href="#status-badges">Status Badges</a></li>
       <li><a href="#admin-registration">Admin Registration</a></li>
+      <li><a href="#dsgvo">DSGVO / Data Retention</a></li>
     </ul>
-    <div class="section-label">API layer</div>
+    <div class="section-label">🌐 API Layer</div>
     <ul>
       <li><a href="#api-rest">REST API</a></li>
       <li><a href="#api-graphql">GraphQL API</a></li>
       <li><a href="#api-tokens">Token Management</a></li>
     </ul>
-    <div class="section-label">Infrastructure</div>
+    <div class="section-label">⚙️ Infrastructure</div>
     <ul>
       <li><a href="#elasticsearch">Elasticsearch (ES)</a></li>
-      <li><a href="#celery">Celery & Periodic Tasks</a></li>
+      <li><a href="#celery">Celery &amp; Periodic Tasks</a></li>
       <li><a href="#logging">Structured Logging</a></li>
+    </ul>
+    <div class="section-label">🌟 Sandbox / Demo</div>
+    <ul>
+      <li><a href="#demo-setup">Running the Demo</a></li>
+      <li><a href="#demo-models">Demo Models Overview</a></li>
+      <li><a href="#demo-seed">Seed Command</a></li>
+    </ul>
+    <div class="section-label">🔄 Migration Guide</div>
+    <ul>
+      <li><a href="#migration-from-v0">From v0.0.x → v0.1.x</a></li>
     </ul>
   </nav>
 </aside>
@@ -490,8 +497,128 @@ logger.error("payment_failed", reason="card_declined")</code></pre>
     Noisy third-party loggers (<code>django.db.backends</code>, <code>elasticsearch</code>, <code>urllib3</code>) are silenced to <code>WARNING</code> automatically.
   </div>
 
+  <!-- ── DSGVO / Data Retention ───────────────────────────────────────────── -->
+  <h2 id="dsgvo">🔒 DSGVO / GDPR Data Retention</h2>
+  <p>SnapAdmin provides one-line automatic record cleanup to help comply with EU data retention laws (DSGVO/GDPR). Add two class attributes to any <code>SnapModel</code>:</p>
+
+  <pre><code>class AuditLog(SnapModel):
+    action     = SnapCharField(max_length=100)
+    created_at = SnapDateTimeField(auto_now_add=True)
+
+    # Auto-delete records older than 90 days
+    data_retention_days  = 90
+    data_retention_field = "created_at"  # default — any DateTimeField works</code></pre>
+
+  <h3>How it works</h3>
+  <table>
+    <tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>data_retention_days</code></td><td><code>int | None</code></td><td><code>None</code></td><td>Max age of records in days. Set to a positive integer to enable auto-deletion.</td></tr>
+    <tr><td><code>data_retention_field</code></td><td><code>str</code></td><td><code>"created_at"</code></td><td>Name of the <code>DateTimeField</code> to measure record age against.</td></tr>
+  </table>
+
+  <h3>Running the cleanup</h3>
+  <pre><code># Via Celery Beat (recommended — add to CELERY_BEAT_SCHEDULE):
+"purge-expired-data": {
+    "task": "api.tasks.purge_expired_data",
+    "schedule": crontab(hour=1, minute=0),
+}
+
+# Manually via management command:
+python manage.py purge_expired_data           # live run — deletes records
+python manage.py purge_expired_data --dry-run  # preview only — no deletes</code></pre>
+
+  <div class="callout callout-warn">
+    <strong>ES_ONLY models</strong>
+    Models with <code>es_storage_mode = EsStorageMode.ES_ONLY</code> are skipped by the purge task — they have no DB table. Implement custom Elasticsearch cleanup for those models.
+  </div>
+
+  <!-- ── Sandbox / Demo ─────────────────────────────────────────────────────── -->
+  <h2 id="demo-models">📦 Demo App — Model Overview</h2>
+  <p>The <code>demo/</code> app contains pre-built models that showcase every SnapAdmin feature. Each model uses a different Elasticsearch storage mode.</p>
+
+  <table>
+    <tr><th>Model</th><th>ES Mode</th><th>Demonstrates</th></tr>
+    <tr>
+      <td><code>Category</code>, <code>Tag</code></td>
+      <td><span style="background:#f1f5f9;color:#475569;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">DB_ONLY</span></td>
+      <td>Simple lookup tables, ForeignKey and M2M relations</td>
+    </tr>
+    <tr>
+      <td><code>Product</code></td>
+      <td><span style="background:#dbeafe;color:#1d4ed8;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">DUAL</span></td>
+      <td>Nightly Celery re-index, full-text ES search with DB fallback, status badges</td>
+    </tr>
+    <tr>
+      <td><code>Customer</code>, <code>Order</code></td>
+      <td><span style="background:#f1f5f9;color:#475569;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">DB_ONLY</span></td>
+      <td>Relational data, ForeignKey with autocomplete, range filters</td>
+    </tr>
+    <tr>
+      <td><code>SearchLog</code></td>
+      <td><span style="background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">ES_ONLY</span></td>
+      <td>ES-only model (<code>managed=False</code>), high-frequency write pattern</td>
+    </tr>
+    <tr>
+      <td><code>AuditLog</code></td>
+      <td><span style="background:#f1f5f9;color:#475569;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">DB_ONLY</span></td>
+      <td>DSGVO retention: <code>data_retention_days=90</code></td>
+    </tr>
+    <tr>
+      <td><code>Showcase</code></td>
+      <td><span style="background:#f1f5f9;color:#475569;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">DB_ONLY</span></td>
+      <td>All 30 field types in one model, tabs, rows, WYSIWYG, phone, color</td>
+    </tr>
+  </table>
+
+  <h2 id="demo-seed">🌱 Seed Command</h2>
+  <p>The <code>seed_demo</code> management command populates the database with realistic demo data in seconds.</p>
+  <pre><code>python manage.py seed_demo          # default: 20 products, 10 customers, 5 orders
+python manage.py seed_demo --no-index  # skip ES indexing (no ES cluster needed)</code></pre>
+  <p>The command is idempotent — running it multiple times adds more data without duplicating existing records.</p>
+
+  <!-- ── Migration Guide ───────────────────────────────────────────────────── -->
+  <h2 id="migration-from-v0">🔄 Migration Guide: v0.0.x → v0.1.x</h2>
+  <p>Version 0.1.0 is a significant rewrite. If you are upgrading from an older version, follow these steps.</p>
+
+  <h3>1. Update the package</h3>
+  <pre><code>pip install --upgrade drofji-snapadmin</code></pre>
+
+  <h3>2. Replace model field imports</h3>
+  <pre><code># Before (v0.0.x)
+from snapadmin.fields import CharField, IntegerField  # bare re-exports
+
+# After (v0.1.x)
+from snapadmin import fields as snap
+name = snap.SnapCharField(max_length=200, searchable=True, show_in_list=True)</code></pre>
+
+  <h3>3. Update SnapModel usage</h3>
+  <pre><code># Before (v0.0.x)
+from snapadmin.models import BaseModel
+class Product(BaseModel): ...
+
+# After (v0.1.x)
+from snapadmin.models import SnapModel
+class Product(SnapModel): ...</code></pre>
+
+  <h3>4. Admin registration</h3>
+  <pre><code># After (v0.1.x) — add to your app's admin.py:
+from snapadmin.models import SnapModel
+SnapModel.register_all_admins()  # registers all SnapModel subclasses</code></pre>
+
+  <h3>5. New settings</h3>
+  <pre><code># settings.py additions for v0.1.x:
+SNAPADMIN_REST_API_ENABLED = True    # default True
+SNAPADMIN_GRAPHQL_ENABLED  = True    # default True
+SNAPADMIN_SWAGGER_ENABLED  = True    # default True
+ELASTICSEARCH_ENABLED      = False   # default False — enable only with ES cluster</code></pre>
+
+  <div class="callout callout-success">
+    <strong>No data migration needed</strong>
+    SnapAdmin does not add columns or constraints to your existing model tables. The only new table is <code>snapadmin_apitoken</code> (for the token auth feature). Run <code>python manage.py migrate</code> after upgrading.
+  </div>
+
   <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
-    SnapAdmin — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
+    SnapAdmin v0.1.0a2 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
   </div>
 
 </main>
