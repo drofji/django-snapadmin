@@ -3,14 +3,28 @@ version: "3.9"
 # ─────────────────────────────────────────────────────────────────────────────
 # SnapAdmin — Docker Compose Stack
 #
+# Default stack (no flags):
+#   docker compose up --build
+#   Starts: db, redis, app, worker, beat
+#   ELASTICSEARCH_ENABLED defaults to False in .env (no ES overhead)
+#
+# With Elasticsearch (full search features):
+#   docker compose --profile es up --build
+#   Starts: everything above + elasticsearch
+#   Set ELASTICSEARCH_ENABLED=True in your .env before running
+#
+# With Kibana (ES visualisation, dev only):
+#   docker compose --profile es --profile dev up --build
+#   Starts: everything above + kibana
+#
 # Services:
 #   db            PostgreSQL 16
 #   redis         Redis 7 (Celery broker + cache)
 #   app           Django via Gunicorn
 #   worker        Celery worker (background tasks)
 #   beat          Celery Beat scheduler (cron jobs)
-#   elasticsearch Elasticsearch 8 (optional search)
-#   kibana        Kibana (ES visualisation, dev only)
+#   elasticsearch Elasticsearch 8 (profile: es)
+#   kibana        Kibana (profile: dev)
 # ─────────────────────────────────────────────────────────────────────────────
 
 x-app-common: &app-common
@@ -22,8 +36,9 @@ x-app-common: &app-common
     DJANGO_SETTINGS_MODULE: sandbox.settings
     POSTGRES_HOST: db
     REDIS_URL: redis://redis:6379/0
+    # ELASTICSEARCH_URL is set here so app can reach ES when profile is active.
+    # ELASTICSEARCH_ENABLED comes from .env — set to True only when running --profile es.
     ELASTICSEARCH_URL: http://elasticsearch:9200
-    ELASTICSEARCH_ENABLED: "True"
     JSON_LOGS: "True"
   depends_on:
     db:
@@ -100,6 +115,8 @@ services:
       - app
 
   # ── Celery Beat (Scheduler) ─────────────────────────────────────────────────
+  # Uses Django DB-backed scheduler (django_celery_beat) so admins can inspect
+  # and modify the schedule from the Django admin UI.
   beat:
     <<: *app-common
     command: celery -A sandbox beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
@@ -108,9 +125,13 @@ services:
       - app
 
   # ── Elasticsearch ───────────────────────────────────────────────────────────
+  # Optional — only starts when running: docker compose --profile es up
+  # Also set ELASTICSEARCH_ENABLED=True in your .env file.
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
     restart: unless-stopped
+    profiles:
+      - es
     environment:
       discovery.type: single-node
       ES_JAVA_OPTS: "-Xms512m -Xmx512m"
@@ -126,17 +147,18 @@ services:
       retries: 10
 
   # ── Kibana (dev tool — optional) ────────────────────────────────────────────
+  # Only starts when: docker compose --profile es --profile dev up
   kibana:
     image: docker.elastic.co/kibana/kibana:8.13.0
     restart: unless-stopped
+    profiles:
+      - dev
     environment:
       ELASTICSEARCH_HOSTS: http://elasticsearch:9200
     ports:
       - "5601:5601"
     depends_on:
       - elasticsearch
-    profiles:
-      - dev # Only starts when: docker compose --profile dev up
 
 volumes:
   postgres_data:

@@ -250,6 +250,18 @@ docker compose up --build
 - **REST API Docs**: http://localhost:8000/api/docs/
 - **GraphQL API**: http://localhost:8000/api/graphql/
 
+**With Elasticsearch** (optional, adds ~512 MB RAM):
+```bash
+# 1. Enable in .env
+echo "ELASTICSEARCH_ENABLED=True" >> .env
+
+# 2. Start with ES profile
+docker compose --profile es up --build
+
+# 3. Also add Kibana for visualisation
+docker compose --profile es --profile dev up --build
+```
+
 ---
 
 ## 💻 Local Development Setup

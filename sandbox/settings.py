@@ -46,6 +46,10 @@ INSTALLED_APPS = [
     'rangefilter',                  # REQUIRED
     'snapadmin',                    # REQUIRED
 
+    # Celery result/beat storage (Django DB backend)
+    'django_celery_beat',            # Celery Beat admin + DB-backed schedule
+    'django_celery_results',         # Store task results in Django DB
+
     # Other modules
     'extra_settings',               # Optional
 
