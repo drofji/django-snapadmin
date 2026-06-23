@@ -379,27 +379,66 @@ reindex_products_to_elasticsearch.delay()</code></pre>
 
   <!-- ── Celery ────────────────────────────────────────────────────────────── -->
   <h2 id="celery">⚙️ Celery &amp; Periodic Tasks</h2>
-  <p>SnapAdmin ships built-in Celery tasks. Configure a Celery app in your project to use them.</p>
+  <p>SnapAdmin ships built-in Celery tasks for background indexing, token cleanup, and DSGVO data retention. Wire them up with Celery Beat to get a fully automated backend in minutes.</p>
 
   <h3>Built-in Tasks</h3>
   <table>
-    <tr><th>Task</th><th>Description</th></tr>
-    <tr><td><code>api.tasks.purge_expired_tokens</code></td><td>Delete all <code>APIToken</code> records past their expiration date</td></tr>
-    <tr><td><code>demo.tasks.reindex_products_to_elasticsearch</code></td><td>Re-index all products to the Elasticsearch index (demo app)</td></tr>
-    <tr><td><code>demo.tasks.generate_daily_stats</code></td><td>Compute and log daily business metrics (demo app)</td></tr>
+    <tr><th>Task</th><th>Default Schedule</th><th>Description</th></tr>
+    <tr><td><code>api.tasks.purge_expired_tokens</code></td><td>Daily 3am</td><td>Delete all <code>APIToken</code> records past their expiration date</td></tr>
+    <tr><td><code>api.tasks.purge_expired_data</code></td><td>Daily 1am</td><td>DSGVO/GDPR — auto-delete records older than <code>data_retention_days</code> on each SnapModel</td></tr>
+    <tr><td><code>demo.tasks.reindex_products_to_elasticsearch</code></td><td>Daily midnight</td><td>Re-index all products to Elasticsearch (DUAL mode demo)</td></tr>
+    <tr><td><code>demo.tasks.generate_daily_stats</code></td><td>Daily 2am</td><td>Compute and log daily business metrics (demo app)</td></tr>
   </table>
 
-  <h3>Celery Setup (sandbox)</h3>
-  <pre><code># sandbox/celery.py
+  <h3>Celery Setup</h3>
+  <pre><code># myproject/celery.py
 from celery import Celery
 
-app = Celery("sandbox")
+app = Celery("myproject")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()</code></pre>
 
-  <pre><code># settings.py
+  <h3>Schedule All Tasks (Celery Beat)</h3>
+  <p>Add the following to <code>settings.py</code> to activate all background tasks. The dashboard will display them automatically.</p>
+  <pre><code>from celery.schedules import crontab
+
 CELERY_BROKER_URL = "redis://localhost:6379/0"
-CELERY_RESULT_BACKEND = "redis://localhost:6379/0"</code></pre>
+CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
+
+CELERY_BEAT_SCHEDULE = {
+    "reindex-products-to-es": {
+        "task": "demo.tasks.reindex_products_to_elasticsearch",
+        "schedule": crontab(hour=0, minute=0),   # daily midnight
+        "description": "Sync Product records (DUAL mode) to Elasticsearch",
+    },
+    "purge-expired-data": {
+        "task": "api.tasks.purge_expired_data",
+        "schedule": crontab(hour=1, minute=0),   # daily 1am
+        "description": "DSGVO — delete records older than data_retention_days",
+    },
+    "generate-daily-stats": {
+        "task": "demo.tasks.generate_daily_stats",
+        "schedule": crontab(hour=2, minute=0),   # daily 2am
+        "description": "Daily business stats",
+    },
+    "purge-expired-tokens": {
+        "task": "api.tasks.purge_expired_tokens",
+        "schedule": crontab(hour=3, minute=0),   # daily 3am
+        "description": "Remove expired API tokens",
+    },
+}</code></pre>
+
+  <div class="callout callout-success">
+    <strong>Dashboard integration</strong>
+    Every entry in <code>CELERY_BEAT_SCHEDULE</code> that includes a <code>"description"</code> key is automatically shown in the SnapAdmin Dashboard under <em>Scheduled Cron Jobs</em>.
+  </div>
+
+  <h3>Running Celery in Docker</h3>
+  <pre><code># docker-compose.yml services:
+worker:
+  command: celery -A sandbox worker -l INFO
+beat:
+  command: celery -A sandbox beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler</code></pre>
 
   <!-- ── Structured Logging ────────────────────────────────────────────────── -->
   <h2 id="logging">🪵 Structured Logging</h2>

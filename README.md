@@ -8,6 +8,44 @@
 
 ---
 
+## ⚡ The Core Idea — 3 Steps, Full Stack
+
+Define a model. Configure settings. Everything works.
+
+```python
+# 1. Define a model
+from snapadmin import fields as snap, models as snap_models
+
+class Product(snap_models.SnapModel):
+    name    = snap.SnapCharField(max_length=200, searchable=True, show_in_list=True)
+    price   = snap.SnapDecimalField(max_digits=10, decimal_places=2, filterable=True)
+    available = snap.SnapBooleanField(default=True, filterable=True)
+
+    # 2. Pick an Elasticsearch mode
+    es_storage_mode = snap_models.EsStorageMode.DUAL  # DB + ES in sync
+    data_retention_days = 365  # 3. DSGVO: auto-delete after 1 year
+```
+
+That's it. You instantly get:
+
+| What | How |
+|------|-----|
+| Django Admin | Auto-registered, filtered, searchable — no `admin.py` needed |
+| REST API | Full CRUD at `/api/product/` with Swagger docs |
+| GraphQL | Dynamic schema at `/api/graphql/` |
+| ES Search | Celery Beat syncs DB → Elasticsearch nightly |
+| DSGVO Cleanup | `purge_expired_data` task auto-runs; or `manage.py purge_expired_data` |
+
+### Elasticsearch Storage Modes
+
+| Mode | Where data lives | When to use |
+|------|-----------------|-------------|
+| `DB_ONLY` (default) | PostgreSQL only | Any model where search speed isn't critical |
+| `DUAL` | PostgreSQL + Elasticsearch | Full-text search on large product/article catalogs |
+| `ES_ONLY` | Elasticsearch only | High-frequency write logs, analytics events |
+
+---
+
 ## 📦 SnapAdmin Package Features
 
 The core `snapadmin` package provides everything you need to bootstrap your project's admin and API:
