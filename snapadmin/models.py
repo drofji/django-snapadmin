@@ -260,7 +260,10 @@ class EsManager(models.Manager):
             if not isinstance(qs, EsQuerySet):
                 return EsQuerySet(self.model, [])
             return qs
-        return super().get_queryset()
+        qs = super().get_queryset()
+        if not qs.ordered:
+            qs = qs.order_by("-pk")
+        return qs
       
 
 class DjangoAdminClassAttributeEnum(str, Enum):
@@ -367,6 +370,7 @@ class SnapModel(models.Model):
 
     class Meta:
         abstract = True
+        ordering = ["-pk"]
 
     @classmethod
     def get_es_index_name(cls):
