@@ -176,12 +176,35 @@ cd django-snapadmin
 cp dist.env .env
 docker compose up --build</code></pre>
 
-  <h3>With Traefik (production-like routing)</h3>
-  <p>Use the Traefik overlay to access the app at <code>http://snapadmin.localhost/</code> without a port number:</p>
-  <pre><code>docker compose -f docker-compose.yml -f docker-compose.traefik.yml up --build
+  <h3>With Traefik — Local Development (HTTP)</h3>
+  <p>Access the app at <code>http://snapadmin.localhost/</code> with a BasicAuth-protected dashboard:</p>
+  <pre><code>docker compose -f docker-compose.yml -f docker-compose.traefik.local.yml up --build
 
-# App available at: http://snapadmin.localhost/admin/
-# Traefik dashboard: http://localhost:8080/</code></pre>
+# App:              http://snapadmin.localhost/admin/
+# Traefik dashboard: http://traefik.localhost/  (admin / changeme)</code></pre>
+
+  <p>On Windows, add to <code>C:\Windows\System32\drivers\etc\hosts</code>:</p>
+  <pre><code>127.0.0.1 snapadmin.localhost traefik.localhost</code></pre>
+
+  <h3>With Traefik — Production (HTTPS + Let's Encrypt)</h3>
+  <p>Automatic TLS certificates for your custom domain. Set in <code>.env</code>:</p>
+  <pre><code>TRAEFIK_DOMAIN=admin.mycompany.com
+TRAEFIK_ACME_EMAIL=your@email.com
+TRAEFIK_DASHBOARD_CREDENTIALS=admin:$$apr1$$...   # see dist.env for generation
+ALLOWED_HOSTS=admin.mycompany.com
+DEBUG=False</code></pre>
+
+  <p>Then start:</p>
+  <pre><code>docker compose -f docker-compose.yml -f docker-compose.traefik.prod.yml up -d
+
+# App:               https://admin.mycompany.com/admin/
+# Traefik dashboard:  https://traefik.admin.mycompany.com/  (BasicAuth)
+# HTTP → HTTPS redirect is automatic for all routes</code></pre>
+
+  <h4>Generating Dashboard Credentials</h4>
+  <pre><code># Requires apache2-utils (apt) or httpd-tools (yum)
+echo $(htpasswd -nb admin yourpassword) | sed -e 's/\$/\$\$/g'
+# Paste result into TRAEFIK_DASHBOARD_CREDENTIALS in .env</code></pre>
 
   <h3>Manual / Local Setup</h3>
   <pre><code>git clone https://github.com/drofji/django-snapadmin.git

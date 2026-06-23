@@ -1,17 +1,18 @@
 version: "3.9"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SnapAdmin — Traefik reverse proxy overlay
+# SnapAdmin — Traefik reverse proxy overlay (simple local dev, no auth)
 #
-# Adds Traefik as a local HTTPS-capable reverse proxy with automatic
-# self-signed certificates. Useful for testing production-like URL routing.
+# Kept for backward compatibility. Prefer the split overlays instead:
+#   docker-compose.traefik.local.yml — local dev with BasicAuth dashboard
+#   docker-compose.traefik.prod.yml  — production with HTTPS + Let's Encrypt
 #
 # Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up --build
 #
 # After startup:
 #   http://snapadmin.localhost/       → Django admin / app
-#   http://traefik.localhost:8080/    → Traefik dashboard
+#   http://localhost:8080/            → Traefik dashboard (open, no auth)
 #
 # Requirements:
 #   - No other process listening on port 80

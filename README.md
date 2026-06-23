@@ -225,6 +225,11 @@ Copy `dist.env` to `.env` and configure:
 | `ELASTICSEARCH_URL` | `http://elasticsearch:9200` | Elasticsearch cluster URL |
 | `ELASTICSEARCH_ENABLED` | `False` | Enable ES integration; when `False` all models use `DB_ONLY` |
 | `SNAPADMIN_AUTO_SEED` | `False` | Auto-run `seed_demo` on startup (demo only) |
+| `TRAEFIK_DOMAIN` | `yourdomain.com` | Production domain for `docker-compose.traefik.prod.yml` |
+| `TRAEFIK_ACME_EMAIL` | — | Email for Let's Encrypt certificate registration |
+| `TRAEFIK_DASHBOARD_USER` | `admin` | Reference username (see `TRAEFIK_DASHBOARD_CREDENTIALS`) |
+| `TRAEFIK_DASHBOARD_PASSWORD` | `changeme` | Reference password (see `TRAEFIK_DASHBOARD_CREDENTIALS`) |
+| `TRAEFIK_DASHBOARD_CREDENTIALS` | `admin:$$apr1$$...` | Dashboard BasicAuth in htpasswd format |
 
 ---
 
@@ -262,6 +267,65 @@ docker compose --profile es up --build
 
 # 3. Also add Kibana for visualisation
 docker compose --profile es --profile dev up --build
+```
+
+---
+
+## 🌐 Running with Traefik
+
+Two Traefik overlay files are provided for routing requests through a reverse proxy.
+
+### Local development (HTTP)
+
+Access the app at `http://snapadmin.localhost/` without a port number:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.traefik.local.yml up --build
+```
+
+| URL | Service |
+|-----|---------|
+| `http://snapadmin.localhost/admin/` | Django admin |
+| `http://traefik.localhost/` | Traefik dashboard (BasicAuth) |
+
+On Windows, add to `C:\Windows\System32\drivers\etc\hosts`:
+```
+127.0.0.1 snapadmin.localhost traefik.localhost
+```
+
+### Production (HTTPS + Let's Encrypt)
+
+For production with automatic TLS certificates, set these values in `.env`:
+
+```env
+TRAEFIK_DOMAIN=admin.mycompany.com
+TRAEFIK_ACME_EMAIL=your@email.com
+TRAEFIK_DASHBOARD_CREDENTIALS=admin:$$apr1$$...   # see dist.env for generation instructions
+ALLOWED_HOSTS=admin.mycompany.com
+DEBUG=False
+```
+
+Then start the production overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.traefik.prod.yml up -d
+```
+
+| URL | Service |
+|-----|---------|
+| `https://admin.mycompany.com/admin/` | Django admin (auto-TLS) |
+| `https://traefik.admin.mycompany.com/` | Traefik dashboard (BasicAuth) |
+
+All HTTP traffic is automatically redirected to HTTPS.
+
+### Dashboard credentials
+
+The default credentials in `dist.env` are `admin` / `changeme`. To change them:
+
+```bash
+# Generate htpasswd string and escape $ for Docker Compose
+echo $(htpasswd -nb newuser newpassword) | sed -e 's/\$/\$\$/g'
+# Paste result into TRAEFIK_DASHBOARD_CREDENTIALS in .env
 ```
 
 ---

@@ -1,0 +1,85 @@
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SnapAdmin — Traefik overlay for production (HTTPS + Let's Encrypt)
+#
+# Routes https://${TRAEFIK_DOMAIN}/ → app:8000 with auto-TLS
+# Traefik dashboard at https://traefik.${TRAEFIK_DOMAIN}/ (BasicAuth protected)
+# All HTTP traffic redirected to HTTPS automatically.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.traefik.prod.yml up -d
+#
+# Requirements:
+#   - Ports 80 and 443 open and reachable from the internet
+#   - DNS: ${TRAEFIK_DOMAIN} and traefik.${TRAEFIK_DOMAIN} must resolve to this server
+#   - Set in .env:
+#       TRAEFIK_DOMAIN=admin.mycompany.com
+#       TRAEFIK_ACME_EMAIL=your@email.com
+#       TRAEFIK_DASHBOARD_CREDENTIALS=admin:$$hashed_password$$...
+#       ALLOWED_HOSTS=${TRAEFIK_DOMAIN}
+#       DEBUG=False
+#   - Generate TRAEFIK_DASHBOARD_CREDENTIALS:
+#       echo $(htpasswd -nb admin yourpassword) | sed -e 's/\$/\$\$/g'
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Traefik reverse proxy ───────────────────────────────────────────────────
+  traefik:
+    image: traefik:v3.0
+    restart: unless-stopped
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      # Let's Encrypt ACME via HTTP-01 challenge
+      - "--certificatesresolvers.letsencrypt.acme.email=${TRAEFIK_ACME_EMAIL}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=web"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik_letsencrypt:/letsencrypt
+    labels:
+      - "traefik.enable=true"
+      # Dashboard — HTTPS at traefik.${TRAEFIK_DOMAIN}
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.${TRAEFIK_DOMAIN}`)"
+      - "traefik.http.routers.dashboard.entrypoints=websecure"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.middlewares=dashboard-auth"
+      # BasicAuth — set TRAEFIK_DASHBOARD_CREDENTIALS in .env
+      - "traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_CREDENTIALS}"
+      # Global HTTP → HTTPS redirect
+      - "traefik.http.routers.http-catchall.rule=HostRegexp(`{host:.+}`)"
+      - "traefik.http.routers.http-catchall.entrypoints=web"
+      - "traefik.http.routers.http-catchall.middlewares=redirect-to-https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
+
+  # ── App — routed through Traefik via HTTPS ──────────────────────────────────
+  app:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.snapadmin.rule=Host(`${TRAEFIK_DOMAIN}`)"
+      - "traefik.http.routers.snapadmin.entrypoints=websecure"
+      - "traefik.http.routers.snapadmin.tls.certresolver=letsencrypt"
+      - "traefik.http.services.snapadmin.loadbalancer.server.port=8000"
+    ports: []  # Traefik handles routing; no direct port mapping needed
+
+  # ── Worker and Beat — internal only, not exposed via Traefik ────────────────
+  worker:
+    labels:
+      - "traefik.enable=false"
+
+  beat:
+    labels:
+      - "traefik.enable=false"
+
+volumes:
+  traefik_letsencrypt:
