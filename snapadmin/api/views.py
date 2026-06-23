@@ -4,8 +4,6 @@ snapadmin/api/views.py
 SnapAdmin REST API views.
 """
 
-import logging
-
 from django.apps import apps
 from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.filters import OrderingFilter, SearchFilter
@@ -22,8 +20,6 @@ from snapadmin.api.serializers import (
     APITokenSerializer,
     get_serializer_for_model,
 )
-
-logger = logging.getLogger("snapadmin.api.views")
 
 # Cache for model field introspection results to avoid repeated _meta.get_fields() calls
 _model_field_cache = {}

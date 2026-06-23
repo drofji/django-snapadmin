@@ -1,5 +1,4 @@
 
-import logging
 from django.db import connections
 from django.db.utils import OperationalError
 from django.conf import settings
@@ -7,8 +6,6 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
 from drf_spectacular.utils import extend_schema
-
-logger = logging.getLogger("snapadmin.api.health")
 
 class HealthCheckView(APIView):
     """
