@@ -8,12 +8,13 @@ Includes:
   - Daily stats snapshot generation (demonstrates DB interaction with Celery Beat)
 """
 
-import logging
 from datetime import date
 
 from celery import shared_task
 
-logger = logging.getLogger("snapadmin.demo.tasks")
+from snapadmin.logging_config import get_logger
+
+logger = get_logger("snapadmin.demo.tasks")
 
 
 @shared_task(bind=True, name="demo.tasks.reindex_products_to_elasticsearch")

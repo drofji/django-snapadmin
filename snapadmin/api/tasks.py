@@ -4,13 +4,14 @@ snapadmin/api/tasks.py
 Celery background tasks for the API module.
 """
 
-import logging
 from datetime import timedelta
 
 from celery import shared_task
 from django.utils import timezone
 
-logger = logging.getLogger("snapadmin.api.tasks")
+from snapadmin.logging_config import get_logger
+
+logger = get_logger("snapadmin.api.tasks")
 
 
 @shared_task(bind=True, name="api.tasks.purge_expired_tokens")
