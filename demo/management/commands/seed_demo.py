@@ -14,14 +14,15 @@ when SNAPADMIN_AUTO_SEED=True is set in the environment.
 """
 
 import random
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import User
-from django.core.management.base import BaseCommand, CommandError
+from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from demo.models import Customer, Order, Product, SearchLog
+from demo.models import AuditLog, Category, Customer, Order, Product, SearchLog, Tag
 
 
 # ─── Sample data pools ───────────────────────────────────────────────────────
@@ -52,15 +53,34 @@ ORIGINS = ["status_a", "status_b", "status_c"]
 
 EMAIL_DOMAINS = ["example.com", "demo.org", "test.net", "mail.io"]
 
+CATEGORIES = [
+    ("Electronics", "electronics"),
+    ("Accessories", "accessories"),
+    ("Audio", "audio"),
+    ("Storage", "storage"),
+    ("Ergonomics", "ergonomics"),
+]
+
+TAGS = ["sale", "new", "featured", "bundle", "limited", "bestseller", "eco", "wireless", "usb-c", "pro"]
+
+AUDIT_ACTIONS = [
+    "user.login", "user.logout", "product.created", "product.updated",
+    "order.placed", "order.cancelled", "customer.registered",
+    "api_token.created", "api_token.revoked", "export.csv",
+]
+
 
 class Command(BaseCommand):
     """
     Populate the database with realistic demo data covering all SnapAdmin features.
 
     Seeded objects:
-      • Products   — various prices, availability flags, for ES indexing
-      • Customers  — different origins (badge demo) and active states
-      • Orders     — linked to random customers, for FK/filter demo
+      • Categories  — 5 product categories
+      • Tags        — 10 tags for filtering/grouping
+      • Products    — linked to categories and tags, varied prices and availability
+      • Customers   — different origins (badge demo) and active states
+      • Orders      — linked to random customers, for FK/filter demo
+      • AuditLogs   — action history with timestamps for GDPR retention demo
 
     Also creates:
       • A default superuser (admin / admin) if none exists
@@ -102,19 +122,25 @@ class Command(BaseCommand):
             if flush:
                 self._flush()
 
-            products  = self._seed_products(count)
-            customers = self._seed_customers(count)
+            categories  = self._seed_categories()
+            tags        = self._seed_tags()
+            products    = self._seed_products(count, categories, tags)
+            customers   = self._seed_customers(count)
             search_logs = self._seed_search_logs(count)
-            orders    = self._seed_orders(customers, products, count)
-            admin     = self._ensure_superuser()
-            token     = self._ensure_api_token(admin)
+            orders      = self._seed_orders(customers, products, count)
+            audit_logs  = self._seed_audit_logs(count)
+            admin       = self._ensure_superuser()
+            token       = self._ensure_api_token(admin)
 
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS("✅  Seeding complete!"))
-        self.stdout.write(f"   Products  : {len(products)}")
-        self.stdout.write(f"   Customers : {len(customers)}")
-        self.stdout.write(f"   Orders    : {len(orders)}")
-        self.stdout.write(f"   SearchLogs: {len(search_logs)}")
+        self.stdout.write(f"   Categories : {len(categories)}")
+        self.stdout.write(f"   Tags       : {len(tags)}")
+        self.stdout.write(f"   Products   : {len(products)}")
+        self.stdout.write(f"   Customers  : {len(customers)}")
+        self.stdout.write(f"   Orders     : {len(orders)}")
+        self.stdout.write(f"   SearchLogs : {len(search_logs)}")
+        self.stdout.write(f"   AuditLogs  : {len(audit_logs)}")
         self.stdout.write("")
         self.stdout.write(f"   Admin URL : http://localhost:8000/admin/")
         self.stdout.write(f"   Username  : admin")
@@ -133,17 +159,37 @@ class Command(BaseCommand):
         """Delete all demo data."""
         self.stdout.write("   Flushing existing demo data…")
         Order.objects.all().delete()
+        AuditLog.objects.all().delete()
         Customer.objects.all().delete()
         Product.objects.all().delete()
+        Category.objects.all().delete()
+        Tag.objects.all().delete()
         try:
             SearchLog.objects.all().delete()
         except Exception:
-            # Table might not exist in DB for ES_ONLY
             pass
         self.stdout.write("   Done.")
 
-    def _seed_products(self, count: int) -> list:
-        """Create Product records with varied names, prices, and availability."""
+    def _seed_categories(self) -> list:
+        """Create Category records if they don't already exist."""
+        self.stdout.write("   Creating categories…")
+        created = []
+        for name, slug in CATEGORIES:
+            cat, is_new = Category.objects.get_or_create(slug=slug, defaults={"name": name, "is_active": True})
+            created.append(cat)
+        return created
+
+    def _seed_tags(self) -> list:
+        """Create Tag records if they don't already exist."""
+        self.stdout.write("   Creating tags…")
+        created = []
+        for name in TAGS:
+            tag, _ = Tag.objects.get_or_create(name=name)
+            created.append(tag)
+        return created
+
+    def _seed_products(self, count: int, categories: list, tags: list) -> list:
+        """Create Product records linked to random categories and tags."""
         self.stdout.write("   Creating products…")
         products = []
         for i in range(count):
@@ -152,11 +198,20 @@ class Command(BaseCommand):
                 name = f"{name} (v{i // len(PRODUCT_NAMES) + 1})"
             price     = Decimal(str(round(random.uniform(9.99, 499.99), 2)))
             available = random.random() > 0.2  # 80% available
+            category  = random.choice(categories) if categories else None
 
-            product = Product(name=name, price=price, available=available)
+            product = Product(name=name, price=price, available=available, category=category)
             products.append(product)
 
-        return Product.objects.bulk_create(products, ignore_conflicts=True)
+        created = Product.objects.bulk_create(products, ignore_conflicts=True)
+
+        # Assign random tags after bulk_create (M2M requires PKs)
+        if tags:
+            db_products = list(Product.objects.order_by("-pk")[:count])
+            for product in db_products:
+                product.tags.set(random.sample(tags, k=random.randint(1, 3)))
+
+        return created
 
     def _seed_customers(self, count: int) -> list:
         """Create Customer records with varied origins and active states."""
@@ -189,7 +244,7 @@ class Command(BaseCommand):
             query = random.choice(queries)
             count_res = random.randint(0, 100)
             log = SearchLog(query=query, results_count=count_res)
-            log.save()  # This will save only to ES due to ES_ONLY mode
+            log.save()
             logs.append(log)
         return logs
 
@@ -200,7 +255,6 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("   ⚠  No customers/products — skipping orders."))
             return []
 
-        # Re-query to get PKs after bulk_create
         db_customers = list(Customer.objects.all()[:count])
         orders = []
         for i in range(count):
@@ -209,6 +263,26 @@ class Command(BaseCommand):
             orders.append(Order(customer=customer, total=total))
 
         return Order.objects.bulk_create(orders)
+
+    def _seed_audit_logs(self, count: int) -> list:
+        """Create AuditLog records spread over the last 180 days (shows GDPR retention boundary)."""
+        self.stdout.write("   Creating audit logs…")
+        logs = []
+        now = timezone.now()
+        emails = [f"user{i}@example.com" for i in range(10)]
+        for i in range(count):
+            # spread timestamps over 180 days so some fall within and some outside the 90-day retention window
+            days_ago = random.randint(0, 180)
+            logs.append(AuditLog(
+                action=random.choice(AUDIT_ACTIONS),
+                user_email=random.choice(emails),
+            ))
+        created = AuditLog.objects.bulk_create(logs)
+        # Backdate created_at using direct update (auto_now_add bypasses normal assignment)
+        for i, obj in enumerate(AuditLog.objects.order_by("-pk")[:count]):
+            days_ago = random.randint(0, 180)
+            AuditLog.objects.filter(pk=obj.pk).update(created_at=now - timedelta(days=days_ago))
+        return created
 
     def _ensure_superuser(self) -> User:
         """Create a default superuser if none exists."""
@@ -236,10 +310,7 @@ class Command(BaseCommand):
         return token
 
     def _index_to_elasticsearch(self, products: list):
-        """
-        Attempt to index products to Elasticsearch.
-        Silently skips when ES is unavailable.
-        """
+        """Attempt to index products to Elasticsearch. Silently skips when ES is unavailable."""
         from demo.search import index_product, is_es_available
         if not is_es_available():
             self.stdout.write(self.style.WARNING("   ⚠  Elasticsearch not available — skipping index."))

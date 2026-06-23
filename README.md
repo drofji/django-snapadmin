@@ -48,6 +48,64 @@ That's it. You instantly get:
 
 ---
 
+## 👀 What You'll See
+
+After running `docker compose up --build` and visiting `http://localhost:8000/admin/`:
+
+**Django Admin (powered by Unfold)**
+```
+┌────────────────────────────────────────────────────────────┐
+│  SnapAdmin                           🔍 Search...    admin ▾│
+├──────────────┬─────────────────────────────────────────────┤
+│  DEMO APP    │  Products                         + Add     │
+│  Categories  │ ┌──────────────────────────────────────────┐│
+│  Tags        │ │ Name            Price  In Stock  Category ││
+│  Products    │ │ Premium Laptop  $249   ● Active   Audio   ││
+│  Customers   │ │ Ergonomic Mouse $89    ● Active   Access. ││
+│  Orders      │ │ USB-C Hub       $49    ○ Out      Electr. ││
+│  Audit Logs  │ └──────────────────────────────────────────┘│
+│  Showcase    │  Sidebar filters: Price range │ Available   │
+│  SYSTEM      │                   Category    │             │
+│  Dashboard   │                                             │
+└──────────────┴─────────────────────────────────────────────┘
+```
+
+**REST API Docs (Swagger UI)** — `http://localhost:8000/api/docs/`
+```
+GET  /api/product/         List all products (filterable, paginated)
+POST /api/product/         Create a product
+GET  /api/product/{id}/    Retrieve a product
+PUT  /api/product/{id}/    Update a product
+DEL  /api/product/{id}/    Delete a product
+GET  /api/customer/        …same for every SnapModel
+```
+
+**GraphQL Playground** — `http://localhost:8000/api/graphql/`
+```graphql
+query {
+  allProducts(first: 10) {
+    edges { node { id name price available } }
+  }
+}
+```
+
+**System Dashboard** — `http://localhost:8000/admin/snapadmin/dashboard/`
+```
+┌─────────────────────────────────────────────────────────┐
+│  System Dashboard                          v0.1.0a2     │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
+│  │ Product  │ │ Customer │ │  Order   │ │ AuditLog │  │
+│  │  50 rows │ │  50 rows │ │  50 rows │ │  50 rows │  │
+│  │  [dual]  │ │ [db_only]│ │ [db_only]│ │ 90d ret. │  │
+│  └──────────┘ └──────────┘ └──────────┘ └──────────┘  │
+│  Cron Jobs                                              │
+│  reindex_products_to_es   daily at 02:00               │
+│  purge_expired_data        daily at 03:00               │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
 ## 📦 SnapAdmin Package Features
 
 The core `snapadmin` package provides everything you need to bootstrap your project's admin and API:
