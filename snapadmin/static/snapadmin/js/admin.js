@@ -34,24 +34,31 @@
         }
 
         function activateRowClick() {
-            // Target all changelist tables across all apps
-            $(".results table tbody tr, #changelist-form table tbody tr").each(function() {
+            var rowSelector = ".results table tbody tr, #changelist-form table tbody tr";
+            $(rowSelector).each(function() {
                 var $row = $(this);
-                // Look for the primary link (usually in the first header cell or first cell)
-                var $link = $row.find("th a, td.field-id a, td:first-child a").first();
+                // Search in priority order: first th link, then any td link (not just first cell),
+                // excluding add/history/delete action links to avoid wrong destination
+                var $link = $row.find(
+                    "th a[href], " +
+                    "td.field-id a[href], " +
+                    "td:first-child a[href]:not(.deletelink):not(.historylink), " +
+                    "td a[href*='/change/']:first, " +
+                    "td a[href]:not([href$='/add/']):not([href*='/delete/']):first"
+                ).first();
 
-                if ($link.length) {
-                    $row.css('cursor', 'pointer');
-                    $row.off('click').on('click', function(e) {
-                        // Don't trigger if clicking on a checkbox, button, or another link
-                        if ($(e.target).closest('input, button, a, .action-select').length) return;
+                if (!$link.length) return;
 
-                        var url = $link.attr("href");
-                        if (url) {
-                            window.location = url;
-                        }
-                    });
-                }
+                var url = $link.attr("href");
+                if (!url || url === "#") return;
+
+                $row.css('cursor', 'pointer').attr('data-href', url);
+                $row.off('click.snapadmin').on('click.snapadmin', function(e) {
+                    if ($(e.target).closest(
+                        'input[type="checkbox"], input[type="radio"], button, a, .action-select, select'
+                    ).length) return;
+                    window.location.href = url;
+                });
             });
         }
 

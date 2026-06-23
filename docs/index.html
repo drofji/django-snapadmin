@@ -296,17 +296,86 @@ token = APIToken.create_for_user(
 
   <!-- ── Elasticsearch ──────────────────────────────────────────────────────── -->
   <h2 id="elasticsearch">🔍 Elasticsearch Integration</h2>
-  <p>Configure how each model interacts with the search engine via <code>EsStorageMode</code>.</p>
-  <ul>
-    <li><code>DB_ONLY</code>: Standard Django behavior (Default).</li>
-    <li><code>DUAL</code>: Save to DB + ES; fast searching via <code>es_search()</code>.</li>
-    <li><code>ES_ONLY</code>: Data exists only in ES. Ideal for logs/analytics.</li>
-  </ul>
-  <pre><code># Trigger re-indexing from code
-MyModel.es_reindex_all()
+  <p>SnapAdmin supports three Elasticsearch storage modes via <code>EsStorageMode</code>. Choose the mode per model based on your use case.</p>
 
-# Perform optimized search
-results = MyModel.es_search("query string")</code></pre>
+  <h3>Enable Elasticsearch</h3>
+  <p>Add to your <code>settings.py</code>:</p>
+  <pre><code>ELASTICSEARCH_ENABLED = True   # False by default - ES is completely skipped when False
+ELASTICSEARCH_URL = "http://localhost:9200"  # or set via ELASTICSEARCH_URL env var</code></pre>
+
+  <h3>Storage Modes</h3>
+  <table>
+    <tr><th>Mode</th><th>Storage</th><th>When to use</th></tr>
+    <tr>
+      <td><code>DB_ONLY</code></td>
+      <td>PostgreSQL only</td>
+      <td>Default. Standard Django ORM behavior. No ES dependency.</td>
+    </tr>
+    <tr>
+      <td><code>DUAL</code></td>
+      <td>PostgreSQL + Elasticsearch</td>
+      <td>Write to both DB and ES. Use <code>es_search()</code> for fast full-text search, DB for transactions.</td>
+    </tr>
+    <tr>
+      <td><code>ES_ONLY</code></td>
+      <td>Elasticsearch only</td>
+      <td>No DB table. Ideal for logs, events, or analytics data.</td>
+    </tr>
+  </table>
+
+  <h3>Setting the Mode on a Model</h3>
+  <pre><code>from snapadmin.models import SnapModel, EsStorageMode
+
+# DB_ONLY (default - no extra config needed)
+class Article(SnapModel):
+    title = models.CharField(max_length=200)
+    body = models.TextField()
+
+# DUAL - save to PostgreSQL and Elasticsearch, search via ES
+class Product(SnapModel):
+    es_storage_mode = EsStorageMode.DUAL
+    es_index_fields = ["name", "description", "sku"]  # fields to index in ES
+
+    name = models.CharField(max_length=200)
+    description = models.TextField()
+    sku = models.CharField(max_length=50)
+
+# ES_ONLY - no DB table, data lives in Elasticsearch
+class SearchLog(SnapModel):
+    es_storage_mode = EsStorageMode.ES_ONLY
+    es_index_fields = ["query", "user_id", "timestamp"]
+
+    query = models.CharField(max_length=500)
+    user_id = models.IntegerField()
+    timestamp = models.DateTimeField()</code></pre>
+
+  <h3>Querying</h3>
+  <pre><code># DB_ONLY - standard Django ORM
+articles = Article.objects.filter(title__icontains="django")
+
+# DUAL - use es_search() for full-text, ORM for filtering
+results = Product.es_search("wireless headphones")  # returns list of Product instances
+# Or use ORM for exact queries (hits the DB):
+products = Product.objects.filter(sku="ABC-123")
+
+# ES_ONLY - must use es_search()
+logs = SearchLog.es_search("error 404")
+# Reindex all records from DB to ES (DUAL mode):
+Product.es_reindex_all()
+
+# Check ES availability before querying (DUAL/ES_ONLY)
+try:
+    results = Product.es_search("laptop")
+except Exception:
+    results = Product.objects.all()  # fallback to DB</code></pre>
+
+  <h3>Re-indexing (DUAL mode)</h3>
+  <pre><code># Manually trigger a full re-index:
+Product.es_reindex_all()
+
+# Via Celery task (recommended for large datasets):
+from demo.tasks import reindex_products_to_elasticsearch
+reindex_products_to_elasticsearch.delay()</code></pre>
 
   <!-- ── Celery ────────────────────────────────────────────────────────────── -->
   <h2 id="celery">⚙️ Celery &amp; Periodic Tasks</h2>

@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     # SnapAdmin Stack
     'rest_framework',               # REQUIRED
     'drf_spectacular',              # REQUIRED
+    'django_filters',               # REQUIRED
     'graphene_django',              # REQUIRED for GraphQL
     'admin_auto_filters',           # REQUIRED
     'rangefilter',                  # REQUIRED
@@ -183,6 +184,16 @@ SPECTACULAR_SETTINGS = {
 }
 
 # ------------------------------------------------------------------------------
+# CELERY
+# ------------------------------------------------------------------------------
+CELERY_BROKER_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = TIME_ZONE
+
+# ------------------------------------------------------------------------------
 # EXTRA SETTINGS
 # ------------------------------------------------------------------------------
 EXTRA_SETTINGS_ADMIN_APP = "demo"
@@ -273,10 +284,10 @@ UNFOLD = {
         "redirect_after": lambda request: reverse_lazy_lambda("admin:index"),
     },
     "STYLES": [
-        lambda request: static_lambda("css/style.css"),
+        lambda request: static_lambda("snapadmin/css/admin.css"),
     ],
     "SCRIPTS": [
-        lambda request: static_lambda("js/script.js"),
+        lambda request: static_lambda("snapadmin/js/admin.js"),
     ],
     "BORDER_RADIUS": "6px",
     "COLORS": {

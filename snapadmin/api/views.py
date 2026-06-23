@@ -8,12 +8,14 @@ import logging
 
 from django.apps import apps
 from rest_framework import mixins, permissions, status, viewsets
+from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
 
 from snapadmin.api.authentication import APITokenAuthentication, token_has_permission
+from snapadmin.api.filters import SnapAdminFilterBackend
 from snapadmin.models import APIToken, SnapModel
 from snapadmin.api.serializers import (
     APITokenCreateSerializer,
@@ -88,6 +90,7 @@ class APITokenViewSet(
 class DynamicModelViewSet(viewsets.ModelViewSet):
     authentication_classes = [APITokenAuthentication]
     permission_classes = [permissions.IsAuthenticated, TokenModelPermission]
+    filter_backends = [SnapAdminFilterBackend, SearchFilter, OrderingFilter]
 
     def _get_model_class(self):
         app_label  = self.kwargs["app_label"]

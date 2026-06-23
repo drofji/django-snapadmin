@@ -224,3 +224,48 @@ div.fieldBox.flex-container label {
         text-align: center;
     }
 }
+
+/* Unfold: ensure object-tools (Add button) is always visible in changelist header */
+ul.object-tools {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+ul.object-tools li {
+    margin: 0;
+}
+
+ul.object-tools a.addlink,
+ul.object-tools a[href*="/add/"] {
+    display: inline-flex !important;
+    align-items: center;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Improve spacing between border and field content */
+.unfold input[type="text"],
+.unfold input[type="number"],
+.unfold input[type="email"],
+.unfold input[type="url"],
+.unfold input[type="password"],
+.unfold input[type="date"],
+.unfold input[type="datetime-local"],
+.unfold input[type="time"],
+.unfold textarea,
+.unfold select {
+    padding: 8px 12px !important;
+}
+
+/* Constrain wide fields to avoid horizontal overflow */
+.unfold .form-row textarea,
+.unfold .form-row .ck-editor,
+.unfold .form-row .ck-editor__editable {
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
