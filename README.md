@@ -23,7 +23,7 @@ class Product(snap_models.SnapModel):
     price   = snap.SnapDecimalField(max_digits=10, decimal_places=2, filterable=True)
     available = snap.SnapBooleanField(default=True, filterable=True)
 
-    # 2. (Optional) Enable Elasticsearch + DSGVO cleanup
+    # 2. (Optional) Enable Elasticsearch + GDPR cleanup
     # es_storage_mode = snap_models.EsStorageMode.DUAL  # DB + ES in sync
     # data_retention_days = 365  # Auto-delete records older than 1 year
 ```
@@ -36,7 +36,7 @@ That's it. You instantly get:
 | REST API | Full CRUD at `/api/product/` with Swagger docs |
 | GraphQL | Dynamic schema at `/api/graphql/` |
 | ES Search | Optional — enable with `es_storage_mode = EsStorageMode.DUAL` |
-| DSGVO Cleanup | Optional — enable with `data_retention_days` on any model |
+| GDPR Cleanup | Optional — enable with `data_retention_days` on any model |
 
 ### Elasticsearch Storage Modes
 
@@ -65,7 +65,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Token Auth** | Secure, expirable API tokens with granular model-level access control. |
 | **Configurable** | Easily enable/disable REST API, GraphQL, Swagger docs, and search modes via settings. |
 | **Elasticsearch Ready** | Multi-mode storage (`DB_ONLY`, `DUAL`, `ES_ONLY`) for blazing fast search. |
-| **DSGVO/GDPR Retention** | Per-model `data_retention_days` parameter with automatic Celery cleanup task. |
+| **GDPR/DSGVO Data Retention** | Per-model `data_retention_days` parameter with automatic Celery cleanup task. |
 | **Structured Logging** | Integrated `structlog` for readable local logs and JSON logs in production. |
 
 ---
@@ -182,7 +182,7 @@ SNAPADMIN_SWAGGER_ENABLED = True    # Enable/Disable Swagger UI documentation
 ELASTICSEARCH_ENABLED = False       # Toggle ES search engine support
 ```
 
-## DSGVO / GDPR Data Retention
+## GDPR / DSGVO Data Retention
 
 Add automatic record cleanup to any model with two class attributes:
 
