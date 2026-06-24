@@ -492,6 +492,38 @@ docker compose --profile es up --build
 docker compose --profile es --profile dev up --build
 ```
 
+### Building images with automatic retention
+
+For the test/demo image, `scripts/docker_build.sh` builds, tags by build-day, and
+self-prunes so old images never pile up:
+
+```bash
+scripts/docker_build.sh                          # image=snapadmin-test, keep 3 build-days
+IMAGE=myimg scripts/docker_build.sh              # custom image name
+SNAPADMIN_IMAGE_KEEP_DAYS=5 scripts/docker_build.sh   # widen the window
+```
+
+**Retention policy** — *one build per day, keep the last N build-days* (N defaults to 3,
+override via `SNAPADMIN_IMAGE_KEEP_DAYS`):
+
+- **Collapse within a day** — images are tagged `snapadmin-test:YYYY-MM-DD` plus a moving
+  `:latest`. Rebuilding the same calendar day re-points that day's tag at the new image;
+  the superseded build becomes a dangling layer and is reclaimed.
+- **Rolling N-day window** — the last build of each of the N most-recent *build-days* is
+  kept; when an (N+1)-th distinct build-day appears, the oldest day's image is pruned.
+- **History gaps are irrelevant** — "N days" means the last N build-days, not calendar
+  days. Idle days never consume a slot.
+
+> *Example:* builds a month ago, a week ago, yesterday, and today leave exactly **three**
+> images after today's build — one each for *a week ago*, *yesterday*, and *today*; the
+> month-ago image and all superseded same-day builds are gone.
+
+The pruner can also run standalone (e.g. in CI), with a dry-run mode:
+
+```bash
+python -m scripts.docker_retention prune --image snapadmin-test --dry-run
+```
+
 ---
 
 ## 🌐 Running with Traefik

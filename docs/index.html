@@ -221,6 +221,23 @@ python manage.py migrate
 python manage.py seed_demo
 python manage.py runserver</code></pre>
 
+  <h3>Building images with automatic retention</h3>
+  <p>For the test/demo image, <code>scripts/docker_build.sh</code> builds, tags by build-day, and self-prunes so old images never pile up:</p>
+  <pre><code>scripts/docker_build.sh                              # image=snapadmin-test, keep 3 build-days
+IMAGE=myimg scripts/docker_build.sh                  # custom image name
+SNAPADMIN_IMAGE_KEEP_DAYS=5 scripts/docker_build.sh  # widen the window</code></pre>
+  <p><strong>Retention policy</strong> — <em>one build per day, keep the last N build-days</em> (N defaults to 3, override via <code>SNAPADMIN_IMAGE_KEEP_DAYS</code>):</p>
+  <ul>
+    <li><strong>Collapse within a day</strong> — images are tagged <code>snapadmin-test:YYYY-MM-DD</code> plus a moving <code>:latest</code>. Rebuilding the same calendar day re-points that day's tag at the new image; the superseded build becomes a dangling layer and is reclaimed.</li>
+    <li><strong>Rolling N-day window</strong> — the last build of each of the N most-recent <em>build-days</em> is kept; when an (N+1)-th distinct build-day appears, the oldest day's image is pruned.</li>
+    <li><strong>History gaps are irrelevant</strong> — "N days" means the last N build-days, not calendar days. Idle days never consume a slot.</li>
+  </ul>
+  <div class="callout callout-info">
+    <strong>Worked example.</strong> Builds a month ago, a week ago, yesterday, and today leave exactly <strong>three</strong> images after today's build — one each for <em>a week ago</em>, <em>yesterday</em>, and <em>today</em>; the month-ago image and all superseded same-day builds are gone.
+  </div>
+  <p>The pruner can also run standalone (e.g. in CI), with a dry-run mode:</p>
+  <pre><code>python -m scripts.docker_retention prune --image snapadmin-test --dry-run</code></pre>
+
   <!-- ── SnapModel ─────────────────────────────────────────────────────────── -->
   <h2 id="snap-model">🏗 SnapModel</h2>
   <p>Inherit from <code>SnapModel</code> to get automatic admin registration and a smart <code>__str__</code>.</p>
