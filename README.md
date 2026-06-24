@@ -281,13 +281,30 @@ When `offline_mode = True`, SnapAdmin injects `snapadmin/js/offline.js` into tha
 model's admin pages only. It then:
 
 - **Caches** the rendered list view into the browser's **IndexedDB** on every visit.
-- **Shows a red offline banner** and repaints the list from cache when the browser
+- **Shows a calm offline banner** and repaints the list from cache when the browser
   goes offline (`navigator.onLine === false`).
 - **Queues mutations** made while offline and **replays them on reconnect**, then
   refreshes the cached snapshot from the server.
 
+### Connectivity awareness for *every* model
+
+A lightweight `connectivity.js` loads on all SnapModel admin pages and prevents
+silent data loss on models that are **not** offline-capable:
+
+- **Warning banner + save guard** — on a non-offline model, going offline shows a red
+  "changes will NOT be saved" banner, **blocks form submission**, and visually disables
+  the Save buttons until the connection returns.
+- **Sidebar badges** — every model link in the left menu is marked so you can see at a
+  glance which models sync offline: a green **sync icon** (it spins while offline) for
+  offline-capable models, and a muted **no-offline icon** (shown while offline) for the
+  rest.
+
+The badge list is served by the `GET /api/offline-models/` endpoint (authenticated),
+with a `localStorage` fallback so badges still render while offline.
+
 No settings, migrations, or extra dependencies are required — it is pure client-side
-behavior gated per model. Models without the flag are unaffected and ship no extra JS.
+behavior gated per model. Models without the flag still get the connectivity warnings
+but ship no caching JS.
 
 ---
 

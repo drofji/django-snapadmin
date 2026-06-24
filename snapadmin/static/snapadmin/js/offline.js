@@ -19,6 +19,27 @@
     var DB_VERSION = 1;
     var ROWS_STORE = "rows";
     var QUEUE_STORE = "queue";
+    // Shared with connectivity.js so the sidebar can badge offline-capable models
+    // even while the browser is offline (no network fetch possible).
+    var LEARNED_KEY = "snapadmin:offline-models";
+
+    // The presence of this script means the current model is offline-capable.
+    // connectivity.js reads this flag to choose the reassuring banner (here) over
+    // the "changes won't be saved" warning, and to skip the form-submit guard.
+    window.SNAPADMIN_OFFLINE_CAPABLE = true;
+
+    // Remember this model key locally so the sidebar can mark it as syncable
+    // on any admin page, including offline.
+    function rememberCapableModel(key) {
+        if (!key) return;
+        try {
+            var stored = JSON.parse(window.localStorage.getItem(LEARNED_KEY) || "[]");
+            if (stored.indexOf(key) === -1) {
+                stored.push(key);
+                window.localStorage.setItem(LEARNED_KEY, JSON.stringify(stored));
+            }
+        } catch (e) { /* localStorage unavailable */ }
+    }
 
     // ---- Model identity -----------------------------------------------------
     // Derive "app_label/model_name" from the admin URL: /admin/<app>/<model>/...
@@ -214,6 +235,7 @@
     // ---- Bootstrap ----------------------------------------------------------
     function init() {
         var key = getModelKey();
+        rememberCapableModel(key);
         if (key && navigator.onLine) {
             // Live page: snapshot the current list for offline use.
             cacheRows(key, scrapeRows()).catch(function () {});

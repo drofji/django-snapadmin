@@ -15,6 +15,7 @@ from drf_spectacular.views import (
 
 from snapadmin.api.views import APITokenViewSet, DynamicModelViewSet, ModelSchemaView
 from snapadmin.api.health import HealthCheckView
+from snapadmin.api.offline import OfflineModelsView
 
 REST_API_ENABLED = getattr(settings, "SNAPADMIN_REST_API_ENABLED", True)
 SWAGGER_ENABLED = getattr(settings, "SNAPADMIN_SWAGGER_ENABLED", True)
@@ -35,6 +36,9 @@ if REST_API_ENABLED:
 
         # Health check
         path("health/", HealthCheckView.as_view(), name="api-health"),
+
+        # Offline-capable model list (consumed by the admin connectivity layer)
+        path("offline-models/", OfflineModelsView.as_view(), name="offline-models"),
 
         # Dynamic model CRUD  ─  list + create
         path(

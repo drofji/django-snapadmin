@@ -574,17 +574,27 @@ python manage.py purge_expired_data --dry-run  # preview only — no deletes</co
     # Cache this model's list view client-side and enable the offline banner
     offline_mode = True</code></pre>
 
-  <h3>What it does</h3>
+  <h3>What it does (offline-capable models)</h3>
   <table>
     <tr><th>Behavior</th><th>Detail</th></tr>
     <tr><td>Cache</td><td>Snapshots the rendered list view into the browser's <strong>IndexedDB</strong> on every visit.</td></tr>
-    <tr><td>Offline banner</td><td>Shows a sticky red banner and repaints the list from cache when <code>navigator.onLine</code> is <code>false</code>.</td></tr>
+    <tr><td>Offline banner</td><td>Shows a calm sticky banner and repaints the list from cache when <code>navigator.onLine</code> is <code>false</code>.</td></tr>
     <tr><td>Reconnect sync</td><td>Queues mutations made while offline and replays them on the <code>online</code> event, then refreshes the cached snapshot.</td></tr>
   </table>
 
+  <h3>Connectivity awareness (every model)</h3>
+  <p>A lightweight <code>connectivity.js</code> loads on all SnapModel admin pages and stops silent data loss on models that are <em>not</em> offline-capable:</p>
+  <table>
+    <tr><th>Behavior</th><th>Detail</th></tr>
+    <tr><td>Warning banner</td><td>On a non-offline model, going offline shows a red <em>"changes will NOT be saved"</em> banner.</td></tr>
+    <tr><td>Save guard</td><td>Form submission is blocked and the Save buttons are visually disabled until the connection returns.</td></tr>
+    <tr><td>Sidebar badges</td><td>Each model link gets a green <strong>sync icon</strong> (spins while offline) if it is offline-capable, or a muted <strong>no-offline icon</strong> (shown while offline) otherwise — so you can see at a glance which records survive a disconnect.</td></tr>
+  </table>
+  <p>The badge list comes from <code>GET /api/offline-models/</code> (authenticated), with a <code>localStorage</code> fallback so badges still render while offline.</p>
+
   <div class="callout callout-info">
     <strong>Zero configuration</strong>
-    No settings, migrations, or extra dependencies. The <code>offline_mode</code> flag is purely client-side and gated per model.
+    No settings, migrations, or extra dependencies. The <code>offline_mode</code> flag is purely client-side and gated per model; non-offline models still get the connectivity warnings but ship no caching JS.
   </div>
 
   <!-- ── Sandbox / Demo ─────────────────────────────────────────────────────── -->
