@@ -312,6 +312,19 @@ class SnapSaveMixin:
                 change_message="\n".join(change_lines),
                 single_object=True,
             )
+            # Remember we already wrote a granular "field: old -> new" entry for
+            # this object so log_change() can suppress Django's generic duplicate.
+            request._snap_logged_change = True
+
+    def log_change(self, request, obj, message):
+        # Django's admin writes its own generic "Changed X." LogEntry after
+        # save_model/save_related. When our save_model already logged the detailed
+        # "field: old -> new" entry, that generic row is a duplicate (same object,
+        # timestamp and user) — skip it. Otherwise fall back to the default entry
+        # so changes we don't diff (e.g. M2M-only edits) still appear in history.
+        if getattr(request, "_snap_logged_change", False):
+            return None
+        return super().log_change(request, obj, message)
 
     def save_related(self, request, form, formsets, change):
         for formset in formsets:
@@ -375,6 +388,21 @@ class SnapModel(models.Model):
     # and the last cached rows are shown; the cache is refreshed and queued changes are
     # synced automatically once the connection is restored.
     offline_mode: bool = False
+
+    # Large-dataset / performance tuning
+    # These map straight onto Django admin's list-view knobs. The defaults match
+    # Django's own, but SnapModel also auto-derives `list_select_related` from the
+    # ForeignKey columns shown in the list view (see register_admin) so related
+    # columns never trigger N+1 queries — no manual configuration required.
+    #
+    # list_per_page         — rows per page in the admin list view.
+    # list_max_show_all     — cap for the "Show all" link (guards huge tables).
+    # show_full_result_count — when False, the admin skips the second, unfiltered
+    #   COUNT(*) it normally runs to display "X total"; on multi-million-row tables
+    #   that full count is the single most expensive query, so disable it there.
+    list_per_page: int = 100
+    list_max_show_all: int = 200
+    show_full_result_count: bool = True
 
     class Meta:
         abstract = True
@@ -693,12 +721,27 @@ class SnapModel(models.Model):
 
         BASE_JS = ["admin/js/vendor/jquery/jquery.js", "admin/js/jquery.init.js", "snapadmin/js/jquery_bridge.js", "snapadmin/js/select2.min.js", "snapadmin/js/admin.js", "snapadmin/js/connectivity.js"]
         BASE_CSS = ["snapadmin/css/select2.min.css", "snapadmin/css/admin.css"]
+        if UNFOLD_INSTALLED:
+            # Unfold-specific overrides are opt-in: only layered on when the
+            # Unfold theme is actually installed. Loaded after admin.css so its
+            # `.unfold`-scoped rules win the cascade.
+            BASE_CSS.append("snapadmin/css/admin-unfold.css")
         extra_js = [cls.js_admin_files] if isinstance(cls.js_admin_files, str) else list(cls.js_admin_files)
         extra_css = [cls.css_admin_files] if isinstance(cls.css_admin_files, str) else list(cls.css_admin_files)
         final_js = list(dict.fromkeys(BASE_JS + extra_js))
         if cls.offline_mode:
             final_js.append("snapadmin/js/offline.js")
         final_css = list(dict.fromkeys(BASE_CSS + extra_css))
+
+        # Auto-derive list_select_related from the ForeignKey columns actually shown
+        # in the list view. Rendering an FK column (or a __str__ that walks it) without
+        # this issues one extra query per row — the classic admin N+1. We only join the
+        # FKs that appear in list_display, so we never pull relations we won't display.
+        fk_field_names = {
+            f.name for f in cls._meta.get_fields()
+            if getattr(f, "many_to_one", False)
+        }
+        list_select_related = [fn for fn in list_display if fn in fk_field_names]
 
         A = DjangoAdminClassAttributeEnum
         admin_attrs = {
@@ -707,6 +750,10 @@ class SnapModel(models.Model):
             A.LIST_FILTER.value: list_filter,
             A.AUTOCOMPLETE_FIELDS.value: autocomplete_fields,
             A.INLINES.value: cls.snap_inlines,
+            "list_select_related": list_select_related or False,
+            "list_per_page": cls.list_per_page,
+            "list_max_show_all": cls.list_max_show_all,
+            "show_full_result_count": cls.show_full_result_count,
             "formatted_id": formatted_id,
             A.MEDIA_CLASS.value: type(A.MEDIA_CLASS.value, (), {A.CSS_MEDIA.value: {A.ALL_MEDIA.value: final_css}, A.JS_MEDIA.value: final_js}),
         }

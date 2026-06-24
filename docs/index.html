@@ -112,6 +112,8 @@
       <li><a href="#admin-registration">Admin Registration</a></li>
       <li><a href="#dsgvo">DSGVO / Data Retention</a></li>
       <li><a href="#offline">Offline Mode</a></li>
+      <li><a href="#theming">Theming &amp; Styles</a></li>
+      <li><a href="#performance">Large-Dataset Performance</a></li>
     </ul>
     <div class="section-label">🌐 API Layer</div>
     <ul>
@@ -596,6 +598,75 @@ python manage.py purge_expired_data --dry-run  # preview only — no deletes</co
     <strong>Zero configuration</strong>
     No settings, migrations, or extra dependencies. The <code>offline_mode</code> flag is purely client-side and gated per model; non-offline models still get the connectivity warnings but ship no caching JS.
   </div>
+
+  <!-- ── Theming & Styles ───────────────────────────────────────────────────── -->
+  <h2 id="theming">🎨 Theming &amp; Styles</h2>
+  <p>SnapAdmin ships its admin styling as two layers, so an install that doesn't use Unfold is never forced to adopt Unfold's assumptions.</p>
+
+  <table>
+    <tr><th>Stylesheet</th><th>Scope</th><th>When it loads</th></tr>
+    <tr>
+      <td><code>snapadmin/css/admin.css</code></td>
+      <td>Theme-agnostic core — field sizing, Select2 widgets, action bar, and the shared <code>:root</code> design tokens</td>
+      <td>Always, on every SnapModel admin page</td>
+    </tr>
+    <tr>
+      <td><code>snapadmin/css/admin-unfold.css</code></td>
+      <td>Unfold-specific overrides — all <code>.unfold</code>-scoped rules, dark-mode borders, and the Add-button visibility fix</td>
+      <td><strong>Only when <code>django-unfold</code> is installed</strong></td>
+    </tr>
+  </table>
+
+  <p>The Unfold layer is opt-in. SnapAdmin appends it automatically — after the core sheet, so its <code>.unfold</code> rules win the cascade — only when Unfold is detected. A plain Django admin install gets the core sheet alone. The shared design tokens (<code>--primary-color</code>, <code>--radius</code>, …) are defined once in the core sheet and referenced by both layers.</p>
+
+  <div class="callout callout-info">
+    <strong>No flag to set</strong>
+    The split keys off whether Unfold is importable, so there is nothing to configure — drop Unfold from <code>INSTALLED_APPS</code> and the Unfold overrides simply stop loading.
+  </div>
+
+  <!-- ── Large-Dataset Performance ──────────────────────────────────────────── -->
+  <h2 id="performance">⚡ Large-Dataset Performance</h2>
+  <p>SnapAdmin keeps the admin and API responsive as tables grow. Most tuning is automatic; the rest is a few per-model knobs.</p>
+
+  <h3>Automatic — no admin N+1</h3>
+  <p>When a model is registered, SnapAdmin inspects the columns shown in the list view and <strong>auto-derives <code>list_select_related</code></strong> from the <code>ForeignKey</code> columns among them. A list view that renders a related column — or a <code>__str__</code> that walks a relation — issues <strong>one joined query</strong> instead of one query per row. Only the FKs you actually display are joined; relations you don't show are never fetched.</p>
+  <p>The auto-generated REST API applies the same treatment to its querysets — <code>select_related()</code> for ForeignKeys and <code>prefetch_related()</code> for many-to-many fields — with the field lists cached per model to keep introspection out of the request hot path.</p>
+
+  <h3>Per-model knobs</h3>
+  <p>Override these class attributes on any <code>SnapModel</code> to tune the admin list view:</p>
+  <pre><code>class AuditLog(snap_models.SnapModel):
+    action = snap.SnapCharField(max_length=100, searchable=True)
+
+    list_per_page = 50              # rows per page (default 100)
+    list_max_show_all = 200         # cap on the "Show all" link
+    show_full_result_count = False  # skip the unfiltered COUNT(*) on huge tables</code></pre>
+
+  <table>
+    <tr><th>Attribute</th><th>Default</th><th>When to change it</th></tr>
+    <tr>
+      <td><code>list_per_page</code></td>
+      <td><code>100</code></td>
+      <td>Lower it for wide rows or heavy list templates.</td>
+    </tr>
+    <tr>
+      <td><code>list_max_show_all</code></td>
+      <td><code>200</code></td>
+      <td>Guards against a "Show all" rendering a million-row table.</td>
+    </tr>
+    <tr>
+      <td><code>show_full_result_count</code></td>
+      <td><code>True</code></td>
+      <td>Set <code>False</code> on very large tables — the admin then skips the second, unfiltered <code>COUNT(*)</code> it runs to display the grand total, which is often the single most expensive query on the page.</td>
+    </tr>
+  </table>
+
+  <div class="callout callout-info">
+    <strong>REST pagination is on by default</strong>
+    The REST API paginates with <code>PageNumberPagination</code> (<code>PAGE_SIZE = 25</code>), so large collections are never serialized in one response. Tune it via the <code>REST_FRAMEWORK</code> setting.
+  </div>
+
+  <h3>Offloading search to Elasticsearch</h3>
+  <p>For <code>DUAL</code> and <code>ES_ONLY</code> models the REST list endpoint serves results directly from Elasticsearch (<code>es_search</code>) rather than the database, moving full-text search and large-result pagination off the primary database. See <a href="#elasticsearch">Elasticsearch Storage Modes</a>.</p>
 
   <!-- ── Sandbox / Demo ─────────────────────────────────────────────────────── -->
   <h2 id="demo-models">📦 Demo App — Model Overview</h2>

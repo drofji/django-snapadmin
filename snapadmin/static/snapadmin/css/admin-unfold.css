@@ -1,0 +1,132 @@
+/* Unfold-specific overrides for snapadmin.
+
+   This stylesheet is opt-in: snapadmin only adds it to a model admin's
+   Media when django-unfold is installed (UNFOLD_INSTALLED). Plain Django
+   admin (or any other theme) gets the theme-agnostic rules in admin.css
+   and is never forced to adopt Unfold's assumptions.
+
+   It is loaded *after* admin.css, so these `.unfold`-scoped rules win
+   their cascade. Design tokens (--primary-color, --radius, ...) live in
+   admin.css :root and are shared with this layer. */
+
+/* Fix field sizing and borders inside the Unfold shell */
+.unfold .vTextField,
+.unfold .vURLField,
+.unfold .vEmailField,
+.unfold .vIntegerField,
+.unfold .vDecimalField,
+.unfold .vTimeField,
+.unfold .vDateField,
+.unfold textarea,
+.unfold select {
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    border: 1px solid #d1d5db !important;
+    border-radius: var(--radius) !important;
+}
+
+/* Force labels above fields. Scope to div.form-row only: tabular inlines
+   render their row as <tr class="form-row">, and forcing flex-column there
+   collapses the <td> cells into a single column. */
+.unfold div.form-row {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    border: 0 !important;
+}
+
+.unfold div.form-row > div {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    box-sizing: border-box !important;
+}
+
+.unfold div.form-row label {
+    display: block !important;
+    padding: 0 0 6px 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    float: none !important;
+    text-align: left !important;
+    font-weight: 600 !important;
+}
+
+/* Dark mode compatibility for borders and backgrounds */
+@media (prefers-color-scheme: dark) {
+    .unfold .vTextField, .unfold select, .unfold textarea {
+        border-color: #374151 !important;
+    }
+}
+
+/* Ensure borders are visible in all admin apps */
+.unfold input[type="text"],
+.unfold input[type="password"],
+.unfold input[type="email"],
+.unfold textarea,
+.unfold select {
+    border: 1px solid #d1d5db !important;
+}
+
+/* Unfold: ensure object-tools (Add button) is always visible in changelist header */
+ul.object-tools {
+    display: flex !important;
+    align-items: center;
+    gap: 8px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+ul.object-tools li {
+    margin: 0;
+}
+
+ul.object-tools a.addlink,
+ul.object-tools a[href*="/add/"] {
+    display: inline-flex !important;
+    align-items: center;
+    visibility: visible !important;
+    opacity: 1 !important;
+}
+
+/* Improve spacing between border and field content */
+.unfold input[type="text"],
+.unfold input[type="number"],
+.unfold input[type="email"],
+.unfold input[type="url"],
+.unfold input[type="password"],
+.unfold input[type="date"],
+.unfold input[type="datetime-local"],
+.unfold input[type="time"],
+.unfold textarea,
+.unfold select {
+    padding: 12px 16px !important;
+}
+
+/* Constrain wide fields to avoid horizontal overflow */
+.unfold .form-row textarea,
+.unfold .form-row .ck-editor,
+.unfold .form-row .ck-editor__editable {
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+/* Light theme: keep select dropdown options readable.
+   The selected option was rendering as white text on a light
+   highlight, making it nearly invisible. */
+.unfold select option {
+    color: #333 !important;
+    background-color: #fff !important;
+}
+
+.unfold select option:checked,
+.unfold select option:hover,
+.unfold select option:focus {
+    color: #111 !important;
+    background-color: #ececf0 !important;
+}

@@ -125,6 +125,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Elasticsearch Ready** | Multi-mode storage (`DB_ONLY`, `DUAL`, `ES_ONLY`) for blazing fast search. |
 | **GDPR/DSGVO Data Retention** | Per-model `data_retention_days` parameter with automatic Celery cleanup task. |
 | **Offline Mode** | Per-model `offline_mode` toggle: caches the list view in IndexedDB, shows an offline banner, and syncs on reconnect. |
+| **Large-Dataset Tuning** | Auto-derived `list_select_related` (no admin N+1), plus per-model `list_per_page` / `show_full_result_count` knobs for million-row tables. |
 | **Structured Logging** | Integrated `structlog` for readable local logs and JSON logs in production. |
 
 ---
@@ -191,6 +192,22 @@ class Product(snap_models.SnapModel):
 from snapadmin.models import SnapModel
 SnapModel.register_all_admins()
 ```
+
+### Theming & Styles
+
+SnapAdmin ships its admin styling as two layers so it never forces theme
+assumptions on installs that don't use Unfold:
+
+| Stylesheet | Scope | When it loads |
+|------------|-------|---------------|
+| `snapadmin/css/admin.css` | Theme-agnostic core (field sizing, Select2, action bar, `:root` design tokens) | Always, on every SnapModel admin page |
+| `snapadmin/css/admin-unfold.css` | Unfold-specific overrides (`.unfold`-scoped rules, dark-mode borders, Add-button fix) | **Only when `django-unfold` is installed** |
+
+The Unfold layer is opt-in: it is appended automatically (after the core sheet,
+so its rules win the cascade) only when Unfold is detected. A plain Django admin
+install — or one on another theme — gets the core sheet alone and is never
+styled with Unfold assumptions. The shared design tokens (`--primary-color`,
+`--radius`, …) live in the core sheet so both layers reference the same values.
 
 ### Available Field Types
 
@@ -305,6 +322,57 @@ with a `localStorage` fallback so badges still render while offline.
 No settings, migrations, or extra dependencies are required — it is pure client-side
 behavior gated per model. Models without the flag still get the connectivity warnings
 but ship no caching JS.
+
+---
+
+## ⚡ Large-Dataset Performance
+
+SnapAdmin is built to stay responsive as tables grow. Most of the tuning is automatic,
+and the rest is a handful of per-model knobs.
+
+### Automatic — no admin N+1
+
+For every model, `register_admin()` inspects the columns shown in the list view and
+**auto-derives `list_select_related`** from the `ForeignKey` columns among them. A list
+view that renders a related column (or a `__str__` that walks a relation) therefore
+issues **one joined query**, not one query per row. Only the FKs actually displayed are
+joined — relations you don't show are never pulled.
+
+The auto-generated REST API does the same on its querysets: `select_related()` for
+ForeignKeys and `prefetch_related()` for many-to-many fields, with the field lists cached
+per model to keep introspection out of the hot path.
+
+### Per-model knobs
+
+Override these class attributes on any `SnapModel` to tune the admin list view:
+
+```python
+class AuditLog(snap_models.SnapModel):
+    action = snap.SnapCharField(max_length=100, searchable=True)
+
+    list_per_page = 50              # rows per page (default 100)
+    list_max_show_all = 200         # cap on the "Show all" link
+    show_full_result_count = False  # skip the unfiltered COUNT(*) on huge tables
+```
+
+| Attribute | Default | When to change it |
+|-----------|---------|-------------------|
+| `list_per_page` | `100` | Lower it for wide rows or heavy templates. |
+| `list_max_show_all` | `200` | Guards against a "Show all" on a million-row table. |
+| `show_full_result_count` | `True` | Set `False` on very large tables — the admin then skips the second, unfiltered `COUNT(*)` it runs to show the grand total, which is often the single most expensive query. |
+
+### REST pagination
+
+The REST API paginates by default (`PageNumberPagination`, `PAGE_SIZE = 25`), so large
+collections are never serialized in one response. Tune it via the `REST_FRAMEWORK`
+setting.
+
+### Offloading search to Elasticsearch
+
+For `DUAL` and `ES_ONLY` models the REST list endpoint serves results straight from
+Elasticsearch (`es_search`) instead of the database, moving full-text search and
+large-result pagination off the primary database. See **Elasticsearch Storage Modes**
+above.
 
 ---
 

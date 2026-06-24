@@ -298,6 +298,74 @@ class TestSnapSaveMixinChange:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SnapSaveMixin.log_change — dedupe detailed vs. generic history entries
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestSnapSaveMixinLogChange:
+    def _make_admin_instance(self, model_class):
+        from snapadmin.models import SnapSaveMixin
+        from django.contrib.admin import ModelAdmin
+
+        class FakeAdmin(SnapSaveMixin, ModelAdmin):
+            pass
+
+        instance = FakeAdmin(model_class, admin.site)
+        instance.model = model_class
+        return instance
+
+    def test_save_model_then_log_change_writes_single_entry(self):
+        """A real field change logs exactly one (detailed) entry, not two."""
+        from demo.models import Product
+        from django.contrib.admin.models import LogEntry
+        from django.contrib.auth.models import User
+
+        user = User.objects.create_superuser("logchange_dedupe", password="pass")
+        product = Product.objects.create(name="Original", price=Decimal("10.00"))
+
+        admin_instance = self._make_admin_instance(Product)
+        request = RequestFactory().get("/")
+        request.user = user
+
+        class FakeForm:
+            changed_data = ["name"]
+            initial = {"name": "Original"}
+            cleaned_data = {"name": "Updated"}
+
+        before = LogEntry.objects.count()
+        admin_instance.save_model(request, product, FakeForm(), change=True)
+        # Django admin would now call log_change with its generic message.
+        result = admin_instance.log_change(request, product, "Changed name.")
+
+        assert result is None  # generic duplicate suppressed
+        assert LogEntry.objects.count() == before + 1
+        # The surviving entry is the detailed one written by save_model.
+        latest = LogEntry.objects.latest("id")
+        assert "Updated" in latest.change_message
+
+    def test_log_change_falls_back_when_nothing_logged(self):
+        """With no detailed entry (e.g. M2M-only edit), keep Django's default."""
+        from demo.models import Product
+        from django.contrib.admin.models import LogEntry
+        from django.contrib.auth.models import User
+
+        user = User.objects.create_superuser("logchange_fallback", password="pass")
+        product = Product.objects.create(name="Solo", price=Decimal("10.00"))
+
+        admin_instance = self._make_admin_instance(Product)
+        request = RequestFactory().get("/")
+        request.user = user
+        # No save_model diff ran, so the suppression flag is absent.
+
+        before = LogEntry.objects.count()
+        result = admin_instance.log_change(request, product, "Changed tags.")
+
+        assert result is not None
+        assert LogEntry.objects.count() == before + 1
+        assert LogEntry.objects.latest("id").change_message == "Changed tags."
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # get_admin_fields — FieldDoesNotExist path
 # ─────────────────────────────────────────────────────────────────────────────
 
