@@ -114,6 +114,7 @@
       <li><a href="#offline">Offline Mode</a></li>
       <li><a href="#theming">Theming &amp; Styles</a></li>
       <li><a href="#performance">Large-Dataset Performance</a></li>
+      <li><a href="#optimizations">Optimizations Guide</a></li>
     </ul>
     <div class="section-label">🌐 API Layer</div>
     <ul>
@@ -687,6 +688,125 @@ python manage.py benchmark_list_view --model order</code></pre>
    Query reduction : 5,001 → 1  (5001× fewer)
    Speedup         : 15.5× faster wall time</code></pre>
   <p>The unoptimized query count scales linearly with row count (<code>N + 1</code>); the optimized path stays flat at <strong>1</strong> — exactly the N+1 elimination <code>list_select_related</code> provides. See the broader <a href="#optimizations">Optimizations</a> guide for the underlying data-access patterns.</p>
+
+  <!-- ── Optimizations Guide ─────────────────────────────────────────────────── -->
+  <h2 id="optimizations">🚀 Optimizations Guide</h2>
+  <p>The <a href="#performance">Large-Dataset Performance</a> section above is the reference for SnapAdmin's specific knobs. This guide is the broader picture: the data-access patterns every developer working with large tables should understand, whether or not they use SnapAdmin. Most of it is plain Django/SQL; the SnapAdmin-specific automation is called out where it applies.</p>
+
+  <h3>1. Query optimization for large tables</h3>
+  <p>The cheapest query is the one you never run, and the cheapest row is the one you never fetch. A few tools cover most cases:</p>
+  <table>
+    <tr><th>Tool</th><th>Use it when</th><th>What it does</th></tr>
+    <tr>
+      <td><code>select_related(...)</code></td>
+      <td>Following a <strong>ForeignKey</strong> / <strong>OneToOne</strong> (to-one) relation.</td>
+      <td>Pulls the related row in the <em>same</em> query via a SQL <code>JOIN</code>. One query total.</td>
+    </tr>
+    <tr>
+      <td><code>prefetch_related(...)</code></td>
+      <td>Following a <strong>ManyToMany</strong> or reverse FK (to-many) relation.</td>
+      <td>A second query for the related set, joined in Python. Two queries total, not <code>N+1</code>.</td>
+    </tr>
+    <tr>
+      <td><code>only(...)</code> / <code>defer(...)</code></td>
+      <td>Rows are wide (big text/JSON columns) but you render few columns.</td>
+      <td>Fetches/skips specific columns. <strong>Caution:</strong> touching a deferred column triggers a fresh per-row query — an N+1 in disguise.</td>
+    </tr>
+    <tr>
+      <td><code>values()</code> / <code>values_list()</code></td>
+      <td>You need raw data (export, aggregation), not model instances.</td>
+      <td>Returns dicts/tuples, skipping model construction overhead entirely.</td>
+    </tr>
+    <tr>
+      <td><code>exists()</code></td>
+      <td>You only need to know <em>whether</em> rows match.</td>
+      <td>Emits <code>SELECT 1 ... LIMIT 1</code> — far cheaper than <code>count()</code> or truthiness on the queryset.</td>
+    </tr>
+    <tr>
+      <td><code>count()</code></td>
+      <td>You need the number, not the rows.</td>
+      <td>A single <code>COUNT(*)</code> — but on huge tables even this is expensive (see below).</td>
+    </tr>
+  </table>
+
+  <p><strong>Indexing.</strong> Any column you filter or sort on at scale should have a database index (<code>db_index=True</code>, or <code>Meta.indexes</code> for composite/partial indexes). Without one, the database scans the whole table for every query. The flip side: indexes cost write time and storage, so index the columns you actually query, not every column.</p>
+
+  <p><strong>Pagination.</strong> Offset pagination (<code>LIMIT 50 OFFSET 1000000</code>) makes the database walk and discard every skipped row — page 20,000 is slow even with an index. <strong>Keyset (cursor) pagination</strong> — <code>WHERE id &gt; :last_seen_id ORDER BY id LIMIT 50</code> — stays constant-time at any depth because it seeks straight to the next page via the index. Prefer it for deep, infinite-scroll, or API pagination over very large tables.</p>
+
+  <div class="callout callout-info">
+    <strong>Skip the grand-total COUNT.</strong>
+    Django's admin runs a second, unfiltered <code>COUNT(*)</code> just to show "X total" — frequently the most expensive query on the page. Set <code>show_full_result_count = False</code> on a <code>SnapModel</code> to drop it on huge tables.
+  </div>
+
+  <h3>2. The N+1 problem</h3>
+  <p>The classic performance trap: you fetch a list of <code>N</code> objects in <strong>1</strong> query, then access a related object on each one, firing <strong>N</strong> more queries — <code>N + 1</code> total. At 50 rows it's invisible in dev; at 50,000 rows it melts the database.</p>
+  <pre><code># N+1: one query for orders, then one per order for the customer
+for order in Order.objects.all():        # 1 query
+    print(order.customer.first_name)     # +1 query EACH iteration
+
+# Fixed: a single JOIN pulls customers alongside orders
+for order in Order.objects.select_related("customer"):   # 1 query, total
+    print(order.customer.first_name)</code></pre>
+  <p><strong>How to spot it:</strong> count queries. In tests, <code>django.test.utils.CaptureQueriesContext</code> (or <code>assertNumQueries</code>); in development, <a href="https://django-debug-toolbar.readthedocs.io/">django-debug-toolbar</a>; in code, <code>len(connection.queries)</code> with <code>DEBUG=True</code>.</p>
+  <div class="callout callout-info">
+    <strong>SnapAdmin eliminates the admin N+1 automatically.</strong>
+    <code>register_admin()</code> inspects the FK columns shown in the list view and auto-derives <code>list_select_related</code>, so changelist pages issue one joined query instead of one per row. The <a href="#performance">benchmark above</a> shows it: 5,001 queries → 1. Run <code>python manage.py benchmark_list_view</code> to see it on your own data.
+  </div>
+
+  <h3>3. SQL vs NoSQL — when to offload to Elasticsearch</h3>
+  <p>A relational table is the right home for most data: it gives you transactions, joins, foreign-key integrity, and ad-hoc queries. Reach for a search engine like Elasticsearch when the access pattern outgrows what SQL does cheaply:</p>
+  <table>
+    <tr><th>Keep it in PostgreSQL when…</th><th>Offload to Elasticsearch when…</th></tr>
+    <tr>
+      <td>You need ACID transactions and referential integrity.</td>
+      <td>You need fast full-text / fuzzy / relevance-ranked search across large text.</td>
+    </tr>
+    <tr>
+      <td>Queries are structured (filter/sort on indexed columns, joins).</td>
+      <td>Faceted search, aggregations, and autocomplete over millions of rows.</td>
+    </tr>
+    <tr>
+      <td>The table is the system of record.</td>
+      <td>Read volume and query complexity would overwhelm the primary DB.</td>
+    </tr>
+  </table>
+  <p>SnapAdmin makes this a per-model setting via <code>es_storage_mode</code> — see <a href="#elasticsearch">Elasticsearch Storage Modes</a>:</p>
+  <ul>
+    <li><strong><code>DB_ONLY</code></strong> — PostgreSQL only (the default). Right for the vast majority of models.</li>
+    <li><strong><code>DUAL</code></strong> — write to both; Postgres is the source of truth, ES is a denormalized read/search copy.</li>
+    <li><strong><code>ES_ONLY</code></strong> — high-volume, write-heavy logs/events that never need relational integrity (<code>managed=False</code>, no DB table).</li>
+  </ul>
+
+  <h3>4. Denormalization &amp; data duplication</h3>
+  <p>Normalization removes redundancy so each fact lives in exactly one place — great for write integrity, but it pushes joins onto every read. <strong>Denormalization</strong> deliberately duplicates data to make reads cheap, trading storage and write complexity for read speed.</p>
+  <p><code>DUAL</code> mode is the worked example: PostgreSQL stays the normalized source of truth, while a denormalized, query-optimized copy lives in Elasticsearch for fast search. The cost is <strong>consistency</strong> — the two stores can drift, so the copy must be kept in sync (SnapAdmin re-indexes on save and via a nightly Celery task; see <a href="#celery">Celery &amp; Periodic Tasks</a>).</p>
+  <p>Related patterns:</p>
+  <ul>
+    <li><strong>Computed/materialized columns</strong> — store an expensive aggregate (e.g. <code>order_count</code> on a customer) instead of recomputing it on every read; update it on write or on a schedule.</li>
+    <li><strong>Caching</strong> — a read-through cache is denormalization with a TTL; same consistency trade-off, bounded by expiry.</li>
+  </ul>
+  <div class="callout callout-warn">
+    <strong>The rule of thumb:</strong> normalize until reads hurt, then denormalize the specific hot path — and own the cache-invalidation/consistency cost you just took on. Don't denormalize speculatively.
+  </div>
+
+  <h3>5. Practical checklist &amp; anti-patterns</h3>
+  <p>Before shipping a view over a large table, check:</p>
+  <ul>
+    <li>✅ Every <code>WHERE</code>/<code>ORDER BY</code> column at scale is indexed.</li>
+    <li>✅ To-one relations you display use <code>select_related</code>; to-many use <code>prefetch_related</code>.</li>
+    <li>✅ Deep/API pagination uses keyset, not offset.</li>
+    <li>✅ Existence checks use <code>exists()</code>, not <code>count()</code> or <code>len()</code>.</li>
+    <li>✅ The unfiltered grand-total <code>COUNT(*)</code> is disabled on huge admin tables (<code>show_full_result_count = False</code>).</li>
+  </ul>
+  <p>Common anti-patterns to avoid:</p>
+  <ul>
+    <li>❌ Fetching whole rows just to render one column (use <code>only()</code>/<code>values()</code>).</li>
+    <li>❌ Sorting or filtering on an unindexed column on a large table.</li>
+    <li>❌ Leaving <code>Show all</code> enabled on a million-row admin list (cap it with <code>list_max_show_all</code>).</li>
+    <li>❌ Accessing a relation inside a loop without <code>select_related</code>/<code>prefetch_related</code> (the N+1).</li>
+    <li>❌ Touching a <code>defer()</code>red column in a loop — it re-queries per row.</li>
+  </ul>
+  <p>Related reading: <a href="#performance">Large-Dataset Performance</a> (SnapAdmin's knobs) and <a href="#elasticsearch">Elasticsearch Storage Modes</a> (the SQL/NoSQL split).</p>
 
   <!-- ── Sandbox / Demo ─────────────────────────────────────────────────────── -->
   <h2 id="demo-models">📦 Demo App — Model Overview</h2>

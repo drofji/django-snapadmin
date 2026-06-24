@@ -418,6 +418,14 @@ The query count for the unoptimized path scales linearly with row count (`N + 1`
 while the optimized path stays flat at **1** — exactly the N+1 elimination
 `list_select_related` is there to provide.
 
+### Going deeper
+
+The section above covers SnapAdmin's knobs. For the broader data-access patterns
+behind them — `select_related` vs `prefetch_related`, `only()`/`values()`, keyset
+vs offset pagination, indexing, the N+1 problem, the SQL/NoSQL trade-off, and
+denormalization — see the **[Optimizations Guide](https://drofji.github.io/django-snapadmin/#optimizations)**
+in the full documentation.
+
 ---
 
 ## 🔧 Environment Variables Reference
