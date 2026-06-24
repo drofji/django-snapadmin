@@ -124,6 +124,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Configurable** | Easily enable/disable REST API, GraphQL, Swagger docs, and search modes via settings. |
 | **Elasticsearch Ready** | Multi-mode storage (`DB_ONLY`, `DUAL`, `ES_ONLY`) for blazing fast search. |
 | **GDPR/DSGVO Data Retention** | Per-model `data_retention_days` parameter with automatic Celery cleanup task. |
+| **Offline Mode** | Per-model `offline_mode` toggle: caches the list view in IndexedDB, shows an offline banner, and syncs on reconnect. |
 | **Structured Logging** | Integrated `structlog` for readable local logs and JSON logs in production. |
 
 ---
@@ -260,6 +261,33 @@ Records are removed by the `purge_expired_data` Celery task (schedule it with Ce
 python manage.py purge_expired_data         # live run
 python manage.py purge_expired_data --dry-run  # preview only
 ```
+
+---
+
+## 📴 Offline Mode
+
+Make a model's admin list view survive a dropped connection with a single toggle:
+
+```python
+class Customer(snap_models.SnapModel):
+    first_name = snap.SnapCharField(max_length=100, show_in_form=True)
+    last_name = snap.SnapCharField(max_length=100, show_in_form=True)
+
+    # Cache this model's list view client-side and enable the offline banner
+    offline_mode = True
+```
+
+When `offline_mode = True`, SnapAdmin injects `snapadmin/js/offline.js` into that
+model's admin pages only. It then:
+
+- **Caches** the rendered list view into the browser's **IndexedDB** on every visit.
+- **Shows a red offline banner** and repaints the list from cache when the browser
+  goes offline (`navigator.onLine === false`).
+- **Queues mutations** made while offline and **replays them on reconnect**, then
+  refreshes the cached snapshot from the server.
+
+No settings, migrations, or extra dependencies are required — it is pure client-side
+behavior gated per model. Models without the flag are unaffected and ship no extra JS.
 
 ---
 

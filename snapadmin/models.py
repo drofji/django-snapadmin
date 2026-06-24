@@ -369,6 +369,13 @@ class SnapModel(models.Model):
     data_retention_days: int | None = None
     data_retention_field: str = "created_at"
 
+    # Offline mode
+    # Set offline_mode = True to enable client-side caching (IndexedDB) of this model's
+    # admin list view. When the browser loses connectivity, a red offline banner appears
+    # and the last cached rows are shown; the cache is refreshed and queued changes are
+    # synced automatically once the connection is restored.
+    offline_mode: bool = False
+
     class Meta:
         abstract = True
         ordering = ["-pk"]
@@ -689,6 +696,8 @@ class SnapModel(models.Model):
         extra_js = [cls.js_admin_files] if isinstance(cls.js_admin_files, str) else list(cls.js_admin_files)
         extra_css = [cls.css_admin_files] if isinstance(cls.css_admin_files, str) else list(cls.css_admin_files)
         final_js = list(dict.fromkeys(BASE_JS + extra_js))
+        if cls.offline_mode:
+            final_js.append("snapadmin/js/offline.js")
         final_css = list(dict.fromkeys(BASE_CSS + extra_css))
 
         A = DjangoAdminClassAttributeEnum

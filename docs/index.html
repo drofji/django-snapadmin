@@ -111,6 +111,7 @@
       <li><a href="#status-badges">Status Badges</a></li>
       <li><a href="#admin-registration">Admin Registration</a></li>
       <li><a href="#dsgvo">DSGVO / Data Retention</a></li>
+      <li><a href="#offline">Offline Mode</a></li>
     </ul>
     <div class="section-label">🌐 API Layer</div>
     <ul>
@@ -560,6 +561,30 @@ python manage.py purge_expired_data --dry-run  # preview only — no deletes</co
   <div class="callout callout-warn">
     <strong>ES_ONLY models</strong>
     Models with <code>es_storage_mode = EsStorageMode.ES_ONLY</code> are skipped by the purge task — they have no DB table. Implement custom Elasticsearch cleanup for those models.
+  </div>
+
+  <!-- ── Offline Mode ───────────────────────────────────────────────────────── -->
+  <h2 id="offline">📴 Offline Mode</h2>
+  <p>Flip one class attribute to make a model's admin list view survive a dropped connection. SnapAdmin injects <code>snapadmin/js/offline.js</code> into that model's admin pages only — models without the flag ship no extra JavaScript.</p>
+
+  <pre><code>class Customer(SnapModel):
+    first_name = SnapCharField(max_length=100, show_in_form=True)
+    last_name  = SnapCharField(max_length=100, show_in_form=True)
+
+    # Cache this model's list view client-side and enable the offline banner
+    offline_mode = True</code></pre>
+
+  <h3>What it does</h3>
+  <table>
+    <tr><th>Behavior</th><th>Detail</th></tr>
+    <tr><td>Cache</td><td>Snapshots the rendered list view into the browser's <strong>IndexedDB</strong> on every visit.</td></tr>
+    <tr><td>Offline banner</td><td>Shows a sticky red banner and repaints the list from cache when <code>navigator.onLine</code> is <code>false</code>.</td></tr>
+    <tr><td>Reconnect sync</td><td>Queues mutations made while offline and replays them on the <code>online</code> event, then refreshes the cached snapshot.</td></tr>
+  </table>
+
+  <div class="callout callout-info">
+    <strong>Zero configuration</strong>
+    No settings, migrations, or extra dependencies. The <code>offline_mode</code> flag is purely client-side and gated per model.
   </div>
 
   <!-- ── Sandbox / Demo ─────────────────────────────────────────────────────── -->

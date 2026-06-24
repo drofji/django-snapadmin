@@ -96,6 +96,11 @@ class Customer(snap_models.SnapModel):
         ]
     )
 
+    # offline_mode = True → the Customer list view is cached in IndexedDB so it stays
+    # usable without a connection; a red offline banner appears when the browser goes
+    # offline and queued changes sync automatically on reconnect
+    offline_mode = True
+
     class Meta:
         verbose_name = _("Customer")
         verbose_name_plural = _("Customers")
