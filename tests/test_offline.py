@@ -46,6 +46,19 @@ class TestOfflineModeAttribute:
         assert Product.offline_mode is False
 
 
+class TestOfflineCacheLimit:
+    def test_default_limit_is_100(self):
+        assert SnapModel.offline_cache_limit == 100
+
+    def test_customer_overrides_limit(self):
+        from demo.models import Customer
+        assert Customer.offline_cache_limit == 50
+
+    def test_non_offline_model_keeps_default(self):
+        from demo.models import Product
+        assert Product.offline_cache_limit == 100
+
+
 class TestOfflineJsInjection:
     def test_offline_model_includes_offline_js(self):
         from demo.models import Customer
@@ -92,14 +105,24 @@ class TestOfflineJsAsset:
         assert "cacheRows" in source
         assert "readRows" in source
 
-    def test_renders_offline_banner(self, source):
-        assert "snapadmin-offline-banner" in source
-        assert "#DC2626" in source  # red banner background
+    def test_prefetches_from_offline_data_endpoint(self, source):
+        assert "offline-data/" in source
+        assert "fetchOfflineData" in source
 
-    def test_syncs_on_reconnect(self, source):
-        assert 'addEventListener("online"' in source
+    def test_renders_saved_objects_panel(self, source):
+        assert "snapadmin-offline-panel" in source
+        assert "renderPanel" in source
+        assert "Saved objects" in source
+
+    def test_reacts_to_shared_connectivity_event(self, source):
+        # offline.js follows connectivity.js's resolved state, not navigator.onLine.
+        assert "snapadmin:connectivity" in source
         assert "function sync" in source
         assert "queueMutation" in source
+
+    def test_uses_dynamic_toasts(self, source):
+        assert "SnapAdminToast" in source
+        assert "snapadmin-offline-banner" not in source  # static banner replaced
 
     def test_exposes_test_hooks(self, source):
         assert "window.SnapAdminOffline" in source
@@ -137,9 +160,23 @@ class TestConnectivityJsAsset:
         return _read_asset(CONNECTIVITY_JS)
 
     def test_warns_when_offline_on_non_capable_page(self, source):
-        assert "snapadmin-conn-banner" in source
+        assert "objects can't be shown right now" in source
         assert "will NOT be saved" in source
-        assert "#DC2626" in source
+        assert "#DC2626" in source  # warn-toast background
+
+    def test_polls_backend_health(self, source):
+        assert "health/" in source
+        assert "checkBackend" in source
+        assert "AbortController" in source
+
+    def test_broadcasts_connectivity_event(self, source):
+        assert "snapadmin:connectivity" in source
+        assert "isBackendUp" in source
+
+    def test_uses_dynamic_toasts(self, source):
+        assert "SnapAdminToast" in source
+        assert "snapadmin-toasts" in source
+        assert "snapadmin-conn-banner" not in source  # static banner replaced
 
     def test_blocks_form_submit(self, source):
         assert "submitGuard" in source
@@ -190,3 +227,101 @@ class TestOfflineModelsEndpoint:
         keys = get_offline_model_keys()
         assert keys == sorted(keys)
         assert "demo/customer" in keys
+
+    def test_reports_per_model_cache_limits(self, auth_client):
+        r = auth_client.get(self.URL)
+        limits = r.json()["limits"]
+        assert limits["demo/customer"] == 50
+
+    def test_limits_helper(self):
+        from snapadmin.api.offline import get_offline_model_limits
+        limits = get_offline_model_limits()
+        assert limits["demo/customer"] == 50
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Offline-data feed — recent rows of one offline-capable model
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestOfflineModelDataEndpoint:
+    URL = "/api/offline-data/demo/customer/"
+
+    @pytest.fixture
+    def customers(self, db):
+        from demo.models import Customer
+        return [
+            Customer.objects.create(
+                first_name=f"User{i}", last_name="Test",
+                email=f"user{i}@example.com", origin="status_a", active=True,
+            )
+            for i in range(5)
+        ]
+
+    def test_requires_authentication(self, anon_client):
+        r = anon_client.get(self.URL)
+        assert r.status_code in (401, 403)
+
+    def test_returns_recent_objects(self, auth_client, customers):
+        r = auth_client.get(self.URL)
+        assert r.status_code == 200
+        body = r.json()
+        assert body["model"] == "demo/customer"
+        assert body["count"] == len(body["objects"]) == 5
+        assert body["limit"] == 50  # Customer.offline_cache_limit
+        assert body["fields"]  # verbose labels present
+
+    def test_orders_by_descending_pk(self, auth_client, customers):
+        r = auth_client.get(self.URL)
+        ids = [obj["id"] for obj in r.json()["objects"]]
+        assert ids == sorted(ids, reverse=True)
+
+    def test_limit_query_param_is_respected(self, auth_client, customers):
+        r = auth_client.get(self.URL + "?limit=2")
+        body = r.json()
+        assert body["limit"] == 2
+        assert body["count"] == 2
+
+    def test_limit_is_clamped_to_model_cap(self, auth_client, customers):
+        r = auth_client.get(self.URL + "?limit=9999")
+        assert r.json()["limit"] == 50  # capped at offline_cache_limit
+
+    def test_invalid_limit_falls_back_to_cap(self, auth_client, customers):
+        r = auth_client.get(self.URL + "?limit=abc")
+        assert r.json()["limit"] == 50
+
+    def test_non_positive_limit_falls_back_to_cap(self, auth_client, customers):
+        r = auth_client.get(self.URL + "?limit=0")
+        assert r.json()["limit"] == 50
+
+    def test_non_offline_model_is_404(self, auth_client):
+        r = auth_client.get("/api/offline-data/demo/product/")
+        assert r.status_code == 404
+
+    def test_unknown_model_is_404(self, auth_client):
+        r = auth_client.get("/api/offline-data/demo/nope/")
+        assert r.status_code == 404
+
+    def test_non_snapmodel_is_404(self, auth_client):
+        # auth.User is a real model but not a SnapModel → not exposed offline.
+        r = auth_client.get("/api/offline-data/auth/user/")
+        assert r.status_code == 404
+
+    def test_serves_related_fields_with_join_and_prefetch(self, auth_client, product):
+        """A model with FK + M2M exercises the select_related / prefetch_related path."""
+        from demo.models import Product
+
+        original = Product.offline_mode
+        try:
+            Product.offline_mode = True
+            r = auth_client.get("/api/offline-data/demo/product/")
+            assert r.status_code == 200
+            assert r.json()["count"] == 1
+        finally:
+            Product.offline_mode = original
+
+    def test_url_route_resolves(self):
+        from django.urls import resolve, reverse
+        url = reverse("offline-data", kwargs={"app_label": "demo", "model_name": "customer"})
+        assert url == self.URL
+        assert resolve(url).view_name == "offline-data"

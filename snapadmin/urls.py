@@ -15,7 +15,7 @@ from drf_spectacular.views import (
 
 from snapadmin.api.views import APITokenViewSet, DynamicModelViewSet, ModelSchemaView
 from snapadmin.api.health import HealthCheckView
-from snapadmin.api.offline import OfflineModelsView
+from snapadmin.api.offline import OfflineModelsView, OfflineModelDataView
 
 REST_API_ENABLED = getattr(settings, "SNAPADMIN_REST_API_ENABLED", True)
 SWAGGER_ENABLED = getattr(settings, "SNAPADMIN_SWAGGER_ENABLED", True)
@@ -39,6 +39,13 @@ if REST_API_ENABLED:
 
         # Offline-capable model list (consumed by the admin connectivity layer)
         path("offline-models/", OfflineModelsView.as_view(), name="offline-models"),
+
+        # Recent rows of one offline-capable model (prefetched into IndexedDB by offline.js)
+        path(
+            "offline-data/<str:app_label>/<str:model_name>/",
+            OfflineModelDataView.as_view(),
+            name="offline-data",
+        ),
 
         # Dynamic model CRUD  ─  list + create
         path(

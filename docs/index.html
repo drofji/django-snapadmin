@@ -573,26 +573,30 @@ python manage.py purge_expired_data --dry-run  # preview only — no deletes</co
     first_name = SnapCharField(max_length=100, show_in_form=True)
     last_name  = SnapCharField(max_length=100, show_in_form=True)
 
-    # Cache this model's list view client-side and enable the offline banner
-    offline_mode = True</code></pre>
+    # Cache this model's list view client-side and enable offline support
+    offline_mode = True
+    # Prefetch only the 50 most-recent rows for offline view (default: 100)
+    offline_cache_limit = 50</code></pre>
 
   <h3>What it does (offline-capable models)</h3>
   <table>
     <tr><th>Behavior</th><th>Detail</th></tr>
-    <tr><td>Cache</td><td>Snapshots the rendered list view into the browser's <strong>IndexedDB</strong> on every visit.</td></tr>
-    <tr><td>Offline banner</td><td>Shows a calm sticky banner and repaints the list from cache when <code>navigator.onLine</code> is <code>false</code>.</td></tr>
-    <tr><td>Reconnect sync</td><td>Queues mutations made while offline and replays them on the <code>online</code> event, then refreshes the cached snapshot.</td></tr>
+    <tr><td>Prefetch &amp; cache</td><td>Pulls the most-recent <code>offline_cache_limit</code> rows (default <strong>100</strong>) from <code>GET /api/offline-data/&lt;app&gt;/&lt;model&gt;/</code> into the browser's <strong>IndexedDB</strong> on every visit. The rendered list is kept as a fallback snapshot.</td></tr>
+    <tr><td>Saved-objects panel</td><td>When the backend is unreachable, repaints the list from cache and shows a panel: how many objects are cached (out of the limit), when they were cached, and how many changes are queued.</td></tr>
+    <tr><td>Reconnect sync</td><td>Queues mutations made while offline and replays them when the backend returns, then refreshes the cache and shows a <em>"synced N changes"</em> toast.</td></tr>
   </table>
 
-  <h3>Connectivity awareness (every model)</h3>
-  <p>A lightweight <code>connectivity.js</code> loads on all SnapModel admin pages and stops silent data loss on models that are <em>not</em> offline-capable:</p>
+  <h3>Real backend health checks</h3>
+  <p>Connectivity is decided by whether the <strong>Django backend actually answers</strong>, not by the OS network flag — a laptop can hold a Wi-Fi link while the server is down or the VPN dropped. A lightweight <code>connectivity.js</code> loads on all SnapModel admin pages:</p>
   <table>
     <tr><th>Behavior</th><th>Detail</th></tr>
-    <tr><td>Warning banner</td><td>On a non-offline model, going offline shows a red <em>"changes will NOT be saved"</em> banner.</td></tr>
-    <tr><td>Save guard</td><td>Form submission is blocked and the Save buttons are visually disabled until the connection returns.</td></tr>
-    <tr><td>Sidebar badges</td><td>Each model link gets a green <strong>sync icon</strong> (spins while offline) if it is offline-capable, or a muted <strong>no-offline icon</strong> (shown while offline) otherwise — so you can see at a glance which records survive a disconnect.</td></tr>
+    <tr><td>Health polling</td><td>Polls <code>GET /api/health/</code> every 15s by default (override via <code>window.SNAPADMIN_HEALTH_INTERVAL</code>) with a short timeout, and re-checks immediately on <code>online</code>/<code>offline</code> events and tab refocus. The backend is "up" only when it responds.</td></tr>
+    <tr><td>Shared state</td><td>Publishes one resolved state as a <code>snapadmin:connectivity</code> DOM event, so the connectivity layer and the per-model engine always agree.</td></tr>
+    <tr><td>Dynamic toasts</td><td>Backend-lost / restored, <em>"objects can't be shown right now"</em> (non-cached pages), and <em>"synced N changes"</em> surface as auto-dismissing toasts — no static banners.</td></tr>
+    <tr><td>Save guard</td><td>On a non-offline model, an unreachable backend blocks form submission and disables the Save buttons until it returns, while leaving the already-rendered page intact.</td></tr>
+    <tr><td>Sidebar badges</td><td>Each model link gets a green <strong>sync icon</strong> (spins while the backend is down) if it is offline-capable, or a muted <strong>no-offline icon</strong> otherwise — so you can see at a glance which records survive a disconnect.</td></tr>
   </table>
-  <p>The badge list comes from <code>GET /api/offline-models/</code> (authenticated), with a <code>localStorage</code> fallback so badges still render while offline.</p>
+  <p>The badge list and per-model cache limits come from <code>GET /api/offline-models/</code> (authenticated), with a <code>localStorage</code> fallback so badges still render while offline.</p>
 
   <div class="callout callout-info">
     <strong>Zero configuration</strong>

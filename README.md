@@ -124,7 +124,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Configurable** | Easily enable/disable REST API, GraphQL, Swagger docs, and search modes via settings. |
 | **Elasticsearch Ready** | Multi-mode storage (`DB_ONLY`, `DUAL`, `ES_ONLY`) for blazing fast search. |
 | **GDPR/DSGVO Data Retention** | Per-model `data_retention_days` parameter with automatic Celery cleanup task. |
-| **Offline Mode** | Per-model `offline_mode` toggle: caches the list view in IndexedDB, shows an offline banner, and syncs on reconnect. |
+| **Offline Mode** | Per-model `offline_mode` toggle: prefetches the last `offline_cache_limit` rows into IndexedDB, polls `/api/health/` for real backend availability, shows dynamic toasts + a saved-objects panel, and syncs on reconnect. |
 | **Large-Dataset Tuning** | Auto-derived `list_select_related` (no admin N+1), plus per-model `list_per_page` / `show_full_result_count` knobs for million-row tables. |
 | **Structured Logging** | Integrated `structlog` for readable local logs and JSON logs in production. |
 
@@ -290,34 +290,49 @@ class Customer(snap_models.SnapModel):
     first_name = snap.SnapCharField(max_length=100, show_in_form=True)
     last_name = snap.SnapCharField(max_length=100, show_in_form=True)
 
-    # Cache this model's list view client-side and enable the offline banner
+    # Cache this model's list view client-side and enable offline support
     offline_mode = True
+    # Prefetch only the 50 most-recent rows for offline view (default: 100)
+    offline_cache_limit = 50
 ```
 
 When `offline_mode = True`, SnapAdmin injects `snapadmin/js/offline.js` into that
 model's admin pages only. It then:
 
-- **Caches** the rendered list view into the browser's **IndexedDB** on every visit.
-- **Shows a calm offline banner** and repaints the list from cache when the browser
-  goes offline (`navigator.onLine === false`).
+- **Prefetches the most-recent `offline_cache_limit` rows** (default **100**) from
+  `GET /api/offline-data/<app>/<model>/` and stores them in the browser's **IndexedDB**
+  on every visit (the rendered list is kept as a fallback snapshot).
+- **Repaints the list from cache** when the backend becomes unreachable, and shows a
+  **saved-objects panel** — how many objects are cached (out of the limit), when they
+  were cached, and how many changes are queued for sync.
 - **Queues mutations** made while offline and **replays them on reconnect**, then
-  refreshes the cached snapshot from the server.
+  refreshes the cache and shows a "synced *N* changes" toast.
 
-### Connectivity awareness for *every* model
+### Real backend health checks, not just `navigator.onLine`
 
-A lightweight `connectivity.js` loads on all SnapModel admin pages and prevents
-silent data loss on models that are **not** offline-capable:
+Connectivity is decided by whether the **Django backend actually answers**, not by the
+OS network flag — a laptop can hold a Wi-Fi link while the server is down or the VPN
+dropped. A lightweight `connectivity.js` loads on **all** SnapModel admin pages and:
 
-- **Warning banner + save guard** — on a non-offline model, going offline shows a red
-  "changes will NOT be saved" banner, **blocks form submission**, and visually disables
-  the Save buttons until the connection returns.
-- **Sidebar badges** — every model link in the left menu is marked so you can see at a
-  glance which models sync offline: a green **sync icon** (it spins while offline) for
-  offline-capable models, and a muted **no-offline icon** (shown while offline) for the
-  rest.
+- **Polls `GET /api/health/`** (every 15s by default — set
+  `window.SNAPADMIN_HEALTH_INTERVAL` to override) with a short timeout, and re-checks
+  immediately on browser `online`/`offline` events and tab refocus. The backend is
+  "up" only when it responds.
+- **Publishes one shared state** as a `snapadmin:connectivity` DOM event, so the
+  connectivity layer and the per-model engine always agree.
+- **Dynamic toasts, not static banners** — backend-lost / restored, "objects can't be
+  shown right now" (non-cached pages), and "synced *N* changes" surface as
+  auto-dismissing toasts.
 
-The badge list is served by the `GET /api/offline-models/` endpoint (authenticated),
-with a `localStorage` fallback so badges still render while offline.
+On models that are **not** offline-capable, losing the backend shows a warning toast,
+**blocks form submission**, and disables the Save buttons until it returns (preventing
+silent data loss) while leaving the already-rendered page intact. **Sidebar badges**
+mark every model link so you can see which models sync offline: a green **sync icon**
+(spins while the backend is down) for offline-capable models, a muted **no-offline
+icon** for the rest.
+
+The badge list and per-model cache limits are served by `GET /api/offline-models/`
+(authenticated), with a `localStorage` fallback so badges still render while offline.
 
 No settings, migrations, or extra dependencies are required — it is pure client-side
 behavior gated per model. Models without the flag still get the connectivity warnings

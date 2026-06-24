@@ -5,12 +5,19 @@
 // presence on the page means offline mode is active for the current model.
 //
 // Responsibilities:
-//   1. Persist the current admin list view (rows scraped from the changelist
-//      table) into IndexedDB, keyed by the model.
-//   2. When the browser is offline, show a red banner and repaint the list from
-//      the cached snapshot so the page is still usable.
-//   3. Queue mutations made while offline and replay them once the connection
-//      is restored, then refresh the cache from the server.
+//   1. While the backend is reachable, prefetch the most-recent rows from
+//      GET /api/offline-data/<app>/<model>/ (capped by the model's
+//      offline_cache_limit) and persist them in IndexedDB, keyed by model. The
+//      rendered changelist is kept as a fallback snapshot.
+//   2. When the backend is unreachable, repaint the list from the cache and show
+//      a saved-objects panel listing exactly what is cached and how many changes
+//      are queued, plus a reassuring toast.
+//   3. Queue mutations made while offline and replay them once the backend is
+//      reachable again, then refresh the cache.
+//
+// Connectivity is owned by connectivity.js: it polls /api/health/ and broadcasts
+// a `snapadmin:connectivity` ({up}) DOM event. offline.js reacts to that event
+// rather than to navigator.onLine, so both layers agree on one state.
 
 (function () {
     "use strict";
@@ -20,13 +27,23 @@
     var ROWS_STORE = "rows";
     var QUEUE_STORE = "queue";
     // Shared with connectivity.js so the sidebar can badge offline-capable models
-    // even while the browser is offline (no network fetch possible).
+    // even while the backend is unreachable (no network fetch possible).
     var LEARNED_KEY = "snapadmin:offline-models";
+    var LIMITS_KEY = "snapadmin:offline-limits";
 
     // The presence of this script means the current model is offline-capable.
-    // connectivity.js reads this flag to choose the reassuring banner (here) over
-    // the "changes won't be saved" warning, and to skip the form-submit guard.
+    // connectivity.js reads this flag to skip its warning toast + form guard here.
     window.SNAPADMIN_OFFLINE_CAPABLE = true;
+
+    // ---- Toast bridge -------------------------------------------------------
+    // connectivity.js loads first and exposes window.SnapAdminToast; fall back to
+    // a no-op if it is somehow absent so offline.js never throws.
+    function toast(message, opts) {
+        if (window.SnapAdminToast && window.SnapAdminToast.show) {
+            return window.SnapAdminToast.show(message, opts);
+        }
+        return null;
+    }
 
     // Remember this model key locally so the sidebar can mark it as syncable
     // on any admin page, including offline.
@@ -41,12 +58,23 @@
         } catch (e) { /* localStorage unavailable */ }
     }
 
+    function cacheLimitFor(key) {
+        try {
+            var limits = JSON.parse(window.localStorage.getItem(LIMITS_KEY) || "{}");
+            return limits[key] || null;
+        } catch (e) { return null; }
+    }
+
     // ---- Model identity -----------------------------------------------------
     // Derive "app_label/model_name" from the admin URL: /admin/<app>/<model>/...
     function getModelKey() {
         var match = window.location.pathname.match(/\/admin\/([^/]+)\/([^/]+)\//);
         if (!match) return null;
         return match[1] + "/" + match[2];
+    }
+
+    function apiBase() {
+        return (window.SNAPADMIN_API_BASE || "/api/").replace(/\/?$/, "/");
     }
 
     // ---- IndexedDB plumbing -------------------------------------------------
@@ -76,14 +104,22 @@
     }
 
     // ---- Public cache API ---------------------------------------------------
-    function cacheRows(modelKey, rows) {
+    // `extra` carries the structured payload (objects, fields, limit) from the
+    // offline-data endpoint; the scraped rows remain the fallback snapshot.
+    function cacheRows(modelKey, rows, extra) {
         return openDB().then(function (db) {
             return new Promise(function (resolve, reject) {
-                var req = tx(db, ROWS_STORE, "readwrite").put({
+                var record = {
                     model: modelKey,
                     rows: rows,
                     cachedAt: Date.now()
-                });
+                };
+                if (extra) {
+                    record.objects = extra.objects || null;
+                    record.fields = extra.fields || null;
+                    record.limit = extra.limit || null;
+                }
+                var req = tx(db, ROWS_STORE, "readwrite").put(record);
                 req.onsuccess = function () { resolve(); };
                 req.onerror = function () { reject(req.error); };
             });
@@ -131,6 +167,19 @@
         });
     }
 
+    // ---- Fetch the most-recent rows from the offline-data endpoint ----------
+    function fetchOfflineData(modelKey) {
+        if (!modelKey) return Promise.resolve(null);
+        var url = apiBase() + "offline-data/" + modelKey + "/";
+        return fetch(url, {
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: { "Accept": "application/json" }
+        }).then(function (r) {
+            return r.ok ? r.json() : null;
+        }).catch(function () { return null; });
+    }
+
     // ---- Scrape the current changelist into plain row objects ---------------
     function scrapeRows() {
         var rows = [];
@@ -153,25 +202,64 @@
         return rows;
     }
 
-    // ---- Offline banner -----------------------------------------------------
-    function showBanner() {
-        if (document.getElementById("snapadmin-offline-banner")) return;
-        var banner = document.createElement("div");
-        banner.id = "snapadmin-offline-banner";
-        banner.setAttribute("role", "alert");
-        banner.textContent = "Offline mode — showing cached data. Changes will sync when you reconnect.";
-        banner.style.cssText = [
-            "position:sticky", "top:0", "z-index:9999", "width:100%",
-            "box-sizing:border-box", "padding:10px 16px", "text-align:center",
-            "font-weight:600", "color:#fff", "background:#DC2626",
-            "box-shadow:0 1px 4px rgba(0,0,0,0.2)"
-        ].join(";");
-        document.body.insertBefore(banner, document.body.firstChild);
+    // Snapshot the current page: prefer the structured endpoint, always keep the
+    // scraped rows as a fallback so the list repaints even if the API is gone.
+    function snapshot(modelKey) {
+        if (!modelKey) return Promise.resolve();
+        var scraped = scrapeRows();
+        return fetchOfflineData(modelKey).then(function (data) {
+            var extra = data ? { objects: data.objects, fields: data.fields, limit: data.limit } : null;
+            return cacheRows(modelKey, scraped, extra);
+        });
     }
 
-    function hideBanner() {
-        var banner = document.getElementById("snapadmin-offline-banner");
-        if (banner && banner.parentNode) banner.parentNode.removeChild(banner);
+    // ---- Saved-objects panel ------------------------------------------------
+    function relativeTime(ts) {
+        if (!ts) return "unknown";
+        var secs = Math.round((Date.now() - ts) / 1000);
+        if (secs < 60) return secs + "s ago";
+        var mins = Math.round(secs / 60);
+        if (mins < 60) return mins + "m ago";
+        var hrs = Math.round(mins / 60);
+        if (hrs < 24) return hrs + "h ago";
+        return Math.round(hrs / 24) + "d ago";
+    }
+
+    function renderPanel(cached, queueCount) {
+        var panel = document.getElementById("snapadmin-offline-panel");
+        if (!panel) {
+            panel = document.createElement("div");
+            panel.id = "snapadmin-offline-panel";
+            panel.style.cssText = [
+                "position:fixed", "bottom:16px", "right:16px", "z-index:9998",
+                "max-width:320px", "box-sizing:border-box", "background:#111827",
+                "color:#f9fafb", "border-radius:10px", "padding:12px 14px",
+                "box-shadow:0 6px 20px rgba(0,0,0,.3)", "font-size:13px", "line-height:1.4"
+            ].join(";");
+            document.body.appendChild(panel);
+        }
+        var objects = (cached && cached.objects) || [];
+        var count = objects.length || (cached && cached.rows ? cached.rows.length : 0);
+        var limit = (cached && cached.limit) || cacheLimitFor(getModelKey()) || count;
+        var when = cached ? relativeTime(cached.cachedAt) : "unknown";
+
+        var lines = [
+            '<div style="font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:6px">' +
+                '<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:#f59e0b"></span>' +
+                'Offline — showing cached data</div>',
+            '<div style="opacity:.85">Saved objects: <b>' + count + '</b> of last ' + limit + '</div>',
+            '<div style="opacity:.85">Cached: ' + when + '</div>'
+        ];
+        if (queueCount) {
+            lines.push('<div style="margin-top:6px;color:#fbbf24">Pending sync: <b>' +
+                queueCount + '</b> change' + (queueCount === 1 ? "" : "s") + '</div>');
+        }
+        panel.innerHTML = lines.join("");
+    }
+
+    function removePanel() {
+        var panel = document.getElementById("snapadmin-offline-panel");
+        if (panel && panel.parentNode) panel.parentNode.removeChild(panel);
     }
 
     // ---- Repaint the list from cache when offline ---------------------------
@@ -187,7 +275,7 @@
         });
     }
 
-    // ---- Sync queued mutations once back online -----------------------------
+    // ---- Sync queued mutations once the backend is reachable ----------------
     function getCsrfToken() {
         var match = document.cookie.match(/csrftoken=([^;]+)/);
         return match ? match[1] : "";
@@ -195,7 +283,7 @@
 
     function sync() {
         return readQueue().then(function (items) {
-            if (!items.length) return Promise.resolve();
+            if (!items.length) return 0;
             var chain = Promise.resolve();
             items.forEach(function (item) {
                 var m = item.mutation || {};
@@ -211,24 +299,37 @@
                     });
                 });
             });
-            return chain.then(clearQueue);
+            return chain.then(clearQueue).then(function () { return items.length; });
         });
     }
 
     // ---- Connectivity handling ----------------------------------------------
     function handleOffline() {
         var key = getModelKey();
-        showBanner();
+        toast("Offline mode — showing cached data. Changes will sync when you reconnect.",
+            { type: "warn", id: "offline-state", sticky: true });
         if (!key) return;
-        readRows(key).then(repaintFromCache).catch(function () {});
+        readRows(key).then(function (cached) {
+            repaintFromCache(cached);
+            readQueue().then(function (items) {
+                renderPanel(cached, items.length);
+            }).catch(function () { renderPanel(cached, 0); });
+        }).catch(function () {});
     }
 
     function handleOnline() {
-        hideBanner();
-        sync().then(function () {
-            // Refresh cache snapshot from the now-live page on next load.
+        if (window.SnapAdminToast && window.SnapAdminToast.dismiss) {
+            window.SnapAdminToast.dismiss("offline-state");
+        }
+        removePanel();
+        sync().then(function (n) {
+            if (n) {
+                toast("Synced " + n + " change" + (n === 1 ? "" : "s") + " to the server.",
+                    { type: "success", duration: 4000 });
+            }
+            // Refresh the cache snapshot from the now-live page.
             var key = getModelKey();
-            if (key) cacheRows(key, scrapeRows()).catch(function () {});
+            if (key) snapshot(key).catch(function () {});
         }).catch(function () {});
     }
 
@@ -236,15 +337,22 @@
     function init() {
         var key = getModelKey();
         rememberCapableModel(key);
-        if (key && navigator.onLine) {
-            // Live page: snapshot the current list for offline use.
-            cacheRows(key, scrapeRows()).catch(function () {});
+
+        // React to the shared connectivity state rather than navigator.onLine.
+        document.addEventListener("snapadmin:connectivity", function (e) {
+            if (e.detail && e.detail.up) handleOnline(); else handleOffline();
+        });
+
+        var backendUp = !window.SnapAdminConnectivity ||
+            (window.SnapAdminConnectivity.isBackendUp && window.SnapAdminConnectivity.isBackendUp());
+
+        if (key && backendUp) {
+            // Live page: prefetch + snapshot the current list for offline use.
+            snapshot(key).catch(function () {});
         }
-        if (!navigator.onLine) {
-            handleOffline();
-        }
-        window.addEventListener("offline", handleOffline);
-        window.addEventListener("online", handleOnline);
+        // If the page already loaded offline, paint from cache immediately;
+        // connectivity.js will also fire the event once its first probe lands.
+        if (!navigator.onLine) handleOffline();
     }
 
     // Expose helpers for testing and advanced usage.
@@ -257,8 +365,10 @@
         readQueue: readQueue,
         clearQueue: clearQueue,
         scrapeRows: scrapeRows,
-        showBanner: showBanner,
-        hideBanner: hideBanner,
+        fetchOfflineData: fetchOfflineData,
+        snapshot: snapshot,
+        renderPanel: renderPanel,
+        removePanel: removePanel,
         sync: sync
     };
 

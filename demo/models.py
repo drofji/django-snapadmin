@@ -97,9 +97,12 @@ class Customer(snap_models.SnapModel):
     )
 
     # offline_mode = True → the Customer list view is cached in IndexedDB so it stays
-    # usable without a connection; a red offline banner appears when the browser goes
-    # offline and queued changes sync automatically on reconnect
+    # usable without a connection; a dynamic toast + saved-objects panel appear when the
+    # backend becomes unreachable and queued changes sync automatically on reconnect.
     offline_mode = True
+    # offline_cache_limit → prefetch only the 50 most-recent customers for offline view
+    # (overrides the default of 100) to keep the IndexedDB snapshot small.
+    offline_cache_limit = 50
 
     class Meta:
         verbose_name = _("Customer")

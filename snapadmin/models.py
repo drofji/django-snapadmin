@@ -389,6 +389,12 @@ class SnapModel(models.Model):
     # synced automatically once the connection is restored.
     offline_mode: bool = False
 
+    # How many of the most-recent rows (ordered by -pk) to prefetch and cache for
+    # offline viewing. The offline-data endpoint clamps any client-supplied ?limit=
+    # to this value and uses it as the default. Raise it for models you want fully
+    # browsable offline; lower it on very wide rows to keep IndexedDB small.
+    offline_cache_limit: int = 100
+
     # Large-dataset / performance tuning
     # These map straight onto Django admin's list-view knobs. The defaults match
     # Django's own, but SnapModel also auto-derives `list_select_related` from the
