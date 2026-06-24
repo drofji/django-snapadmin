@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ─────────────────────────────────────────────────────────────────────────────
 # SnapAdmin — Docker Compose Stack
 #
@@ -87,13 +85,7 @@ services:
       sh -c "python manage.py migrate --noinput &&
              python manage.py collectstatic --noinput &&
              python manage.py seed_demo --no-index &&
-             gunicorn sandbox.wsgi:application \
-               --bind 0.0.0.0:8000 \
-               --workers 4 \
-               --worker-class sync \
-               --timeout 120 \
-               --access-logfile - \
-               --error-logfile -"
+             gunicorn sandbox.wsgi:application --bind 0.0.0.0:8000 --workers 4 --worker-class sync --timeout 120 --access-logfile - --error-logfile -"
     ports:
       - "8000:8000"
     volumes:

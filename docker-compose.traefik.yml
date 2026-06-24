@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ─────────────────────────────────────────────────────────────────────────────
 # SnapAdmin — Traefik reverse proxy overlay (simple local dev, no auth)
 #

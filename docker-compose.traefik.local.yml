@@ -1,5 +1,3 @@
-version: "3.9"
-
 # ─────────────────────────────────────────────────────────────────────────────
 # SnapAdmin — Traefik overlay for local development (HTTP only)
 #
