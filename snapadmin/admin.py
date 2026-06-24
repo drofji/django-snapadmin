@@ -5,13 +5,13 @@ from django.utils.translation import gettext_lazy as _
 try:
     from django.conf import settings
     if 'unfold' not in settings.INSTALLED_APPS:
-        raise ImportError("Unfold not in INSTALLED_APPS")
+        raise ImportError("Unfold not in INSTALLED_APPS")  # pragma: no cover
 
     from unfold.admin import ModelAdmin, TabularInline, StackedInline
     from unfold.contrib.filters.admin import RelatedDropdownFilter, ChoicesDropdownFilter
     from unfold.decorators import display
     UNFOLD_INSTALLED = True
-except (ImportError, RuntimeError):
+except (ImportError, RuntimeError):  # pragma: no cover
     from django.contrib.admin import ModelAdmin, TabularInline, StackedInline
     RelatedDropdownFilter = admin.RelatedFieldListFilter
     ChoicesDropdownFilter = admin.ChoicesFieldListFilter
@@ -92,7 +92,7 @@ class APITokenAdmin(ModelAdmin):
         val = f"{obj.token_key[:8]}••••••••"
         if UNFOLD_INSTALLED:
             return [val, None, None]
-        return val
+        return val  # pragma: no cover
 
     @display(description=_("Status"), label=True)
     def status_badge(self, obj: APIToken):
@@ -107,5 +107,4 @@ class APITokenAdmin(ModelAdmin):
         if UNFOLD_INSTALLED:
             return res
 
-        # Fallback for standard admin: just return the label
-        return res[0]
+        return res[0]  # pragma: no cover

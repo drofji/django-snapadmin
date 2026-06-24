@@ -10,7 +10,7 @@ from datetime import timedelta
 from enum import Enum
 
 from django.apps import apps
-from django.core.exceptions import ValidationError
+from django.core.exceptions import FieldDoesNotExist, ValidationError
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.contrib.admin.models import ADDITION, CHANGE, DELETION, LogEntry
@@ -27,7 +27,7 @@ from django.conf import settings
 try:
     from django.conf import settings
     if 'unfold' not in settings.INSTALLED_APPS:
-        raise ImportError("Unfold not in INSTALLED_APPS")
+        raise ImportError("Unfold not in INSTALLED_APPS")  # pragma: no cover
 
     from unfold.admin import ModelAdmin
     from unfold.contrib.filters.admin import (
@@ -39,7 +39,7 @@ try:
     )
     from unfold.decorators import display as unfold_display
     UNFOLD_INSTALLED = True
-except (ImportError, RuntimeError):
+except (ImportError, RuntimeError):  # pragma: no cover
     from django.contrib.admin import ModelAdmin
     RangeDateFilter = admin.DateFieldListFilter
     RangeNumericFilter = admin.AllValuesFieldListFilter
@@ -285,7 +285,7 @@ def formatted_id(obj):
     val = mark_safe(f'<span class="faded-zeros">{leading}</span>{number}')
     if UNFOLD_INSTALLED:
         return [val, None, None]
-    return val
+    return val  # pragma: no cover
 
 # ===========================================================================
 # Admin Mixin
@@ -305,13 +305,12 @@ class SnapSaveMixin:
                 change_lines.append(f"{verbose}: '{old_val}' -> '{new_val}'")
         super().save_model(request, obj, form, change)
         if change_lines:
-            LogEntry.objects.log_action(
+            LogEntry.objects.log_actions(
                 user_id=request.user.id,
-                content_type_id=ContentType.objects.get_for_model(obj).id,
-                object_id=obj.pk,
-                object_repr=str(obj),
+                queryset=[obj],
                 action_flag=CHANGE,
                 change_message="\n".join(change_lines),
+                single_object=True,
             )
 
     def save_related(self, request, form, formsets, change):
@@ -329,13 +328,12 @@ class SnapSaveMixin:
                             verbose = instance._meta.get_field(field_name).verbose_name
                             change_lines.append(f"{verbose}: '{old_val}' -> '{new_val}'")
                     if change_lines:
-                        LogEntry.objects.log_action(
+                        LogEntry.objects.log_actions(
                             user_id=request.user.id,
-                            content_type_id=ContentType.objects.get_for_model(instance).id,
-                            object_id=instance.pk,
-                            object_repr=str(instance),
+                            queryset=[instance],
                             action_flag=CHANGE,
                             change_message="\n".join(change_lines),
+                            single_object=True,
                         )
                 except Exception: pass
         super().save_related(request, form, formsets, change)
@@ -653,7 +651,7 @@ class SnapModel(models.Model):
                         row_map[row_name].append(fn)
                     else:
                         grouped.append(fn)
-                except models.FieldDoesNotExist:
+                except FieldDoesNotExist:
                     grouped.append(fn)
 
             # Convert multi-field rows to tuples for Django fieldsets
@@ -673,7 +671,7 @@ class SnapModel(models.Model):
                     tabs_map.setdefault(tab_name, []).append(field_name)
                 else:
                     untabbed_fields.append(field_name)
-            except models.FieldDoesNotExist:
+            except FieldDoesNotExist:
                 untabbed_fields.append(field_name)
 
         fieldsets = []

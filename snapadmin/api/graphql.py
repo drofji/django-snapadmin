@@ -5,8 +5,10 @@ from django.apps import apps
 from snapadmin.models import SnapModel, EsStorageMode
 
 def get_dynamic_graphql_schema():
-    class Query(graphene.ObjectType):
-        pass
+    # graphene.ObjectType collects its fields/resolvers via a metaclass at
+    # class-creation time, so attributes must be passed in the namespace dict
+    # rather than added later with setattr() (setattr does NOT register fields).
+    query_attrs: dict = {}
 
     for model in apps.get_models():
         if issubclass(model, SnapModel) and model is not SnapModel:
@@ -38,15 +40,16 @@ def get_dynamic_graphql_schema():
                         return m.objects.all()
                     return resolve_list
 
-                setattr(Query, field_name, graphene.Field(object_type, id=graphene.ID(required=True)))
-                setattr(Query, f"resolve_{field_name}", make_single_resolver(model))
+                query_attrs[field_name] = graphene.Field(object_type, id=graphene.ID(required=True))
+                query_attrs[f"resolve_{field_name}"] = make_single_resolver(model)
 
-                setattr(Query, list_field_name, graphene.List(object_type))
-                setattr(Query, f"resolve_{list_field_name}", make_list_resolver(model))
+                query_attrs[list_field_name] = graphene.List(object_type)
+                query_attrs[f"resolve_{list_field_name}"] = make_list_resolver(model)
             except Exception:
                 # Skip models that can't be introspected (e.g. no DB table for non-managed)
                 continue
 
+    Query = type("Query", (graphene.ObjectType,), query_attrs)
     return graphene.Schema(query=Query)
 
 schema = get_dynamic_graphql_schema()
