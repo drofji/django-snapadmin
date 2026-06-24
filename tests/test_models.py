@@ -49,7 +49,13 @@ class TestFormattedId:
 
     def _make_obj(self, pk):
         from types import SimpleNamespace
-        return SimpleNamespace(id=pk)
+        return SimpleNamespace(pk=pk, id=pk)
+
+    def test_renders_non_integer_pk_verbatim(self):
+        # UUID / char / composite PKs must not crash the column.
+        fn = self._get_formatted_id_fn()
+        result = fn(self._make_obj("ab12-cd34"))
+        assert "ab12-cd34" in result[0]
 
     def test_renders_six_digit_id(self):
         fn = self._get_formatted_id_fn()

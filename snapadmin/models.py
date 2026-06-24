@@ -277,11 +277,17 @@ class DjangoAdminClassAttributeEnum(str, Enum):
 
 @admin.display(description="ID")
 def formatted_id(obj):
-    raw = f"{obj.id:06d}"
-    significant_start = next((i for i, ch in enumerate(raw) if ch != "0"), len(raw))
-    leading = raw[:significant_start]
-    number = raw[significant_start:] or "0"
-    val = mark_safe(f'<span class="faded-zeros">{leading}</span>{number}')
+    pk = obj.pk
+    # Only integer PKs get the zero-padded "000123" treatment. UUID/char/composite
+    # PKs are rendered verbatim so the column never crashes on a non-int id.
+    if isinstance(pk, int):
+        raw = f"{pk:06d}"
+        significant_start = next((i for i, ch in enumerate(raw) if ch != "0"), len(raw))
+        leading = raw[:significant_start]
+        number = raw[significant_start:] or "0"
+        val = mark_safe(f'<span class="faded-zeros">{leading}</span>{number}')
+    else:
+        val = mark_safe(str(pk))
     if UNFOLD_INSTALLED:
         return [val, None, None]
     return val  # pragma: no cover
