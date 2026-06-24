@@ -16,7 +16,7 @@ because they are called from the admin browser session — unlike the token-only
 """
 
 from django.apps import apps
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -36,17 +36,39 @@ def _offline_models() -> list:
     return models
 
 
-def get_offline_model_keys() -> list[str]:
-    """Return sorted ``"app_label/model_name"`` keys for offline-capable models."""
-    keys = [f"{m._meta.app_label}/{m._meta.model_name}" for m in _offline_models()]
+def _can_view(user, model) -> bool:
+    """True when ``user`` may read ``model`` in the admin (staff + view perm).
+
+    These endpoints feed the admin's own offline cache, so access is gated the
+    same way the admin is: the user must be staff and hold the model's ``view``
+    permission. Superusers pass both checks automatically.
+    """
+    if not getattr(user, "is_staff", False):
+        return False
+    perm = f"{model._meta.app_label}.view_{model._meta.model_name}"
+    return user.has_perm(perm)
+
+
+def get_offline_model_keys(user=None) -> list[str]:
+    """Return sorted ``"app_label/model_name"`` keys for offline-capable models.
+
+    When ``user`` is given, only models that user may view are included so the
+    sidebar never advertises offline capability for records the user can't see.
+    """
+    keys = [
+        f"{m._meta.app_label}/{m._meta.model_name}"
+        for m in _offline_models()
+        if user is None or _can_view(user, m)
+    ]
     return sorted(keys)
 
 
-def get_offline_model_limits() -> dict[str, int]:
-    """Map each offline-capable model key to its ``offline_cache_limit``."""
+def get_offline_model_limits(user=None) -> dict[str, int]:
+    """Map each (viewable) offline-capable model key to its ``offline_cache_limit``."""
     return {
         f"{m._meta.app_label}/{m._meta.model_name}": int(getattr(m, "offline_cache_limit", 100))
         for m in _offline_models()
+        if user is None or _can_view(user, m)
     }
 
 
@@ -58,8 +80,8 @@ class OfflineModelsView(APIView):
     @extend_schema(summary="List models that support offline mode")
     def get(self, request) -> Response:
         return Response({
-            "models": get_offline_model_keys(),
-            "limits": get_offline_model_limits(),
+            "models": get_offline_model_keys(request.user),
+            "limits": get_offline_model_limits(request.user),
         })
 
 
@@ -105,6 +127,12 @@ class OfflineModelDataView(APIView):
         model = self._get_offline_model(app_label, model_name)
         if model is None:
             raise NotFound("Model is not available for offline mode.")
+
+        # Gate the cache feed the same way the admin gates the model: staff only,
+        # and only with the model's view permission. Without this any authenticated
+        # user could read the most-recent rows of an offline-capable model.
+        if not _can_view(request.user, model):
+            raise PermissionDenied("You do not have permission to view this model.")
 
         limit = self._resolve_limit(request, model)
 

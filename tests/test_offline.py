@@ -325,3 +325,63 @@ class TestOfflineModelDataEndpoint:
         url = reverse("offline-data", kwargs={"app_label": "demo", "model_name": "customer"})
         assert url == self.URL
         assert resolve(url).view_name == "offline-data"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Offline endpoints honour admin access — staff + per-model view permission
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestOfflineEndpointPermissions:
+    DATA_URL = "/api/offline-data/demo/customer/"
+    MODELS_URL = "/api/offline-models/"
+
+    @pytest.fixture
+    def client_factory(self):
+        from rest_framework.test import APIClient
+
+        def _make(user):
+            client = APIClient()
+            client.force_authenticate(user=user)
+            return client
+        return _make
+
+    @pytest.fixture
+    def non_staff_user(self, db):
+        from django.contrib.auth.models import User
+        return User.objects.create_user(username="plain", password="x")
+
+    @pytest.fixture
+    def staff_no_perm(self, db):
+        from django.contrib.auth.models import User
+        return User.objects.create_user(username="staff_noperm", password="x", is_staff=True)
+
+    @pytest.fixture
+    def staff_with_perm(self, db):
+        from django.contrib.auth.models import User
+        from django.contrib.auth.models import Permission
+        user = User.objects.create_user(username="staff_perm", password="x", is_staff=True)
+        user.user_permissions.add(Permission.objects.get(codename="view_customer"))
+        return user
+
+    def test_data_feed_denied_for_non_staff(self, client_factory, non_staff_user, customer):
+        r = client_factory(non_staff_user).get(self.DATA_URL)
+        assert r.status_code == 403
+
+    def test_data_feed_denied_for_staff_without_view_perm(self, client_factory, staff_no_perm, customer):
+        r = client_factory(staff_no_perm).get(self.DATA_URL)
+        assert r.status_code == 403
+
+    def test_data_feed_allowed_for_staff_with_view_perm(self, client_factory, staff_with_perm, customer):
+        r = client_factory(staff_with_perm).get(self.DATA_URL)
+        assert r.status_code == 200
+        assert r.json()["count"] == 1
+
+    def test_models_list_filtered_by_permission(self, client_factory, non_staff_user, staff_with_perm):
+        # A user who cannot view Customer never sees it advertised as offline-capable.
+        empty = client_factory(non_staff_user).get(self.MODELS_URL).json()
+        assert "demo/customer" not in empty["models"]
+        assert "demo/customer" not in empty["limits"]
+        allowed = client_factory(staff_with_perm).get(self.MODELS_URL).json()
+        assert "demo/customer" in allowed["models"]
+        assert allowed["limits"]["demo/customer"] == 50

@@ -163,17 +163,45 @@ pip install git+https://github.com/drofji/django-snapadmin.git
 ## 🛠 Usage & Configuration
 
 ### 1. Configure Settings
-Add required apps to `INSTALLED_APPS` in `settings.py`:
+Add the required apps to `INSTALLED_APPS` in `settings.py`. **Order matters** — `unfold`
+and its contrib apps must come *before* `django.contrib.admin`, and `django_ckeditor_5`
+must be present because `SnapModel` imports the CKEditor 5 widget at load time:
 ```python
 INSTALLED_APPS = [
+    # Theme — must precede django.contrib.admin
     "unfold",
-    "snapadmin",
+    "unfold.contrib.filters",
+    "unfold.contrib.forms",
+    "unfold.contrib.inlines",
+
+    # WYSIWYG (required — imported by SnapModel)
+    "django_ckeditor_5",
+
+    # Django core
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+
+    # SnapAdmin stack (all required)
     "rest_framework",
     "drf_spectacular",
+    "django_filters",
     "graphene_django",
-    # ...
+    "snapadmin",
+
+    # Optional — only with the [celery] extra
+    # "django_celery_beat",
+    # "django_celery_results",
+
+    # Your apps …
 ]
 ```
+> Installing `drofji-snapadmin` pulls in `django-unfold`, `django-ckeditor-5`,
+> `djangorestframework`, `drf-spectacular`, `django-filter` and `graphene-django`
+> automatically — you only need to list them in `INSTALLED_APPS`.
 
 ### 2. Define your Model
 ```python
@@ -603,6 +631,48 @@ python manage.py migrate
 python manage.py seed_demo
 python manage.py runserver
 ```
+
+---
+
+## 🔄 Migrating from `drofji-automatically-django-admin`
+
+The legacy package **`drofji-automatically-django-admin`** (import root `drofji_autoadmin`,
+last tag **v1.1.0**) is being retired. SnapAdmin is its direct successor — same declarative
+admin, now with REST/GraphQL, the Unfold theme, Elasticsearch, GDPR retention and offline mode.
+The underlying Django fields are unchanged, so this is a **rename + settings swap, not a data
+migration** (the only new table is `snapadmin_apitoken`).
+
+```bash
+# 1. Swap the package
+pip uninstall drofji-automatically-django-admin
+pip install drofji-snapadmin            # or: pip install git+https://github.com/drofji/django-snapadmin.git
+
+# 2. Rename the import root, base class and fields (repo-wide)
+grep -rl drofji_autoadmin . | xargs sed -i '' 's/drofji_autoadmin/snapadmin/g'
+grep -rl AutoAdmin       . | xargs sed -i '' 's/AutoAdmin/Snap/g'
+#   drofji_autoadmin → snapadmin   |   AutoAdminModel → SnapModel   |   AutoAdminCharField → SnapCharField …
+```
+
+**What you must change by hand:**
+
+| Concern | Old (`drofji_autoadmin`) | New (`snapadmin`) |
+|---------|--------------------------|-------------------|
+| Theme apps | `admin_interface`, `colorfield` | **Remove them**; add `unfold` (+ `unfold.contrib.*`) and `django_ckeditor_5` *before* `django.contrib.admin` |
+| REST stack | — | add `rest_framework`, `drf_spectacular`, `django_filters`, `graphene_django`, `snapadmin` |
+| `rangefilter` | present | keep it |
+| Admin registration | automatic (inheritance) | **explicit** — add `SnapModel.register_all_admins()` to `admin.py` |
+| Color fields | `colorfield.ColorField` | `SnapColorField` |
+| APIs | none | optional: `path("", include("snapadmin.urls"))` for `/api/`, `/api/docs/`, `/graphql/` |
+
+Then run `python manage.py migrate` (creates only `snapadmin_apitoken`) and
+`collectstatic` if you serve static yourself.
+
+> ⚠️ **Don't run both packages at once** — keeping `drofji_autoadmin` in `INSTALLED_APPS`
+> alongside SnapAdmin makes both register the admin (`AlreadyRegistered`). Fully uninstall the
+> old package and remove it from `INSTALLED_APPS` first.
+
+The full step-by-step is in [docs/index.html](docs/index.html) under
+*Migration Guide → drofji_autoadmin → SnapAdmin*.
 
 ---
 

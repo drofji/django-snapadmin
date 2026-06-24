@@ -3,7 +3,6 @@ snapadmin/models.py
 Core module for SnapAdmin — an auto-registration layer on top of Django's built-in admin with Unfold integration.
 """
 
-import random
 import secrets
 import string
 from datetime import timedelta
@@ -488,12 +487,33 @@ class SnapModel(models.Model):
             es.delete(index=self.get_es_index_name(), id=self.pk, ignore=[404])
         except Exception: pass
 
+    @classmethod
+    def _generate_es_only_pk(cls) -> int:
+        # ES_ONLY models have no DB sequence, so we mint the id ourselves. A small
+        # random range collides quickly (and would silently overwrite an existing ES
+        # document), so we draw from the full 63-bit BigAutoField space and, when ES
+        # is reachable, re-roll on the rare chance the id already exists.
+        max_id = 9223372036854775807
+        candidate = secrets.randbelow(max_id) + 1
+        if not getattr(settings, "ELASTICSEARCH_ENABLED", False):
+            return candidate
+        try:
+            es = cls.get_es_client()
+            index_name = cls.get_es_index_name()
+            for _attempt in range(5):
+                if not es.exists(index=index_name, id=candidate):
+                    return candidate
+                candidate = secrets.randbelow(max_id) + 1
+        except Exception:
+            pass
+        return candidate
+
     def save(self, *args, **kwargs):
         if self.es_storage_mode == EsStorageMode.ES_ONLY:
             # Skip DB save for ES_ONLY models
             if not self.pk:
-                # Generate a pseudo-random integer ID if not set
-                self.pk = random.randint(100000, 999999)
+                # Mint a collision-resistant id (no DB sequence exists for ES_ONLY).
+                self.pk = self._generate_es_only_pk()
             self.index_in_es()
             return
 

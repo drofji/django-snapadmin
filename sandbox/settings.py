@@ -155,6 +155,15 @@ SNAPADMIN_SWAGGER_ENABLED = True
 SNAPADMIN_GRAPHQL_ENABLED = True
 
 # ------------------------------------------------------------------------------
+# ELASTICSEARCH
+# ------------------------------------------------------------------------------
+# Read from the environment so the docker-compose `--profile es` stack (which sets
+# ELASTICSEARCH_ENABLED=True / ELASTICSEARCH_URL in .env) actually activates ES in
+# the demo. Defaults keep ES off for local dev and the test suite.
+ELASTICSEARCH_ENABLED = os.getenv('ELASTICSEARCH_ENABLED', 'False') == 'True'
+ELASTICSEARCH_URL = os.getenv('ELASTICSEARCH_URL', 'http://localhost:9200')
+
+# ------------------------------------------------------------------------------
 # REST FRAMEWORK
 # ------------------------------------------------------------------------------
 

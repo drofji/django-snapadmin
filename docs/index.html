@@ -136,6 +136,7 @@
     </ul>
     <div class="section-label">🔄 Migration Guide</div>
     <ul>
+      <li><a href="#migration-from-autoadmin">From drofji_autoadmin → SnapAdmin</a></li>
       <li><a href="#migration-from-v0">From v0.0.x → v0.1.x</a></li>
     </ul>
   </nav>
@@ -869,7 +870,121 @@ for order in Order.objects.select_related("customer"):   # 1 query, total
 python manage.py seed_demo --no-index  # skip ES indexing (no ES cluster needed)</code></pre>
   <p>The command is idempotent — running it multiple times adds more data without duplicating existing records.</p>
 
-  <!-- ── Migration Guide ───────────────────────────────────────────────────── -->
+  <!-- ── Migration Guide: old package → SnapAdmin ─────────────────────────── -->
+  <h2 id="migration-from-autoadmin">🔄 Migration Guide: <code>drofji-automatically-django-admin</code> → SnapAdmin</h2>
+  <p>
+    The legacy package <code>drofji-automatically-django-admin</code> (import root
+    <code>drofji_autoadmin</code>, last tag <strong>v1.1.0</strong>) is being retired and its
+    repository removed. <strong>SnapAdmin is its direct successor</strong> — same declarative,
+    field-driven admin, now renamed and extended with a REST API, GraphQL, the Unfold theme,
+    Elasticsearch, GDPR retention and offline mode. The underlying Django field types are
+    unchanged, so this is a <strong>rename + settings swap, not a data migration</strong>.
+  </p>
+
+  <div class="callout callout-success">
+    <strong>No data migration</strong>
+    SnapAdmin does not alter your existing model tables. The only new table is
+    <code>snapadmin_apitoken</code> (token auth). Your data stays exactly where it is.
+  </div>
+
+  <h3>1. Swap the package</h3>
+  <pre><code>pip uninstall drofji-automatically-django-admin
+pip install drofji-snapadmin
+# or pin the repo:
+pip install git+https://github.com/drofji/django-snapadmin.git</code></pre>
+  <p>If you pinned the old GitHub URL in <code>requirements.txt</code>, replace that line with
+  <code>drofji-snapadmin</code>.</p>
+
+  <h3>2. Rename the import root (<code>drofji_autoadmin</code> → <code>snapadmin</code>)</h3>
+  <pre><code># Before
+from drofji_autoadmin import models as drofji_models, fields as drofji_fields
+from drofji_autoadmin import validators
+
+# After
+from snapadmin import models as snap_models, fields as snap_fields
+from snapadmin import validators</code></pre>
+  <p>One-shot, repo-wide:</p>
+  <pre><code>grep -rl drofji_autoadmin . | xargs sed -i '' 's/drofji_autoadmin/snapadmin/g'</code></pre>
+
+  <h3>3. Rename the base class & fields (<code>AutoAdmin*</code> → <code>Snap*</code>)</h3>
+  <pre><code># Before
+class Product(drofji_models.AutoAdminModel):
+    name = drofji_fields.AutoAdminCharField(max_length=200, searchable=True)
+
+# After
+class Product(snap_models.SnapModel):
+    name = snap_fields.SnapCharField(max_length=200, searchable=True)</code></pre>
+  <p>All field flags (<code>show_in_list</code>, <code>searchable</code>, <code>filterable</code>,
+  <code>row</code>, <code>tab</code>, …) and the per-model <code>admin_overrides</code> dict keep
+  the same names and behaviour. Mechanical replace:</p>
+  <pre><code>grep -rl AutoAdmin . | xargs sed -i '' 's/AutoAdmin/Snap/g'
+# AutoAdminModel→SnapModel, AutoAdminCharField→SnapCharField, AutoAdminFunctionField→SnapFunctionField, …</code></pre>
+
+  <h3>4. Swap the theme in <code>INSTALLED_APPS</code></h3>
+  <p>The old package themed the admin with <code>admin_interface</code> + <code>colorfield</code>.
+  SnapAdmin uses <strong>Unfold</strong>. <strong>Remove the old theme apps</strong> (leaving them
+  alongside Unfold causes conflicting admin overrides) and add the new stack — order matters,
+  Unfold and its contrib apps must precede <code>django.contrib.admin</code>:</p>
+  <pre><code>INSTALLED_APPS = [
+-   "admin_interface",
+-   "colorfield",
++   "unfold",
++   "unfold.contrib.filters",
++   "unfold.contrib.forms",
++   "unfold.contrib.inlines",
++   "django_ckeditor_5",
+    "django.contrib.admin",
+    "django.contrib.auth",
+    # … other django.contrib.* …
+    "rangefilter",            # keep — SnapAdmin still uses it
+-   "drofji_autoadmin",
++   "rest_framework",
++   "drf_spectacular",
++   "django_filters",
++   "graphene_django",
++   "snapadmin",
+    # your apps …
+]</code></pre>
+
+  <h3>5. Register the admin explicitly (new requirement)</h3>
+  <p>The old package auto-registered models purely by inheritance. SnapAdmin needs one explicit
+  call — add it to your app's <code>admin.py</code>, or your models won't appear in the admin:</p>
+  <pre><code># admin.py
+from snapadmin.models import SnapModel
+SnapModel.register_all_admins()</code></pre>
+
+  <h3>6. Replace color fields</h3>
+  <p>If you used <code>ColorField</code> from <code>django-colorfield</code>, switch to
+  <code>snap_fields.SnapColorField</code> (validates <code>#RRGGBB</code> / <code>#RGB</code>).</p>
+
+  <h3>7. (Optional) Wire up the new APIs</h3>
+  <p>SnapAdmin ships a REST API, GraphQL endpoint and Swagger UI — features the old package did
+  not have. Include the routes only if you want them:</p>
+  <pre><code># urls.py
+urlpatterns = [
+    path("admin/", admin.site.urls),
+    path("", include("snapadmin.urls")),   # /api/, /api/docs/, /graphql/
+]
+
+# settings.py — all default True
+SNAPADMIN_REST_API_ENABLED = True
+SNAPADMIN_GRAPHQL_ENABLED  = True
+SNAPADMIN_SWAGGER_ENABLED  = True
+ELASTICSEARCH_ENABLED      = False   # opt-in; needs the [elasticsearch] extra</code></pre>
+
+  <h3>8. Migrate & collect static</h3>
+  <pre><code>python manage.py migrate          # creates only snapadmin_apitoken
+python manage.py collectstatic    # if you serve static yourself</code></pre>
+
+  <div class="callout callout-warning">
+    <strong>Don't run both packages at once</strong>
+    Keeping <code>drofji_autoadmin</code> installed and in <code>INSTALLED_APPS</code> alongside
+    SnapAdmin makes both try to register the admin → <code>AlreadyRegistered</code>. Fully
+    uninstall the old package and remove it from <code>INSTALLED_APPS</code> before enabling
+    SnapAdmin.
+  </div>
+
+  <!-- ── Migration Guide: same-package versions ───────────────────────────── -->
   <h2 id="migration-from-v0">🔄 Migration Guide: v0.0.x → v0.1.x</h2>
   <p>Version 0.1.0 is a significant rewrite. If you are upgrading from an older version, follow these steps.</p>
 
