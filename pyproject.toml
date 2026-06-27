@@ -8,6 +8,19 @@ readme = "README.md"
 homepage = "https://github.com/drofji/django-snapadmin"
 repository = "https://github.com/drofji/django-snapadmin"
 keywords = ["django", "admin", "rest-api", "graphql", "elasticsearch", "unfold", "declarative"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Web Environment",
+    "Framework :: Django",
+    "Framework :: Django :: 5.2",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Topic :: Internet :: WWW/HTTP :: Site Management",
+]
 
 packages = [{include = "snapadmin"}]
 
