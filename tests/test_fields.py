@@ -533,3 +533,46 @@ class TestSnapColorValidator:
     def test_equality(self):
         from snapadmin.validators import SnapColorValidator
         assert SnapColorValidator() == SnapColorValidator()
+
+
+# ── Migration-safe deconstruct (validators must not accumulate) ────────────────
+
+class TestValidatorDeconstructStability:
+    """deconstruct()/reconstruct() must be idempotent for validator-injecting
+    fields, otherwise makemigrations re-emits an AlterField forever."""
+
+    import pytest as _pytest
+
+    @_pytest.mark.parametrize("field_path", [
+        "SnapColorField",
+        "SnapPhoneField",
+        "SnapFileField",
+    ])
+    def test_validators_do_not_accumulate(self, field_path):
+        import snapadmin.fields as fields
+        cls = getattr(fields, field_path)
+
+        field = cls()
+        # The live field keeps exactly one auto-injected validator.
+        assert len(field._validators) == 1
+
+        counts = []
+        name, path, args, kwargs = field.deconstruct()
+        for _ in range(3):
+            counts.append(len(kwargs.get("validators", [])))
+            rebuilt = cls(*args, **kwargs)
+            assert len(rebuilt._validators) == 1  # runtime validation preserved
+            name, path, args, kwargs = rebuilt.deconstruct()
+        # deconstruct strips the auto validator, so every round-trip is stable.
+        assert counts == [0, 0, 0]
+
+    def test_user_validators_are_preserved(self):
+        from django.core.validators import MaxLengthValidator
+        from snapadmin.fields import SnapColorField
+
+        field = SnapColorField(validators=[MaxLengthValidator(7)])
+        kwargs = field.deconstruct()[3]
+        # The user's validator survives; only the auto-injected one is stripped.
+        assert any(isinstance(v, MaxLengthValidator) for v in kwargs["validators"])
+        from snapadmin.validators import SnapColorValidator
+        assert not any(isinstance(v, SnapColorValidator) for v in kwargs["validators"])

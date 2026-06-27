@@ -56,6 +56,25 @@ class DjangoFieldAttributeEnum(str, Enum):
 # Base mixin
 # ===========================================================================
 
+def _strip_auto_validator(deconstructed, validator_cls):
+    """Drop the auto-injected validator from a field's ``deconstruct()`` output.
+
+    Fields like :class:`SnapColorField` add their validator in ``__init__``. If
+    ``deconstruct()`` also reports it, every reconstruction re-adds another copy,
+    so the validator list grows on each migration and ``makemigrations`` never
+    converges. Removing it here lets ``__init__`` re-add exactly one.
+    """
+    name, path, args, kwargs = deconstructed
+    validators = kwargs.get(DjangoFieldAttributeEnum.VALIDATORS.value)
+    if validators:
+        kept = [v for v in validators if not isinstance(v, validator_cls)]
+        if kept:
+            kwargs[DjangoFieldAttributeEnum.VALIDATORS.value] = kept
+        else:
+            kwargs.pop(DjangoFieldAttributeEnum.VALIDATORS.value, None)
+    return name, path, args, kwargs
+
+
 class SnapField:
     """
     Mixin that adds SnapAdmin metadata to any Django model field.
@@ -232,6 +251,12 @@ class SnapFileField(models.FileField, SnapField):
         kwargs.setdefault(DjangoFieldAttributeEnum.VALIDATORS.value, []).append(file_validator)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
+    def deconstruct(self):
+        # __init__ always re-injects the SnapFileValidator, so strip it here to
+        # keep deconstruct/reconstruct idempotent (otherwise it accumulates and
+        # makemigrations never converges).
+        return _strip_auto_validator(super().deconstruct(), snap_validators.SnapFileValidator)
+
 class SnapImageField(models.ImageField, SnapField):
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
@@ -303,6 +328,9 @@ class SnapPhoneField(models.CharField, SnapField):
         cleaned[DjangoFieldAttributeEnum.VALIDATORS.value].append(SnapPhoneValidator())
         super().__init__(**cleaned)
 
+    def deconstruct(self):
+        return _strip_auto_validator(super().deconstruct(), snap_validators.SnapPhoneValidator)
+
 class SnapColorField(models.CharField, SnapField):
     """CharField pre-wired with hex color validation (#RRGGBB / #RGB)."""
 
@@ -314,6 +342,9 @@ class SnapColorField(models.CharField, SnapField):
         cleaned.setdefault(DjangoFieldAttributeEnum.VALIDATORS.value, [])
         cleaned[DjangoFieldAttributeEnum.VALIDATORS.value].append(SnapColorValidator())
         super().__init__(**cleaned)
+
+    def deconstruct(self):
+        return _strip_auto_validator(super().deconstruct(), snap_validators.SnapColorValidator)
 
 class SnapFunctionField(SnapNotDatabaseField):
     def __init__(self, func, verbose_name=None, show_in_list=True,
