@@ -108,6 +108,23 @@ class Customer(snap_models.SnapModel):
         verbose_name = _("Customer")
         verbose_name_plural = _("Customers")
 
+class CustomerProfile(snap_models.SnapModel):
+    """Demonstrates SnapOneToOneField — a one-to-one extension of Customer.
+
+    A OneToOne models "exactly one related row" (here: one profile per customer).
+    on_delete=CASCADE removes the profile when its customer is deleted.
+    """
+    customer = snap_fields.SnapOneToOneField(
+        Customer, on_delete=django_models.CASCADE, related_name="profile",
+        verbose_name=_("Customer"), autocomplete=True, show_in_list=True, show_in_form=True,
+    )
+    newsletter = snap_fields.SnapBooleanField(default=False, verbose_name=_("Newsletter Opt-in"), show_in_form=True, filterable=True)
+    bio = snap_fields.SnapTextField(blank=True, verbose_name=_("Bio"), show_in_form=True)
+
+    class Meta:
+        verbose_name = _("Customer Profile")
+        verbose_name_plural = _("Customer Profiles")
+
 class Order(snap_models.SnapModel):
     # autocomplete=True → FK rendered as searchable autocomplete widget (requires search_fields on Customer)
     customer = snap_fields.SnapForeignKey(Customer, on_delete=django_models.PROTECT, verbose_name=_("Customer"), autocomplete=True, show_in_list=True, show_in_form=True)
@@ -145,7 +162,7 @@ class SearchLog(snap_models.SnapModel):
 
 class AuditLog(snap_models.SnapModel):
     """
-    Demonstrates GDPR/DSGVO data retention.
+    Demonstrates GDPR data retention.
     Records older than data_retention_days are auto-deleted by the purge_expired_data
     Celery task. Run manually: python manage.py purge_expired_data --dry-run
     """
@@ -225,6 +242,16 @@ class Showcase(snap_models.SnapModel):
     small_int_field = snap_fields.SnapSmallIntegerField(verbose_name=_("Small Integer"), show_in_form=True, tab=_("Extended"))
     pos_small_int_field = snap_fields.SnapPositiveSmallIntegerField(verbose_name=_("Pos. Small Integer"), show_in_form=True, tab=_("Extended"))
     pos_big_int_field = snap_fields.SnapPositiveBigIntegerField(verbose_name=_("Pos. Big Integer"), show_in_form=True, tab=_("Extended"))
+
+    # SnapFunctionField — a computed, read-only column rendered from a callable.
+    # It is NOT a database column (no migration), so it's perfect for derived or
+    # aggregated display values. safe_html=False escapes the output.
+    summary = snap_fields.SnapFunctionField(
+        func=lambda obj: f"{obj.char_field or '—'} · int={obj.integer_field or 0}",
+        verbose_name=_("Computed Summary"),
+        show_in_list=True,
+        show_in_form=False,
+    )
 
     # Unfold: group fields into collapsible sections and warn on unsaved changes
     compressed_fields = True

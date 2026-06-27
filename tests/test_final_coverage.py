@@ -98,31 +98,31 @@ class TestGraphqlResolvers:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# tasks.py 61-66 — ES_ONLY model with retention is skipped (warning + continue)
+# tasks.py — ES_ONLY model with retention is purged via ES (0 when ES disabled)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.mark.django_db
 class TestPurgeTaskEsOnly:
-    def test_task_skips_es_only_model_with_retention(self):
+    def test_task_purges_es_only_model_with_retention(self):
         from snapadmin.api.tasks import purge_expired_data
         from demo.models import SearchLog
 
         # SearchLog is ES_ONLY but normally has no retention; give it one so the
-        # task reaches the ES_ONLY guard and skips it.
+        # task reaches the ES_ONLY purge path. ES is disabled in tests, so the
+        # purge resolves to 0 — but the model is now accounted for in the summary.
         with patch.object(SearchLog, "data_retention_days", 30, create=True):
             result = purge_expired_data.apply().get()
 
-        # SearchLog must not appear in the purged summary (it was skipped).
-        assert "demo.SearchLog" not in result["purged"]
+        assert result["purged"].get("demo.SearchLog") == 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# purge_expired_data command 47-48 — ES_ONLY skip prints SKIPPED
+# purge_expired_data command — ES_ONLY model is reported, not skipped
 # ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.mark.django_db
 class TestPurgeCommandEsOnly:
-    def test_command_skips_es_only_model(self):
+    def test_command_reports_es_only_model(self):
         from io import StringIO
         from django.core.management import call_command
         from demo.models import SearchLog
@@ -131,8 +131,9 @@ class TestPurgeCommandEsOnly:
         with patch.object(SearchLog, "data_retention_days", 30, create=True):
             call_command("purge_expired_data", "--dry-run", stdout=out)
 
-        assert "SKIPPED" in out.getvalue()
-        assert "SearchLog" in out.getvalue()
+        output = out.getvalue()
+        assert "SearchLog" in output
+        assert "SKIPPED" not in output
 
 
 # ─────────────────────────────────────────────────────────────────────────────

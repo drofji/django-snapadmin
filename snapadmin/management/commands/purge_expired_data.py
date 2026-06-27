@@ -1,7 +1,7 @@
 """
 management/commands/purge_expired_data.py
 
-Run DSGVO/GDPR data retention cleanup manually.
+Run GDPR data retention cleanup manually.
 Equivalent to calling the purge_expired_data Celery task synchronously.
 
 Usage:
@@ -12,7 +12,7 @@ from django.core.management.base import BaseCommand
 
 
 class Command(BaseCommand):
-    help = "Delete records that exceed their model's data_retention_days limit (DSGVO/GDPR)"
+    help = "Delete records that exceed their model's data_retention_days limit (GDPR)"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -22,10 +22,9 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        from datetime import timedelta
         from django.apps import apps
         from django.utils import timezone
-        from snapadmin.models import SnapModel, EsStorageMode
+        from snapadmin.models import SnapModel
 
         dry_run: bool = options["dry_run"]
         now = timezone.now()
@@ -39,23 +38,13 @@ class Command(BaseCommand):
             if not retention_days or retention_days <= 0:
                 continue
 
-            retention_field = getattr(model, "data_retention_field", "created_at")
-            cutoff = now - timedelta(days=retention_days)
             label = f"{model._meta.app_label}.{model.__name__}"
 
-            if model.es_storage_mode == EsStorageMode.ES_ONLY:
-                self.stdout.write(self.style.WARNING(f"  SKIPPED {label} (ES_ONLY - handle manually)"))
-                continue
-
             try:
-                filter_kwargs = {f"{retention_field}__lt": cutoff}
-                qs = model.objects.filter(**filter_kwargs)
-                count = qs.count()
-
+                count = model.purge_expired(now=now, dry_run=dry_run)
                 if dry_run:
                     self.stdout.write(f"  DRY RUN {label}: {count} records would be deleted (older than {retention_days} days)")
                 else:
-                    qs.delete()
                     self.stdout.write(self.style.SUCCESS(f"  DELETED {label}: {count} records (older than {retention_days} days)"))
                     total += count
             except Exception as exc:

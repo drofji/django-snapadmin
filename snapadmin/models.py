@@ -381,7 +381,7 @@ class SnapModel(models.Model):
     es_index_name = None
     es_mapping = None
 
-    # DSGVO / GDPR data retention
+    # GDPR data retention
     # Set data_retention_days to a positive integer to enable automatic deletion of old records.
     # Records older than this many days (measured on data_retention_field) will be removed.
     data_retention_days: int | None = None
@@ -614,6 +614,87 @@ class SnapModel(models.Model):
             indexed += 1
 
         return {"indexed": indexed}
+
+    # ------------------------------------------------------------------
+    # GDPR / data-retention purge
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _delete_pks_from_es(cls, pks) -> None:
+        """Best-effort removal of the given primary keys from the ES index.
+
+        Used by the DUAL-mode purge: ``QuerySet.delete()`` is a bulk SQL DELETE
+        that never calls ``Model.delete()``, so the ES mirror would otherwise be
+        left behind. We collect the pks before the DB delete and clear them here.
+        """
+        if not pks or not getattr(settings, "ELASTICSEARCH_ENABLED", False):
+            return
+        try:
+            es = cls.get_es_client()
+            index_name = cls.get_es_index_name()
+            for pk in pks:
+                es.delete(index=index_name, id=pk, ignore=[404])
+        except Exception:
+            pass
+
+    @classmethod
+    def _purge_expired_es_only(cls, cutoff, retention_field, dry_run: bool) -> int:
+        """Purge expired ES_ONLY documents via a range query on the retention field.
+
+        ES_ONLY models have no DB table, so retention must run against the index
+        directly. Requires the retention field to be mapped as a date in ES.
+        """
+        if not getattr(settings, "ELASTICSEARCH_ENABLED", False):
+            return 0
+        try:
+            es = cls.get_es_client()
+            index_name = cls.get_es_index_name()
+            body = {"query": {"range": {retention_field: {"lt": cutoff.isoformat()}}}}
+            if dry_run:
+                resp = es.count(index=index_name, body=body)
+                return resp.get("count", 0)
+            resp = es.delete_by_query(index=index_name, body=body, ignore=[404])
+            return resp.get("deleted", 0)
+        except Exception:
+            return 0
+
+    @classmethod
+    def purge_expired(cls, *, now=None, dry_run: bool = False) -> int:
+        """Delete records past this model's ``data_retention_days`` (GDPR).
+
+        Removes rows older than the retention window — measured on
+        ``data_retention_field`` — from **every** storage layer the model uses:
+
+        * ``DB_ONLY`` — bulk delete from the database.
+        * ``DUAL``    — bulk delete from the database **and** the ES mirror.
+        * ``ES_ONLY`` — delete the matching documents from Elasticsearch.
+
+        Returns the number of records purged (or that *would* be purged when
+        ``dry_run=True``); returns ``0`` when retention is not configured.
+        """
+        retention_days = getattr(cls, "data_retention_days", None)
+        if not retention_days or retention_days <= 0:
+            return 0
+
+        retention_field = getattr(cls, "data_retention_field", "created_at")
+        now = now or timezone.now()
+        cutoff = now - timedelta(days=retention_days)
+
+        if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+            return cls._purge_expired_es_only(cutoff, retention_field, dry_run)
+
+        qs = cls.objects.filter(**{f"{retention_field}__lt": cutoff})
+        if dry_run:
+            return qs.count()
+
+        if cls.es_storage_mode == EsStorageMode.DUAL:
+            pks = list(qs.values_list("pk", flat=True))
+            count, _ = qs.delete()
+            cls._delete_pks_from_es(pks)
+            return count
+
+        count, _ = qs.delete()
+        return count
 
     # ------------------------------------------------------------------
     # Human-readable representation

@@ -46,6 +46,26 @@ That's it. You instantly get:
 | `DUAL` | PostgreSQL + Elasticsearch | Full-text search on large product/article catalogs |
 | `ES_ONLY` | Elasticsearch only | High-frequency write logs, analytics events |
 
+Searchable fields are declared in `es_mapping` (a `{field: ES mapping}` dict). Search
+through `es_search()` — a fuzzy `multi_match` when ES is on, with an automatic ORM
+fallback when it's off, so the same call works everywhere (`snap_search()` is an alias):
+
+```python
+# Fuzzy, typo-tolerant full-text search (default limit=20)
+results = Product.es_search("wireles headphones")   # typo still matches
+top5    = Product.es_search("laptop", limit=5)
+browse  = Product.es_search(limit=100)              # no query → match-all, newest first
+
+# ES_ONLY models are read *only* through es_search() (no DB table)
+logs = SearchLog.es_search("error 404")
+
+# DB_ONLY models answer too — falls back to an ORM icontains query
+Article.es_search("django")   # works even with ELASTICSEARCH_ENABLED=False
+```
+
+For `DB_ONLY`/`DUAL` it returns a Django `QuerySet`; for `ES_ONLY` a lightweight
+`EsQuerySet` of instances built from the index.
+
 ---
 
 ## 👀 What You'll See
@@ -123,7 +143,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Token Auth** | Secure, expirable API tokens with granular model-level access control. |
 | **Configurable** | Easily enable/disable REST API, GraphQL, Swagger docs, and search modes via settings. |
 | **Elasticsearch Ready** | Multi-mode storage (`DB_ONLY`, `DUAL`, `ES_ONLY`) for blazing fast search. |
-| **GDPR/DSGVO Data Retention** | Per-model `data_retention_days` parameter with automatic Celery cleanup task. |
+| **GDPR Data Retention** | Per-model `data_retention_days` parameter with automatic Celery cleanup task. |
 | **Offline Mode** | Per-model `offline_mode` toggle: prefetches the last `offline_cache_limit` rows into IndexedDB, polls `/api/health/` for real backend availability, shows dynamic toasts + a saved-objects panel, and syncs on reconnect. |
 | **Large-Dataset Tuning** | Auto-derived `list_select_related` (no admin N+1), plus per-model `list_per_page` / `show_full_result_count` knobs for million-row tables. |
 | **Structured Logging** | Integrated `structlog` for readable local logs and JSON logs in production. |
@@ -286,7 +306,7 @@ SNAPADMIN_SWAGGER_ENABLED = True    # Enable/Disable Swagger UI documentation
 ELASTICSEARCH_ENABLED = False       # Toggle ES search engine support
 ```
 
-## GDPR / DSGVO Data Retention
+## GDPR Data Retention
 
 Add automatic record cleanup to any model with two class attributes:
 
@@ -306,6 +326,25 @@ Records are removed by the `purge_expired_data` Celery task (schedule it with Ce
 python manage.py purge_expired_data         # live run
 python manage.py purge_expired_data --dry-run  # preview only
 ```
+
+Or programmatically, per model — returns the number of records purged:
+
+```python
+AuditLog.purge_expired()              # delete expired rows now
+AuditLog.purge_expired(dry_run=True)  # count only, delete nothing
+```
+
+The purge is **storage-aware**, so personal data never lingers in a secondary store:
+
+| Mode | What gets purged |
+| --- | --- |
+| `DB_ONLY` | Bulk delete from the database. |
+| `DUAL` | Database rows **and** the mirrored Elasticsearch documents. |
+| `ES_ONLY` | Range `delete_by_query` against the index on `data_retention_field`. |
+
+> A plain `QuerySet.delete()` never calls each model's `delete()`, so a naïve bulk
+> purge would leave the Elasticsearch copy behind. `purge_expired()` closes that gap
+> for `DUAL` and `ES_ONLY` models (ES operations require `ELASTICSEARCH_ENABLED=True`).
 
 ---
 

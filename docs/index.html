@@ -4,101 +4,227 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>SnapAdmin Documentation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --primary: #1a56db;
-    --primary-dark: #1342a8;
-    --accent: #0e9f6e;
-    --danger: #e02424;
-    --warn: #c27803;
-    --bg: #f9fafb;
+    --primary: #4f46e5;
+    --primary-dark: #4338ca;
+    --primary-soft: rgba(79,70,229,.10);
+    --accent: #0ea472;
+    --danger: #dc2626;
+    --warn: #d97706;
+    --bg: #f6f7fb;
+    --bg-grad-1: #eef2ff;
+    --bg-grad-2: #f6f7fb;
     --card: #ffffff;
-    --border: #e5e7eb;
-    --text: #111827;
+    --card-soft: #fbfbfe;
+    --border: #e6e8ee;
+    --border-strong: #d6d9e2;
+    --text: #1a1d29;
+    --text-soft: #3a4051;
     --muted: #6b7280;
-    --code-bg: #1e293b;
-    --code-text: #e2e8f0;
+    --code-bg: #0f1525;
+    --code-text: #e7ecf5;
+    --shadow-sm: 0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --shadow-md: 0 4px 12px rgba(16,24,40,.06), 0 2px 4px rgba(16,24,40,.04);
+    --shadow-lg: 0 12px 32px rgba(16,24,40,.10);
+    --radius: 12px;
+    --sidebar-w: 280px;
+    --content-max: 880px;
+  }
+  html[data-theme="dark"] {
+    --primary: #818cf8;
+    --primary-dark: #a5b4fc;
+    --primary-soft: rgba(129,140,248,.14);
+    --accent: #34d399;
+    --danger: #f87171;
+    --warn: #fbbf24;
+    --bg: #0b0e17;
+    --bg-grad-1: #131829;
+    --bg-grad-2: #0b0e17;
+    --card: #141925;
+    --card-soft: #181e2c;
+    --border: #242b3d;
+    --border-strong: #313a52;
+    --text: #e8ebf2;
+    --text-soft: #c2c8d6;
+    --muted: #8b93a7;
+    --code-bg: #0a0d16;
+    --code-text: #dde4f0;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.30);
+    --shadow-md: 0 4px 14px rgba(0,0,0,.40);
+    --shadow-lg: 0 16px 40px rgba(0,0,0,.55);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: linear-gradient(180deg, var(--bg-grad-1) 0%, var(--bg-grad-2) 420px);
+    background-attachment: fixed;
+    color: var(--text); line-height: 1.65; font-size: 15.5px;
+    -webkit-font-smoothing: antialiased;
+  }
 
-  /* Layout */
-  .sidebar { position: fixed; top: 0; left: 0; width: 260px; height: 100vh; overflow-y: auto; background: var(--card); border-right: 1px solid var(--border); padding: 0; z-index: 100; }
-  .main { margin-left: 260px; padding: 40px 48px; max-width: 900px; }
-  .sidebar-logo { padding: 24px 20px 16px; border-bottom: 1px solid var(--border); }
-  .sidebar-logo h2 { font-size: 18px; color: var(--primary); font-weight: 700; }
-  .sidebar-logo span { font-size: 12px; color: var(--muted); }
-  .sidebar nav ul { list-style: none; padding: 12px 0; }
-  .sidebar nav ul li a { display: block; padding: 7px 20px; color: var(--text); text-decoration: none; font-size: 14px; border-left: 3px solid transparent; transition: all .15s; }
-  .sidebar nav ul li a:hover, .sidebar nav ul li a.active { background: #eff6ff; color: var(--primary); border-left-color: var(--primary); }
-  .sidebar nav .section-label { padding: 12px 20px 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  /* ── Sidebar ─────────────────────────────────────────── */
+  .sidebar {
+    position: fixed; top: 0; left: 0; width: var(--sidebar-w); height: 100vh;
+    overflow-y: auto; background: var(--card); border-right: 1px solid var(--border);
+    z-index: 100; transition: transform .25s ease;
+  }
+  .sidebar::-webkit-scrollbar { width: 8px; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
+  .sidebar-logo { padding: 22px 22px 14px; }
+  .sidebar-logo h2 { font-size: 19px; font-weight: 800; letter-spacing: -.02em; background: linear-gradient(120deg, var(--primary), var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .sidebar-logo span { font-size: 12px; color: var(--muted); font-weight: 500; }
+  .nav-search { padding: 4px 18px 12px; }
+  .nav-search input {
+    width: 100%; padding: 9px 12px; font-size: 13.5px; font-family: inherit;
+    border: 1px solid var(--border-strong); border-radius: 9px; background: var(--card-soft);
+    color: var(--text); outline: none; transition: border-color .15s, box-shadow .15s;
+  }
+  .nav-search input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+  .sidebar nav ul { list-style: none; padding: 2px 0 8px; }
+  .sidebar nav ul li a {
+    display: block; padding: 7px 22px; color: var(--text-soft); text-decoration: none;
+    font-size: 14px; font-weight: 500; border-left: 3px solid transparent; transition: all .13s;
+  }
+  .sidebar nav ul li a:hover { background: var(--primary-soft); color: var(--primary-dark); }
+  .sidebar nav ul li a.active { background: var(--primary-soft); color: var(--primary-dark); border-left-color: var(--primary); font-weight: 600; }
+  .sidebar nav .section-label { padding: 14px 22px 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+  .nav-hidden { display: none !important; }
 
-  /* Content */
-  h1 { font-size: 32px; font-weight: 800; margin-bottom: 8px; }
-  h2 { font-size: 22px; font-weight: 700; margin: 40px 0 12px; padding-top: 40px; border-top: 1px solid var(--border); }
-  h3 { font-size: 16px; font-weight: 700; margin: 24px 0 8px; color: var(--primary-dark); }
-  p { margin-bottom: 14px; color: #374151; }
-  .subtitle { font-size: 17px; color: var(--muted); margin-bottom: 32px; }
-  a { color: var(--primary); text-decoration: none; }
+  /* ── Topbar (mobile + theme toggle) ──────────────────── */
+  .topbar {
+    position: fixed; top: 0; right: 0; left: var(--sidebar-w); height: 0; z-index: 90;
+    display: flex; justify-content: flex-end; pointer-events: none;
+  }
+  .icon-btn {
+    pointer-events: auto; margin: 16px; width: 42px; height: 42px; border-radius: 11px;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    font-size: 18px; cursor: pointer; box-shadow: var(--shadow-sm);
+    display: inline-flex; align-items: center; justify-content: center; transition: all .15s;
+  }
+  .icon-btn:hover { border-color: var(--primary); color: var(--primary); transform: translateY(-1px); }
+  #menuToggle { display: none; }
+
+  /* ── Main content ────────────────────────────────────── */
+  .main { margin-left: var(--sidebar-w); padding: 56px 56px 120px; max-width: calc(var(--content-max) + var(--sidebar-w)); }
+  section, h2 { scroll-margin-top: 24px; }
+
+  h1 { font-size: 40px; font-weight: 800; letter-spacing: -.03em; margin-bottom: 10px; line-height: 1.1; }
+  h2 { font-size: 26px; font-weight: 800; letter-spacing: -.02em; margin: 56px 0 16px; padding-top: 32px; border-top: 1px solid var(--border); }
+  h3 { font-size: 17px; font-weight: 700; margin: 28px 0 10px; color: var(--text); }
+  p { margin-bottom: 14px; color: var(--text-soft); }
+  .subtitle { font-size: 19px; color: var(--muted); margin-bottom: 36px; max-width: 640px; }
+  a { color: var(--primary-dark); text-decoration: none; font-weight: 500; }
   a:hover { text-decoration: underline; }
+  ul, ol { margin: 0 0 16px 22px; color: var(--text-soft); }
+  li { margin-bottom: 5px; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
 
-  /* Badges */
-  .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-right: 4px; }
+  /* ── Badges ──────────────────────────────────────────── */
+  .badge { display: inline-block; padding: 3px 11px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-right: 4px; }
   .badge-green { background: #d1fae5; color: #065f46; }
   .badge-blue  { background: #dbeafe; color: #1e40af; }
   .badge-red   { background: #fee2e2; color: #991b1b; }
   .badge-yellow { background: #fef3c7; color: #92400e; }
+  html[data-theme="dark"] .badge-green { background: rgba(52,211,153,.16); color: #6ee7b7; }
+  html[data-theme="dark"] .badge-blue  { background: rgba(129,140,248,.18); color: #bfc6ff; }
+  html[data-theme="dark"] .badge-red   { background: rgba(248,113,113,.16); color: #fca5a5; }
+  html[data-theme="dark"] .badge-yellow{ background: rgba(251,191,36,.16); color: #fcd34d; }
 
-  /* Code blocks */
-  pre { background: var(--code-bg); color: var(--code-text); padding: 20px 24px; border-radius: 8px; overflow-x: auto; margin: 12px 0 20px; font-size: 13.5px; line-height: 1.65; }
-  code { font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace; }
-  p code, li code { background: #f1f5f9; color: #0f172a; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+  /* ── Code blocks ─────────────────────────────────────── */
+  .code-wrap { position: relative; margin: 14px 0 22px; }
+  pre {
+    background: var(--code-bg); color: var(--code-text); padding: 20px 22px; border-radius: var(--radius);
+    overflow-x: auto; font-size: 13.5px; line-height: 1.7; border: 1px solid rgba(255,255,255,.06);
+    box-shadow: var(--shadow-md);
+  }
+  pre::-webkit-scrollbar { height: 9px; }
+  pre::-webkit-scrollbar-thumb { background: #394056; border-radius: 8px; }
+  code { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+  pre code { color: var(--code-text); }
+  p code, li code, td code, th code { background: var(--primary-soft); color: var(--primary-dark); padding: 1.5px 6px; border-radius: 5px; font-size: 12.8px; font-weight: 500; }
+  .copy-btn {
+    position: absolute; top: 10px; right: 10px; padding: 5px 11px; font-size: 11.5px; font-weight: 600;
+    font-family: 'Inter', sans-serif; color: #c7cfde; background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 7px; cursor: pointer; opacity: 0;
+    transition: all .15s;
+  }
+  .code-wrap:hover .copy-btn { opacity: 1; }
+  .copy-btn:hover { background: rgba(255,255,255,.16); color: #fff; }
+  .copy-btn.copied { background: var(--accent); color: #fff; border-color: transparent; }
 
-  /* Tables */
-  table { width: 100%; border-collapse: collapse; margin: 12px 0 20px; font-size: 14px; }
-  th { background: #f8fafc; font-weight: 600; padding: 10px 14px; text-align: left; border-bottom: 2px solid var(--border); }
-  td { padding: 9px 14px; border-bottom: 1px solid var(--border); }
-  tr:hover td { background: #f9fafb; }
+  /* ── Tables ──────────────────────────────────────────── */
+  table { width: 100%; border-collapse: collapse; margin: 14px 0 22px; font-size: 14px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); }
+  th { background: var(--card-soft); font-weight: 600; padding: 11px 16px; text-align: left; border-bottom: 1px solid var(--border-strong); color: var(--text); font-size: 13px; }
+  td { padding: 11px 16px; border-bottom: 1px solid var(--border); color: var(--text-soft); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: var(--primary-soft); }
 
-  /* Cards */
-  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 20px 24px; margin-bottom: 16px; }
-  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; margin: 16px 0; }
-  .feature-card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
-  .feature-card .icon { font-size: 24px; margin-bottom: 8px; }
-  .feature-card h4 { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  /* ── Cards ───────────────────────────────────────────── */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 24px; margin-bottom: 16px; box-shadow: var(--shadow-sm); }
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; margin: 22px 0; }
+  .feature-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm); transition: transform .16s, box-shadow .16s, border-color .16s; }
+  .feature-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--border-strong); }
+  .feature-card .icon { font-size: 26px; margin-bottom: 10px; display: block; }
+  .feature-card h4 { font-size: 14.5px; font-weight: 700; margin-bottom: 5px; color: var(--text); }
   .feature-card p { font-size: 13px; color: var(--muted); margin: 0; }
 
-  /* Callouts */
-  .callout { border-left: 4px solid; border-radius: 0 6px 6px 0; padding: 12px 16px; margin: 16px 0; font-size: 14px; }
-  .callout-info    { border-color: var(--primary); background: #eff6ff; }
-  .callout-success { border-color: var(--accent);  background: #f0fdf4; }
-  .callout-warn    { border-color: var(--warn);    background: #fffbeb; }
-  .callout-danger  { border-color: var(--danger);  background: #fef2f2; }
-  .callout strong  { display: block; margin-bottom: 4px; }
+  /* ── Callouts ────────────────────────────────────────── */
+  .callout { border-left: 4px solid; border-radius: 0 10px 10px 0; padding: 14px 18px; margin: 18px 0; font-size: 14px; box-shadow: var(--shadow-sm); }
+  .callout-info    { border-color: var(--primary); background: var(--primary-soft); }
+  .callout-success { border-color: var(--accent);  background: rgba(14,164,114,.10); }
+  .callout-warn    { border-color: var(--warn);    background: rgba(217,119,6,.10); }
+  .callout-danger  { border-color: var(--danger);  background: rgba(220,38,38,.10); }
+  .callout strong  { display: block; margin-bottom: 4px; color: var(--text); }
 
-  /* HTTP method badges */
-  .method { display: inline-block; padding: 1px 7px; border-radius: 4px; font-size: 11px; font-weight: 700; font-family: monospace; margin-right: 8px; }
+  /* ── HTTP method badges & endpoints ──────────────────── */
+  .method { display: inline-block; padding: 2px 8px; border-radius: 5px; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-right: 8px; }
   .get    { background: #d1fae5; color: #065f46; }
   .post   { background: #dbeafe; color: #1e40af; }
   .patch  { background: #fef3c7; color: #92400e; }
   .delete { background: #fee2e2; color: #991b1b; }
-
-  .endpoint-row { display: flex; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
-  .endpoint-path { font-family: monospace; flex: 1; }
+  html[data-theme="dark"] .get { background: rgba(52,211,153,.16); color: #6ee7b7; }
+  html[data-theme="dark"] .post { background: rgba(129,140,248,.18); color: #bfc6ff; }
+  html[data-theme="dark"] .patch { background: rgba(251,191,36,.16); color: #fcd34d; }
+  html[data-theme="dark"] .delete { background: rgba(248,113,113,.16); color: #fca5a5; }
+  .endpoint-row { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .endpoint-path { font-family: 'JetBrains Mono', monospace; flex: 1; color: var(--text); }
   .endpoint-desc { color: var(--muted); font-size: 12px; }
 
-  @media (max-width: 768px) {
-    .sidebar { display: none; }
-    .main { margin-left: 0; padding: 20px; }
+  /* ── Hero ────────────────────────────────────────────── */
+  .hero { position: relative; padding: 8px 0 4px; }
+  .hero .eyebrow { display: inline-block; font-size: 12.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--primary-dark); background: var(--primary-soft); padding: 5px 13px; border-radius: 20px; margin-bottom: 18px; }
+  h1 .grad { background: linear-gradient(120deg, var(--primary), var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+  @media (max-width: 980px) {
+    :root { --sidebar-w: 0px; }
+    .sidebar { transform: translateX(-100%); width: 280px; box-shadow: var(--shadow-lg); }
+    .sidebar.open { transform: translateX(0); }
+    .topbar { left: 0; justify-content: space-between; }
+    #menuToggle { display: inline-flex; }
+    .main { margin-left: 0; padding: 72px 22px 80px; }
+    h1 { font-size: 32px; }
   }
 </style>
 </head>
 <body>
 
-<aside class="sidebar">
+<div class="topbar">
+  <button class="icon-btn" id="menuToggle" aria-label="Toggle menu">☰</button>
+  <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
+</div>
+
+<aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <h2>⚡ SnapAdmin</h2>
     <span>Documentation v0.1.0a2</span>
+  </div>
+  <div class="nav-search">
+    <input type="search" id="navSearch" placeholder="Filter sections…" autocomplete="off">
   </div>
   <nav>
     <div class="section-label">📦 Package Users</div>
@@ -110,7 +236,7 @@
       <li><a href="#advanced-layout">Advanced Layout</a></li>
       <li><a href="#status-badges">Status Badges</a></li>
       <li><a href="#admin-registration">Admin Registration</a></li>
-      <li><a href="#dsgvo">DSGVO / Data Retention</a></li>
+      <li><a href="#gdpr">GDPR / Data Retention</a></li>
       <li><a href="#offline">Offline Mode</a></li>
       <li><a href="#theming">Theming &amp; Styles</a></li>
       <li><a href="#performance">Large-Dataset Performance</a></li>
@@ -145,9 +271,10 @@
 <main class="main">
 
   <!-- ── Overview ─────────────────────────────────────────────────────────── -->
-  <section id="overview">
-    <h1>⚡ SnapAdmin</h1>
-    <p class="subtitle">Automatic, beautiful, production-ready Django Admin — zero boilerplate.</p>
+  <section id="overview" class="hero">
+    <span class="eyebrow">⚡ Django Admin, supercharged</span>
+    <h1>Snap<span class="grad">Admin</span></h1>
+    <p class="subtitle">Automatic, beautiful, production-ready Django Admin — zero boilerplate. REST &amp; GraphQL, Elasticsearch, offline mode and GDPR retention, all from your model definitions.</p>
 
     <div class="card-grid">
       <div class="feature-card"><div class="icon">🎯</div><h4>Declarative Admin</h4><p>Embed admin config in model fields. No ModelAdmin classes needed.</p></div>
@@ -264,7 +391,25 @@ class Product(snap_models.SnapModel):
     <tr><td><code>row</code></td><td>str</td><td>None</td><td>Group fields into a horizontal row</td></tr>
     <tr><td><code>tab</code></td><td>str</td><td>None</td><td>Place field into a specific Unfold tab</td></tr>
     <tr><td><code>wysiwyg</code></td><td>bool</td><td>False</td><td>Enable CKEditor 5 for TextFields</td></tr>
+    <tr><td><code>autocomplete</code></td><td>bool</td><td>False</td><td>Searchable autocomplete widget (relation fields)</td></tr>
   </table>
+
+  <h3>Available field types</h3>
+  <p>Every field type below maps 1:1 to a Django field (except the computed ones) and accepts all the flags above.</p>
+  <table>
+    <tr><th>Category</th><th>Snap field types</th></tr>
+    <tr><td>Text</td><td><code>SnapCharField</code>, <code>SnapTextField</code>, <code>SnapRichTextField</code>, <code>SnapSlugField</code>, <code>SnapEmailField</code>, <code>SnapURLField</code>, <code>SnapUUIDField</code>, <code>SnapGenericIPAddressField</code>, <code>SnapPhoneField</code>, <code>SnapColorField</code></td></tr>
+    <tr><td>Numbers</td><td><code>SnapIntegerField</code>, <code>SnapPositiveIntegerField</code>, <code>SnapSmallIntegerField</code>, <code>SnapPositiveSmallIntegerField</code>, <code>SnapBigIntegerField</code>, <code>SnapPositiveBigIntegerField</code>, <code>SnapFloatField</code>, <code>SnapDecimalField</code></td></tr>
+    <tr><td>Date &amp; time</td><td><code>SnapDateField</code>, <code>SnapDateTimeField</code>, <code>SnapTimeField</code>, <code>SnapDurationField</code></td></tr>
+    <tr><td>Boolean &amp; JSON</td><td><code>SnapBooleanField</code>, <code>SnapJSONField</code></td></tr>
+    <tr><td>Files</td><td><code>SnapFileField</code>, <code>SnapImageField</code></td></tr>
+    <tr><td>Relations</td><td><code>SnapForeignKey</code>, <code>SnapOneToOneField</code>, <code>SnapManyToManyField</code></td></tr>
+    <tr><td>Computed (no DB column)</td><td><code>SnapFunctionField</code> (render from a callable), <code>SnapStatusBadgeField</code> (coloured pill badge)</td></tr>
+  </table>
+  <div class="callout callout-info">
+    <strong>See them all live</strong>
+    The demo app's <code>Showcase</code> model exercises every field type across tabbed sections, and <code>SnapFunctionField</code>/<code>SnapOneToOneField</code> appear on <code>Showcase</code> and <code>CustomerProfile</code> respectively.
+  </div>
 
   <!-- ── Advanced Layout ────────────────────────────────────────────────────── -->
   <h2 id="advanced-layout">📐 Advanced Layout</h2>
@@ -405,54 +550,82 @@ ELASTICSEARCH_URL=https://my-cluster.example.com:9200</code></pre>
   </table>
 
   <h3>Setting the Mode on a Model</h3>
+  <p>The fields you want searchable in Elasticsearch are declared in <code>es_mapping</code> — a dict of <code>{field_name: ES mapping}</code>. (There is no <code>es_index_fields</code> attribute.) For <code>DUAL</code> you may also set <code>es_index_enabled = True</code>.</p>
   <pre><code>from snapadmin.models import SnapModel, EsStorageMode
+from snapadmin import fields as snap_fields
 
-# DB_ONLY (default - no extra config needed)
+# DB_ONLY (default — no extra config needed)
 class Article(SnapModel):
-    title = models.CharField(max_length=200)
-    body = models.TextField()
+    title = snap_fields.SnapCharField(max_length=200, searchable=True)
+    body  = snap_fields.SnapTextField()
 
-# DUAL - save to PostgreSQL and Elasticsearch, search via ES
+# DUAL — save to PostgreSQL AND Elasticsearch, search via ES
 class Product(SnapModel):
-    es_storage_mode = EsStorageMode.DUAL
-    es_index_fields = ["name", "description", "sku"]  # fields to index in ES
+    name        = snap_fields.SnapCharField(max_length=200, searchable=True)
+    description = snap_fields.SnapTextField()
+    price       = snap_fields.SnapDecimalField(max_digits=10, decimal_places=2)
 
-    name = models.CharField(max_length=200)
-    description = models.TextField()
-    sku = models.CharField(max_length=50)
+    es_index_enabled = True
+    es_storage_mode  = EsStorageMode.DUAL
+    es_mapping = {
+        "name":        {"type": "text", "analyzer": "standard"},
+        "description": {"type": "text"},
+        "price":       {"type": "float"},
+    }
 
-# ES_ONLY - no DB table, data lives in Elasticsearch
+# ES_ONLY — no DB table (managed=False), data lives only in Elasticsearch
 class SearchLog(SnapModel):
+    query         = snap_fields.SnapCharField(max_length=255, searchable=True)
+    results_count = snap_fields.SnapIntegerField()
+    timestamp     = models.DateTimeField(auto_now_add=True)
+
     es_storage_mode = EsStorageMode.ES_ONLY
-    es_index_fields = ["query", "user_id", "timestamp"]
+    es_mapping = {
+        "query":         {"type": "text"},
+        "results_count": {"type": "integer"},
+        "timestamp":     {"type": "date"},
+    }
 
-    query = models.CharField(max_length=500)
-    user_id = models.IntegerField()
-    timestamp = models.DateTimeField()</code></pre>
+    class Meta:
+        managed = False  # required for ES_ONLY — no DB table is created</code></pre>
 
-  <h3>Querying</h3>
-  <pre><code># DB_ONLY - standard Django ORM
-articles = Article.objects.filter(title__icontains="django")
+  <h3 id="es-search">Querying with <code>es_search()</code></h3>
+  <p><code>es_search(query_string=None, limit=20)</code> is the single entry point for search. It runs a fuzzy <code>multi_match</code> over the index when ES is enabled, and <strong>gracefully falls back to an ORM query</strong> (using the model's <code>searchable</code> fields) when ES is off or unreachable — so the same call works in every environment. <code>snap_search()</code> is a public alias with identical behavior.</p>
+  <pre><code># Full-text search (fuzzy, typo-tolerant) — returns a queryset-like result
+results = Product.es_search("wireles headphones")     # note the typo — still matches
+for product in results:
+    print(product.name, product.price)
 
-# DUAL - use es_search() for full-text, ORM for filtering
-results = Product.es_search("wireless headphones")  # returns list of Product instances
-# Or use ORM for exact queries (hits the DB):
-products = Product.objects.filter(sku="ABC-123")
+# Cap the number of hits (default 20)
+top5 = Product.es_search("laptop", limit=5)
 
-# ES_ONLY - must use es_search()
+# No query string → match-all (most-recent first), handy for "browse" views
+everything = Product.es_search(limit=100)
+
+# Public alias — identical behavior, nicer name for app code
+hits = Product.snap_search("4k monitor")
+
+# ES_ONLY models: es_search() is the ONLY way to read them (no DB table)
 logs = SearchLog.es_search("error 404")
-# Reindex all records from DB to ES (DUAL mode):
-Product.es_reindex_all()
+recent_logs = SearchLog.es_search(limit=50)
 
-# Check ES availability before querying (DUAL/ES_ONLY)
-try:
-    results = Product.es_search("laptop")
-except Exception:
-    results = Product.objects.all()  # fallback to DB</code></pre>
+# DB_ONLY models still answer es_search() — it falls back to an ORM
+# icontains query across the model's searchable fields:
+articles = Article.es_search("django")   # works even with ELASTICSEARCH_ENABLED=False</code></pre>
+
+  <div class="callout callout-info">
+    <strong>Return types</strong>
+    For <code>DB_ONLY</code>/<code>DUAL</code>, <code>es_search()</code> returns a normal Django <code>QuerySet</code> (ES hits are mapped back to real DB rows, ES order preserved). For <code>ES_ONLY</code> it returns a lightweight <code>EsQuerySet</code> of model instances built straight from the index — iterable, sliceable, and countable, but not a DB queryset.
+  </div>
 
   <h3>Re-indexing (DUAL mode)</h3>
-  <pre><code># Manually trigger a full re-index:
-Product.es_reindex_all()
+  <pre><code># Manually trigger a full re-index of every row into ES:
+Product.es_reindex_all()      # {"indexed": N} — or {"skipped": True} if ES is off
+
+# Per-instance indexing happens automatically on save() in DUAL/ES_ONLY mode.
+# To force a single object back into the index:
+product.index_in_es()
+product.delete_from_es()      # remove just this object's ES document
 
 # Via Celery task (recommended for large datasets):
 from demo.tasks import reindex_products_to_elasticsearch
@@ -460,13 +633,13 @@ reindex_products_to_elasticsearch.delay()</code></pre>
 
   <!-- ── Celery ────────────────────────────────────────────────────────────── -->
   <h2 id="celery">⚙️ Celery &amp; Periodic Tasks</h2>
-  <p>SnapAdmin ships built-in Celery tasks for background indexing, token cleanup, and DSGVO data retention. Wire them up with Celery Beat to get a fully automated backend in minutes.</p>
+  <p>SnapAdmin ships built-in Celery tasks for background indexing, token cleanup, and GDPR data retention. Wire them up with Celery Beat to get a fully automated backend in minutes.</p>
 
   <h3>Built-in Tasks</h3>
   <table>
     <tr><th>Task</th><th>Default Schedule</th><th>Description</th></tr>
     <tr><td><code>api.tasks.purge_expired_tokens</code></td><td>Daily 3am</td><td>Delete all <code>APIToken</code> records past their expiration date</td></tr>
-    <tr><td><code>api.tasks.purge_expired_data</code></td><td>Daily 1am</td><td>DSGVO/GDPR — auto-delete records older than <code>data_retention_days</code> on each SnapModel</td></tr>
+    <tr><td><code>api.tasks.purge_expired_data</code></td><td>Daily 1am</td><td>GDPR — auto-delete records older than <code>data_retention_days</code> on each SnapModel</td></tr>
     <tr><td><code>demo.tasks.reindex_products_to_elasticsearch</code></td><td>Daily midnight</td><td>Re-index all products to Elasticsearch (DUAL mode demo)</td></tr>
     <tr><td><code>demo.tasks.generate_daily_stats</code></td><td>Daily 2am</td><td>Compute and log daily business metrics (demo app)</td></tr>
   </table>
@@ -495,7 +668,7 @@ CELERY_BEAT_SCHEDULE = {
     "purge-expired-data": {
         "task": "api.tasks.purge_expired_data",
         "schedule": crontab(hour=1, minute=0),   # daily 1am
-        "description": "DSGVO — delete records older than data_retention_days",
+        "description": "GDPR — delete records older than data_retention_days",
     },
     "generate-daily-stats": {
         "task": "demo.tasks.generate_daily_stats",
@@ -549,9 +722,9 @@ logger.error("payment_failed", reason="card_declined")</code></pre>
     Noisy third-party loggers (<code>django.db.backends</code>, <code>elasticsearch</code>, <code>urllib3</code>) are silenced to <code>WARNING</code> automatically.
   </div>
 
-  <!-- ── DSGVO / Data Retention ───────────────────────────────────────────── -->
-  <h2 id="dsgvo">🔒 DSGVO / GDPR Data Retention</h2>
-  <p>SnapAdmin provides one-line automatic record cleanup to help comply with EU data retention laws (DSGVO/GDPR). Add two class attributes to any <code>SnapModel</code>:</p>
+  <!-- ── GDPR / Data Retention ───────────────────────────────────────────── -->
+  <h2 id="gdpr">🔒 GDPR Data Retention</h2>
+  <p>SnapAdmin provides one-line automatic record cleanup to help comply with EU data retention laws (GDPR). Add two class attributes to any <code>SnapModel</code>:</p>
 
   <pre><code>class AuditLog(SnapModel):
     action     = SnapCharField(max_length=100)
@@ -577,11 +750,23 @@ logger.error("payment_failed", reason="card_declined")</code></pre>
 
 # Manually via management command:
 python manage.py purge_expired_data           # live run — deletes records
-python manage.py purge_expired_data --dry-run  # preview only — no deletes</code></pre>
+python manage.py purge_expired_data --dry-run  # preview only — no deletes
 
-  <div class="callout callout-warn">
-    <strong>ES_ONLY models</strong>
-    Models with <code>es_storage_mode = EsStorageMode.ES_ONLY</code> are skipped by the purge task — they have no DB table. Implement custom Elasticsearch cleanup for those models.
+# Programmatically, per model (returns the number purged):
+AuditLog.purge_expired()              # delete now
+AuditLog.purge_expired(dry_run=True)  # count what *would* be deleted, delete nothing</code></pre>
+
+  <h3>Purging across every storage layer</h3>
+  <p>The purge is <strong>storage-aware</strong> — it removes expired records from wherever the model actually keeps them, so personal data never lingers in a secondary store:</p>
+  <table>
+    <tr><th>Mode</th><th>What gets purged</th></tr>
+    <tr><td><code>DB_ONLY</code></td><td>Bulk delete from the database.</td></tr>
+    <tr><td><code>DUAL</code></td><td>Bulk delete from the database <strong>and</strong> the mirrored Elasticsearch documents (the pks are collected before the DB delete, then cleared from the index).</td></tr>
+    <tr><td><code>ES_ONLY</code></td><td>A range <code>delete_by_query</code> against the index on <code>data_retention_field</code> (which must be mapped as a <code>date</code> in <code>es_mapping</code>).</td></tr>
+  </table>
+  <div class="callout callout-success">
+    <strong>Why this matters for GDPR</strong>
+    A plain <code>QuerySet.delete()</code> never calls each model's <code>delete()</code>, so a naïve bulk purge would leave the Elasticsearch copy behind. SnapAdmin's <code>purge_expired()</code> closes that gap for both <code>DUAL</code> and <code>ES_ONLY</code> models. ES operations are best-effort and require <code>ELASTICSEARCH_ENABLED=True</code>.
   </div>
 
   <!-- ── Offline Mode ───────────────────────────────────────────────────────── -->
@@ -855,7 +1040,7 @@ for order in Order.objects.select_related("customer"):   # 1 query, total
     <tr>
       <td><code>AuditLog</code></td>
       <td><span style="background:#f1f5f9;color:#475569;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">DB_ONLY</span></td>
-      <td>DSGVO retention: <code>data_retention_days=90</code></td>
+      <td>GDPR retention: <code>data_retention_days=90</code></td>
     </tr>
     <tr>
       <td><code>Showcase</code></td>
@@ -1045,6 +1230,57 @@ ELASTICSEARCH_ENABLED      = False   # default False — enable only with ES clu
     });
   }, { rootMargin: '-20% 0px -70% 0px' });
   sections.forEach(s => observer.observe(s));
+
+  // ── Dark / light theme (persisted, defaults to system preference) ──
+  const root = document.documentElement;
+  const themeBtn = document.getElementById('themeToggle');
+  const applyTheme = t => {
+    root.setAttribute('data-theme', t);
+    if (themeBtn) themeBtn.textContent = t === 'dark' ? '☀️' : '🌙';
+  };
+  const saved = localStorage.getItem('snapadmin-docs-theme');
+  applyTheme(saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  themeBtn && themeBtn.addEventListener('click', () => {
+    const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('snapadmin-docs-theme', next);
+    applyTheme(next);
+  });
+
+  // ── Mobile sidebar toggle ──
+  const sidebar = document.getElementById('sidebar');
+  const menuBtn = document.getElementById('menuToggle');
+  menuBtn && menuBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+  document.querySelectorAll('.sidebar nav a').forEach(a =>
+    a.addEventListener('click', () => sidebar.classList.remove('open')));
+
+  // ── Sidebar filter ──
+  const navSearch = document.getElementById('navSearch');
+  navSearch && navSearch.addEventListener('input', e => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('.sidebar nav li').forEach(li => {
+      const hit = li.textContent.toLowerCase().includes(q);
+      li.classList.toggle('nav-hidden', q && !hit);
+    });
+  });
+
+  // ── One-click copy on every code block ──
+  document.querySelectorAll('main pre').forEach(pre => {
+    const wrap = document.createElement('div');
+    wrap.className = 'code-wrap';
+    pre.parentNode.insertBefore(wrap, pre);
+    wrap.appendChild(pre);
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = 'Copy';
+    wrap.appendChild(btn);
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(pre.innerText);
+        btn.textContent = 'Copied!'; btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1600);
+      } catch (_) { /* clipboard unavailable */ }
+    });
+  });
 </script>
 </body>
 </html>

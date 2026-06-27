@@ -229,7 +229,7 @@ CELERY_BEAT_SCHEDULE = {
     "purge-expired-data": {
         "task": "api.tasks.purge_expired_data",
         "schedule": crontab(hour=1, minute=0),  # daily 1am
-        "description": "DSGVO/GDPR - delete records older than data_retention_days on each model",
+        "description": "GDPR - delete records older than data_retention_days on each model",
     },
     "generate-daily-stats": {
         "task": "demo.tasks.generate_daily_stats",
