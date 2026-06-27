@@ -4,6 +4,42 @@ All notable changes to `drofji-snapadmin` are documented here.
 
 ---
 
+## [0.1.0a2] — 2026-06-27 — Second Alpha
+
+Hardening, new field types, infrastructure and a documentation overhaul on top of the
+first alpha. **Still a pre-release** — APIs may change before `0.1.0` stable.
+
+### Added
+- New field types: `SnapSmallIntegerField`, `SnapPositiveSmallIntegerField`,
+  `SnapPositiveBigIntegerField`, `SnapRichTextField`, `SnapPhoneField`, `SnapColorField`
+  (with `SnapPhoneValidator` / `SnapColorValidator`)
+- **GDPR data retention**: `data_retention_days` / `data_retention_field` on `SnapModel`
+  and a storage-aware `purge_expired()` — DB_ONLY deletes rows, **DUAL also clears the
+  Elasticsearch mirror**, **ES_ONLY purges via a range `delete_by_query`**; plus the
+  `purge_expired_data` Celery task and management command (`--dry-run`)
+- **Offline mode**: `offline_mode` / `offline_cache_limit` per model — IndexedDB caching,
+  real backend health checks, connectivity toasts, saved-objects panel, reconnect sync
+- **Large-dataset performance**: auto `list_select_related` (FK N+1 fix), `list_per_page`
+  / `list_max_show_all` / `show_full_result_count` knobs; `seed_large` +
+  `benchmark_list_view` commands
+- Theming split: theme-agnostic `admin.css` + opt-in `admin-unfold.css`
+- Optional extras: `[elasticsearch]`, `[celery]`, `[all]`; `django-filter` auto Swagger filters
+- Demo: `Showcase` (every field type), `CustomerProfile` (`SnapOneToOneField`),
+  `AuditLog` (retention), `SearchLog` (ES_ONLY)
+
+### Fixed
+- GDPR purge no longer leaves Elasticsearch copies behind for DUAL/ES_ONLY models
+- GraphQL schema generation (fields now collected at class-creation time)
+- `FieldDoesNotExist` import for Django 6.0; deduped object-history log entries
+- Docker `command` quoting; Celery startup; structlog usage in tasks
+- Docs: corrected `es_index_fields` → `es_mapping`; renamed DSGVO → GDPR throughout
+
+### Changed
+- Docs site redesigned (dark/light theme, sidebar filter, copy buttons, `es_search` examples)
+- `snapadmin/` package at **100% line coverage** (580 tests)
+
+---
+
 ## [0.1.0a1] — 2026-06-23 — First Alpha Release
 
 Initial public alpha of **SnapAdmin** — a declarative Django admin and API package.
