@@ -482,6 +482,15 @@ token = APIToken.create_for_user(
   <p>Include the token in every API request as an HTTP header:</p>
   <pre><code>Authorization: Token &lt;token_key&gt;</code></pre>
 
+  <div class="callout callout-warn">
+    <strong>Tokens are hashed at rest</strong>
+    Only a SHA-256 digest and the 8-character <code>token_prefix</code> are stored — the raw key is
+    <em>never</em> persisted. It is returned exactly once: in the <code>POST /api/tokens/</code> response
+    (and shown once in the admin when you create a token). Copy it then; it cannot be recovered later.
+    On every subsequent read <code>token_key</code> is <code>null</code> and only <code>token_prefix</code>
+    identifies the token.
+  </div>
+
   <h3>Token REST Endpoints</h3>
   <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/tokens/</span><span class="endpoint-desc">List tokens owned by the current user</span></div>
   <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/tokens/</span><span class="endpoint-desc">Create a new token</span></div>
@@ -492,8 +501,9 @@ token = APIToken.create_for_user(
   <table>
     <tr><th>Field</th><th>Description</th></tr>
     <tr><td><code>token_name</code></td><td>Human-readable label (e.g. <em>"Read-only dashboard"</em>)</td></tr>
-    <tr><td><code>token_key</code></td><td>40-character secret key — treat like a password</td></tr>
-    <tr><td><code>allowed_models</code></td><td>List of <code>"app_label.ModelName"</code> strings; empty = unrestricted</td></tr>
+    <tr><td><code>token_key</code></td><td>40-character secret key — treat like a password. Hashed at rest; returned only once, at creation</td></tr>
+    <tr><td><code>token_prefix</code></td><td>First 8 characters of the key (not secret) — identifies a stored token in lists and the admin</td></tr>
+    <tr><td><code>allowed_models</code></td><td>List of <code>"app_label.ModelName"</code> strings the token may target. <strong>Empty ≠ unrestricted</strong>: it means "any model the owning user already has Django permissions for". Token scope is always AND-ed with <code>user.has_perm</code>, so a non-empty list <em>narrows</em> access further</td></tr>
     <tr><td><code>expiration_date</code></td><td>Optional expiry; leave blank for non-expiring tokens</td></tr>
     <tr><td><code>is_active</code></td><td>Deactivate without deleting the token</td></tr>
   </table>
@@ -1161,7 +1171,7 @@ ELASTICSEARCH_ENABLED      = False   # opt-in; needs the [elasticsearch] extra</
   <pre><code>python manage.py migrate          # creates only snapadmin_apitoken
 python manage.py collectstatic    # if you serve static yourself</code></pre>
 
-  <div class="callout callout-warning">
+  <div class="callout callout-warn">
     <strong>Don't run both packages at once</strong>
     Keeping <code>drofji_autoadmin</code> installed and in <code>INSTALLED_APPS</code> alongside
     SnapAdmin makes both try to register the admin → <code>AlreadyRegistered</code>. Fully

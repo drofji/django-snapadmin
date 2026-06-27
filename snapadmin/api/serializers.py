@@ -15,6 +15,9 @@ class APITokenSerializer(serializers.ModelSerializer):
     owner_username = serializers.CharField(source="user.username", read_only=True)
     is_expired = serializers.BooleanField(read_only=True)
     is_valid = serializers.BooleanField(read_only=True)
+    # The raw key is hashed at rest: it is only populated in the response that
+    # creates the token, and is null on every subsequent list/retrieve.
+    token_key = serializers.CharField(read_only=True)
 
     class Meta:
         model = APIToken
@@ -22,6 +25,7 @@ class APITokenSerializer(serializers.ModelSerializer):
             "id",
             "token_name",
             "token_key",
+            "token_prefix",
             "owner_username",
             "expiration_date",
             "allowed_models",
@@ -31,7 +35,7 @@ class APITokenSerializer(serializers.ModelSerializer):
             "created_at",
             "last_used_at",
         ]
-        read_only_fields = ["token_key", "created_at", "last_used_at"]
+        read_only_fields = ["token_prefix", "created_at", "last_used_at"]
 
 
 class APITokenCreateSerializer(serializers.ModelSerializer):

@@ -26,7 +26,7 @@ class TestTokenKeyGeneration:
 
     def test_key_unique_in_db(self, api_token):
         from snapadmin.models import APIToken
-        assert APIToken.objects.filter(token_key=api_token.token_key).count() == 1
+        assert APIToken.objects.filter(token_digest=api_token.token_digest).count() == 1
 
 
 # ── Expiry / validity ─────────────────────────────────────────────────────────

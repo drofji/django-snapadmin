@@ -1,4 +1,4 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.utils.html import format_html
 from django.utils.translation import gettext_lazy as _
 
@@ -62,7 +62,7 @@ class APITokenAdmin(ModelAdmin):
         ("user", RelatedDropdownFilter),
     ]
     search_fields = ["token_name", "user__username"]
-    readonly_fields = ["token_key", "created_at", "last_used_at"]
+    readonly_fields = ["full_key", "created_at", "last_used_at"]
     ordering = ["-created_at"]
 
     warn_unsaved_form = True
@@ -70,7 +70,7 @@ class APITokenAdmin(ModelAdmin):
 
     fieldsets = [
         (None, {
-            "fields": ["token_name", "user", "token_key"],
+            "fields": ["token_name", "user", "full_key"],
         }),
         (_("Access Control"), {
             "fields": ["is_active", "expiration_date", "allowed_models"],
@@ -86,10 +86,31 @@ class APITokenAdmin(ModelAdmin):
             kwargs["widget"] = SmartModelSelectorWidget()
         return super().formfield_for_dbfield(db_field, request, **kwargs)
 
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        # The raw key exists only on the instance that just minted it. Surface it
+        # once here, since it can never be retrieved from storage again.
+        if not change and obj.token_key:
+            self.message_user(
+                request,
+                _("API token created. Copy it now — it will not be shown again: %(key)s")
+                % {"key": obj.token_key},
+                level=messages.WARNING,
+            )
+
+    @display(description=_("Token Key"))
+    def full_key(self, obj: APIToken):
+        """Show the raw key once (right after creation) or the masked prefix."""
+        if obj.token_key:
+            return obj.token_key
+        if obj.token_prefix:
+            return f"{obj.token_prefix}•••••••• ({_('hidden — shown only once at creation')})"
+        return "—"
+
     @display(description=_("Token Key"), header=True)
     def masked_key(self, obj: APIToken):
         """Show only the first 8 characters of the token key."""
-        val = f"{obj.token_key[:8]}••••••••"
+        val = f"{obj.token_prefix}••••••••"
         if UNFOLD_INSTALLED:
             return [val, None, None]
         return val  # pragma: no cover

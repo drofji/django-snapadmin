@@ -3,6 +3,7 @@ snapadmin/models.py
 Core module for SnapAdmin — an auto-registration layer on top of Django's built-in admin with Unfold integration.
 """
 
+import hashlib
 import secrets
 import string
 from datetime import timedelta
@@ -78,13 +79,32 @@ def validate_allowed_models(value):
         except LookupError:
             raise ValidationError(_("Model '%(item)s' does not exist."), params={"item": item})
 
+TOKEN_KEY_LENGTH = 40
+TOKEN_PREFIX_LENGTH = 8
+
 def _generate_token_key() -> str:
     alphabet = string.ascii_letters + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(40))
+    return "".join(secrets.choice(alphabet) for _ in range(TOKEN_KEY_LENGTH))
+
+def hash_token_key(raw_key: str) -> str:
+    """Return the SHA-256 hex digest of a raw token key.
+
+    Token keys are high-entropy random strings, so a single fast cryptographic
+    hash (rather than a slow password hash) is the appropriate, constant-cost
+    way to store them: the raw key is never written to the database, and lookup
+    is an indexed equality match on the digest.
+    """
+    return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
 class APIToken(models.Model):
+    # Holds the raw secret only on the in-memory instance that just minted it
+    # (during save/create). It is never persisted and is None for any token
+    # re-fetched from the database.
+    _raw_token_key: str | None = None
+
     token_name = models.CharField(max_length=100, verbose_name=_("Token Name"), help_text=_("A descriptive name for this token (e.g. 'CI Pipeline', 'Read-only dashboard')."))
-    token_key = models.CharField(max_length=40, unique=True, default=_generate_token_key, verbose_name=_("Token Key"), help_text=_("Secret 40-character key. Treat like a password."))
+    token_prefix = models.CharField(max_length=TOKEN_PREFIX_LENGTH, blank=True, editable=False, verbose_name=_("Token Prefix"), help_text=_("First 8 characters of the key, for identification. Not secret."))
+    token_digest = models.CharField(max_length=64, unique=True, blank=True, editable=False, verbose_name=_("Token Digest"), help_text=_("SHA-256 hash of the secret key. The raw key is never stored — it is shown only once, at creation."))
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="api_tokens", verbose_name=_("Owner"))
     expiration_date = models.DateTimeField(null=True, blank=True, verbose_name=_("Expiration Date"), help_text=_("Leave blank for a token that never expires."))
     allowed_models = models.JSONField(default=list, blank=True, validators=[validate_allowed_models], verbose_name=_("Allowed Models"), help_text=_("List of 'app_label.ModelName' strings this token can access."))
@@ -101,6 +121,26 @@ class APIToken(models.Model):
         return f"{self.token_name} ({self.user.username})"
 
     @property
+    def token_key(self) -> str | None:
+        """The raw secret key.
+
+        Available only on the instance that just created the token; it is hashed
+        at rest and never reloaded, so this returns ``None`` for a token fetched
+        from the database. Use :attr:`token_prefix` to identify stored tokens.
+        """
+        return self._raw_token_key
+
+    def save(self, *args, **kwargs):
+        # Mint and hash the key on first save (covers create_for_user,
+        # objects.create, and a bare APIToken(...).save() from the admin).
+        if not self.token_digest:
+            raw_key = _generate_token_key()
+            self._raw_token_key = raw_key
+            self.token_prefix = raw_key[:TOKEN_PREFIX_LENGTH]
+            self.token_digest = hash_token_key(raw_key)
+        super().save(*args, **kwargs)
+
+    @property
     def is_expired(self) -> bool:
         if self.expiration_date is None:
             return False
@@ -111,6 +151,15 @@ class APIToken(models.Model):
         return self.is_active and not self.is_expired
 
     def can_access_model(self, app_label: str, model_name: str) -> bool:
+        """Whether this token may target ``app_label.ModelName``.
+
+        An **empty** ``allowed_models`` is *not* unrestricted access: it means
+        "any model the owning user already has Django permissions for". The token
+        scope is always AND-ed with ``user.has_perm`` (see
+        ``snapadmin.api.authentication.token_has_permission``), so an empty list
+        delegates entirely to the user's permissions. A **non-empty** list
+        further narrows access to exactly those entries.
+        """
         if not self.allowed_models: return True
         return f"{app_label}.{model_name}" in self.allowed_models
 

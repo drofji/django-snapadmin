@@ -146,7 +146,10 @@ class Command(BaseCommand):
         self.stdout.write(f"   Username  : admin")
         self.stdout.write(f"   Password  : admin")
         self.stdout.write("")
-        self.stdout.write(f"   API Token : {token.token_key}")
+        # token_key holds the raw key only on the run that creates it; on a re-run
+        # the token already exists and only its (non-secret) prefix is available.
+        token_display = token.token_key or f"{token.token_prefix}•••••••• (existing — reset the DB to mint a new one)"
+        self.stdout.write(f"   API Token : {token_display}")
         self.stdout.write(f"   Swagger   : http://localhost:8000/api/docs/")
         self.stdout.write("")
 

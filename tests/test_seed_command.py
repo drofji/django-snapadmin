@@ -67,10 +67,11 @@ class TestSeedDemoCommand:
 
     def test_output_prints_token_key(self):
         output = self._call(count=3)
-        # Token key is 40 alphanumeric chars – check something key-like is in output
+        # The raw key is hashed at rest, so a re-fetched token only exposes its
+        # (non-secret) prefix — which the seed run prints as part of the full key.
         from snapadmin.models import APIToken
         token = APIToken.objects.filter(token_name="Demo Token").first()
-        assert token.token_key in output
+        assert token.token_prefix in output
 
     def test_custom_count_respected(self):
         from demo.models import Product

@@ -140,7 +140,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Change Logging** | Automatic tracking of field-level changes (`old → new`) with a dedicated history view. |
 | **Automatic REST API** | Instantly generated CRUD endpoints for every `SnapModel` with zero extra code. |
 | **Dynamic GraphQL API** | Automatically generated GraphQL schema with support for complex data fetching. |
-| **Token Auth** | Secure, expirable API tokens with granular model-level access control. |
+| **Token Auth** | Expirable API tokens with granular model-level access control. Keys are **hashed at rest** (SHA-256) and shown only once, at creation. |
 | **Configurable** | Easily enable/disable REST API, GraphQL, Swagger docs, and search modes via settings. |
 | **Elasticsearch Ready** | Multi-mode storage (`DB_ONLY`, `DUAL`, `ES_ONLY`) for blazing fast search. |
 | **GDPR Data Retention** | Per-model `data_retention_days` parameter with automatic Celery cleanup task. |
@@ -305,6 +305,30 @@ SNAPADMIN_GRAPHQL_ENABLED = True    # Enable/Disable the GraphQL API
 SNAPADMIN_SWAGGER_ENABLED = True    # Enable/Disable Swagger UI documentation
 ELASTICSEARCH_ENABLED = False       # Toggle ES search engine support
 ```
+
+## 🔑 API Token Security
+
+API tokens authenticate REST/GraphQL requests via the `Authorization: Token <key>` header.
+
+```python
+from snapadmin.models import APIToken
+
+token = APIToken.create_for_user(
+    user=user,
+    token_name="CI Pipeline",
+    allowed_models=["myapp.Product", "myapp.Order"],  # optional scope
+    expires_in_days=30,
+)
+print(token.token_key)  # raw key — available ONLY here, right after creation
+```
+
+- **Hashed at rest** — only a SHA-256 `token_digest` and the non-secret 8-char `token_prefix` are
+  stored. The raw `token_key` is never persisted; it is returned exactly once (the
+  `POST /api/tokens/` response, or a one-time admin message). Afterwards `token_key` is `None` and
+  only `token_prefix` identifies the token. Authentication looks the presented key up by its digest.
+- **`allowed_models` — empty ≠ unrestricted.** An empty list means "any model the owning user
+  already has Django permissions for"; the token scope is always AND-ed with `user.has_perm`. A
+  non-empty list *narrows* access to exactly those `"app_label.ModelName"` entries.
 
 ## GDPR Data Retention
 

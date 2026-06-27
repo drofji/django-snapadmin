@@ -9,7 +9,7 @@ import logging
 from django.contrib.auth.models import User
 from rest_framework import authentication, exceptions
 
-from snapadmin.models import APIToken
+from snapadmin.models import APIToken, hash_token_key
 
 logger = logging.getLogger("snapadmin.api.auth")
 
@@ -36,11 +36,12 @@ class APITokenAuthentication(authentication.BaseAuthentication):
         return self._validate_token(token_key)
 
     def _validate_token(self, token_key: str):
+        # The raw key is never stored; look it up by its SHA-256 digest.
         try:
             token = (
                 APIToken.objects
                 .select_related("user")
-                .get(token_key=token_key)
+                .get(token_digest=hash_token_key(token_key))
             )
         except APIToken.DoesNotExist:
             raise exceptions.AuthenticationFailed("Invalid token.")
