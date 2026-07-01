@@ -9,6 +9,16 @@ All notable changes to `drofji-snapadmin` are documented here.
 Hardening, new field types, infrastructure and a documentation overhaul on top of the
 first alpha. **Still a pre-release** — APIs may change before `0.1.0` stable.
 
+### Security
+- **API tokens are hashed at rest.** `APIToken` no longer stores the raw key: it keeps a
+  non-secret `token_prefix` (first 8 chars) and a unique SHA-256 `token_digest`. The raw
+  `token_key` is returned exactly once — in the `POST /api/tokens/` response and a one-time
+  admin message — and is `None` on every subsequent read. Authentication looks tokens up by
+  digest. (Migration `0002_hash_api_token_key` backfills existing keys, then drops the
+  plaintext column.)
+- Offline data endpoint (`/api/offline-data/<app>/<model>/`) now enforces staff + per-model
+  view permission instead of returning rows to any authenticated user
+
 ### Added
 - New field types: `SnapSmallIntegerField`, `SnapPositiveSmallIntegerField`,
   `SnapPositiveBigIntegerField`, `SnapRichTextField`, `SnapPhoneField`, `SnapColorField`
@@ -28,15 +38,25 @@ first alpha. **Still a pre-release** — APIs may change before `0.1.0` stable.
   `AuditLog` (retention), `SearchLog` (ES_ONLY)
 
 ### Fixed
+- **Infinite migrations** from `SnapColorField` / `SnapPhoneField` / `SnapFileField`: they
+  re-injected their built-in validator on every `deconstruct()`, so `makemigrations` never
+  converged. `deconstruct()` now strips the auto-injected validator (user validators kept)
 - GDPR purge no longer leaves Elasticsearch copies behind for DUAL/ES_ONLY models
+- `ES_ONLY` primary keys now drawn from the full 63-bit space via `secrets` (with an
+  ES existence re-roll) instead of a 6-digit random int prone to silent overwrites
 - GraphQL schema generation (fields now collected at class-creation time)
 - `FieldDoesNotExist` import for Django 6.0; deduped object-history log entries
 - Docker `command` quoting; Celery startup; structlog usage in tasks
+- Demo ES toggle (`ELASTICSEARCH_ENABLED` / `_URL`) is now actually read by `sandbox/settings.py`
 - Docs: corrected `es_index_fields` → `es_mapping`; renamed DSGVO → GDPR throughout
 
 ### Changed
-- Docs site redesigned (dark/light theme, sidebar filter, copy buttons, `es_search` examples)
-- `snapadmin/` package at **100% line coverage** (580 tests)
+- `allowed_models` documented precisely: an **empty list is not "unrestricted"** — it means
+  "any model the owning user already has Django perms for" (AND-ed with `user.has_perm`); a
+  non-empty list narrows access further
+- Docs site redesigned (dark/light theme, sidebar filter, copy buttons, `es_search` examples);
+  added an `APIToken` security section and a migration guide from the retired `drofji_autoadmin`
+- `snapadmin/` package at **100% line coverage** (603 tests)
 
 ---
 
