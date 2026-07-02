@@ -1,5 +1,5 @@
 [tool.poetry]
-name = "drofji-snapadmin"
+name = "django-snapadmin"
 version = "0.1.0a2"
 description = "Declarative Django admin + REST API + GraphQL auto-generation from model definitions."
 authors = ["Alexander Wiese"]

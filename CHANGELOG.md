@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `drofji-snapadmin` are documented here.
+All notable changes to `django-snapadmin` are documented here.
 
 ---
 
@@ -146,5 +146,5 @@ Initial public alpha of **SnapAdmin** — a declarative Django admin and API pac
 
 ### Installation
 ```bash
-pip install drofji-snapadmin
+pip install django-snapadmin
 ```

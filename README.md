@@ -170,7 +170,7 @@ snapadmin/
 
 ### From PyPI (Recommended)
 ```bash
-pip install drofji-snapadmin
+pip install django-snapadmin
 ```
 
 ### From GitHub (Latest/Development)
@@ -219,7 +219,7 @@ INSTALLED_APPS = [
     # Your apps …
 ]
 ```
-> Installing `drofji-snapadmin` pulls in `django-unfold`, `django-ckeditor-5`,
+> Installing `django-snapadmin` pulls in `django-unfold`, `django-ckeditor-5`,
 > `djangorestframework`, `drf-spectacular`, `django-filter` and `graphene-django`
 > automatically — you only need to list them in `INSTALLED_APPS`.
 
@@ -708,7 +708,7 @@ migration** (the only new table is `snapadmin_apitoken`).
 ```bash
 # 1. Swap the package
 pip uninstall drofji-automatically-django-admin
-pip install drofji-snapadmin            # or: pip install git+https://github.com/drofji/django-snapadmin.git
+pip install django-snapadmin            # or: pip install git+https://github.com/drofji/django-snapadmin.git
 
 # 2. Rename the import root, base class and fields (repo-wide)
 grep -rl drofji_autoadmin . | xargs sed -i '' 's/drofji_autoadmin/snapadmin/g'
