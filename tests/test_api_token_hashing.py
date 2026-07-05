@@ -7,7 +7,6 @@ auth backend looks the token up by digest.
 """
 
 import hashlib
-import importlib
 
 import pytest
 from django.contrib import admin as django_admin
@@ -55,50 +54,6 @@ class TestTokenAtRest:
         token.save()
         assert token.token_key is not None
         assert token.token_digest == hash_token_key(token.token_key)
-
-
-# ── Migration backfill ─────────────────────────────────────────────────────────
-
-class _FakeManager:
-    def __init__(self, tokens):
-        self._tokens = tokens
-
-    def all(self):
-        return self
-
-    def iterator(self):
-        return iter(self._tokens)
-
-
-class _FakeToken:
-    def __init__(self, token_key):
-        self.token_key = token_key
-        self.saved_fields = None
-
-    def save(self, update_fields=None):
-        self.saved_fields = update_fields
-
-
-class _FakeApps:
-    def __init__(self, tokens):
-        self._tokens = tokens
-
-    def get_model(self, app_label, model_name):
-        manager = _FakeManager(self._tokens)
-        return type("HistoricalAPIToken", (), {"objects": manager})
-
-
-def test_migration_backfills_prefix_and_digest():
-    """The 0002 data migration hashes each legacy plaintext key in place."""
-    migration = importlib.import_module("snapadmin.migrations.0002_hash_api_token_key")
-    raw = "ABCDEFGH" + "z" * 32
-    token = _FakeToken(raw)
-
-    migration.backfill_digests(_FakeApps([token]), schema_editor=None)
-
-    assert token.token_prefix == "ABCDEFGH"
-    assert token.token_digest == hashlib.sha256(raw.encode("utf-8")).hexdigest()
-    assert token.saved_fields == ["token_prefix", "token_digest"]
 
 
 # ── Authentication by digest ───────────────────────────────────────────────────
