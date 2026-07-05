@@ -185,7 +185,7 @@ query {
 **System Dashboard** — `http://localhost:8000/admin/snapadmin/dashboard/`
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  System Dashboard                          v0.1.0a9     │
+│  System Dashboard                          v0.1.0a10    │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
 │  │ Product  │ │ Customer │ │  Order   │ │ AuditLog │  │
 │  │  50 rows │ │  50 rows │ │  50 rows │ │  50 rows │  │
