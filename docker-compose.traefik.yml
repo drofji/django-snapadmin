@@ -1,0 +1,45 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SnapAdmin — Traefik reverse proxy overlay (simple local dev, no auth)
+#
+# Kept for backward compatibility. Prefer the split overlays instead:
+#   docker-compose.traefik.local.yml — local dev with BasicAuth dashboard
+#   docker-compose.traefik.prod.yml  — production with HTTPS + Let's Encrypt
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up --build
+#
+# After startup:
+#   http://snapadmin.localhost/       → Django admin / app
+#   http://localhost:8080/            → Traefik dashboard (open, no auth)
+#
+# Requirements:
+#   - No other process listening on port 80
+#   - Traefik resolves *.localhost natively on macOS/Linux;
+#     on Windows add "127.0.0.1 snapadmin.localhost" to C:\Windows\System32\drivers\etc\hosts
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Traefik reverse proxy ───────────────────────────────────────────────────
+  traefik:
+    image: traefik:v3.0
+    restart: unless-stopped
+    command:
+      - "--api.insecure=true"                          # Enable Traefik dashboard (dev only)
+      - "--providers.docker=true"                      # Watch Docker labels for routing rules
+      - "--providers.docker.exposedbydefault=false"    # Only expose labeled services
+      - "--entrypoints.web.address=:80"                # HTTP entrypoint
+    ports:
+      - "80:80"          # HTTP traffic
+      - "8080:8080"      # Traefik dashboard
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker socket (read-only)
+
+  # ── Override app service to add Traefik labels ───────────────────────────────
+  app:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.snapadmin.rule=Host(`snapadmin.localhost`)"
+      - "traefik.http.routers.snapadmin.entrypoints=web"
+      - "traefik.http.services.snapadmin.loadbalancer.server.port=8000"
+    ports: []  # Remove direct port mapping when Traefik handles routing

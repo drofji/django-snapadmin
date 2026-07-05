@@ -1,0 +1,40 @@
+{% load i18n %}<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:24px;background:#f4f4f7;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f2933;">
+  <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:8px;overflow:hidden;border:1px solid #e4e7eb;">
+    <div style="background:#312e81;color:#ffffff;padding:20px 24px;">
+      <h1 style="margin:0;font-size:18px;">&#128202; SnapAdmin — daily error digest</h1>
+      <p style="margin:8px 0 0;font-size:14px;opacity:.9;">
+        <strong>{{ total }}</strong> error{{ total|pluralize }} in the last
+        <strong>{{ hours }} hours</strong>, {{ groups|length }} distinct group{{ groups|length|pluralize }}
+      </p>
+    </div>
+    <div style="padding:24px;">
+      {% for group in groups %}
+      <div style="border:1px solid #e4e7eb;border-radius:6px;padding:14px 16px;margin-bottom:12px;">
+        <div style="display:flex;font-size:13px;">
+          <span style="background:#e0e7ff;color:#312e81;border-radius:10px;padding:2px 10px;font-weight:600;margin-right:10px;">{{ group.count }}&times;</span>
+          <strong>{{ group.exception_class }}</strong>&nbsp;<span style="color:#616e7c;">({{ group.status_code }})</span>
+        </div>
+        <div style="font-family:monospace;font-size:12px;color:#3e4c59;margin-top:8px;">{{ group.method }} {{ group.path|default:"—" }}</div>
+        {% if group.message %}<div style="font-size:12px;color:#616e7c;margin-top:6px;">{{ group.message|truncatechars:200 }}</div>{% endif %}
+        <div style="font-size:11px;color:#9aa5b1;margin-top:8px;">
+          first {{ group.first_seen|date:"Y-m-d H:i" }} &middot; last {{ group.last_seen|date:"Y-m-d H:i" }}
+        </div>
+      </div>
+      {% endfor %}
+      {% if hidden_groups %}
+      <p style="margin:4px 0 0;font-size:12px;color:#616e7c;">
+        … and {{ hidden_groups }} more group{{ hidden_groups|pluralize }}
+        ({{ hidden_events }} event{{ hidden_events|pluralize }}) not shown — the digest is
+        capped by SNAPADMIN_ERROR_DIGEST_MAX_GROUPS.
+      </p>
+      {% endif %}
+      <p style="margin:20px 0 0;font-size:12px;color:#616e7c;">
+        Generated at {{ generated_at|date:"Y-m-d H:i:s e" }} — full details in the
+        <strong>Error Events</strong> section of your admin panel.
+      </p>
+    </div>
+  </div>
+</body>
+</html>

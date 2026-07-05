@@ -1,0 +1,87 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: django-snapadmin\n"
+"Report-Msgid-Bugs-To: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: nl\n"
+
+msgid "Skip to main content"
+msgstr "Ga naar hoofdinhoud"
+
+msgid "System entry points"
+msgstr "Systeemtoegangspunten"
+
+msgid "System Entry Points"
+msgstr "Systeemtoegangspunten"
+
+msgid "Managed Models"
+msgstr "Beheerde modellen"
+
+msgid "Scheduled Cron Jobs"
+msgstr "Geplande taken"
+
+msgid "Name"
+msgstr "Naam"
+
+msgid "Task"
+msgstr "Taak"
+
+msgid "Schedule"
+msgstr "Planning"
+
+msgid "Description"
+msgstr "Beschrijving"
+
+msgid "Data Distribution"
+msgstr "Gegevensverdeling"
+
+msgid "System Health"
+msgstr "Systeemstatus"
+
+msgid "Environment"
+msgstr "Omgeving"
+
+msgid "Mode"
+msgstr "Modus"
+
+msgid "Hostname"
+msgstr "Hostnaam"
+
+msgid "API Capabilities"
+msgstr "API-mogelijkheden"
+
+msgid "Language"
+msgstr "Taal"
+
+msgid "English"
+msgstr "Engels"
+
+msgid "Russian"
+msgstr "Russisch"
+
+msgid "German"
+msgstr "Duits"
+
+msgid "Swiss German"
+msgstr "Zwitsers Duits"
+
+msgid "French"
+msgstr "Frans"
+
+msgid "Swiss French"
+msgstr "Zwitsers Frans"
+
+msgid "Spanish"
+msgstr "Spaans"
+
+msgid "Italian"
+msgstr "Italiaans"
+
+msgid "Polish"
+msgstr "Pools"
+
+msgid "Dutch"
+msgstr "Nederlands"
+

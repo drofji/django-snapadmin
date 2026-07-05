@@ -1,0 +1,1946 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SnapAdmin Documentation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --primary: #4f46e5;
+    --primary-dark: #4338ca;
+    --primary-soft: rgba(79,70,229,.10);
+    --accent: #0ea472;
+    --danger: #dc2626;
+    --warn: #d97706;
+    --bg: #f6f7fb;
+    --bg-grad-1: #eef2ff;
+    --bg-grad-2: #f6f7fb;
+    --card: #ffffff;
+    --card-soft: #fbfbfe;
+    --border: #e6e8ee;
+    --border-strong: #d6d9e2;
+    --text: #1a1d29;
+    --text-soft: #3a4051;
+    --muted: #6b7280;
+    --code-bg: #0f1525;
+    --code-text: #e7ecf5;
+    --shadow-sm: 0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+    --shadow-md: 0 4px 12px rgba(16,24,40,.06), 0 2px 4px rgba(16,24,40,.04);
+    --shadow-lg: 0 12px 32px rgba(16,24,40,.10);
+    --radius: 12px;
+    --sidebar-w: 280px;
+    --content-max: 880px;
+  }
+  html[data-theme="dark"] {
+    --primary: #818cf8;
+    --primary-dark: #a5b4fc;
+    --primary-soft: rgba(129,140,248,.14);
+    --accent: #34d399;
+    --danger: #f87171;
+    --warn: #fbbf24;
+    --bg: #0b0e17;
+    --bg-grad-1: #131829;
+    --bg-grad-2: #0b0e17;
+    --card: #141925;
+    --card-soft: #181e2c;
+    --border: #242b3d;
+    --border-strong: #313a52;
+    --text: #e8ebf2;
+    --text-soft: #c2c8d6;
+    --muted: #8b93a7;
+    --code-bg: #0a0d16;
+    --code-text: #dde4f0;
+    --shadow-sm: 0 1px 2px rgba(0,0,0,.30);
+    --shadow-md: 0 4px 14px rgba(0,0,0,.40);
+    --shadow-lg: 0 16px 40px rgba(0,0,0,.55);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: linear-gradient(180deg, var(--bg-grad-1) 0%, var(--bg-grad-2) 420px);
+    background-attachment: fixed;
+    color: var(--text); line-height: 1.65; font-size: 15.5px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── Sidebar ─────────────────────────────────────────── */
+  .sidebar {
+    position: fixed; top: 0; left: 0; width: var(--sidebar-w); height: 100vh;
+    overflow-y: auto; background: var(--card); border-right: 1px solid var(--border);
+    z-index: 100; transition: transform .25s ease;
+  }
+  .sidebar::-webkit-scrollbar { width: 8px; }
+  .sidebar::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
+  .sidebar-logo { padding: 22px 22px 14px; }
+  .sidebar-logo h2 { font-size: 19px; font-weight: 800; letter-spacing: -.02em; background: linear-gradient(120deg, var(--primary), var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  .sidebar-logo span { font-size: 12px; color: var(--muted); font-weight: 500; }
+  .nav-search { padding: 4px 18px 12px; }
+  .nav-search input {
+    width: 100%; padding: 9px 12px; font-size: 13.5px; font-family: inherit;
+    border: 1px solid var(--border-strong); border-radius: 9px; background: var(--card-soft);
+    color: var(--text); outline: none; transition: border-color .15s, box-shadow .15s;
+  }
+  .nav-search input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-soft); }
+  .sidebar nav ul { list-style: none; padding: 2px 0 8px; }
+  .sidebar nav ul li a {
+    display: block; padding: 7px 22px; color: var(--text-soft); text-decoration: none;
+    font-size: 14px; font-weight: 500; border-left: 3px solid transparent; transition: all .13s;
+  }
+  .sidebar nav ul li a:hover { background: var(--primary-soft); color: var(--primary-dark); }
+  .sidebar nav ul li a.active { background: var(--primary-soft); color: var(--primary-dark); border-left-color: var(--primary); font-weight: 600; }
+  .sidebar nav .section-label { padding: 14px 22px 4px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .09em; color: var(--muted); }
+  .nav-hidden { display: none !important; }
+
+  /* ── Topbar (mobile + theme toggle) ──────────────────── */
+  .topbar {
+    position: fixed; top: 0; right: 0; left: var(--sidebar-w); height: 0; z-index: 90;
+    display: flex; justify-content: flex-end; pointer-events: none;
+  }
+  .icon-btn {
+    pointer-events: auto; margin: 16px; width: 42px; height: 42px; border-radius: 11px;
+    border: 1px solid var(--border); background: var(--card); color: var(--text);
+    font-size: 18px; cursor: pointer; box-shadow: var(--shadow-sm);
+    display: inline-flex; align-items: center; justify-content: center; transition: all .15s;
+  }
+  .icon-btn:hover { border-color: var(--primary); color: var(--primary); transform: translateY(-1px); }
+  #menuToggle { display: none; }
+
+  /* ── Main content ────────────────────────────────────── */
+  .main { margin-left: var(--sidebar-w); padding: 56px 56px 120px; max-width: calc(var(--content-max) + var(--sidebar-w)); }
+  section, h2 { scroll-margin-top: 24px; }
+
+  h1 { font-size: 40px; font-weight: 800; letter-spacing: -.03em; margin-bottom: 10px; line-height: 1.1; }
+  h2 { font-size: 26px; font-weight: 800; letter-spacing: -.02em; margin: 56px 0 16px; padding-top: 32px; border-top: 1px solid var(--border); }
+  h3 { font-size: 17px; font-weight: 700; margin: 28px 0 10px; color: var(--text); }
+  p { margin-bottom: 14px; color: var(--text-soft); }
+  .subtitle { font-size: 19px; color: var(--muted); margin-bottom: 36px; max-width: 640px; }
+  a { color: var(--primary-dark); text-decoration: none; font-weight: 500; }
+  a:hover { text-decoration: underline; }
+  ul, ol { margin: 0 0 16px 22px; color: var(--text-soft); }
+  li { margin-bottom: 5px; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  /* ── Badges ──────────────────────────────────────────── */
+  .badge { display: inline-block; padding: 3px 11px; border-radius: 20px; font-size: 12px; font-weight: 600; margin-right: 4px; }
+  .badge-green { background: #d1fae5; color: #065f46; }
+  .badge-blue  { background: #dbeafe; color: #1e40af; }
+  .badge-red   { background: #fee2e2; color: #991b1b; }
+  .badge-yellow { background: #fef3c7; color: #92400e; }
+  html[data-theme="dark"] .badge-green { background: rgba(52,211,153,.16); color: #6ee7b7; }
+  html[data-theme="dark"] .badge-blue  { background: rgba(129,140,248,.18); color: #bfc6ff; }
+  html[data-theme="dark"] .badge-red   { background: rgba(248,113,113,.16); color: #fca5a5; }
+  html[data-theme="dark"] .badge-yellow{ background: rgba(251,191,36,.16); color: #fcd34d; }
+
+  /* ── Code blocks ─────────────────────────────────────── */
+  .code-wrap { position: relative; margin: 14px 0 22px; }
+  pre {
+    background: var(--code-bg); color: var(--code-text); padding: 20px 22px; border-radius: var(--radius);
+    overflow-x: auto; font-size: 13.5px; line-height: 1.7; border: 1px solid rgba(255,255,255,.06);
+    box-shadow: var(--shadow-md);
+  }
+  pre::-webkit-scrollbar { height: 9px; }
+  pre::-webkit-scrollbar-thumb { background: #394056; border-radius: 8px; }
+  code { font-family: 'JetBrains Mono', 'Fira Code', monospace; }
+  pre code { color: var(--code-text); }
+  p code, li code, td code, th code { background: var(--primary-soft); color: var(--primary-dark); padding: 1.5px 6px; border-radius: 5px; font-size: 12.8px; font-weight: 500; }
+  .copy-btn {
+    position: absolute; top: 10px; right: 10px; padding: 5px 11px; font-size: 11.5px; font-weight: 600;
+    font-family: 'Inter', sans-serif; color: #c7cfde; background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.12); border-radius: 7px; cursor: pointer; opacity: 0;
+    transition: all .15s;
+  }
+  .code-wrap:hover .copy-btn { opacity: 1; }
+  .copy-btn:hover { background: rgba(255,255,255,.16); color: #fff; }
+  .copy-btn.copied { background: var(--accent); color: #fff; border-color: transparent; }
+
+  /* ── Tables ──────────────────────────────────────────── */
+  table { width: 100%; border-collapse: collapse; margin: 14px 0 22px; font-size: 14px; background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); }
+  th { background: var(--card-soft); font-weight: 600; padding: 11px 16px; text-align: left; border-bottom: 1px solid var(--border-strong); color: var(--text); font-size: 13px; }
+  td { padding: 11px 16px; border-bottom: 1px solid var(--border); color: var(--text-soft); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  tbody tr:hover td { background: var(--primary-soft); }
+
+  /* ── Cards ───────────────────────────────────────────── */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 24px; margin-bottom: 16px; box-shadow: var(--shadow-sm); }
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 16px; margin: 22px 0; }
+  .feature-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; box-shadow: var(--shadow-sm); transition: transform .16s, box-shadow .16s, border-color .16s; }
+  .feature-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--border-strong); }
+  .feature-card .icon { font-size: 26px; margin-bottom: 10px; display: block; }
+  .feature-card h4 { font-size: 14.5px; font-weight: 700; margin-bottom: 5px; color: var(--text); }
+  .feature-card p { font-size: 13px; color: var(--muted); margin: 0; }
+
+  /* ── Callouts ────────────────────────────────────────── */
+  .callout { border-left: 4px solid; border-radius: 0 10px 10px 0; padding: 14px 18px; margin: 18px 0; font-size: 14px; box-shadow: var(--shadow-sm); }
+  .callout-info    { border-color: var(--primary); background: var(--primary-soft); }
+  .callout-success { border-color: var(--accent);  background: rgba(14,164,114,.10); }
+  .callout-warn    { border-color: var(--warn);    background: rgba(217,119,6,.10); }
+  .callout-danger  { border-color: var(--danger);  background: rgba(220,38,38,.10); }
+  .callout strong  { display: block; margin-bottom: 4px; color: var(--text); }
+
+  /* ── HTTP method badges & endpoints ──────────────────── */
+  .method { display: inline-block; padding: 2px 8px; border-radius: 5px; font-size: 11px; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-right: 8px; }
+  .get    { background: #d1fae5; color: #065f46; }
+  .post   { background: #dbeafe; color: #1e40af; }
+  .patch  { background: #fef3c7; color: #92400e; }
+  .delete { background: #fee2e2; color: #991b1b; }
+  html[data-theme="dark"] .get { background: rgba(52,211,153,.16); color: #6ee7b7; }
+  html[data-theme="dark"] .post { background: rgba(129,140,248,.18); color: #bfc6ff; }
+  html[data-theme="dark"] .patch { background: rgba(251,191,36,.16); color: #fcd34d; }
+  html[data-theme="dark"] .delete { background: rgba(248,113,113,.16); color: #fca5a5; }
+  .endpoint-row { display: flex; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+  .endpoint-path { font-family: 'JetBrains Mono', monospace; flex: 1; color: var(--text); }
+  .endpoint-desc { color: var(--muted); font-size: 12px; }
+
+  /* ── Hero ────────────────────────────────────────────── */
+  .hero { position: relative; padding: 8px 0 4px; }
+  .hero .eyebrow { display: inline-block; font-size: 12.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--primary-dark); background: var(--primary-soft); padding: 5px 13px; border-radius: 20px; margin-bottom: 18px; }
+  h1 .grad { background: linear-gradient(120deg, var(--primary), var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+  @media (max-width: 980px) {
+    :root { --sidebar-w: 0px; }
+    .sidebar { transform: translateX(-100%); width: 280px; box-shadow: var(--shadow-lg); }
+    .sidebar.open { transform: translateX(0); }
+    .topbar { left: 0; justify-content: space-between; }
+    #menuToggle { display: inline-flex; }
+    .main { margin-left: 0; padding: 72px 22px 80px; }
+    h1 { font-size: 32px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="icon-btn" id="menuToggle" aria-label="Toggle menu">☰</button>
+  <button class="icon-btn" id="themeToggle" aria-label="Toggle dark mode" title="Toggle dark mode">🌙</button>
+</div>
+
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-logo">
+    <h2>⚡ SnapAdmin</h2>
+    <span>Documentation v0.1.0a9</span>
+  </div>
+  <div class="nav-search">
+    <input type="search" id="navSearch" placeholder="Filter sections…" autocomplete="off">
+  </div>
+  <nav>
+    <div class="section-label">📦 Package Users</div>
+    <ul>
+      <li><a href="#overview" class="active">Overview</a></li>
+      <li><a href="#installation">Installation</a></li>
+      <li><a href="#snap-model">SnapModel</a></li>
+      <li><a href="#snap-fields">Snap Fields</a></li>
+      <li><a href="#advanced-layout">Advanced Layout</a></li>
+      <li><a href="#status-badges">Status Badges</a></li>
+      <li><a href="#admin-registration">Admin Registration</a></li>
+      <li><a href="#gdpr">GDPR / Data Retention</a></li>
+      <li><a href="#error-monitoring">Error Monitoring</a></li>
+      <li><a href="#backups">3-2-1 Backups</a></li>
+      <li><a href="#offline">Offline Mode</a></li>
+      <li><a href="#theming">Theming &amp; Styles</a></li>
+      <li><a href="#performance">Large-Dataset Performance</a></li>
+      <li><a href="#optimizations">Optimizations Guide</a></li>
+    </ul>
+    <div class="section-label">🌐 API Layer</div>
+    <ul>
+      <li><a href="#api-rest">REST API</a></li>
+      <li><a href="#integrating">Integrating (Auth / JWT / ETL)</a></li>
+      <li><a href="#enterprise-config">Enterprise Config</a></li>
+      <li><a href="#api-graphql">GraphQL API</a></li>
+      <li><a href="#api-tokens">Token Management</a></li>
+      <li><a href="#extending">Extending &amp; Overriding</a></li>
+    </ul>
+    <div class="section-label">⚙️ Infrastructure</div>
+    <ul>
+      <li><a href="#elasticsearch">Elasticsearch (ES)</a></li>
+      <li><a href="#celery">Celery &amp; Periodic Tasks</a></li>
+      <li><a href="#logging">Structured Logging</a></li>
+    </ul>
+    <div class="section-label">🌟 Sandbox / Demo</div>
+    <ul>
+      <li><a href="#demo-setup">Running the Demo</a></li>
+      <li><a href="#demo-models">Demo Models Overview</a></li>
+      <li><a href="#demo-seed">Seed Command</a></li>
+    </ul>
+    <div class="section-label">🔄 Migration Guide</div>
+    <ul>
+      <li><a href="#migration-from-autoadmin">From drofji_autoadmin → SnapAdmin</a></li>
+      <li><a href="#migration-from-v0">From v0.0.x → v0.1.x</a></li>
+    </ul>
+  </nav>
+</aside>
+
+<main class="main">
+
+  <!-- ── Overview ─────────────────────────────────────────────────────────── -->
+  <section id="overview" class="hero">
+    <span class="eyebrow">⚡ Django Admin, supercharged</span>
+    <h1>Snap<span class="grad">Admin</span></h1>
+    <p class="subtitle">Automatic, beautiful, production-ready Django Admin — zero boilerplate. REST &amp; GraphQL, Elasticsearch, offline mode and GDPR retention, all from your model definitions.</p>
+
+    <div class="callout callout-success" style="text-align: left; margin: 18px auto 0;">
+      <strong>What's New in v0.1.0a9</strong>
+      <strong>The enterprise backlog, cleared.</strong> Seven more features land: an <strong>unalterable
+      audit trail</strong> (DORA / ISO 27001) with SIEM export; <strong>async background export</strong>
+      of CSV/JSON with progress, resume and cancel (<code>/api/exports/</code>); <strong>fast
+      approximate-count pagination</strong> so million-row changelists stop timing out;
+      <strong>10-locale i18n</strong> (incl. Swiss German/French) with a language switcher and English
+      fallback; <strong>WCAG 2.1 AA</strong> accessibility on the dashboard; startup <strong>config
+      health checks</strong>; and an <strong>ecosystem compatibility</strong> hook
+      (<code>admin_mixins</code>) plus matrix. a8's four enterprise-config features (read-replica
+      routing, PII masking, SSO, admin nesting) remain — see <a href="#enterprise-config">Enterprise
+      config</a>.
+    </div>
+
+    <div class="card-grid">
+      <div class="feature-card"><div class="icon">🎯</div><h4>Declarative Admin</h4><p>Embed admin config in model fields. No ModelAdmin classes needed.</p></div>
+      <div class="feature-card"><div class="icon">🌐</div><h4>Auto REST API</h4><p>Full CRUD API generated for every SnapModel automatically.</p></div>
+      <div class="feature-card"><div class="icon">⚛️</div><h4>Dynamic GraphQL</h4><p>Unified GraphQL schema generation for all managed models.</p></div>
+      <div class="feature-card"><div class="icon">🔑</div><h4>Token Auth</h4><p>Named tokens with expiry, model restrictions, and Django perms.</p></div>
+      <div class="feature-card"><div class="icon">📊</div><h4>Swagger UI</h4><p>Interactive OpenAPI 3 documentation via drf-spectacular.</p></div>
+      <div class="feature-card"><div class="icon">🔍</div><h4>Elasticsearch</h4><p>Integrated full-text search with automatic DB fallback.</p></div>
+      <div class="feature-card"><div class="icon">🪵</div><h4>Structured Logs</h4><p>Colourised structlog for dev, JSON for production.</p></div>
+      <div class="feature-card"><div class="icon">🐳</div><h4>Docker Ready</h4><p>One-command stack: Django + PostgreSQL + Redis + ES.</p></div>
+    </div>
+
+    <div class="callout" style="text-align: left; margin: 18px auto 0;">
+      <strong>📦 The package vs. 🌟 the demo.</strong> Everything under
+      <em>Package Users</em> and <em>API Layer</em> in the sidebar is the installable
+      <code>django-snapadmin</code> package — the code you ship in your own project. The
+      <em>Sandbox / Demo</em> section (example Product/Customer/Order models, the seeded Docker
+      stack, the dashboard) lives only in the repository to help you evaluate SnapAdmin; it is
+      <strong>not</strong> published to PyPI. Need to change generated behaviour? See
+      <a href="#extending">Extending &amp; Overriding</a>.
+    </div>
+  </section>
+
+  <!-- ── Installation ─────────────────────────────────────────────────────── -->
+  <h2 id="installation">📦 Installation</h2>
+  <p>SnapAdmin can be installed via PyPI or directly from source.</p>
+
+  <h3>From PyPI</h3>
+  <pre><code>pip install django-snapadmin</code></pre>
+
+  <h3>From GitHub</h3>
+  <pre><code>pip install git+https://github.com/drofji/django-snapadmin.git</code></pre>
+
+  <!-- ── Demo Setup ───────────────────────────────────────────────────────── -->
+  <h2 id="demo-setup">🌟 Running the Demo</h2>
+  <p>The repository includes a complete sandbox project to explore all features.</p>
+
+  <h3>Via Docker (Recommended)</h3>
+  <pre><code>git clone https://github.com/drofji/django-snapadmin.git
+cd django-snapadmin
+cp dist.env .env
+docker compose up --build</code></pre>
+
+  <h3>With Traefik — Local Development (HTTP)</h3>
+  <p>Access the app at <code>http://snapadmin.localhost/</code> with a BasicAuth-protected dashboard:</p>
+  <pre><code>docker compose -f docker-compose.yml -f docker-compose.traefik.local.yml up --build
+
+# App:              http://snapadmin.localhost/admin/
+# Traefik dashboard: http://traefik.localhost/  (admin / changeme)</code></pre>
+
+  <p>On Windows, add to <code>C:\Windows\System32\drivers\etc\hosts</code>:</p>
+  <pre><code>127.0.0.1 snapadmin.localhost traefik.localhost</code></pre>
+
+  <h3>With Traefik — Production (HTTPS + Let's Encrypt)</h3>
+  <p>Automatic TLS certificates for your custom domain. Set in <code>.env</code>:</p>
+  <pre><code>TRAEFIK_DOMAIN=admin.mycompany.com
+TRAEFIK_ACME_EMAIL=your@email.com
+TRAEFIK_DASHBOARD_CREDENTIALS=admin:$$apr1$$...   # see dist.env for generation
+ALLOWED_HOSTS=admin.mycompany.com
+DEBUG=False</code></pre>
+
+  <p>Then start:</p>
+  <pre><code>docker compose -f docker-compose.yml -f docker-compose.traefik.prod.yml up -d
+
+# App:               https://admin.mycompany.com/admin/
+# Traefik dashboard:  https://traefik.admin.mycompany.com/  (BasicAuth)
+# HTTP → HTTPS redirect is automatic for all routes</code></pre>
+
+  <h4>Generating Dashboard Credentials</h4>
+  <pre><code># Requires apache2-utils (apt) or httpd-tools (yum)
+echo $(htpasswd -nb admin yourpassword) | sed -e 's/\$/\$\$/g'
+# Paste result into TRAEFIK_DASHBOARD_CREDENTIALS in .env</code></pre>
+
+  <h3>Manual / Local Setup</h3>
+  <pre><code>git clone https://github.com/drofji/django-snapadmin.git
+cd django-snapadmin
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e .
+
+python manage.py migrate
+python manage.py seed_demo
+python manage.py runserver</code></pre>
+
+  <h3>Building images with automatic retention</h3>
+  <p>For the test/demo image, <code>scripts/docker_build.sh</code> builds, tags by build-day, and self-prunes so old images never pile up:</p>
+  <pre><code>scripts/docker_build.sh                              # image=snapadmin-test, keep 3 build-days
+IMAGE=myimg scripts/docker_build.sh                  # custom image name
+SNAPADMIN_IMAGE_KEEP_DAYS=5 scripts/docker_build.sh  # widen the window</code></pre>
+  <p><strong>Retention policy</strong> — <em>one build per day, keep the last N build-days</em> (N defaults to 3, override via <code>SNAPADMIN_IMAGE_KEEP_DAYS</code>):</p>
+  <ul>
+    <li><strong>Collapse within a day</strong> — images are tagged <code>snapadmin-test:YYYY-MM-DD</code> plus a moving <code>:latest</code>. Rebuilding the same calendar day re-points that day's tag at the new image; the superseded build becomes a dangling layer and is reclaimed.</li>
+    <li><strong>Rolling N-day window</strong> — the last build of each of the N most-recent <em>build-days</em> is kept; when an (N+1)-th distinct build-day appears, the oldest day's image is pruned.</li>
+    <li><strong>History gaps are irrelevant</strong> — "N days" means the last N build-days, not calendar days. Idle days never consume a slot.</li>
+  </ul>
+  <div class="callout callout-info">
+    <strong>Worked example.</strong> Builds a month ago, a week ago, yesterday, and today leave exactly <strong>three</strong> images after today's build — one each for <em>a week ago</em>, <em>yesterday</em>, and <em>today</em>; the month-ago image and all superseded same-day builds are gone.
+  </div>
+  <p>The pruner can also run standalone (e.g. in CI), with a dry-run mode:</p>
+  <pre><code>python -m scripts.docker_retention prune --image snapadmin-test --dry-run</code></pre>
+
+  <!-- ── SnapModel ─────────────────────────────────────────────────────────── -->
+  <h2 id="snap-model">🏗 SnapModel</h2>
+  <p>Inherit from <code>SnapModel</code> to get automatic admin registration and a smart <code>__str__</code>.</p>
+  <pre><code>from snapadmin import models as snap_models, fields as snap
+
+class Product(snap_models.SnapModel):
+    name = snap.SnapCharField(max_length=200, searchable=True)
+    price = snap.SnapDecimalField(max_digits=10, decimal_places=2, filterable=True)
+    available = snap.SnapBooleanField(default=True)</code></pre>
+
+  <!-- ── Snap Fields ───────────────────────────────────────────────────────── -->
+  <h2 id="snap-fields">📋 Snap Fields</h2>
+  <p>Every Snap field is a drop-in replacement for the corresponding Django field, with extra admin control attributes.</p>
+
+  <table>
+    <tr><th>Flag</th><th>Type</th><th>Default</th><th>Effect</th></tr>
+    <tr><td><code>show_in_list</code></td><td>bool</td><td>True</td><td>Adds to <code>list_display</code></td></tr>
+    <tr><td><code>show_in_form</code></td><td>bool</td><td>False</td><td>Shows field in change form</td></tr>
+    <tr><td><code>searchable</code></td><td>bool</td><td>False</td><td>Adds to <code>search_fields</code></td></tr>
+    <tr><td><code>filterable</code></td><td>bool</td><td>False</td><td>Smart sidebar filter (type-aware)</td></tr>
+    <tr><td><code>editable</code></td><td>bool</td><td>True</td><td>Always read-only when False</td></tr>
+    <tr><td><code>updatable</code></td><td>bool</td><td>True</td><td>Read-only after first save when False</td></tr>
+    <tr><td><code>row</code></td><td>str</td><td>None</td><td>Group fields into a horizontal row</td></tr>
+    <tr><td><code>tab</code></td><td>str</td><td>None</td><td>Place field into a specific Unfold tab</td></tr>
+    <tr><td><code>wysiwyg</code></td><td>bool</td><td>False</td><td>Enable CKEditor 5 for TextFields</td></tr>
+    <tr><td><code>autocomplete</code></td><td>bool</td><td>False</td><td>Searchable autocomplete widget (relation fields)</td></tr>
+  </table>
+
+  <h3>Available field types</h3>
+  <p>Every field type below maps 1:1 to a Django field (except the computed ones) and accepts all the flags above.</p>
+  <table>
+    <tr><th>Category</th><th>Snap field types</th></tr>
+    <tr><td>Text</td><td><code>SnapCharField</code>, <code>SnapTextField</code>, <code>SnapRichTextField</code>, <code>SnapSlugField</code>, <code>SnapEmailField</code>, <code>SnapURLField</code>, <code>SnapUUIDField</code>, <code>SnapGenericIPAddressField</code>, <code>SnapPhoneField</code>, <code>SnapColorField</code></td></tr>
+    <tr><td>Numbers</td><td><code>SnapIntegerField</code>, <code>SnapPositiveIntegerField</code>, <code>SnapSmallIntegerField</code>, <code>SnapPositiveSmallIntegerField</code>, <code>SnapBigIntegerField</code>, <code>SnapPositiveBigIntegerField</code>, <code>SnapFloatField</code>, <code>SnapDecimalField</code></td></tr>
+    <tr><td>Date &amp; time</td><td><code>SnapDateField</code>, <code>SnapDateTimeField</code>, <code>SnapTimeField</code>, <code>SnapDurationField</code></td></tr>
+    <tr><td>Boolean &amp; JSON</td><td><code>SnapBooleanField</code>, <code>SnapJSONField</code></td></tr>
+    <tr><td>Files</td><td><code>SnapFileField</code>, <code>SnapImageField</code></td></tr>
+    <tr><td>Relations</td><td><code>SnapForeignKey</code>, <code>SnapOneToOneField</code>, <code>SnapManyToManyField</code></td></tr>
+    <tr><td>Computed (no DB column)</td><td><code>SnapFunctionField</code> (render from a callable), <code>SnapStatusBadgeField</code> (coloured pill badge)</td></tr>
+  </table>
+  <div class="callout callout-info">
+    <strong>See them all live</strong>
+    The demo app's <code>Showcase</code> model exercises every field type across tabbed sections, and <code>SnapFunctionField</code>/<code>SnapOneToOneField</code> appear on <code>Showcase</code> and <code>CustomerProfile</code> respectively.
+  </div>
+
+  <!-- ── Advanced Layout ────────────────────────────────────────────────────── -->
+  <h2 id="advanced-layout">📐 Advanced Layout</h2>
+  <p>Control the visual arrangement of your admin forms using <code>row</code> and <code>tab</code> attributes.</p>
+  <pre><code>class Customer(snap_models.SnapModel):
+    # These two will appear on the same line
+    first_name = snap.SnapCharField(max_length=100, row="name")
+    last_name = snap.SnapCharField(max_length=100, row="name")
+
+    # This field will appear in the "Contact" tab
+    email = snap.SnapEmailField(tab="Contact")</code></pre>
+
+  <!-- ── Status Badges ─────────────────────────────────────────────────────── -->
+  <h2 id="status-badges">🏷 Status Badges</h2>
+  <p>Render coloured pill badges for any choice/status field directly in the admin list view.</p>
+  <pre><code>from snapadmin import fields as snap
+
+status_badge = snap.SnapStatusBadgeField(
+    field_name="is_active",
+    choices=[
+        snap.SnapStatusBadgeFieldChoice(True, "#065F46", "#D1FAE5", "#10B981"),
+        snap.SnapStatusBadgeFieldChoice(False, "#991B1B", "#FEE2E2", "#EF4444"),
+    ]
+)</code></pre>
+
+  <!-- ── Admin Registration ──────────────────────────────────────────────── -->
+  <h2 id="admin-registration">🔧 Admin Registration</h2>
+  <p>Call <code>register_all_admins()</code> once in your <code>admin.py</code> to register every <code>SnapModel</code> subclass with Django's admin site.</p>
+  <pre><code># admin.py
+from snapadmin.models import SnapModel
+SnapModel.register_all_admins()</code></pre>
+
+  <p>To restrict registration to a specific app, pass the <code>app_label</code> argument:</p>
+  <pre><code>SnapModel.register_all_admins(app_label="myapp")</code></pre>
+
+  <div class="callout callout-info">
+    <strong>Note</strong>
+    The <code>APIToken</code> admin is also registered automatically when <code>register_all_admins()</code> is called.
+  </div>
+
+  <!-- ── API REST ──────────────────────────────────────────────────────────── -->
+  <h2 id="api-rest">🌐 REST API</h2>
+  <p>CRUD endpoints are generated automatically for all managed models.</p>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/models/schema/</span><span class="endpoint-desc">List all available endpoints</span></div>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/models/{app}/{Model}/</span><span class="endpoint-desc">List objects (filters, search, pagination)</span></div>
+  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/models/{app}/{Model}/</span><span class="endpoint-desc">Create object</span></div>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/models/{app}/{Model}/{id}/</span><span class="endpoint-desc">Retrieve object</span></div>
+  <div class="endpoint-row"><span class="method post">PATCH</span><span class="endpoint-path">/api/models/{app}/{Model}/{id}/</span><span class="endpoint-desc">Update object (PUT for full update)</span></div>
+  <div class="endpoint-row"><span class="method delete">DELETE</span><span class="endpoint-path">/api/models/{app}/{Model}/{id}/</span><span class="endpoint-desc">Delete object</span></div>
+
+  <h3>Request Examples</h3>
+  <p>All requests authenticate with an API token (see <a href="#api-tokens">Token Management</a>):</p>
+  <pre><code>TOKEN="your-40-char-token-key"
+BASE="http://localhost:8000/api"
+
+# Discover every available endpoint and its fields
+curl -H "Authorization: Token $TOKEN" "$BASE/models/schema/"
+
+# Plain listing — paginated, served by the database
+curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?page=2"
+
+# Auto-generated field filters (full per-model list visible in Swagger)
+curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?available=true&price__gte=100"
+
+# Create, update, delete
+curl -X POST -H "Authorization: Token $TOKEN" -H "Content-Type: application/json" \
+     -d '{"name": "Laptop Pro", "price": "1499.00", "available": true}' \
+     "$BASE/models/demo/Product/"
+curl -X PATCH -H "Authorization: Token $TOKEN" -H "Content-Type: application/json" \
+     -d '{"available": false}' "$BASE/models/demo/Product/42/"
+curl -X DELETE -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/42/"</code></pre>
+
+  <h3 id="es-routing">Smart ES Query Routing — <code>?search=</code></h3>
+  <p><code>?search=</code> runs a full-text search over the model's <code>searchable=True</code> fields.
+  For a <strong><code>DUAL</code>-storage model</strong> — whose data is already mirrored in
+  Elasticsearch — the very same request is executed on ES: fuzzy, typo-tolerant and
+  relevance-ranked, with <strong>no change to the URL or your client code</strong>. Field filters and
+  pagination still apply on top of the ES-ranked result:</p>
+  <pre><code># Product is DUAL → this search runs on Elasticsearch (typo still matches)
+curl -i -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?search=laptp"
+# HTTP/1.1 200 OK
+# X-Snap-Query-Backend: elasticsearch     ← the search ran on ES
+# {"count": 3, "results": [{"id": 42, "name": "Laptop Pro", …}, …]}
+
+# ES search combined with DB filters and pagination — still one request
+curl -H "Authorization: Token $TOKEN" \
+     "$BASE/models/demo/Product/?search=laptop&available=true&page=1"
+
+# The same URL shape on a DB_ONLY model transparently uses SQL icontains
+curl -i -H "Authorization: Token $TOKEN" "$BASE/models/demo/Customer/?search=7"
+# X-Snap-Query-Backend: database          ← no ES mirror, the DB handled it</code></pre>
+
+  <p>Routing decision per request:</p>
+  <table>
+    <tr><th>Model mode</th><th><code>?search=</code> present</th><th>Routing enabled</th><th>Executed on</th></tr>
+    <tr><td><code>ES_ONLY</code></td><td>any</td><td>—</td><td>Elasticsearch (only source)</td></tr>
+    <tr><td><code>DUAL</code></td><td>yes</td><td>yes</td><td><strong>Elasticsearch</strong> (fuzzy <code>multi_match</code>, relevance order)</td></tr>
+    <tr><td><code>DUAL</code></td><td>yes</td><td>no</td><td>Database (<code>icontains</code> over searchable fields)</td></tr>
+    <tr><td><code>DUAL</code></td><td>no</td><td>—</td><td>Database (native pagination, no ES round-trip)</td></tr>
+    <tr><td><code>DB_ONLY</code></td><td>yes</td><td>—</td><td>Database (<code>icontains</code> over searchable fields)</td></tr>
+  </table>
+
+  <p>Every list response carries the <code>X-Snap-Query-Backend: elasticsearch | database</code>
+  header, so you can always verify where a query ran — including the case where ES failed
+  mid-request and the internal DB fallback answered (the header then honestly says
+  <code>database</code>). Configuration:</p>
+  <pre><code># settings.py
+SNAPADMIN_ES_QUERY_ROUTING     = True    # global switch (default True)
+SNAPADMIN_ES_SEARCH_LIMIT      = 1000    # max hits fetched from ES per routed search
+SNAPADMIN_QUERY_BACKEND_HEADER = True    # set False to hide the header in production
+
+# models.py — per-model opt-out (e.g. when one model's ES mirror lags)
+class Product(SnapModel):
+    es_storage_mode  = EsStorageMode.DUAL
+    es_query_routing = False   # this model's API searches always run on the DB</code></pre>
+
+  <h3>Counting objects — with &amp; without filters</h3>
+  <p>Every list response is paginated and already reports the <strong>total matching count</strong>
+  in <code>count</code> — no need to page through everything. Request the smallest page to read
+  just the number:</p>
+  <pre><code># Total rows (page_size=1 → tiny payload, full count in "count")
+curl -s -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?page_size=1"
+# {"count": 5231, "next": "...", "results": [ ...1 row... ]}
+
+# Count of a filtered set — "count" reflects the filtered queryset
+curl -s -H "Authorization: Token $TOKEN" \
+     "$BASE/models/demo/Product/?available=true&price__gte=100&page_size=1"
+
+# Count of a full-text match set (DUAL → ES answers; count = ES hits)
+curl -s -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?search=laptop&page_size=1"</code></pre>
+  <ul>
+    <li><strong><code>DB_ONLY</code> / <code>DUAL</code> without search</strong> — <code>count</code>
+      is an exact <code>SELECT COUNT(*)</code> over the filtered SQL queryset.</li>
+    <li><strong><code>DUAL</code> with <code>?search=</code> / <code>ES_ONLY</code></strong> —
+      <code>count</code> is the number of ES hits, capped by <code>SNAPADMIN_ES_SEARCH_LIMIT</code>
+      (default 1000). For an exact large-set count, count on the DB (drop <code>?search=</code>) or
+      raise the limit.</li>
+  </ul>
+
+  <h3>Exporting / bulk-reading optimally</h3>
+  <p>Read large result sets <strong>page by page</strong> (bounded query + bounded response) rather
+  than with one huge <code>page_size</code>. Follow the <code>next</code> link the API returns:</p>
+  <pre><code>URL="$BASE/models/demo/Product/?page_size=200&ordering=id"
+while [ "$URL" != "null" ]; do
+  PAGE=$(curl -s -H "Authorization: Token $TOKEN" "$URL")
+  echo "$PAGE" | python -c "import sys,json;[print(r['id']) for r in json.load(sys.stdin)['results']]"
+  URL=$(echo "$PAGE" | python -c "import sys,json;print(json.load(sys.stdin)['next'] or 'null')")
+done</code></pre>
+  <table>
+    <tr><th>Mode</th><th>Fastest export path</th></tr>
+    <tr><td><code>DB_ONLY</code> / <code>DUAL</code> (no search)</td><td>Plain paginated listing — native SQL <code>LIMIT/OFFSET</code>, no ES round-trip, no row cap. Add <code>?ordering=id</code> for a stable walk; FK columns are auto-<code>select_related</code> (no N+1).</td></tr>
+    <tr><td>Full-text (<code>DUAL</code>)</td><td>Only route through ES (<code>?search=</code>) when you need fuzzy/relevance — it is capped by <code>SNAPADMIN_ES_SEARCH_LIMIT</code>. For a complete dump of matches, filter on the DB instead.</td></tr>
+    <tr><td><code>ES_ONLY</code></td><td>Listings come from ES, bounded by <code>SNAPADMIN_ES_SEARCH_LIMIT</code>; raise it or narrow with filters/<code>?search=</code>.</td></tr>
+    <tr><td>Server-side job</td><td>Skip HTTP; stream the ORM: <code>Model.objects.all().iterator(chunk_size=2000)</code> keeps memory flat over millions of rows.</td></tr>
+  </table>
+  <p>The same three modes addressed directly from Python:</p>
+  <pre><code># DB_ONLY / DUAL — exact, index-backed count
+Product.objects.filter(available=True, price__gte=100).count()
+
+# DUAL / ES_ONLY — fuzzy full-text via Elasticsearch
+Product.snap_search("laptp", limit=50)     # DUAL: DB queryset in ES-relevance order
+SearchLog.snap_search("checkout")          # ES_ONLY: straight from the index
+
+# Memory-flat export of any DB-backed model
+for row in Product.objects.all().iterator(chunk_size=2000):
+    ...</code></pre>
+
+  <h3>Hiding fields from the API — <code>api_exclude_fields</code></h3>
+  <p>Columns listed in <code>api_exclude_fields</code> are removed from the REST serializer
+  (responses <em>and</em> writes), the GraphQL object type and <code>/api/models/schema/</code> —
+  while the admin keeps showing them. Use it for PII and internal columns:</p>
+  <pre><code>class AuditLog(SnapModel):
+    action     = snap_fields.SnapCharField(max_length=100, searchable=True)
+    user_email = snap_fields.SnapEmailField()     # PII
+
+    api_exclude_fields = ["user_email"]           # never leaves the server via API</code></pre>
+
+  <!-- ── Integrating ───────────────────────────────────────────────────────── -->
+  <h2 id="integrating">🧩 Integrating with Your Project</h2>
+  <p>SnapAdmin drops into a real project without bridge code — authentication, the user model and
+  the Elasticsearch client are all pluggable, and imports have a first-class helper.</p>
+
+  <h3>Pluggable API authentication (JWT / session / custom)</h3>
+  <p>By default the API accepts SnapAdmin's own token auth. Point
+  <code>SNAPADMIN_API_AUTHENTICATION_CLASSES</code> at any DRF authenticators — model CRUD, schema
+  and token endpoints all honour it. With non-token auth, model permissions fall back to plain
+  Django model permissions (a token additionally applies its <code>allowed_models</code> scope):</p>
+  <pre><code>SNAPADMIN_API_AUTHENTICATION_CLASSES = [
+    "rest_framework_simplejwt.authentication.JWTAuthentication",
+    "rest_framework.authentication.SessionAuthentication",
+    "snapadmin.api.authentication.APITokenAuthentication",   # keep tokens working too
+]</code></pre>
+  <p><strong>JWT in three steps</strong> (<code>djangorestframework-simplejwt</code>):</p>
+  <pre><code># 1. settings.py — add the authenticator above + the app
+INSTALLED_APPS += ["rest_framework_simplejwt"]
+
+# 2. urls.py — obtain / refresh endpoints
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+urlpatterns += [
+    path("api/token/",         TokenObtainPairView.as_view()),
+    path("api/token/refresh/", TokenRefreshView.as_view()),
+]
+
+# 3. authenticate, then call any SnapAdmin endpoint with the Bearer token
+#   curl -H "Authorization: Bearer $ACCESS" .../api/models/demo/Product/</code></pre>
+  <div class="callout callout-success">
+    <strong>Scope</strong> — the setting applies to the REST API. GraphQL keeps its own contract
+    (<code>SNAPADMIN_GRAPHQL_REQUIRE_AUTH</code>) and already accepts SnapAdmin tokens + sessions.
+  </div>
+
+  <h3>Custom user model</h3>
+  <p><code>APIToken</code> and everything built on it target <code>settings.AUTH_USER_MODEL</code>,
+  so a project with a custom user model works out of the box (usernames read via
+  <code>get_username()</code>, so <code>USERNAME_FIELD = "email"</code> is fine).</p>
+
+  <h3>Configurable Elasticsearch client</h3>
+  <pre><code>ELASTICSEARCH_KWARGS = {                 # merged into Elasticsearch(...)
+    "api_key": "…", "ca_certs": "/etc/ssl/es.pem",
+    "request_timeout": 30, "max_retries": 3, "retry_on_timeout": True,
+}
+# …or full control (cloud_id, sniffing, custom transport):
+SNAPADMIN_ES_CLIENT_FACTORY = "myproject.es.make_client"   # zero-arg callable → client</code></pre>
+
+  <h3>Bulk reindex command</h3>
+  <pre><code>python manage.py snapadmin_reindex                       # all ES-enabled SnapModels
+python manage.py snapadmin_reindex --model demo.Product  # one model
+python manage.py snapadmin_reindex --chunk-size 1000     # tune bulk batch size</code></pre>
+
+  <h3>Generic ETL — external source → SnapModel upsert</h3>
+  <p>Import from any external system with a streamed bulk upsert — no per-row saves, no per-row ES
+  writes; one bulk reindex at the end. Idempotent via
+  <code>bulk_create(update_conflicts=True)</code>:</p>
+  <pre><code>from snapadmin.etl import upsert_from_source
+
+def rows_from_remote():          # any iterable of dicts (e.g. a streamed cursor)
+    for r in remote_cursor:
+        yield {"code": r.code, "base": "EUR", "rate": r.rate}
+
+summary = upsert_from_source(
+    ExchangeRate, rows_from_remote(),
+    unique_fields=["code"],      # conflict target (needs a unique constraint)
+    batch_size=1000,
+)
+# {"processed": 5231, "batches": 6, "reindex": {"indexed": 5231}}</code></pre>
+  <p>It bypasses <code>Model.save()</code>, so <code>full_clean()</code> is not run — validate
+  upstream for speed. Demo: <code>python manage.py sync_exchange_rates</code>.</p>
+
+  <h3>Optional user-management API (admin-only)</h3>
+  <p>Set <code>SNAPADMIN_USER_API_ENABLED = True</code> for admin-only user/permission endpoints —
+  useful when building a frontend admin panel. Every endpoint requires a <strong>staff</strong> user:</p>
+  <div class="endpoint-row"><span class="method get">GET/POST</span><span class="endpoint-path">/api/users/</span><span class="endpoint-desc">List / create users</span></div>
+  <div class="endpoint-row"><span class="method post">PATCH/DELETE</span><span class="endpoint-path">/api/users/{id}/</span><span class="endpoint-desc">Manage one user</span></div>
+  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/users/{id}/set-password/</span><span class="endpoint-desc">{"password": "…"}</span></div>
+  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/users/{id}/permissions/</span><span class="endpoint-desc">{"permissions": ["demo.view_product", …]}</span></div>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/permissions/</span><span class="endpoint-desc">All assignable permissions (for pickers)</span></div>
+
+  <!-- ── Enterprise config ─────────────────────────────────────────────────── -->
+  <h2 id="enterprise-config">🏢 Enterprise Config <span class="badge">v0.1.0a8</span></h2>
+  <p>Four settings-driven features that fit SnapAdmin's zero-boilerplate philosophy. Every one is
+  <strong>inert on a stock single-database install</strong> — it does nothing until you configure it.</p>
+
+  <h3>Read-replica routing</h3>
+  <p>Heavy API lists and analytical dashboards can lock up the primary write database. Point SnapAdmin
+  at a read replica and every auto-generated <strong>read-only</strong> list/retrieve is pinned to it
+  via <code>.using()</code>. Writes (POST/PUT/PATCH/DELETE) and the object lookups behind them always
+  stay on <code>default</code>, so replication lag can never stale or drop a mutation. An empty or
+  unknown alias is a safe no-op.</p>
+  <pre><code># settings.py
+DATABASES = {"default": {...}, "read_replica": {...}}
+SNAPADMIN_ANALYTICS_DB_ALIAS = "read_replica"</code></pre>
+
+  <h3>PII data masking</h3>
+  <p>Declare sensitive fields once. They are obfuscated in the admin changelist, dropped from the
+  admin change form, and masked in REST API responses for anyone who is not a superuser or a holder of
+  the <code>snapadmin.view_raw_pii</code> permission. Emails become <code>a***@domain.com</code>, other
+  values <code>+3********78</code>.</p>
+  <pre><code># settings.py
+SNAPADMIN_MASKED_FIELDS = {
+    "users.UserModel": ["email", "phone_number"],
+    "customers.Profile": ["passport_number", "billing_address"],
+}
+# Grant trusted staff raw access:
+#   assign the "snapadmin | api token | Can view unmasked PII data" permission.</code></pre>
+
+  <h3>SSO / OAuth2 login buttons</h3>
+  <p>SnapAdmin only <em>renders</em> the providers you already wired into
+  <code>AUTHENTICATION_BACKENDS</code> / URLconf (django-allauth, social-auth, mozilla-django-oidc) —
+  it adds no auth dependency. Configure once and get login-page buttons plus a public
+  <code>GET /api/sso-providers/</code> endpoint for headless frontends.</p>
+  <pre><code># settings.py
+SNAPADMIN_SSO_PROVIDERS = {
+    "azure":    {"label": "Login with Microsoft Enterprise", "url": "/accounts/azure/login/"},
+    "keycloak": {"label": "Corporate Keycloak SSO", "url": "/api/v1/auth/keycloak/"},
+}
+# TEMPLATES → OPTIONS → context_processors: add "snapadmin.sso.sso_providers"
+# In your admin/login.html override: {% include "snapadmin/sso_buttons.html" %}</code></pre>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/sso-providers/</span><span class="endpoint-desc">Public list of SSO buttons (labels + login URLs)</span></div>
+
+  <h3>Admin-index nesting</h3>
+  <p>Keep the admin index uncluttered: fold auto-generated sections under existing app groups, hide
+  groups, or rename headings — no custom <code>AdminSite</code> required.</p>
+  <pre><code># settings.py
+SNAPADMIN_NESTED_APPS = {"snapadmin": "auth"}   # move snapadmin models under "auth"
+SNAPADMIN_HIDDEN_APPS = ["silk"]                # hide these groups from the index
+SNAPADMIN_APP_LABELS  = {"auth": "Administration"}  # rename a group heading</code></pre>
+
+  <h3>Unalterable audit trail <span class="badge">DORA / ISO 27001</span></h3>
+  <p>Django's built-in <code>LogEntry</code> is minimal and editable straight from the DB. SnapAdmin
+  records a richer, append-only <code>SnapadminAuditLog</code> for every admin create/update/delete —
+  <strong>who</strong> (actor + IP + User-Agent), <strong>what</strong> (target object + before/after
+  field diff) and <strong>when</strong> (tz-aware timestamp). Rows are immutable at the ORM level
+  (<code>save</code>/<code>delete</code> raise once persisted) and the admin is fully read-only.</p>
+  <pre><code># settings.py — on by default
+SNAPADMIN_AUDIT_LOG_ENABLED = True
+SNAPADMIN_AUDIT_RETENTION_DAYS = 365
+
+# Export for a SIEM (newline-delimited JSON or CSV):
+python manage.py snapadmin_audit_export --format json &gt; audit.jsonl
+python manage.py snapadmin_audit_export --since 2026-01-01 --action delete
+python manage.py snapadmin_audit_export --purge   # also prune rows past retention</code></pre>
+  <p style="font-size: 13px; color: var(--muted);">For defence against direct database tampering, layer
+  a DB trigger / append-only role on top — the ORM guard protects the admin and application paths.</p>
+
+  <h3>Large-dataset performance</h3>
+  <p>Every SnapAdmin admin auto-derives <code>list_select_related</code> from the FK columns it shows,
+  and the REST API auto-<code>select_related</code>s FKs and <code>prefetch_related</code>s M2M — no
+  N+1, zero config. On multi-million-row tables the changelist's <code>SELECT COUNT(*)</code> is the
+  costliest query; <code>EstimatedCountPaginator</code> swaps it for PostgreSQL's instant
+  <code>reltuples</code> estimate on <strong>unfiltered</strong> listings, staying exact for small or
+  filtered views and non-PostgreSQL databases.</p>
+  <pre><code># settings.py — on by default
+SNAPADMIN_ESTIMATED_COUNT = True
+SNAPADMIN_ESTIMATED_COUNT_THRESHOLD = 100000   # estimate only above this row count
+
+# Per model: also skip the second, unfiltered COUNT(*) the admin runs for "X total"
+class BigModel(snap_models.SnapModel):
+    show_full_result_count = False</code></pre>
+
+  <h3>Async background export <span class="badge">Celery</span></h3>
+  <p>Large synchronous exports time out. SnapAdmin offloads them to a Celery worker that streams a
+  model's rows to CSV or JSON in <strong>resumable chunks</strong> (continues from the last persisted
+  chunk if the worker restarts) and is <strong>cancellable</strong> mid-run. Jobs are private to their
+  requester; the caller needs the target model's <code>view</code> permission.</p>
+  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/exports/</span><span class="endpoint-desc">Start an export → job id + status</span></div>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/exports/&lt;id&gt;/</span><span class="endpoint-desc">Poll status, rows processed/total, %, ETA</span></div>
+  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/exports/&lt;id&gt;/cancel/</span><span class="endpoint-desc">Cancel between chunks</span></div>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/exports/&lt;id&gt;/download/</span><span class="endpoint-desc">Download the finished file</span></div>
+  <pre><code>curl -H "Authorization: Token $TOKEN" -H "Content-Type: application/json" \
+     -d '{"app_label": "demo", "model": "Product", "export_format": "csv"}' \
+     http://localhost:8000/api/exports/
+# → {"id": "…", "status": "pending", "progress_percent": 0, "eta_seconds": null, …}</code></pre>
+
+  <!-- ── API GraphQL ───────────────────────────────────────────────────────── -->
+  <h2 id="api-graphql">⚛️ GraphQL API</h2>
+  <p>SnapAdmin provides a dynamic GraphQL interface powered by Graphene-Django.</p>
+  <ul style="margin: 8px 0 14px 20px; font-size: 14px;">
+    <li><strong>Auto-Schema</strong>: All <code>SnapModel</code> subclasses are automatically added to the schema.</li>
+    <li><strong>Secured by default</strong>: every resolver requires authentication (admin session or API token) and the model's Django <code>view</code> permission — the same contract as REST. Token <code>allowed_models</code> scopes apply on top.</li>
+    <li><strong>Unified Fetching</strong>: the <code>search</code> argument routes to Elasticsearch for <code>DUAL</code>/<code>ES_ONLY</code> models; <code>first</code>/<code>offset</code> paginate.</li>
+    <li><strong>Endpoint</strong>: <code>/api/graphql/</code>; GraphiQL follows <code>DEBUG</code> (override with <code>SNAPADMIN_GRAPHIQL_ENABLED</code>).</li>
+  </ul>
+
+  <h3>Request Examples</h3>
+  <pre><code># Same API tokens as REST — anonymous callers get "Authentication required."
+curl -H "Authorization: Token $TOKEN" -H "Content-Type: application/json" \
+     -d '{"query": "{ allDemoProducts(search: \"laptop\", first: 10) { id name price } }"}' \
+     "http://localhost:8000/api/graphql/"
+
+# Single object by id
+curl -H "Authorization: Token $TOKEN" -H "Content-Type: application/json" \
+     -d '{"query": "{ demoProduct(id: 42) { name price available } }"}' \
+     "http://localhost:8000/api/graphql/"</code></pre>
+
+  <pre><code># settings.py
+SNAPADMIN_GRAPHQL_REQUIRE_AUTH = True   # default — never disable in production
+SNAPADMIN_GRAPHIQL_ENABLED     = DEBUG  # playground only during development</code></pre>
+
+  <div class="callout callout-warn">
+    <strong>Upgrading from ≤ 0.1.0a3</strong>
+    GraphQL used to be open to anonymous callers. Since v0.1.0a4 every resolver enforces
+    authentication and per-model permissions; clients must send the same
+    <code>Authorization: Token …</code> header the REST API uses (or hold an admin session).
+  </div>
+
+  <!-- ── API Tokens ──────────────────────────────────────────────────────── -->
+  <h2 id="api-tokens">🔑 Token Management</h2>
+  <p>SnapAdmin uses named API tokens for REST API authentication. Tokens are created and managed in the Django admin under <em>API Tokens</em>, or programmatically:</p>
+  <pre><code>from snapadmin.models import APIToken
+
+# Create a token for a user, valid for 30 days
+token = APIToken.create_for_user(
+    user=user,
+    token_name="CI Pipeline",
+    allowed_models=["myapp.Product", "myapp.Order"],
+    expires_in_days=30,
+)</code></pre>
+
+  <p>Include the token in every API request as an HTTP header:</p>
+  <pre><code>Authorization: Token &lt;token_key&gt;</code></pre>
+
+  <div class="callout callout-warn">
+    <strong>Tokens are hashed at rest</strong>
+    Only a SHA-256 digest and the 8-character <code>token_prefix</code> are stored — the raw key is
+    <em>never</em> persisted. It is returned exactly once: in the <code>POST /api/tokens/</code> response
+    (and shown once in the admin when you create a token). Copy it then; it cannot be recovered later.
+    On every subsequent read <code>token_key</code> is <code>null</code> and only <code>token_prefix</code>
+    identifies the token.
+  </div>
+
+  <h3>Token REST Endpoints</h3>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/tokens/</span><span class="endpoint-desc">List tokens owned by the current user</span></div>
+  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/tokens/</span><span class="endpoint-desc">Create a new token</span></div>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/tokens/{id}/</span><span class="endpoint-desc">Retrieve a token</span></div>
+  <div class="endpoint-row"><span class="method delete">DELETE</span><span class="endpoint-path">/api/tokens/{id}/</span><span class="endpoint-desc">Revoke (delete) a token</span></div>
+
+  <h3>Token Fields</h3>
+  <table>
+    <tr><th>Field</th><th>Description</th></tr>
+    <tr><td><code>token_name</code></td><td>Human-readable label (e.g. <em>"Read-only dashboard"</em>)</td></tr>
+    <tr><td><code>token_key</code></td><td>40-character secret key — treat like a password. Hashed at rest; returned only once, at creation</td></tr>
+    <tr><td><code>token_prefix</code></td><td>First 8 characters of the key (not secret) — identifies a stored token in lists and the admin</td></tr>
+    <tr><td><code>allowed_models</code></td><td>List of <code>"app_label.ModelName"</code> strings the token may target. <strong>Empty ≠ unrestricted</strong>: it means "any model the owning user already has Django permissions for". Token scope is always AND-ed with <code>user.has_perm</code>, so a non-empty list <em>narrows</em> access further</td></tr>
+    <tr><td><code>expiration_date</code></td><td>Optional expiry; leave blank for non-expiring tokens</td></tr>
+    <tr><td><code>is_active</code></td><td>Deactivate without deleting the token</td></tr>
+  </table>
+
+  <!-- ── Extending & Overriding ─────────────────────────────────────────────── -->
+  <h2 id="extending">🧬 Extending &amp; Overriding</h2>
+  <p>SnapAdmin is built to extend without forking. When a generated surface isn't enough, reach for
+  the closest hook below — each snippet drops into <em>your</em> project.</p>
+
+  <h3>1. Add your own field type</h3>
+  <p>Mix <code>SnapField</code> into any Django field, then run incoming kwargs through
+  <code>_initializeSnapLogic()</code> (consumes the Snap-only options like <code>searchable</code>,
+  <code>filterable</code>, <code>show_in_list</code>) and <code>handleDjangoKwargs()</code> (returns
+  the Django-safe kwargs):</p>
+  <pre><code># yourapp/fields.py
+from django.db import models
+from snapadmin.fields import SnapField
+
+class SnapMoneyField(models.DecimalField, SnapField):
+    def __init__(self, **kwargs):
+        kwargs.setdefault("max_digits", 12)
+        kwargs.setdefault("decimal_places", 2)
+        kwargs.setdefault("filterable", True)          # Snap option
+        kwargs = self._initializeSnapLogic(**kwargs)   # consume Snap options
+        cleaned = self.handleDjangoKwargs(**kwargs)    # Django-only kwargs
+        super().__init__(**cleaned)</code></pre>
+
+  <h3>2. Reuse the built-in validators</h3>
+  <p>The validators behind <code>SnapPhoneField</code> / <code>SnapColorField</code> /
+  <code>SnapFileField</code> are public and work on any plain Django field:</p>
+  <pre><code>from snapadmin.validators import SnapPhoneValidator, SnapFileValidator
+
+phone    = models.CharField(max_length=20, validators=[SnapPhoneValidator()])
+contract = models.FileField(validators=[
+    SnapFileValidator(allowed_extensions=["pdf"], max_size_bytes=10 * 1024 * 1024),
+])</code></pre>
+
+  <h3>3. Extend a SnapModel</h3>
+  <p><code>SnapModel</code> is a normal abstract model — add methods, a custom manager, override
+  <code>save()</code>, or tune the ES hooks. The admin/API surfaces are driven off your declared
+  fields, so extra methods never break them:</p>
+  <pre><code>class Product(snap_models.SnapModel):
+    name  = snap.SnapCharField(max_length=200, searchable=True)
+    price = SnapMoneyField()
+
+    es_storage_mode   = snap_models.EsStorageMode.DUAL
+    es_index_settings = {"number_of_shards": 2}   # override index creation
+
+    def save(self, *args, **kwargs):
+        self.name = self.name.strip()
+        super().save(*args, **kwargs)             # keeps ES mirroring intact</code></pre>
+
+  <h3>4. Add custom REST endpoints (or override CRUD for one model)</h3>
+  <p>The REST layer is one generic <code>DynamicModelViewSet</code> routed by
+  <code>app_label</code>/<code>model_name</code>. To customise a single model, register
+  <strong>your own</strong> DRF viewset in your <code>urls.py</code>, <em>before</em> SnapAdmin's
+  routes so it wins for that path — reuse Snap's serializer via
+  <code>get_serializer_for_model()</code>:</p>
+  <pre><code>from rest_framework import viewsets, decorators
+from rest_framework.routers import DefaultRouter
+from snapadmin.api.serializers import get_serializer_for_model
+from yourapp.models import Product
+
+class ProductViewSet(viewsets.ModelViewSet):
+    queryset = Product.objects.all()
+    serializer_class = get_serializer_for_model("yourapp", "product")
+
+    @decorators.action(detail=False)
+    def on_sale(self, request):
+        page = self.paginate_queryset(Product.objects.filter(price__lt=100))
+        return self.get_paginated_response(self.get_serializer(page, many=True).data)
+
+router = DefaultRouter()
+router.register(r"api/product", ProductViewSet, basename="product")
+urlpatterns = [*router.urls, path("", include("snapadmin.urls"))]</code></pre>
+  <p>Prefer to keep the generic viewset but change how it behaves globally? Subclass
+  <code>DynamicModelViewSet</code> and point your own route at it.</p>
+
+  <h3>5. Swap auth, permissions &amp; the ES client (config, no code)</h3>
+  <table>
+    <tr><th>To change…</th><th>Set</th></tr>
+    <tr><td>Who can call the API (JWT / session / custom)</td><td><code>SNAPADMIN_API_AUTHENTICATION_CLASSES</code> — see <a href="#integrating">Integrating</a></td></tr>
+    <tr><td>Which model a token may touch</td><td><code>APIToken.allowed_models</code> (AND-ed with Django perms)</td></tr>
+    <tr><td>How the Elasticsearch client is built</td><td><code>ELASTICSEARCH_KWARGS</code> / <code>SNAPADMIN_ES_CLIENT_FACTORY</code></td></tr>
+    <tr><td>GraphQL auth / GraphiQL exposure</td><td><code>SNAPADMIN_GRAPHQL_REQUIRE_AUTH</code> / <code>SNAPADMIN_GRAPHIQL_ENABLED</code></td></tr>
+    <tr><td>Hiding fields from every API surface</td><td><code>api_exclude_fields</code> on the model</td></tr>
+  </table>
+  <div class="callout">
+    <strong>GraphQL</strong> is generated dynamically from your <code>SnapModel</code>s and enforces
+    the <em>same</em> per-model permissions and <code>api_exclude_fields</code> as REST — extend it by
+    adding/removing SnapModels and tuning those settings, not by editing the schema.
+  </div>
+
+  <h3>6. Override admin templates &amp; the dashboard</h3>
+  <p>SnapAdmin's templates live under the <code>snapadmin/</code> template namespace, so Django's
+  normal template resolution lets you shadow any of them. Put your project's <code>templates/</code>
+  dir ahead of the app in <code>TEMPLATES['DIRS']</code>, then drop in a same-named file:</p>
+  <pre><code>yourproject/templates/snapadmin/dashboard.html            # replace the system dashboard
+yourproject/templates/snapadmin/email/error_alert.html    # rebrand the spike-alert email
+yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily digest</code></pre>
+
+  <!-- ── Elasticsearch ──────────────────────────────────────────────────────── -->
+  <h2 id="elasticsearch">🔍 Elasticsearch Integration</h2>
+  <p>SnapAdmin supports three Elasticsearch storage modes via <code>EsStorageMode</code>. Choose the mode per model based on your use case.</p>
+
+  <h3>Enable Elasticsearch</h3>
+  <p>Add to your <code>settings.py</code> (or set via env vars):</p>
+  <pre><code>ELASTICSEARCH_ENABLED = True   # False by default — ES is completely skipped when False
+ELASTICSEARCH_URL = "http://localhost:9200"  # local dev or external cluster</code></pre>
+
+  <div class="callout callout-info">
+    <strong>Local dev without Docker</strong>
+    Leave <code>ELASTICSEARCH_ENABLED=False</code>. All models fall back to <code>DB_ONLY</code> automatically — no ES process required.
+  </div>
+
+  <h3>Running with Docker</h3>
+  <p>The default <code>docker compose up</code> does <strong>not</strong> start Elasticsearch (saves ~512 MB RAM). To enable it:</p>
+  <pre><code># Enable ES in your .env
+ELASTICSEARCH_ENABLED=True
+
+# Then start the full stack including ES
+docker compose --profile es up --build
+
+# Add Kibana for visualisation (dev only)
+docker compose --profile es --profile dev up --build</code></pre>
+
+  <h3>External Elasticsearch (production / staging)</h3>
+  <p>Point to any external ES cluster via env vars — no code change needed:</p>
+  <pre><code># .env (production)
+ELASTICSEARCH_ENABLED=True
+ELASTICSEARCH_URL=https://my-cluster.example.com:9200</code></pre>
+
+  <h3>Storage Modes</h3>
+  <table>
+    <tr><th>Mode</th><th>Storage</th><th>When to use</th></tr>
+    <tr>
+      <td><code>DB_ONLY</code></td>
+      <td>PostgreSQL only</td>
+      <td>Default. Standard Django ORM behavior. No ES dependency.</td>
+    </tr>
+    <tr>
+      <td><code>DUAL</code></td>
+      <td>PostgreSQL + Elasticsearch</td>
+      <td>Write to both DB and ES. Use <code>es_search()</code> for fast full-text search, DB for transactions.</td>
+    </tr>
+    <tr>
+      <td><code>ES_ONLY</code></td>
+      <td>Elasticsearch only</td>
+      <td>No DB table. Ideal for logs, events, or analytics data.</td>
+    </tr>
+  </table>
+
+  <h3>Setting the Mode on a Model</h3>
+  <p>The fields you want searchable in Elasticsearch are declared in <code>es_mapping</code> — a dict of <code>{field_name: ES mapping}</code>. (There is no <code>es_index_fields</code> attribute.) For <code>DUAL</code> you may also set <code>es_index_enabled = True</code>.</p>
+  <pre><code>from snapadmin.models import SnapModel, EsStorageMode
+from snapadmin import fields as snap_fields
+
+# DB_ONLY (default — no extra config needed)
+class Article(SnapModel):
+    title = snap_fields.SnapCharField(max_length=200, searchable=True)
+    body  = snap_fields.SnapTextField()
+
+# DUAL — save to PostgreSQL AND Elasticsearch, search via ES
+class Product(SnapModel):
+    name        = snap_fields.SnapCharField(max_length=200, searchable=True)
+    description = snap_fields.SnapTextField()
+    price       = snap_fields.SnapDecimalField(max_digits=10, decimal_places=2)
+
+    es_index_enabled = True
+    es_storage_mode  = EsStorageMode.DUAL
+    es_mapping = {
+        "name":        {"type": "text", "analyzer": "standard"},
+        "description": {"type": "text"},
+        "price":       {"type": "float"},
+    }
+
+# ES_ONLY — no DB table (managed=False), data lives only in Elasticsearch
+class SearchLog(SnapModel):
+    query         = snap_fields.SnapCharField(max_length=255, searchable=True)
+    results_count = snap_fields.SnapIntegerField()
+    timestamp     = models.DateTimeField(auto_now_add=True)
+
+    es_storage_mode = EsStorageMode.ES_ONLY
+    es_mapping = {
+        "query":         {"type": "text"},
+        "results_count": {"type": "integer"},
+        "timestamp":     {"type": "date"},
+    }
+
+    class Meta:
+        managed = False  # required for ES_ONLY — no DB table is created</code></pre>
+
+  <h3>Custom analyzers &amp; index settings — <code>es_index_settings</code></h3>
+  <p>Index-level settings (custom analyzers under <code>analysis</code>, <code>number_of_shards</code>,
+  <code>number_of_replicas</code>, …) are declared in <code>es_index_settings</code> and applied when the
+  index is <strong>first created</strong>. Existing indexes are never altered — to apply a change,
+  delete the index and run <code>es_reindex_all()</code>:</p>
+  <pre><code>class Product(SnapModel):
+    es_storage_mode = EsStorageMode.DUAL
+    es_mapping = {
+        "name":  {"type": "text", "analyzer": "de_analyzer"},
+        "price": {"type": "float"},
+    }
+    es_index_settings = {
+        "analysis": {"analyzer": {"de_analyzer": {"type": "german"}}},
+        "number_of_shards": 1,
+    }</code></pre>
+
+  <h3>Automatic mapping — <code>es_auto_mapping</code></h3>
+  <p>Don't want to write mappings by hand? Set <code>es_auto_mapping = True</code> and the mapping is
+  derived from the model's fields: <code>CharField</code>/<code>TextField</code> → <code>text</code> with a
+  <code>.raw</code> keyword subfield (exact match + aggregations), <code>Email/Slug/URL/UUID/IP/File</code> →
+  <code>keyword</code>, integers &amp; FK → <code>long</code>, <code>Float</code> → <code>double</code>,
+  <code>Decimal</code> → <code>scaled_float</code>, dates → <code>date</code>, <code>JSONField</code> →
+  <code>object</code>. Entries in <code>es_mapping</code> override the derived ones per field:</p>
+  <pre><code>class SearchLog(SnapModel):
+    query         = snap_fields.SnapCharField(max_length=255, searchable=True)
+    results_count = snap_fields.SnapIntegerField()
+
+    es_storage_mode = EsStorageMode.ES_ONLY
+    es_auto_mapping = True   # derived: query → text + .raw, results_count → long
+    # es_mapping = {"query": {"type": "search_as_you_type"}}   # optional override</code></pre>
+
+  <div class="callout callout-info">
+    <strong>Searches are mapping-aware</strong>
+    Full-text queries (<code>es_search()</code> and the routed REST <code>?search=</code>) target only the
+    <em>text-capable</em> fields of <code>es_mapping</code> and run with <code>lenient: true</code>, so a mapping
+    that mixes numeric/date/boolean fields never breaks a search. ES failures that previously
+    disappeared silently are logged as structlog <code>warning</code> events
+    (<code>es_ensure_index_failed</code>, <code>es_index_document_failed</code>, <code>es_search_failed</code>, …).
+  </div>
+
+  <h3 id="es-search">Querying with <code>es_search()</code></h3>
+  <p><code>es_search(query_string=None, limit=20)</code> is the single entry point for search. It runs a fuzzy <code>multi_match</code> over the index when ES is enabled, and <strong>gracefully falls back to an ORM query</strong> (using the model's <code>searchable</code> fields) when ES is off or unreachable — so the same call works in every environment. <code>snap_search()</code> is a public alias with identical behavior.</p>
+  <pre><code># Full-text search (fuzzy, typo-tolerant) — returns a queryset-like result
+results = Product.es_search("wireles headphones")     # note the typo — still matches
+for product in results:
+    print(product.name, product.price)
+
+# Cap the number of hits (default 20)
+top5 = Product.es_search("laptop", limit=5)
+
+# No query string → match-all (most-recent first), handy for "browse" views
+everything = Product.es_search(limit=100)
+
+# Public alias — identical behavior, nicer name for app code
+hits = Product.snap_search("4k monitor")
+
+# ES_ONLY models: es_search() is the ONLY way to read them (no DB table)
+logs = SearchLog.es_search("error 404")
+recent_logs = SearchLog.es_search(limit=50)
+
+# DB_ONLY models still answer es_search() — it falls back to an ORM
+# icontains query across the model's searchable fields:
+articles = Article.es_search("django")   # works even with ELASTICSEARCH_ENABLED=False</code></pre>
+
+  <div class="callout callout-info">
+    <strong>Return types</strong>
+    For <code>DB_ONLY</code>/<code>DUAL</code>, <code>es_search()</code> returns a normal Django <code>QuerySet</code> (ES hits are mapped back to real DB rows, ES order preserved). For <code>ES_ONLY</code> it returns a lightweight <code>EsQuerySet</code> of model instances built straight from the index — iterable, sliceable, and countable, but not a DB queryset.
+  </div>
+
+  <div class="callout callout-success">
+    <strong>The REST API routes to ES automatically</strong>
+    You rarely need to call <code>es_search()</code> yourself for API consumers: a plain
+    <code>GET /api/models/{app}/{Model}/?search=…</code> on a <code>DUAL</code> model is routed to
+    Elasticsearch automatically. See <a href="#es-routing">Smart ES Query Routing</a> for examples,
+    the routing matrix and the <code>X-Snap-Query-Backend</code> header.
+  </div>
+
+  <h3>Re-indexing (DUAL mode)</h3>
+  <pre><code># Manually trigger a full re-index of every row into ES.
+# Streams the table through the bulk API — one round-trip per 500 docs
+# (tune with chunk_size=), flat memory even on million-row tables:
+Product.es_reindex_all()      # {"indexed": N} — or {"skipped": True} if ES is off
+
+# Per-instance indexing happens automatically on save() in DUAL/ES_ONLY mode.
+# To force a single object back into the index:
+product.index_in_es()
+product.delete_from_es()      # remove just this object's ES document
+
+# Via Celery task (recommended for large datasets):
+from demo.tasks import reindex_products_to_elasticsearch
+reindex_products_to_elasticsearch.delay()</code></pre>
+
+  <!-- ── Celery ────────────────────────────────────────────────────────────── -->
+  <h2 id="celery">⚙️ Celery &amp; Periodic Tasks</h2>
+  <p>SnapAdmin ships built-in Celery tasks for background indexing, token cleanup, and GDPR data retention. Wire them up with Celery Beat to get a fully automated backend in minutes.</p>
+
+  <h3>Built-in Tasks</h3>
+  <table>
+    <tr><th>Task</th><th>Default Schedule</th><th>Description</th></tr>
+    <tr><td><code>api.tasks.purge_expired_tokens</code></td><td>Daily 3am</td><td>Delete all <code>APIToken</code> records past their expiration date</td></tr>
+    <tr><td><code>api.tasks.purge_expired_data</code></td><td>Daily 1am</td><td>GDPR — auto-delete records older than <code>data_retention_days</code> on each SnapModel</td></tr>
+    <tr><td><code>demo.tasks.reindex_products_to_elasticsearch</code></td><td>Daily midnight</td><td>Re-index all products to Elasticsearch (DUAL mode demo)</td></tr>
+    <tr><td><code>demo.tasks.generate_daily_stats</code></td><td>Daily 2am</td><td>Compute and log daily business metrics (demo app)</td></tr>
+  </table>
+
+  <h3>Celery Setup</h3>
+  <pre><code># myproject/celery.py
+from celery import Celery
+
+app = Celery("myproject")
+app.config_from_object("django.conf:settings", namespace="CELERY")
+app.autodiscover_tasks()</code></pre>
+
+  <h3>Schedule All Tasks (Celery Beat)</h3>
+  <p>Add the following to <code>settings.py</code> to activate all background tasks. The dashboard will display them automatically.</p>
+  <pre><code>from celery.schedules import crontab
+
+CELERY_BROKER_URL = "redis://localhost:6379/0"
+CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
+
+CELERY_BEAT_SCHEDULE = {
+    "reindex-products-to-es": {
+        "task": "demo.tasks.reindex_products_to_elasticsearch",
+        "schedule": crontab(hour=0, minute=0),   # daily midnight
+        "description": "Sync Product records (DUAL mode) to Elasticsearch",
+    },
+    "purge-expired-data": {
+        "task": "api.tasks.purge_expired_data",
+        "schedule": crontab(hour=1, minute=0),   # daily 1am
+        "description": "GDPR — delete records older than data_retention_days",
+    },
+    "generate-daily-stats": {
+        "task": "demo.tasks.generate_daily_stats",
+        "schedule": crontab(hour=2, minute=0),   # daily 2am
+        "description": "Daily business stats",
+    },
+    "purge-expired-tokens": {
+        "task": "api.tasks.purge_expired_tokens",
+        "schedule": crontab(hour=3, minute=0),   # daily 3am
+        "description": "Remove expired API tokens",
+    },
+}</code></pre>
+
+  <div class="callout callout-success">
+    <strong>Dashboard integration</strong>
+    Every entry in <code>CELERY_BEAT_SCHEDULE</code> that includes a <code>"description"</code> key is automatically shown in the SnapAdmin Dashboard under <em>Scheduled Cron Jobs</em>.
+  </div>
+
+  <h3>Running Celery in Docker</h3>
+  <pre><code># docker-compose.yml services:
+worker:
+  command: celery -A sandbox worker -l INFO
+beat:
+  command: celery -A sandbox beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler</code></pre>
+
+  <!-- ── Structured Logging ────────────────────────────────────────────────── -->
+  <h2 id="logging">🪵 Structured Logging</h2>
+  <p>SnapAdmin provides a <code>structlog</code>-based logging setup with colourised output for development and JSON output for production.</p>
+
+  <h3>Activate in settings.py</h3>
+  <pre><code>from snapadmin.logging_config import configure_logging
+
+# Human-readable coloured output (development)
+configure_logging(log_level="INFO", json_logs=False)
+
+# JSON lines (production / Docker)
+configure_logging(log_level="WARNING", json_logs=True)</code></pre>
+
+  <h3>Using the logger in your code</h3>
+  <pre><code>from snapadmin.logging_config import get_logger
+
+logger = get_logger(__name__)
+
+logger.info("order_created", order_id=42, total=199.90)
+logger.warning("es_unavailable", model="Product")
+logger.error("payment_failed", reason="card_declined")</code></pre>
+
+  <div class="callout callout-info">
+    <strong>Log levels</strong>
+    Supported values for <code>log_level</code>: <code>DEBUG</code>, <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code>, <code>CRITICAL</code>.
+    Noisy third-party loggers (<code>django.db.backends</code>, <code>elasticsearch</code>, <code>urllib3</code>) are silenced to <code>WARNING</code> automatically.
+  </div>
+
+  <!-- ── GDPR / Data Retention ───────────────────────────────────────────── -->
+  <h2 id="gdpr">🔒 GDPR Data Retention</h2>
+  <p>SnapAdmin provides one-line automatic record cleanup to help comply with EU data retention laws (GDPR). Add two class attributes to any <code>SnapModel</code>:</p>
+
+  <pre><code>class AuditLog(SnapModel):
+    action     = SnapCharField(max_length=100)
+    created_at = SnapDateTimeField(auto_now_add=True)
+
+    # Auto-delete records older than 90 days
+    data_retention_days  = 90
+    data_retention_field = "created_at"  # default — any DateTimeField works</code></pre>
+
+  <h3>How it works</h3>
+  <table>
+    <tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>data_retention_days</code></td><td><code>int | None</code></td><td><code>None</code></td><td>Max age of records in days. Set to a positive integer to enable auto-deletion.</td></tr>
+    <tr><td><code>data_retention_field</code></td><td><code>str</code></td><td><code>"created_at"</code></td><td>Name of the <code>DateTimeField</code> to measure record age against.</td></tr>
+  </table>
+
+  <h3>Running the cleanup</h3>
+  <pre><code># Via Celery Beat (recommended — add to CELERY_BEAT_SCHEDULE):
+"purge-expired-data": {
+    "task": "api.tasks.purge_expired_data",
+    "schedule": crontab(hour=1, minute=0),
+}
+
+# Manually via management command:
+python manage.py purge_expired_data           # live run — deletes records
+python manage.py purge_expired_data --dry-run  # preview only — no deletes
+
+# Programmatically, per model (returns the number purged):
+AuditLog.purge_expired()              # delete now
+AuditLog.purge_expired(dry_run=True)  # count what *would* be deleted, delete nothing</code></pre>
+
+  <h3>Purging across every storage layer</h3>
+  <p>The purge is <strong>storage-aware</strong> — it removes expired records from wherever the model actually keeps them, so personal data never lingers in a secondary store:</p>
+  <table>
+    <tr><th>Mode</th><th>What gets purged</th></tr>
+    <tr><td><code>DB_ONLY</code></td><td>Bulk delete from the database.</td></tr>
+    <tr><td><code>DUAL</code></td><td>Bulk delete from the database <strong>and</strong> the mirrored Elasticsearch documents (the pks are collected before the DB delete, then cleared from the index).</td></tr>
+    <tr><td><code>ES_ONLY</code></td><td>A range <code>delete_by_query</code> against the index on <code>data_retention_field</code> (which must be mapped as a <code>date</code> in <code>es_mapping</code>).</td></tr>
+  </table>
+  <div class="callout callout-success">
+    <strong>Why this matters for GDPR</strong>
+    A plain <code>QuerySet.delete()</code> never calls each model's <code>delete()</code>, so a naïve bulk purge would leave the Elasticsearch copy behind. SnapAdmin's <code>purge_expired()</code> closes that gap for both <code>DUAL</code> and <code>ES_ONLY</code> models. ES operations are best-effort and require <code>ELASTICSEARCH_ENABLED=True</code>.
+  </div>
+
+  <!-- ── Error Monitoring ──────────────────────────────────────────────────── -->
+  <h2 id="error-monitoring">🚨 Error Monitoring &amp; Email Alerts</h2>
+  <p>Optional email notifications about server errors, built on one middleware. Every unhandled
+  exception and 5xx response is stored as an <code>ErrorEvent</code> — browsable in the admin under
+  <strong>Error Events</strong> — and two email channels keep the team informed:</p>
+  <ul>
+    <li><strong>Spike alert</strong> — when <code>SNAPADMIN_ERROR_ALERT_THRESHOLD</code> errors occur
+      within <code>SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES</code> (default 20 errors / 15 min), one email
+      is sent immediately. A cooldown guarantees at most one alert per window.</li>
+    <li><strong>Daily digest</strong> — a grouped 24-hour report: identical errors are merged by
+      exception class + endpoint, ordered by frequency, and capped at
+      <code>SNAPADMIN_ERROR_DIGEST_MAX_GROUPS</code> groups so the email stays readable.</li>
+  </ul>
+
+  <div class="callout callout-success">
+    <strong>Prerequisite: working SMTP</strong>
+    Delivery uses Django's standard email machinery — configure <code>EMAIL_BACKEND</code>,
+    <code>EMAIL_HOST</code>, credentials and <code>DEFAULT_FROM_EMAIL</code>. While the recipient
+    lists are empty no email is ever sent, so the feature is inert until you opt in.
+  </div>
+
+  <h3>Setup</h3>
+  <pre><code># settings.py
+MIDDLEWARE = [
+    # ... Django middleware ...
+    "snapadmin.middleware.SnapErrorMonitorMiddleware",
+]
+
+# Spike alert (defaults shown)
+SNAPADMIN_ERROR_ALERT_THRESHOLD = 20          # errors ...
+SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES = 15     # ... within this window → email
+SNAPADMIN_ERROR_ALERT_EMAILS = ["ops@example.com"]
+
+# Daily digest
+SNAPADMIN_ERROR_DIGEST_EMAILS = ["team@example.com"]  # falls back to ALERT_EMAILS
+SNAPADMIN_ERROR_DIGEST_MAX_GROUPS = 20
+SNAPADMIN_ERROR_RETENTION_DAYS = 30           # ErrorEvents older than this are purged</code></pre>
+
+  <h3>Scheduling the digest</h3>
+  <pre><code># Celery Beat — the send time is entirely yours:
+"send-error-digest": {
+    "task": "api.tasks.send_error_digest",
+    "schedule": crontab(hour=8, minute=0),
+}
+
+# ...or plain cron, without Celery:
+0 8 * * *  python manage.py send_error_digest
+python manage.py send_error_digest --hours 12   # custom window</code></pre>
+
+  <h3>Settings reference</h3>
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>SNAPADMIN_ERROR_MONITOR_ENABLED</code></td><td><code>True</code></td><td>Master kill-switch — disable recording without touching <code>MIDDLEWARE</code>.</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_ALERT_ENABLED</code></td><td><code>True</code></td><td>Enable the spike alert channel.</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_ALERT_THRESHOLD</code></td><td><code>20</code></td><td>Errors within the window that trigger the alert.</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES</code></td><td><code>15</code></td><td>Rolling window for the spike alert.</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_ALERT_COOLDOWN_MINUTES</code></td><td>= window</td><td>Minimum gap between two alert emails.</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_ALERT_EMAILS</code></td><td><code>[]</code></td><td>Alert recipients. Empty = channel off.</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_DIGEST_ENABLED</code></td><td><code>True</code></td><td>Enable the daily digest channel.</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_DIGEST_EMAILS</code></td><td><code>[]</code></td><td>Digest recipients; falls back to the alert list.</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_DIGEST_MAX_GROUPS</code></td><td><code>20</code></td><td>Cap on distinct error groups per digest email.</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_RETENTION_DAYS</code></td><td><code>30</code></td><td><code>ErrorEvent</code> rows older than this are purged by the digest task.</td></tr>
+  </table>
+
+  <div class="callout callout-success">
+    <strong>Fail-safe by design</strong>
+    Storage or SMTP failures are logged (<code>error_monitor_record_failed</code>,
+    <code>error_monitor_alert_failed</code>) and swallowed — a broken mail server never breaks a page.
+    Try it in the demo: hit <code>/demo/error/</code> a few times (DEBUG only) and watch
+    <strong>Error Events</strong> fill up; with the default DEBUG console email backend the alert
+    lands in your terminal.
+  </div>
+
+  <!-- ── 3-2-1 Backups ─────────────────────────────────────────────────────── -->
+  <h2 id="backups">💾 3-2-1 Database Backups</h2>
+  <p>Built-in scheduled backups following the classic <strong>3-2-1 rule</strong> — <strong>3</strong> copies
+  of your data, on <strong>2</strong> different machines, <strong>1</strong> of them offsite. Dumps are
+  gzip-compressed (file copy for SQLite, <code>pg_dump</code> for PostgreSQL) and shipped to up to four
+  destinations, <strong>each on its own schedule</strong>:</p>
+
+  <table>
+    <tr><th>Copy</th><th>Destination</th><th>Where it lives</th><th>Default frequency</th></tr>
+    <tr><td>1</td><td><code>local</code></td><td>Directory on the <strong>same server</strong> (<code>SNAPADMIN_BACKUP_LOCAL_DIR</code>)</td><td>every 24 h</td></tr>
+    <tr><td>2</td><td><code>network</code></td><td>Directory on <strong>another server on your network</strong> — a mounted NFS/SMB share (<code>SNAPADMIN_BACKUP_NETWORK_DIR</code>; empty = off)</td><td>every 24 h</td></tr>
+    <tr><td>3</td><td><code>remote</code></td><td><strong>Offsite server</strong> anywhere in the world, via FTP/FTPS (<code>SNAPADMIN_BACKUP_FTP_*</code>; empty host = off)</td><td>every 168 h (weekly)</td></tr>
+    <tr><td>3 (alt)</td><td><code>sftp</code></td><td>Same offsite copy over <strong>SSH/SFTP</strong> (<code>SNAPADMIN_BACKUP_SFTP_*</code>) — encrypted transport, password or SSH-key auth. Needs <code>pip install django-snapadmin[backup]</code>. Use instead of, or alongside, <code>remote</code>.</td><td>every 168 h (weekly)</td></tr>
+  </table>
+
+  <h3>Configuration</h3>
+  <pre><code>SNAPADMIN_BACKUP_ENABLED = True               # strictly opt-in (default: False)
+SNAPADMIN_BACKUP_KEEP = 7                     # dumps kept per destination (oldest pruned)
+
+# Copy 1 — same server
+SNAPADMIN_BACKUP_LOCAL_DIR = "/var/backups/snapadmin"
+SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS = 24       # daily
+
+# Copy 2 — server on the same network (mounted share)
+SNAPADMIN_BACKUP_NETWORK_DIR = "/mnt/backup-server/snapadmin"
+SNAPADMIN_BACKUP_NETWORK_EVERY_HOURS = 24     # daily
+
+# Copy 3 — offsite FTP/FTPS
+SNAPADMIN_BACKUP_FTP_HOST = "backup.example.com"
+SNAPADMIN_BACKUP_FTP_PORT = 21
+SNAPADMIN_BACKUP_FTP_USER = "backup"
+SNAPADMIN_BACKUP_FTP_PASSWORD = "secret"
+SNAPADMIN_BACKUP_FTP_DIR = "/snapadmin"
+SNAPADMIN_BACKUP_FTP_TLS = True               # FTPS — recommended offsite
+SNAPADMIN_BACKUP_REMOTE_EVERY_HOURS = 168     # weekly
+
+# Copy 3 (alternative) — offsite over SSH/SFTP; pip install django-snapadmin[backup]
+SNAPADMIN_BACKUP_SFTP_HOST = "offsite.example.com"
+SNAPADMIN_BACKUP_SFTP_PORT = 22
+SNAPADMIN_BACKUP_SFTP_USER = "backup"
+SNAPADMIN_BACKUP_SFTP_KEY_FILE = "/etc/snapadmin/id_ed25519"  # key auth; or set _PASSWORD
+SNAPADMIN_BACKUP_SFTP_DIR = "/snapadmin"
+SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = 168       # weekly</code></pre>
+
+  <h3>Running the backups</h3>
+  <p>Backups run as a <strong>separate process</strong> from your web workers — via Celery Beat or cron.
+  The hourly Beat task is only a due-check: each destination actually fires when its own
+  <code>*_EVERY_HOURS</code> interval has elapsed (last-run times persist in a state file, surviving restarts):</p>
+  <pre><code># Celery Beat:
+"run-db-backups": {
+    "task": "api.tasks.run_db_backups",
+    "schedule": crontab(minute=30),   # hourly due-check
+}
+
+# ...or plain cron, without Celery:
+30 * * * *  python manage.py db_backup            # ships only what is due
+python manage.py db_backup --force                # all configured destinations, now
+python manage.py db_backup --destination remote   # one destination, now</code></pre>
+
+  <div class="callout callout-success">
+    <strong>Failure isolation &amp; retention</strong>
+    A failed destination (unreachable share, FTP/SFTP down) is logged (<code>db_backup_store_failed</code>)
+    and reported, but never cancels the other copies — and it stays due, so it is retried on the next
+    pass. Every destination, including the FTP/SFTP server, keeps only the newest
+    <code>SNAPADMIN_BACKUP_KEEP</code> dumps.
+  </div>
+
+  <!-- ── Offline Mode ───────────────────────────────────────────────────────── -->
+  <h2 id="offline">📴 Offline Mode</h2>
+  <p>Flip one class attribute to make a model's admin list view survive a dropped connection. SnapAdmin injects <code>snapadmin/js/offline.js</code> into that model's admin pages only — models without the flag ship no extra JavaScript.</p>
+
+  <pre><code>class Customer(SnapModel):
+    first_name = SnapCharField(max_length=100, show_in_form=True)
+    last_name  = SnapCharField(max_length=100, show_in_form=True)
+
+    # Cache this model's list view client-side and enable offline support
+    offline_mode = True
+    # Prefetch only the 50 most-recent rows for offline view (default: 100)
+    offline_cache_limit = 50</code></pre>
+
+  <h3>What it does (offline-capable models)</h3>
+  <table>
+    <tr><th>Behavior</th><th>Detail</th></tr>
+    <tr><td>Prefetch &amp; cache</td><td>Pulls the most-recent <code>offline_cache_limit</code> rows (default <strong>100</strong>) from <code>GET /api/offline-data/&lt;app&gt;/&lt;model&gt;/</code> into the browser's <strong>IndexedDB</strong> on every visit. The rendered list is kept as a fallback snapshot.</td></tr>
+    <tr><td>Saved-objects panel</td><td>When the backend is unreachable, repaints the list from cache and shows a panel: how many objects are cached (out of the limit), when they were cached, and how many changes are queued.</td></tr>
+    <tr><td>Reconnect sync</td><td>Queues mutations made while offline and replays them when the backend returns, then refreshes the cache and shows a <em>"synced N changes"</em> toast.</td></tr>
+  </table>
+
+  <h3>Real backend health checks</h3>
+  <p>Connectivity is decided by whether the <strong>Django backend actually answers</strong>, not by the OS network flag — a laptop can hold a Wi-Fi link while the server is down or the VPN dropped. A lightweight <code>connectivity.js</code> loads on all SnapModel admin pages:</p>
+  <table>
+    <tr><th>Behavior</th><th>Detail</th></tr>
+    <tr><td>Health polling</td><td>Polls <code>GET /api/health/</code> every 15s by default (override via <code>window.SNAPADMIN_HEALTH_INTERVAL</code>) with a short timeout, and re-checks immediately on <code>online</code>/<code>offline</code> events and tab refocus. The backend is "up" only when it responds.</td></tr>
+    <tr><td>Shared state</td><td>Publishes one resolved state as a <code>snapadmin:connectivity</code> DOM event, so the connectivity layer and the per-model engine always agree.</td></tr>
+    <tr><td>Dynamic toasts</td><td>Backend-lost / restored, <em>"objects can't be shown right now"</em> (non-cached pages), and <em>"synced N changes"</em> surface as auto-dismissing toasts — no static banners.</td></tr>
+    <tr><td>Save guard</td><td>On a non-offline model, an unreachable backend blocks form submission and disables the Save buttons until it returns, while leaving the already-rendered page intact.</td></tr>
+    <tr><td>Sidebar badges</td><td>Each model link gets a green <strong>sync icon</strong> (spins while the backend is down) if it is offline-capable, or a muted <strong>no-offline icon</strong> otherwise — so you can see at a glance which records survive a disconnect.</td></tr>
+  </table>
+  <p>The badge list and per-model cache limits come from <code>GET /api/offline-models/</code> (authenticated), with a <code>localStorage</code> fallback so badges still render while offline.</p>
+
+  <div class="callout callout-info">
+    <strong>Zero configuration</strong>
+    No settings, migrations, or extra dependencies. The <code>offline_mode</code> flag is purely client-side and gated per model; non-offline models still get the connectivity warnings but ship no caching JS.
+  </div>
+
+  <!-- ── Theming & Styles ───────────────────────────────────────────────────── -->
+  <h2 id="theming">🎨 Theming &amp; Styles</h2>
+  <p>SnapAdmin ships its admin styling as two layers, so an install that doesn't use Unfold is never forced to adopt Unfold's assumptions.</p>
+
+  <table>
+    <tr><th>Stylesheet</th><th>Scope</th><th>When it loads</th></tr>
+    <tr>
+      <td><code>snapadmin/css/admin.css</code></td>
+      <td>Theme-agnostic core — field sizing, Select2 widgets, action bar, and the shared <code>:root</code> design tokens</td>
+      <td>Always, on every SnapModel admin page</td>
+    </tr>
+    <tr>
+      <td><code>snapadmin/css/admin-unfold.css</code></td>
+      <td>Unfold-specific overrides — all <code>.unfold</code>-scoped rules, dark-mode borders, and the Add-button visibility fix</td>
+      <td><strong>Only when <code>django-unfold</code> is installed</strong></td>
+    </tr>
+  </table>
+
+  <p>The Unfold layer is opt-in. SnapAdmin appends it automatically — after the core sheet, so its <code>.unfold</code> rules win the cascade — only when Unfold is detected. A plain Django admin install gets the core sheet alone. The shared design tokens (<code>--primary-color</code>, <code>--radius</code>, …) are defined once in the core sheet and referenced by both layers.</p>
+
+  <div class="callout callout-info">
+    <strong>No flag to set</strong>
+    The split keys off whether Unfold is importable, so there is nothing to configure — drop Unfold from <code>INSTALLED_APPS</code> and the Unfold overrides simply stop loading.
+  </div>
+
+  <!-- ── Large-Dataset Performance ──────────────────────────────────────────── -->
+  <h2 id="performance">⚡ Large-Dataset Performance</h2>
+  <p>SnapAdmin keeps the admin and API responsive as tables grow. Most tuning is automatic; the rest is a few per-model knobs.</p>
+
+  <h3>Automatic — no admin N+1</h3>
+  <p>When a model is registered, SnapAdmin inspects the columns shown in the list view and <strong>auto-derives <code>list_select_related</code></strong> from the <code>ForeignKey</code> columns among them. A list view that renders a related column — or a <code>__str__</code> that walks a relation — issues <strong>one joined query</strong> instead of one query per row. Only the FKs you actually display are joined; relations you don't show are never fetched.</p>
+  <p>The auto-generated REST API applies the same treatment to its querysets — <code>select_related()</code> for ForeignKeys and <code>prefetch_related()</code> for many-to-many fields — with the field lists cached per model to keep introspection out of the request hot path.</p>
+
+  <h3>Per-model knobs</h3>
+  <p>Override these class attributes on any <code>SnapModel</code> to tune the admin list view:</p>
+  <pre><code>class AuditLog(snap_models.SnapModel):
+    action = snap.SnapCharField(max_length=100, searchable=True)
+
+    list_per_page = 50              # rows per page (default 100)
+    list_max_show_all = 200         # cap on the "Show all" link
+    show_full_result_count = False  # skip the unfiltered COUNT(*) on huge tables</code></pre>
+
+  <table>
+    <tr><th>Attribute</th><th>Default</th><th>When to change it</th></tr>
+    <tr>
+      <td><code>list_per_page</code></td>
+      <td><code>100</code></td>
+      <td>Lower it for wide rows or heavy list templates.</td>
+    </tr>
+    <tr>
+      <td><code>list_max_show_all</code></td>
+      <td><code>200</code></td>
+      <td>Guards against a "Show all" rendering a million-row table.</td>
+    </tr>
+    <tr>
+      <td><code>show_full_result_count</code></td>
+      <td><code>True</code></td>
+      <td>Set <code>False</code> on very large tables — the admin then skips the second, unfiltered <code>COUNT(*)</code> it runs to display the grand total, which is often the single most expensive query on the page.</td>
+    </tr>
+  </table>
+
+  <div class="callout callout-info">
+    <strong>REST pagination is on by default</strong>
+    The REST API paginates with <code>PageNumberPagination</code> (<code>PAGE_SIZE = 25</code>), so large collections are never serialized in one response. Tune it via the <code>REST_FRAMEWORK</code> setting.
+  </div>
+
+  <h3>Offloading search to Elasticsearch</h3>
+  <p>For <code>DUAL</code> and <code>ES_ONLY</code> models the REST list endpoint serves results directly from Elasticsearch (<code>es_search</code>) rather than the database, moving full-text search and large-result pagination off the primary database. See <a href="#elasticsearch">Elasticsearch Storage Modes</a>.</p>
+
+  <h3>Benchmarking at scale</h3>
+  <p>Two demo management commands let you reproduce these numbers on your own hardware:</p>
+  <pre><code># Bulk-seed 100k customers + orders (batched bulk_create, flat memory)
+python manage.py seed_large --count 100000
+
+# Time the Order changelist queryset with vs without list_select_related
+python manage.py benchmark_list_view --model order</code></pre>
+  <p><code>benchmark_list_view</code> iterates the changelist queryset and touches each row's ForeignKey, so the unoptimized run pays the full N+1 cost while the optimized run issues one joined query. Representative output on a seeded table (5,000 orders, SQLite):</p>
+  <pre><code>📊  Result
+   WITHOUT :    5,001 queries       584.5 ms
+   WITH    :        1 queries        37.8 ms
+
+   Query reduction : 5,001 → 1  (5001× fewer)
+   Speedup         : 15.5× faster wall time</code></pre>
+  <p>The unoptimized query count scales linearly with row count (<code>N + 1</code>); the optimized path stays flat at <strong>1</strong> — exactly the N+1 elimination <code>list_select_related</code> provides. See the broader <a href="#optimizations">Optimizations</a> guide for the underlying data-access patterns.</p>
+
+  <!-- ── Optimizations Guide ─────────────────────────────────────────────────── -->
+  <h2 id="optimizations">🚀 Optimizations Guide</h2>
+  <p>The <a href="#performance">Large-Dataset Performance</a> section above is the reference for SnapAdmin's specific knobs. This guide is the broader picture: the data-access patterns every developer working with large tables should understand, whether or not they use SnapAdmin. Most of it is plain Django/SQL; the SnapAdmin-specific automation is called out where it applies.</p>
+
+  <h3>1. Query optimization for large tables</h3>
+  <p>The cheapest query is the one you never run, and the cheapest row is the one you never fetch. A few tools cover most cases:</p>
+  <table>
+    <tr><th>Tool</th><th>Use it when</th><th>What it does</th></tr>
+    <tr>
+      <td><code>select_related(...)</code></td>
+      <td>Following a <strong>ForeignKey</strong> / <strong>OneToOne</strong> (to-one) relation.</td>
+      <td>Pulls the related row in the <em>same</em> query via a SQL <code>JOIN</code>. One query total.</td>
+    </tr>
+    <tr>
+      <td><code>prefetch_related(...)</code></td>
+      <td>Following a <strong>ManyToMany</strong> or reverse FK (to-many) relation.</td>
+      <td>A second query for the related set, joined in Python. Two queries total, not <code>N+1</code>.</td>
+    </tr>
+    <tr>
+      <td><code>only(...)</code> / <code>defer(...)</code></td>
+      <td>Rows are wide (big text/JSON columns) but you render few columns.</td>
+      <td>Fetches/skips specific columns. <strong>Caution:</strong> touching a deferred column triggers a fresh per-row query — an N+1 in disguise.</td>
+    </tr>
+    <tr>
+      <td><code>values()</code> / <code>values_list()</code></td>
+      <td>You need raw data (export, aggregation), not model instances.</td>
+      <td>Returns dicts/tuples, skipping model construction overhead entirely.</td>
+    </tr>
+    <tr>
+      <td><code>exists()</code></td>
+      <td>You only need to know <em>whether</em> rows match.</td>
+      <td>Emits <code>SELECT 1 ... LIMIT 1</code> — far cheaper than <code>count()</code> or truthiness on the queryset.</td>
+    </tr>
+    <tr>
+      <td><code>count()</code></td>
+      <td>You need the number, not the rows.</td>
+      <td>A single <code>COUNT(*)</code> — but on huge tables even this is expensive (see below).</td>
+    </tr>
+  </table>
+
+  <p><strong>Indexing.</strong> Any column you filter or sort on at scale should have a database index (<code>db_index=True</code>, or <code>Meta.indexes</code> for composite/partial indexes). Without one, the database scans the whole table for every query. The flip side: indexes cost write time and storage, so index the columns you actually query, not every column.</p>
+
+  <p><strong>Pagination.</strong> Offset pagination (<code>LIMIT 50 OFFSET 1000000</code>) makes the database walk and discard every skipped row — page 20,000 is slow even with an index. <strong>Keyset (cursor) pagination</strong> — <code>WHERE id &gt; :last_seen_id ORDER BY id LIMIT 50</code> — stays constant-time at any depth because it seeks straight to the next page via the index. Prefer it for deep, infinite-scroll, or API pagination over very large tables.</p>
+
+  <div class="callout callout-info">
+    <strong>Skip the grand-total COUNT.</strong>
+    Django's admin runs a second, unfiltered <code>COUNT(*)</code> just to show "X total" — frequently the most expensive query on the page. Set <code>show_full_result_count = False</code> on a <code>SnapModel</code> to drop it on huge tables.
+  </div>
+
+  <h3>2. The N+1 problem</h3>
+  <p>The classic performance trap: you fetch a list of <code>N</code> objects in <strong>1</strong> query, then access a related object on each one, firing <strong>N</strong> more queries — <code>N + 1</code> total. At 50 rows it's invisible in dev; at 50,000 rows it melts the database.</p>
+  <pre><code># N+1: one query for orders, then one per order for the customer
+for order in Order.objects.all():        # 1 query
+    print(order.customer.first_name)     # +1 query EACH iteration
+
+# Fixed: a single JOIN pulls customers alongside orders
+for order in Order.objects.select_related("customer"):   # 1 query, total
+    print(order.customer.first_name)</code></pre>
+  <p><strong>How to spot it:</strong> count queries. In tests, <code>django.test.utils.CaptureQueriesContext</code> (or <code>assertNumQueries</code>); in development, <a href="https://django-debug-toolbar.readthedocs.io/">django-debug-toolbar</a>; in code, <code>len(connection.queries)</code> with <code>DEBUG=True</code>.</p>
+  <div class="callout callout-info">
+    <strong>SnapAdmin eliminates the admin N+1 automatically.</strong>
+    <code>register_admin()</code> inspects the FK columns shown in the list view and auto-derives <code>list_select_related</code>, so changelist pages issue one joined query instead of one per row. The <a href="#performance">benchmark above</a> shows it: 5,001 queries → 1. Run <code>python manage.py benchmark_list_view</code> to see it on your own data.
+  </div>
+
+  <h3>3. SQL vs NoSQL — when to offload to Elasticsearch</h3>
+  <p>A relational table is the right home for most data: it gives you transactions, joins, foreign-key integrity, and ad-hoc queries. Reach for a search engine like Elasticsearch when the access pattern outgrows what SQL does cheaply:</p>
+  <table>
+    <tr><th>Keep it in PostgreSQL when…</th><th>Offload to Elasticsearch when…</th></tr>
+    <tr>
+      <td>You need ACID transactions and referential integrity.</td>
+      <td>You need fast full-text / fuzzy / relevance-ranked search across large text.</td>
+    </tr>
+    <tr>
+      <td>Queries are structured (filter/sort on indexed columns, joins).</td>
+      <td>Faceted search, aggregations, and autocomplete over millions of rows.</td>
+    </tr>
+    <tr>
+      <td>The table is the system of record.</td>
+      <td>Read volume and query complexity would overwhelm the primary DB.</td>
+    </tr>
+  </table>
+  <p>SnapAdmin makes this a per-model setting via <code>es_storage_mode</code> — see <a href="#elasticsearch">Elasticsearch Storage Modes</a>:</p>
+  <ul>
+    <li><strong><code>DB_ONLY</code></strong> — PostgreSQL only (the default). Right for the vast majority of models.</li>
+    <li><strong><code>DUAL</code></strong> — write to both; Postgres is the source of truth, ES is a denormalized read/search copy.</li>
+    <li><strong><code>ES_ONLY</code></strong> — high-volume, write-heavy logs/events that never need relational integrity (<code>managed=False</code>, no DB table).</li>
+  </ul>
+
+  <h3>4. Denormalization &amp; data duplication</h3>
+  <p>Normalization removes redundancy so each fact lives in exactly one place — great for write integrity, but it pushes joins onto every read. <strong>Denormalization</strong> deliberately duplicates data to make reads cheap, trading storage and write complexity for read speed.</p>
+  <p><code>DUAL</code> mode is the worked example: PostgreSQL stays the normalized source of truth, while a denormalized, query-optimized copy lives in Elasticsearch for fast search. The cost is <strong>consistency</strong> — the two stores can drift, so the copy must be kept in sync (SnapAdmin re-indexes on save and via a nightly Celery task; see <a href="#celery">Celery &amp; Periodic Tasks</a>).</p>
+  <p>Related patterns:</p>
+  <ul>
+    <li><strong>Computed/materialized columns</strong> — store an expensive aggregate (e.g. <code>order_count</code> on a customer) instead of recomputing it on every read; update it on write or on a schedule.</li>
+    <li><strong>Caching</strong> — a read-through cache is denormalization with a TTL; same consistency trade-off, bounded by expiry.</li>
+  </ul>
+  <div class="callout callout-warn">
+    <strong>The rule of thumb:</strong> normalize until reads hurt, then denormalize the specific hot path — and own the cache-invalidation/consistency cost you just took on. Don't denormalize speculatively.
+  </div>
+
+  <h3>5. Practical checklist &amp; anti-patterns</h3>
+  <p>Before shipping a view over a large table, check:</p>
+  <ul>
+    <li>✅ Every <code>WHERE</code>/<code>ORDER BY</code> column at scale is indexed.</li>
+    <li>✅ To-one relations you display use <code>select_related</code>; to-many use <code>prefetch_related</code>.</li>
+    <li>✅ Deep/API pagination uses keyset, not offset.</li>
+    <li>✅ Existence checks use <code>exists()</code>, not <code>count()</code> or <code>len()</code>.</li>
+    <li>✅ The unfiltered grand-total <code>COUNT(*)</code> is disabled on huge admin tables (<code>show_full_result_count = False</code>).</li>
+  </ul>
+  <p>Common anti-patterns to avoid:</p>
+  <ul>
+    <li>❌ Fetching whole rows just to render one column (use <code>only()</code>/<code>values()</code>).</li>
+    <li>❌ Sorting or filtering on an unindexed column on a large table.</li>
+    <li>❌ Leaving <code>Show all</code> enabled on a million-row admin list (cap it with <code>list_max_show_all</code>).</li>
+    <li>❌ Accessing a relation inside a loop without <code>select_related</code>/<code>prefetch_related</code> (the N+1).</li>
+    <li>❌ Touching a <code>defer()</code>red column in a loop — it re-queries per row.</li>
+  </ul>
+  <p>Related reading: <a href="#performance">Large-Dataset Performance</a> (SnapAdmin's knobs) and <a href="#elasticsearch">Elasticsearch Storage Modes</a> (the SQL/NoSQL split).</p>
+
+  <!-- ── Sandbox / Demo ─────────────────────────────────────────────────────── -->
+  <h2 id="demo-models">📦 Demo App — Model Overview</h2>
+  <p>The <code>demo/</code> app contains pre-built models that showcase every SnapAdmin feature. Each model uses a different Elasticsearch storage mode.</p>
+
+  <table>
+    <tr><th>Model</th><th>ES Mode</th><th>Demonstrates</th></tr>
+    <tr>
+      <td><code>Category</code>, <code>Tag</code></td>
+      <td><span style="background:#f1f5f9;color:#475569;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">DB_ONLY</span></td>
+      <td>Simple lookup tables, ForeignKey and M2M relations</td>
+    </tr>
+    <tr>
+      <td><code>Product</code></td>
+      <td><span style="background:#dbeafe;color:#1d4ed8;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">DUAL</span></td>
+      <td>Nightly Celery re-index, full-text ES search with DB fallback, status badges</td>
+    </tr>
+    <tr>
+      <td><code>Customer</code>, <code>Order</code></td>
+      <td><span style="background:#f1f5f9;color:#475569;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">DB_ONLY</span></td>
+      <td>Relational data, ForeignKey with autocomplete, range filters</td>
+    </tr>
+    <tr>
+      <td><code>SearchLog</code></td>
+      <td><span style="background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">ES_ONLY</span></td>
+      <td>ES-only model (<code>managed=False</code>), high-frequency write pattern</td>
+    </tr>
+    <tr>
+      <td><code>AuditLog</code></td>
+      <td><span style="background:#f1f5f9;color:#475569;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">DB_ONLY</span></td>
+      <td>GDPR retention: <code>data_retention_days=90</code></td>
+    </tr>
+    <tr>
+      <td><code>Showcase</code></td>
+      <td><span style="background:#f1f5f9;color:#475569;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">DB_ONLY</span></td>
+      <td>All 30 field types in one model, tabs, rows, WYSIWYG, phone, color</td>
+    </tr>
+  </table>
+
+  <h2 id="demo-seed">🌱 Seed Command</h2>
+  <p>The <code>seed_demo</code> management command populates the database with realistic demo data in seconds.</p>
+  <pre><code>python manage.py seed_demo          # default: 20 products, 10 customers, 5 orders
+python manage.py seed_demo --no-index  # skip ES indexing (no ES cluster needed)</code></pre>
+  <p>The command is idempotent — running it multiple times adds more data without duplicating existing records.</p>
+
+  <!-- ── Migration Guide: old package → SnapAdmin ─────────────────────────── -->
+  <h2 id="migration-from-autoadmin">🔄 Migration Guide: <code>drofji-automatically-django-admin</code> → SnapAdmin</h2>
+  <p>
+    The legacy package <code>drofji-automatically-django-admin</code> (import root
+    <code>drofji_autoadmin</code>, last tag <strong>v1.1.0</strong>) is being retired and its
+    repository removed. <strong>SnapAdmin is its direct successor</strong> — same declarative,
+    field-driven admin, now renamed and extended with a REST API, GraphQL, the Unfold theme,
+    Elasticsearch, GDPR retention and offline mode. The underlying Django field types are
+    unchanged, so this is a <strong>rename + settings swap, not a data migration</strong>.
+  </p>
+
+  <div class="callout callout-success">
+    <strong>No data migration</strong>
+    SnapAdmin does not alter your existing model tables. The only new table is
+    <code>snapadmin_apitoken</code> (token auth). Your data stays exactly where it is.
+  </div>
+
+  <h3>1. Swap the package</h3>
+  <pre><code>pip uninstall drofji-automatically-django-admin
+pip install drofji-snapadmin
+# or pin the repo:
+pip install git+https://github.com/drofji/django-snapadmin.git</code></pre>
+  <p>If you pinned the old GitHub URL in <code>requirements.txt</code>, replace that line with
+  <code>drofji-snapadmin</code>.</p>
+
+  <h3>2. Rename the import root (<code>drofji_autoadmin</code> → <code>snapadmin</code>)</h3>
+  <pre><code># Before
+from drofji_autoadmin import models as drofji_models, fields as drofji_fields
+from drofji_autoadmin import validators
+
+# After
+from snapadmin import models as snap_models, fields as snap_fields
+from snapadmin import validators</code></pre>
+  <p>One-shot, repo-wide:</p>
+  <pre><code>grep -rl drofji_autoadmin . | xargs sed -i '' 's/drofji_autoadmin/snapadmin/g'</code></pre>
+
+  <h3>3. Rename the base class & fields (<code>AutoAdmin*</code> → <code>Snap*</code>)</h3>
+  <pre><code># Before
+class Product(drofji_models.AutoAdminModel):
+    name = drofji_fields.AutoAdminCharField(max_length=200, searchable=True)
+
+# After
+class Product(snap_models.SnapModel):
+    name = snap_fields.SnapCharField(max_length=200, searchable=True)</code></pre>
+  <p>All field flags (<code>show_in_list</code>, <code>searchable</code>, <code>filterable</code>,
+  <code>row</code>, <code>tab</code>, …) and the per-model <code>admin_overrides</code> dict keep
+  the same names and behaviour. Mechanical replace:</p>
+  <pre><code>grep -rl AutoAdmin . | xargs sed -i '' 's/AutoAdmin/Snap/g'
+# AutoAdminModel→SnapModel, AutoAdminCharField→SnapCharField, AutoAdminFunctionField→SnapFunctionField, …</code></pre>
+
+  <h3>4. Swap the theme in <code>INSTALLED_APPS</code></h3>
+  <p>The old package themed the admin with <code>admin_interface</code> + <code>colorfield</code>.
+  SnapAdmin uses <strong>Unfold</strong>. <strong>Remove the old theme apps</strong> (leaving them
+  alongside Unfold causes conflicting admin overrides) and add the new stack — order matters,
+  Unfold and its contrib apps must precede <code>django.contrib.admin</code>:</p>
+  <pre><code>INSTALLED_APPS = [
+-   "admin_interface",
+-   "colorfield",
++   "unfold",
++   "unfold.contrib.filters",
++   "unfold.contrib.forms",
++   "unfold.contrib.inlines",
++   "django_ckeditor_5",
+    "django.contrib.admin",
+    "django.contrib.auth",
+    # … other django.contrib.* …
+    "rangefilter",            # keep — SnapAdmin still uses it
+-   "drofji_autoadmin",
++   "rest_framework",
++   "drf_spectacular",
++   "django_filters",
++   "graphene_django",
++   "snapadmin",
+    # your apps …
+]</code></pre>
+
+  <h3>5. Register the admin explicitly (new requirement)</h3>
+  <p>The old package auto-registered models purely by inheritance. SnapAdmin needs one explicit
+  call — add it to your app's <code>admin.py</code>, or your models won't appear in the admin:</p>
+  <pre><code># admin.py
+from snapadmin.models import SnapModel
+SnapModel.register_all_admins()</code></pre>
+
+  <h3>6. Replace color fields</h3>
+  <p>If you used <code>ColorField</code> from <code>django-colorfield</code>, switch to
+  <code>snap_fields.SnapColorField</code> (validates <code>#RRGGBB</code> / <code>#RGB</code>).</p>
+
+  <h3>7. (Optional) Wire up the new APIs</h3>
+  <p>SnapAdmin ships a REST API, GraphQL endpoint and Swagger UI — features the old package did
+  not have. Include the routes only if you want them:</p>
+  <pre><code># urls.py
+urlpatterns = [
+    path("admin/", admin.site.urls),
+    path("", include("snapadmin.urls")),   # /api/, /api/docs/, /graphql/
+]
+
+# settings.py — all default True
+SNAPADMIN_REST_API_ENABLED = True
+SNAPADMIN_GRAPHQL_ENABLED  = True
+SNAPADMIN_SWAGGER_ENABLED  = True
+ELASTICSEARCH_ENABLED      = False   # opt-in; needs the [elasticsearch] extra
+SNAPADMIN_ES_QUERY_ROUTING = True    # route ?search= on DUAL models to ES
+SNAPADMIN_ES_SEARCH_LIMIT  = 1000    # max ES hits per routed search
+SNAPADMIN_GRAPHQL_REQUIRE_AUTH = True  # auth + perms on every GraphQL resolver
+SNAPADMIN_GRAPHIQL_ENABLED = DEBUG     # GraphiQL playground — dev only</code></pre>
+
+  <h3>8. Migrate & collect static</h3>
+  <pre><code>python manage.py migrate          # creates only snapadmin_apitoken
+python manage.py collectstatic    # if you serve static yourself</code></pre>
+
+  <div class="callout callout-warn">
+    <strong>Don't run both packages at once</strong>
+    Keeping <code>drofji_autoadmin</code> installed and in <code>INSTALLED_APPS</code> alongside
+    SnapAdmin makes both try to register the admin → <code>AlreadyRegistered</code>. Fully
+    uninstall the old package and remove it from <code>INSTALLED_APPS</code> before enabling
+    SnapAdmin.
+  </div>
+
+  <!-- ── Migration Guide: same-package versions ───────────────────────────── -->
+  <h2 id="migration-from-v0">🔄 Migration Guide: v0.0.x → v0.1.x</h2>
+  <p>Version 0.1.0 is a significant rewrite. If you are upgrading from an older version, follow these steps.</p>
+
+  <h3>1. Update the package</h3>
+  <pre><code>pip install --upgrade django-snapadmin</code></pre>
+
+  <h3>2. Replace model field imports</h3>
+  <pre><code># Before (v0.0.x)
+from snapadmin.fields import CharField, IntegerField  # bare re-exports
+
+# After (v0.1.x)
+from snapadmin import fields as snap
+name = snap.SnapCharField(max_length=200, searchable=True, show_in_list=True)</code></pre>
+
+  <h3>3. Update SnapModel usage</h3>
+  <pre><code># Before (v0.0.x)
+from snapadmin.models import BaseModel
+class Product(BaseModel): ...
+
+# After (v0.1.x)
+from snapadmin.models import SnapModel
+class Product(SnapModel): ...</code></pre>
+
+  <h3>4. Admin registration</h3>
+  <pre><code># After (v0.1.x) — add to your app's admin.py:
+from snapadmin.models import SnapModel
+SnapModel.register_all_admins()  # registers all SnapModel subclasses</code></pre>
+
+  <h3>5. New settings</h3>
+  <pre><code># settings.py additions for v0.1.x:
+SNAPADMIN_REST_API_ENABLED = True    # default True
+SNAPADMIN_GRAPHQL_ENABLED  = True    # default True
+SNAPADMIN_SWAGGER_ENABLED  = True    # default True
+ELASTICSEARCH_ENABLED      = False   # default False — enable only with ES cluster
+SNAPADMIN_ES_QUERY_ROUTING = True    # default True — ?search= on DUAL models → ES
+SNAPADMIN_ES_SEARCH_LIMIT  = 1000    # default 1000 — max ES hits per routed search</code></pre>
+
+  <div class="callout callout-success">
+    <strong>No data migration needed</strong>
+    SnapAdmin does not add columns or constraints to your existing model tables. The only new table is <code>snapadmin_apitoken</code> (for the token auth feature). Run <code>python manage.py migrate</code> after upgrading.
+  </div>
+
+  <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
+    SnapAdmin v0.1.0a9 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
+  </div>
+
+</main>
+
+<script>
+  // Highlight active section in sidebar on scroll
+  const sections = document.querySelectorAll('h2[id], section[id]');
+  const navLinks = document.querySelectorAll('.sidebar nav a');
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        navLinks.forEach(l => l.classList.remove('active'));
+        const link = document.querySelector(`.sidebar a[href="#${e.target.id}"]`);
+        if (link) link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -70% 0px' });
+  sections.forEach(s => observer.observe(s));
+
+  // ── Dark / light theme (persisted, defaults to system preference) ──
+  const root = document.documentElement;
+  const themeBtn = document.getElementById('themeToggle');
+  const applyTheme = t => {
+    root.setAttribute('data-theme', t);
+    if (themeBtn) themeBtn.textContent = t === 'dark' ? '☀️' : '🌙';
+  };
+  const saved = localStorage.getItem('snapadmin-docs-theme');
+  applyTheme(saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
+  themeBtn && themeBtn.addEventListener('click', () => {
+    const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    localStorage.setItem('snapadmin-docs-theme', next);
+    applyTheme(next);
+  });
+
+  // ── Mobile sidebar toggle ──
+  const sidebar = document.getElementById('sidebar');
+  const menuBtn = document.getElementById('menuToggle');
+  menuBtn && menuBtn.addEventListener('click', () => sidebar.classList.toggle('open'));
+  document.querySelectorAll('.sidebar nav a').forEach(a =>
+    a.addEventListener('click', () => sidebar.classList.remove('open')));
+
+  // ── Sidebar filter ──
+  const navSearch = document.getElementById('navSearch');
+  navSearch && navSearch.addEventListener('input', e => {
+    const q = e.target.value.trim().toLowerCase();
+    document.querySelectorAll('.sidebar nav li').forEach(li => {
+      const hit = li.textContent.toLowerCase().includes(q);
+      li.classList.toggle('nav-hidden', q && !hit);
+    });
+  });
+
+  // ── One-click copy on every code block ──
+  document.querySelectorAll('main pre').forEach(pre => {
+    const wrap = document.createElement('div');
+    wrap.className = 'code-wrap';
+    pre.parentNode.insertBefore(wrap, pre);
+    wrap.appendChild(pre);
+    const btn = document.createElement('button');
+    btn.className = 'copy-btn';
+    btn.textContent = 'Copy';
+    wrap.appendChild(btn);
+    btn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(pre.innerText);
+        btn.textContent = 'Copied!'; btn.classList.add('copied');
+        setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1600);
+      } catch (_) { /* clipboard unavailable */ }
+    });
+  });
+</script>
+</body>
+</html>

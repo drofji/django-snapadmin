@@ -1,0 +1,160 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SnapAdmin — Docker Compose Stack
+#
+# Default stack (no flags):
+#   docker compose up --build
+#   Starts: db, redis, app, worker, beat
+#   ELASTICSEARCH_ENABLED defaults to False in .env (no ES overhead)
+#
+# With Elasticsearch (full search features):
+#   docker compose --profile es up --build
+#   Starts: everything above + elasticsearch
+#   Set ELASTICSEARCH_ENABLED=True in your .env before running
+#
+# With Kibana (ES visualisation, dev only):
+#   docker compose --profile es --profile dev up --build
+#   Starts: everything above + kibana
+#
+# Services:
+#   db            PostgreSQL 16
+#   redis         Redis 7 (Celery broker + cache)
+#   app           Django via Gunicorn
+#   worker        Celery worker (background tasks)
+#   beat          Celery Beat scheduler (cron jobs)
+#   elasticsearch Elasticsearch 8 (profile: es)
+#   kibana        Kibana (profile: dev)
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-app-common: &app-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  env_file: .env
+  environment:
+    DJANGO_SETTINGS_MODULE: sandbox.settings
+    POSTGRES_HOST: db
+    REDIS_URL: redis://redis:6379/0
+    # ELASTICSEARCH_URL is set here so app can reach ES when profile is active.
+    # ELASTICSEARCH_ENABLED comes from .env — set to True only when running --profile es.
+    ELASTICSEARCH_URL: http://elasticsearch:9200
+    JSON_LOGS: "True"
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+
+  # ── PostgreSQL ──────────────────────────────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-snapadmin}
+      POSTGRES_USER: ${POSTGRES_USER:-snapadmin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-snapadmin}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-snapadmin}" ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis ───────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Django App ──────────────────────────────────────────────────────────────
+  app:
+    <<: *app-common
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+             python manage.py collectstatic --noinput &&
+             python manage.py seed_demo --no-index &&
+             gunicorn sandbox.wsgi:application --bind 0.0.0.0:8000 --workers 4 --worker-class sync --timeout 120 --access-logfile - --error-logfile -"
+    ports:
+      - "8000:8000"
+    volumes:
+      - static_files:/app/.staticfiles
+      - media_files:/app/.media
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/admin/" ]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Celery Worker ───────────────────────────────────────────────────────────
+  worker:
+    <<: *app-common
+    command: celery -A sandbox worker --loglevel=info --concurrency=4 -Q celery
+    restart: unless-stopped
+    depends_on:
+      - app
+
+  # ── Celery Beat (Scheduler) ─────────────────────────────────────────────────
+  # Uses Django DB-backed scheduler (django_celery_beat) so admins can inspect
+  # and modify the schedule from the Django admin UI.
+  beat:
+    <<: *app-common
+    command: celery -A sandbox beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    restart: unless-stopped
+    depends_on:
+      - app
+
+  # ── Elasticsearch ───────────────────────────────────────────────────────────
+  # Optional — only starts when running: docker compose --profile es up
+  # Also set ELASTICSEARCH_ENABLED=True in your .env file.
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+    restart: unless-stopped
+    profiles:
+      - es
+    environment:
+      discovery.type: single-node
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      xpack.security.enabled: "false"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    ports:
+      - "127.0.0.1:9200:9200"
+    healthcheck:
+      test: [ "CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health || exit 1" ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # ── Kibana (dev tool — optional) ────────────────────────────────────────────
+  # Only starts when: docker compose --profile es --profile dev up
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.13.0
+    restart: unless-stopped
+    profiles:
+      - dev
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "127.0.0.1:5601:5601"
+    depends_on:
+      - elasticsearch
+
+volumes:
+  postgres_data:
+  redis_data:
+  static_files:
+  media_files:
+  es_data:

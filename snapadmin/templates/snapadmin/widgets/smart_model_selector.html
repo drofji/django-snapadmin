@@ -1,0 +1,30 @@
+<div class="smart-model-selector" id="selector-{{ name }}" data-all-models='{{ all_models_json|safe }}'>
+    <div class="flex flex-col gap-4 mb-4">
+        <div class="flex gap-2">
+            <select id="app-select-{{ name }}" class="border rounded p-2 bg-white dark:bg-gray-800 dark:border-gray-700">
+                <option value="">-- Select App --</option>
+            </select>
+            <select id="model-select-{{ name }}" class="border rounded p-2 bg-white dark:bg-gray-800 dark:border-gray-700" disabled>
+                <option value="">-- Select Model --</option>
+            </select>
+            <button type="button" id="add-model-{{ name }}" class="bg-primary-600 text-white px-4 py-2 rounded hover:bg-primary-700">
+                Add
+            </button>
+        </div>
+
+        <div id="selected-models-{{ name }}" class="flex flex-wrap gap-2">
+            {% for model_id in current_values %}
+                <div class="selected-model-pill bg-gray-100 dark:bg-gray-700 px-3 py-1 rounded-full flex items-center gap-2 border dark:border-gray-600" data-value="{{ model_id }}">
+                    <span class="text-sm">{{ model_id }}</span>
+                    <button type="button" class="remove-model text-red-500 font-bold">&times;</button>
+                </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <input type="hidden" name="{{ name }}" id="hidden-input-{{ name }}" value='[]'>
+</div>
+
+<script>
+    // In-line initialization fallback if needed, but primary logic is in external JS
+</script>

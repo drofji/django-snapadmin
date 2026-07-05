@@ -1,0 +1,59 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# SnapAdmin — Traefik overlay for local development (HTTP only)
+#
+# Routes http://snapadmin.localhost/ → app:8000
+# Traefik dashboard at http://traefik.localhost/ (BasicAuth protected)
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.traefik.local.yml up --build
+#
+# Requirements:
+#   - No other process listening on port 80
+#   - *.localhost resolves natively on macOS/Linux; on Windows add to hosts file:
+#       127.0.0.1 snapadmin.localhost traefik.localhost
+#   - TRAEFIK_DASHBOARD_CREDENTIALS set in .env (htpasswd format)
+#     Generate: echo $(htpasswd -nb admin yourpassword) | sed -e 's/\$/\$\$/g'
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ── Traefik reverse proxy ───────────────────────────────────────────────────
+  traefik:
+    image: traefik:v3.0
+    restart: unless-stopped
+    command:
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+    ports:
+      - "80:80"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      - "traefik.enable=true"
+      # Dashboard at http://traefik.localhost/
+      - "traefik.http.routers.dashboard.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.dashboard.entrypoints=web"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.middlewares=dashboard-auth"
+      # BasicAuth — set TRAEFIK_DASHBOARD_CREDENTIALS in .env
+      - "traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_CREDENTIALS}"
+
+  # ── App — routed through Traefik ────────────────────────────────────────────
+  app:
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.snapadmin.rule=Host(`snapadmin.localhost`)"
+      - "traefik.http.routers.snapadmin.entrypoints=web"
+      - "traefik.http.services.snapadmin.loadbalancer.server.port=8000"
+    ports: []  # Traefik handles routing; no direct port mapping needed
+
+  # ── Worker and Beat — internal only, not exposed via Traefik ────────────────
+  worker:
+    labels:
+      - "traefik.enable=false"
+
+  beat:
+    labels:
+      - "traefik.enable=false"

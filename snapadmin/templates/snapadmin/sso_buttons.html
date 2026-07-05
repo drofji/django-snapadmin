@@ -1,0 +1,27 @@
+{% comment %}
+snapadmin/sso_buttons.html — enterprise SSO login buttons (issue #13)
+
+Renders one button per provider in SNAPADMIN_SSO_PROVIDERS. Include it inside an
+admin login override (e.g. admin/login.html) below or instead of the credential
+form:
+
+    {% include "snapadmin/sso_buttons.html" %}
+
+Requires the "snapadmin.sso.sso_providers" context processor in TEMPLATES, which
+supplies `snapadmin_sso_providers`. Renders nothing when no provider is
+configured, so it is safe to include unconditionally.
+{% endcomment %}
+{% load i18n %}
+{% if snapadmin_sso_providers %}
+<div class="snapadmin-sso" role="group" aria-label="{% translate 'Single sign-on providers' %}">
+  <p class="snapadmin-sso__divider">{% translate "Or sign in with" %}</p>
+  {% for provider in snapadmin_sso_providers %}
+    <a class="snapadmin-sso__btn button"
+       href="{{ provider.url }}"
+       data-provider="{{ provider.key }}">
+      {% if provider.icon %}<span class="snapadmin-sso__icon" aria-hidden="true">{{ provider.icon }}</span>{% endif %}
+      <span class="snapadmin-sso__label">{{ provider.label }}</span>
+    </a>
+  {% endfor %}
+</div>
+{% endif %}

@@ -1,0 +1,26 @@
+{% comment %}
+snapadmin/language_switcher.html — admin-bar language selector (issue #9)
+
+A minimal, accessible dropdown that switches the active locale on the fly via
+Django's built-in set_language view. Requires:
+  * "django.conf.urls.i18n" mounted (provides the 'set_language' URL),
+  * django.middleware.locale.LocaleMiddleware in MIDDLEWARE,
+  * more than one entry in settings.LANGUAGES.
+Renders nothing when only one language is configured.
+{% endcomment %}
+{% load i18n %}
+{% get_current_language as CURRENT_LANGUAGE %}
+{% get_available_languages as AVAILABLE_LANGUAGES %}
+{% if AVAILABLE_LANGUAGES|length > 1 %}
+<form action="{% url 'set_language' %}" method="post" class="snapadmin-langswitch">
+  {% csrf_token %}
+  <input name="next" type="hidden" value="{{ request.path }}">
+  <label for="snap-lang-select" class="snapadmin-langswitch__label">{% translate "Language" %}</label>
+  <select id="snap-lang-select" name="language" onchange="this.form.submit()"
+          aria-label="{% translate 'Language' %}">
+    {% for code, name in AVAILABLE_LANGUAGES %}
+      <option value="{{ code }}"{% if code == CURRENT_LANGUAGE %} selected{% endif %}>{{ name }}</option>
+    {% endfor %}
+  </select>
+</form>
+{% endif %}

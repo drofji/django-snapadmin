@@ -1,0 +1,87 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: django-snapadmin\n"
+"Report-Msgid-Bugs-To: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: es\n"
+
+msgid "Skip to main content"
+msgstr "Saltar al contenido principal"
+
+msgid "System entry points"
+msgstr "Puntos de entrada del sistema"
+
+msgid "System Entry Points"
+msgstr "Puntos de entrada del sistema"
+
+msgid "Managed Models"
+msgstr "Modelos gestionados"
+
+msgid "Scheduled Cron Jobs"
+msgstr "Tareas programadas"
+
+msgid "Name"
+msgstr "Nombre"
+
+msgid "Task"
+msgstr "Tarea"
+
+msgid "Schedule"
+msgstr "Programación"
+
+msgid "Description"
+msgstr "Descripción"
+
+msgid "Data Distribution"
+msgstr "Distribución de datos"
+
+msgid "System Health"
+msgstr "Estado del sistema"
+
+msgid "Environment"
+msgstr "Entorno"
+
+msgid "Mode"
+msgstr "Modo"
+
+msgid "Hostname"
+msgstr "Nombre de host"
+
+msgid "API Capabilities"
+msgstr "Capacidades de la API"
+
+msgid "Language"
+msgstr "Idioma"
+
+msgid "English"
+msgstr "Inglés"
+
+msgid "Russian"
+msgstr "Ruso"
+
+msgid "German"
+msgstr "Alemán"
+
+msgid "Swiss German"
+msgstr "Alemán suizo"
+
+msgid "French"
+msgstr "Francés"
+
+msgid "Swiss French"
+msgstr "Francés suizo"
+
+msgid "Spanish"
+msgstr "Español"
+
+msgid "Italian"
+msgstr "Italiano"
+
+msgid "Polish"
+msgstr "Polaco"
+
+msgid "Dutch"
+msgstr "Neerlandés"
+

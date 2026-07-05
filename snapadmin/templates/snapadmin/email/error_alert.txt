@@ -1,0 +1,15 @@
+SnapAdmin error spike alert
+===========================
+
+{{ count }} server errors in the last {{ window_minutes }} minutes
+(threshold: {{ threshold }}). Generated at {{ generated_at|date:"Y-m-d H:i:s e" }}.
+
+Top error groups:
+{% for group in groups %}
+- {{ group.count }}x {{ group.exception_class }} ({{ group.status_code }}) {{ group.method }} {{ group.path|default:"—" }}
+  last seen {{ group.last_seen|date:"Y-m-d H:i:s" }}{% if group.message %} — {{ group.message|truncatechars:200 }}{% endif %}
+{% endfor %}
+{% if hidden_groups %}
+… and {{ hidden_groups }} more group{{ hidden_groups|pluralize }} ({{ hidden_events }} event{{ hidden_events|pluralize }}) not shown.
+{% endif %}
+Full details: open Error Events in your admin panel.

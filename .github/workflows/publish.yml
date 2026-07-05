@@ -1,0 +1,86 @@
+name: Publish to PyPI
+
+# Publishes a release to PyPI whenever a version tag (v*) is pushed, e.g. `v0.1.0a7`.
+# Uploads via PyPI Trusted Publishing (OIDC) — no API token is stored in the repo.
+#
+# One-time setup on PyPI (pypi.org → project "django-snapadmin" → Settings → Publishing,
+# or add a "pending publisher" before the first upload):
+#   Owner:            drofji
+#   Repository name:  django-snapadmin
+#   Workflow name:    publish.yml
+#   Environment name: pypi
+# See CONTRIBUTING.md → "Releasing to PyPI" for the full walkthrough.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build & verify distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tooling
+        run: python -m pip install --upgrade build twine
+
+      - name: Build sdist and wheel
+        run: python -m build
+
+      # Fail early if the pushed tag (vX.Y.Z) does not match the pyproject version,
+      # so a mistagged release never reaches PyPI.
+      - name: Verify tag matches package version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(ls dist/*.tar.gz | sed -E 's/.*django_snapadmin-(.*)\.tar\.gz/\1/')
+          echo "tag=$TAG package=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::Tag ($TAG) does not match package version ($PKG)"
+            exit 1
+          fi
+
+      # Validates metadata and that the long description (README.md) renders on PyPI.
+      - name: Check metadata and README rendering
+        run: python -m twine check --strict dist/*
+
+      - name: Upload distribution artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    # Only publish on a real tag push, never on manual dispatch of an untagged ref.
+    if: startsWith(github.ref, 'refs/tags/')
+    environment:
+      name: pypi
+      url: https://pypi.org/project/django-snapadmin/
+    permissions:
+      id-token: write  # required for Trusted Publishing (OIDC)
+    steps:
+      - name: Download distribution artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          print-hash: true

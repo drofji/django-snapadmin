@@ -1,0 +1,49 @@
+{% load i18n %}<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:24px;background:#f4f4f7;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f2933;">
+  <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:8px;overflow:hidden;border:1px solid #e4e7eb;">
+    <div style="background:#b91c1c;color:#ffffff;padding:20px 24px;">
+      <h1 style="margin:0;font-size:18px;">&#9888;&#65039; SnapAdmin — error spike detected</h1>
+      <p style="margin:8px 0 0;font-size:14px;opacity:.9;">
+        <strong>{{ count }}</strong> server errors in the last
+        <strong>{{ window_minutes }} minutes</strong> (threshold: {{ threshold }})
+      </p>
+    </div>
+    <div style="padding:24px;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="text-align:left;color:#616e7c;border-bottom:2px solid #e4e7eb;">
+            <th style="padding:8px 6px;">Count</th>
+            <th style="padding:8px 6px;">Error</th>
+            <th style="padding:8px 6px;">Endpoint</th>
+            <th style="padding:8px 6px;">Last seen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for group in groups %}
+          <tr style="border-bottom:1px solid #f0f2f5;vertical-align:top;">
+            <td style="padding:8px 6px;"><span style="background:#fee2e2;color:#b91c1c;border-radius:10px;padding:2px 8px;font-weight:600;">{{ group.count }}&times;</span></td>
+            <td style="padding:8px 6px;">
+              <strong>{{ group.exception_class }}</strong> <span style="color:#616e7c;">({{ group.status_code }})</span>
+              {% if group.message %}<br><span style="color:#616e7c;">{{ group.message|truncatechars:160 }}</span>{% endif %}
+            </td>
+            <td style="padding:8px 6px;font-family:monospace;">{{ group.method }} {{ group.path|default:"—" }}</td>
+            <td style="padding:8px 6px;white-space:nowrap;">{{ group.last_seen|date:"H:i:s" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if hidden_groups %}
+      <p style="margin:16px 0 0;font-size:12px;color:#616e7c;">
+        … and {{ hidden_groups }} more group{{ hidden_groups|pluralize }}
+        ({{ hidden_events }} event{{ hidden_events|pluralize }}) not shown.
+      </p>
+      {% endif %}
+      <p style="margin:20px 0 0;font-size:12px;color:#616e7c;">
+        Generated at {{ generated_at|date:"Y-m-d H:i:s e" }} — full details in the
+        <strong>Error Events</strong> section of your admin panel.
+      </p>
+    </div>
+  </div>
+</body>
+</html>
