@@ -514,11 +514,14 @@ class EsManager(models.Manager):
             if not isinstance(qs, EsQuerySet):
                 return EsQuerySet(self.model, [])
             return qs
-        qs = super().get_queryset()
-        if not qs.ordered:
-            qs = qs.order_by("-pk")
-        return qs
-      
+        # No default ordering is injected here. A default ``order_by("-pk")`` on
+        # the base manager leaks into ``GROUP BY`` for ``.values().annotate()``
+        # aggregations (Django appends ordering columns to the GROUP BY), which
+        # silently returns one row per pk instead of per group. The "-pk" newest-
+        # first default is applied in the presentation layers that need a stable
+        # order instead (admin changelist ``ordering`` and the API list view).
+        return super().get_queryset()
+
 
 class DjangoAdminClassAttributeEnum(str, Enum):
     FIELDS = "fields"
@@ -1430,6 +1433,10 @@ class SnapModel(models.Model):
             A.LIST_FILTER.value: list_filter,
             A.AUTOCOMPLETE_FIELDS.value: autocomplete_fields,
             A.INLINES.value: cls.snap_inlines,
+            # Newest-first default for the changelist. Applied here (not on the
+            # base manager) so it never leaks into GROUP BY on aggregations; a
+            # model's explicit Meta.ordering is honoured when set.
+            "ordering": list(cls._meta.ordering) or ["-pk"],
             "list_select_related": list_select_related or False,
             "list_per_page": cls.list_per_page,
             "list_max_show_all": cls.list_max_show_all,

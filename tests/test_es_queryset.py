@@ -172,11 +172,45 @@ class TestEsQuerySetDelete:
 
 class TestEsManagerGetQueryset:
     @pytest.mark.django_db
-    def test_db_model_returns_ordered_queryset(self):
+    def test_db_model_returns_unordered_queryset(self):
+        # The base manager must NOT inject a default order_by("-pk"): a default
+        # ordering on the manager leaks into GROUP BY on .values().annotate()
+        # aggregations and silently returns wrong grouped results. The newest-
+        # first default lives in the admin changelist and API list layers.
         from demo.models import Customer
-        manager = Customer.objects
-        qs = manager.get_queryset()
-        assert qs.ordered
+        qs = Customer.objects.get_queryset()
+        assert not qs.ordered
+
+    @pytest.mark.django_db
+    def test_aggregation_group_by_is_not_polluted_by_pk(self):
+        # Regression: with a manager-level default -pk order, this returned one
+        # row per pk instead of one row per group. Now it groups correctly.
+        from django.db.models import Count
+        from demo.models import Customer
+
+        Customer.objects.create(first_name="Alice", email="a@example.com", active=True)
+        Customer.objects.create(first_name="Bob", email="b@example.com", active=True)
+        Customer.objects.create(first_name="Carol", email="c@example.com", active=False)
+
+        rows = {
+            r["active"]: r["n"]
+            for r in Customer.objects.values("active").annotate(n=Count("pk"))
+        }
+        # One row per distinct `active` value with real counts, not per pk.
+        assert rows == {True: 2, False: 1}
+        query_sql = str(
+            Customer.objects.values("active").annotate(n=Count("pk")).query
+        )
+        assert "ORDER BY" not in query_sql
+
+    @pytest.mark.django_db
+    def test_admin_changelist_default_ordering_preserved(self):
+        # The newest-first default the manager used to provide now lives on the
+        # admin class so the changelist order is unchanged.
+        from django.contrib import admin
+        from demo.models import Customer
+
+        assert admin.site._registry[Customer].ordering == ["-pk"]
 
     @pytest.mark.django_db
     def test_es_only_model_non_esqueryset_returns_empty_esqueryset(self):
