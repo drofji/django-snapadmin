@@ -9,21 +9,7 @@ Bulk-reindex SnapModels into Elasticsearch.
 from django.apps import apps
 from django.core.management.base import BaseCommand, CommandError
 
-from snapadmin.models import EsStorageMode, SnapModel
-
-
-def _reindexable_models() -> list[type[SnapModel]]:
-    """SnapModels that keep an ES index: DUAL/ES_ONLY storage or es_index_enabled."""
-    return [
-        model
-        for model in apps.get_models()
-        if issubclass(model, SnapModel)
-        and model is not SnapModel
-        and (
-            getattr(model, "es_index_enabled", False)
-            or getattr(model, "es_storage_mode", EsStorageMode.DB_ONLY) != EsStorageMode.DB_ONLY
-        )
-    ]
+from snapadmin.models import SnapModel, reindexable_snapmodels
 
 
 class Command(BaseCommand):
@@ -52,7 +38,7 @@ class Command(BaseCommand):
                 raise CommandError(f"{options['model']} is not a SnapModel.")
             models = [model]
         else:
-            models = _reindexable_models()
+            models = reindexable_snapmodels()
             if not models:
                 self.stdout.write("No ES-enabled SnapModels found — nothing to reindex.")
                 return

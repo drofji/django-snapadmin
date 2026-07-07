@@ -669,6 +669,26 @@ python manage.py snapadmin_reindex --model demo.Product  # one model
 python manage.py snapadmin_reindex --chunk-size 1000     # tune the bulk batch size
 ```
 
+#### Reindex over HTTP (admin only)
+
+For ops without shell access, the same bulk reindex is available as an **opt-in**, staff-only
+endpoint — off by default:
+
+```python
+SNAPADMIN_REINDEX_API_ENABLED = True    # the endpoint 404s until you set this
+SNAPADMIN_REINDEX_API_ASYNC = False     # True → offload to the snapadmin.run_es_reindex Celery task
+```
+
+```
+POST /api/es/reindex/            {"chunk_size": 1000}   # optional; requires an IsAdminUser session/token
+  → 200 {"async": false, "models": N, "indexed_models": …, "errored_models": …, "results": {…}}
+  → 202 {"async": true,  "task_id": "…"}                # when SNAPADMIN_REINDEX_API_ASYNC is on
+```
+
+It reindexes every ES-enabled `SnapModel` (`es_reindex_all`). With async on but Celery not installed
+it returns **503** with an actionable message. Non-staff callers get **403**; while disabled, staff
+get **404**.
+
 ### Generic ETL — external source → SnapModel upsert
 
 Import from any external system (remote DB, CSV, API) with a streamed bulk upsert — no
@@ -1411,6 +1431,8 @@ Copy `dist.env` to `.env` and configure:
 | `SNAPADMIN_API_AUTHENTICATION_CLASSES` | token auth | API authenticator dotted paths (add session / JWT) |
 | `SNAPADMIN_ANALYTICS_DB_ALIAS` | — | `DATABASES` alias for read-only list/retrieve routing; empty = no routing |
 | `SNAPADMIN_API_DELETE_GUARD` | — | Dotted path to a `Callable[[request, obj], bool]` vetoing API deletes (403); AND-ed with each model's `api_can_delete` hook |
+| `SNAPADMIN_REINDEX_API_ENABLED` | `False` | Serve the admin-only bulk ES reindex endpoint (`POST /api/es/reindex/`) |
+| `SNAPADMIN_REINDEX_API_ASYNC` | `False` | Offload the reindex endpoint to the `snapadmin.run_es_reindex` Celery task |
 | `SNAPADMIN_AUDIT_LOG_ENABLED` | `True` | Record admin create/update/delete as an immutable audit trail |
 | `SNAPADMIN_AUDIT_RETENTION_DAYS` | `365` | Retention window for `snapadmin_audit_export --purge` |
 | `SNAPADMIN_ESTIMATED_COUNT` | `True` | Use PostgreSQL's fast row estimate for huge, unfiltered changelists |

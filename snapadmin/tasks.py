@@ -97,6 +97,22 @@ def run_export(self, job_id):
     return {"job_id": str(job_id)}
 
 
+@shared_task(bind=True, name="snapadmin.run_es_reindex")
+def run_es_reindex(self, chunk_size: int = 500):
+    """Bulk-reindex every ES-enabled SnapModel into Elasticsearch.
+
+    The async counterpart of the ``snapadmin_reindex`` command and the
+    ``POST /api/es/reindex/`` endpoint — dispatched by that endpoint when
+    ``SNAPADMIN_REINDEX_API_ASYNC`` is on so a large reindex never blocks the
+    request/worker thread.
+    """
+    from snapadmin.models import run_reindex
+
+    summary = run_reindex(chunk_size=chunk_size)
+    logger.info("es_reindex_task_finished", **{k: v for k, v in summary.items() if k != "results"})
+    return summary
+
+
 @shared_task(bind=True, name="snapadmin.run_db_backups")
 def run_db_backups(self):
     """

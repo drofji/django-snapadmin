@@ -22,6 +22,7 @@ from snapadmin.api.views import (
 )
 from snapadmin.api.health import HealthCheckView
 from snapadmin.api.offline import OfflineModelsView, OfflineModelDataView
+from snapadmin.api.reindex import ESReindexView
 
 REST_API_ENABLED = getattr(settings, "SNAPADMIN_REST_API_ENABLED", True)
 SWAGGER_ENABLED = getattr(settings, "SNAPADMIN_SWAGGER_ENABLED", True)
@@ -65,6 +66,11 @@ if REST_API_ENABLED:
 
         # Health check
         path("health/", HealthCheckView.as_view(), name="api-health"),
+
+        # Admin-only bulk ES reindex (opt-in via SNAPADMIN_REINDEX_API_ENABLED).
+        # Registered unconditionally; the view returns 404 while disabled so the
+        # gate is togglable at runtime without reloading the URLconf.
+        path("es/reindex/", ESReindexView.as_view(), name="es-reindex"),
 
         # Public SSO provider list (headless login for external frontends)
         path("sso-providers/", SSOProviderView.as_view(), name="sso-providers"),

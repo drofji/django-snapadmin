@@ -70,7 +70,7 @@ class TestReindexCommand:
     def test_no_es_models_reports_nothing(self, monkeypatch):
         import snapadmin.management.commands.snapadmin_reindex as cmd
 
-        monkeypatch.setattr(cmd, "_reindexable_models", lambda: [])
+        monkeypatch.setattr(cmd, "reindexable_snapmodels", lambda: [])
         out = StringIO()
         call_command("snapadmin_reindex", stdout=out)
         assert "No ES-enabled SnapModels" in out.getvalue()

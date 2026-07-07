@@ -30,6 +30,9 @@ Wysiwyg field values are now sanitized before they are rendered in the admin cha
 Added
 =====
 
+Admin-only bulk Elasticsearch reindex endpoint
+  Ops can now trigger a full ES reindex over HTTP without shell access. ``POST /api/es/reindex/`` reindexes every ES-enabled SnapModel (the same set as the ``snapadmin_reindex`` command, via ``es_reindex_all``). It is **off by default** and only served when ``SNAPADMIN_REINDEX_API_ENABLED = True`` (while disabled it responds ``404``), and it requires a Django staff user (``IsAdminUser``). By default it runs synchronously and returns a per-model summary; set ``SNAPADMIN_REINDEX_API_ASYNC = True`` to offload it to the new ``snapadmin.run_es_reindex`` Celery task instead (``202`` + task id), which responds ``503`` with an actionable message when Celery isn't installed. An optional ``chunk_size`` (body or query) tunes the bulk batch size. The model-discovery logic is now shared between the command, the task and the endpoint (``snapadmin.models.reindexable_snapmodels`` / ``run_reindex``).
+
 Deletion-veto extension points for the dynamic model API
   Projects can now forbid deleting specific objects through the REST API without re-mounting any routes. Before a ``DELETE`` the endpoint consults two guards, both of which must allow the delete (otherwise it responds ``403 Forbidden``): a per-object ``SnapModel.api_can_delete(request) -> bool`` hook (override it on a model — the base implementation allows) and a project-wide ``SNAPADMIN_API_DELETE_GUARD`` setting (a dotted path to, or a direct, ``Callable[[request, obj], bool]``). This runs after the normal model ``delete`` permission check, so it layers business rules ("superusers are undeletable", "system rows are protected") on top of permissions. Both default to allowing, so existing behaviour is unchanged.
 

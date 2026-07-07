@@ -209,6 +209,13 @@ SNAPADMIN_QUERY_BACKEND_HEADER = os.getenv('SNAPADMIN_QUERY_BACKEND_HEADER', 'Tr
 # Unset (default) → deletes are governed solely by model permissions + hooks.
 SNAPADMIN_API_DELETE_GUARD = os.getenv('SNAPADMIN_API_DELETE_GUARD') or None
 
+# Admin-only HTTP endpoint to bulk-reindex ES-enabled SnapModels
+# (POST /api/es/reindex/, IsAdminUser). Off by default; the endpoint 404s while
+# disabled. When async is on, the reindex is offloaded to the
+# snapadmin.run_es_reindex Celery task (needs Celery + a broker).
+SNAPADMIN_REINDEX_API_ENABLED = os.getenv('SNAPADMIN_REINDEX_API_ENABLED', 'False') == 'True'
+SNAPADMIN_REINDEX_API_ASYNC = os.getenv('SNAPADMIN_REINDEX_API_ASYNC', 'False') == 'True'
+
 # Read-replica routing: alias (from DATABASES) that auto-generated read-only
 # API list/retrieve querysets are pinned to via .using(). Writes always stay on
 # 'default'. Empty / unknown alias → no routing (safe for single-DB installs).

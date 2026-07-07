@@ -1555,6 +1555,53 @@ class SnapModel(models.Model):
                     model.register_admin()
 
 
+def reindexable_snapmodels() -> list[type["SnapModel"]]:
+    """Every SnapModel that maintains an Elasticsearch index.
+
+    A model qualifies when it opts into ES via ``es_index_enabled`` or a
+    non-``DB_ONLY`` storage mode (``DUAL`` / ``ES_ONLY``). Shared by the
+    ``snapadmin_reindex`` management command, the ``run_es_reindex`` task and the
+    admin reindex API so all three agree on what "ES-enabled" means.
+    """
+    return [
+        model
+        for model in apps.get_models()
+        if issubclass(model, SnapModel)
+        and model is not SnapModel
+        and (
+            getattr(model, "es_index_enabled", False)
+            or getattr(model, "es_storage_mode", EsStorageMode.DB_ONLY) != EsStorageMode.DB_ONLY
+        )
+    ]
+
+
+def run_reindex(*, chunk_size: int = 500) -> dict:
+    """Bulk-reindex every ES-enabled SnapModel; return a per-model summary.
+
+    Shared by the admin reindex API and the ``run_es_reindex`` Celery task so the
+    synchronous and asynchronous paths behave identically. Each model's
+    ``es_reindex_all`` summary is collected under its ``app_label.Model`` label;
+    the top level reports how many models were indexed vs. errored.
+    """
+    results: dict[str, dict] = {}
+    indexed_models = 0
+    errored_models = 0
+    for model in reindexable_snapmodels():
+        label = f"{model._meta.app_label}.{model.__name__}"
+        summary = model.es_reindex_all(chunk_size=chunk_size)
+        results[label] = summary
+        if summary.get("errors"):
+            errored_models += 1
+        elif not summary.get("skipped"):
+            indexed_models += 1
+    return {
+        "models": len(results),
+        "indexed_models": indexed_models,
+        "errored_models": errored_models,
+        "results": results,
+    }
+
+
 # ── Signals for Elasticsearch ──────────────────────────────────────────────
 
 # Signals for Elasticsearch are now handled by SnapModel.save() and delete()
