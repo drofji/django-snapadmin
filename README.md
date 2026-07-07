@@ -432,14 +432,15 @@ SNAPADMIN_EXPORT_DIR = BASE_DIR / "exports"   # Where export files are written
 > **Configuration health checks.** SnapAdmin registers Django system checks, so `python manage.py check`
 > (and `runserver` / CI) flags a mis-set `SNAPADMIN_*` value — an unknown replica alias, a masked-field
 > typo, a nested-app target that isn't installed, an SSO provider with no URL — with an actionable hint
-> instead of failing silently. Migrating from the legacy `drofji-*` packages? See **[MIGRATING.md](MIGRATING.md)**.
+> instead of failing silently. Migrating from the legacy `drofji-*` packages? See the
+> **[Migration Guides](https://drofji.github.io/django-snapadmin/#migration-guides)**.
 
 > **Ecosystem compatibility.** SnapAdmin only auto-registers `SnapModel`s and never clobbers an existing
 > admin, so third-party packages coexist cleanly. To layer a package's admin behaviour on top of the
 > auto-generated one, list its mixin in `admin_mixins` (e.g. `admin_mixins = [ImportExportModelAdmin]`);
 > to hand a model's admin over entirely, set `admin_enabled = False`. Full matrix (mptt, guardian,
-> reversion, debug-toolbar, import-export, simple-history, django-filter, taggit) in
-> **[COMPATIBILITY.md](COMPATIBILITY.md)**.
+> reversion, debug-toolbar, import-export, simple-history, django-filter, taggit) in the
+> **[Ecosystem Compatibility guide](https://drofji.github.io/django-snapadmin/#compatibility)**.
 
 ### 📤 Async background export
 

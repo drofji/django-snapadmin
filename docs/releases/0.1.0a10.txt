@@ -1,0 +1,10 @@
+0.1.0a10 — 2026-07-05 — Tenth Alpha
+===================================
+
+Housekeeping release — no new features, no API changes. Still a pre-release.
+
+Fixed
+=====
+
+- Admin dashboard override template was shipped as `templates/admin/index...html` (malformed filename), so Django's admin site never matched it and silently fell back to the stock Unfold dashboard. Renamed to `templates/admin/index.html`.
+- Replaced a bare `print()` + swallowed exception around GraphQL URL wiring in `snapadmin/urls.py` with structured `structlog` logging (`graphql_setup_failed`), consistent with the rest of the package.

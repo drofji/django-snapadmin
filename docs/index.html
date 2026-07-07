@@ -236,6 +236,7 @@
       <li><a href="#advanced-layout">Advanced Layout</a></li>
       <li><a href="#status-badges">Status Badges</a></li>
       <li><a href="#admin-registration">Admin Registration</a></li>
+      <li><a href="#compatibility">Ecosystem Compatibility</a></li>
       <li><a href="#gdpr">GDPR / Data Retention</a></li>
       <li><a href="#error-monitoring">Error Monitoring</a></li>
       <li><a href="#backups">3-2-1 Backups</a></li>
@@ -265,10 +266,9 @@
       <li><a href="#demo-models">Demo Models Overview</a></li>
       <li><a href="#demo-seed">Seed Command</a></li>
     </ul>
-    <div class="section-label">🔄 Migration Guide</div>
+    <div class="section-label">🔄 Migration Guides</div>
     <ul>
-      <li><a href="#migration-from-autoadmin">From drofji_autoadmin → SnapAdmin</a></li>
-      <li><a href="#migration-from-v0">From v0.0.x → v0.1.x</a></li>
+      <li><a href="#migration-guides">Migration Guides</a></li>
     </ul>
   </nav>
 </aside>
@@ -475,6 +475,71 @@ SnapModel.register_all_admins()</code></pre>
   <div class="callout callout-info">
     <strong>Note</strong>
     The <code>APIToken</code> admin is also registered automatically when <code>register_all_admins()</code> is called.
+  </div>
+
+  <!-- ── Ecosystem Compatibility ──────────────────────────────────────────── -->
+  <h2 id="compatibility">🧩 Ecosystem Compatibility</h2>
+  <p>How SnapAdmin coexists with popular third-party Django packages.</p>
+
+  <h3>The two rules that make SnapAdmin safe by default</h3>
+  <ol>
+    <li><strong>SnapAdmin only auto-registers <code>SnapModel</code> subclasses.</strong> Every other
+      model in your project — including third-party ones (<code>taggit.Tag</code>, guardian's
+      permission models, <code>reversion.Version</code>, <code>django_celery_beat</code>, …) — is left
+      entirely alone. There is no global admin takeover.</li>
+    <li><strong>Auto-registration never clobbers an existing admin.</strong> If a model is already
+      registered (by you or a package) when SnapAdmin runs, it skips it (<code>AlreadyRegistered</code>).
+      Your custom admin wins.</li>
+  </ol>
+
+  <p>Two escape hatches let a package take over a <code>SnapModel</code>'s admin when you want it to:</p>
+  <table>
+    <thead><tr><th>Goal</th><th>How</th></tr></thead>
+    <tbody>
+      <tr><td>Add a package's admin behaviour <strong>on top of</strong> SnapAdmin's auto-config</td><td><code>admin_mixins = [ThePackageAdminMixin]</code> on the <code>SnapModel</code></td></tr>
+      <tr><td>Let a package <strong>fully own</strong> the admin for a model</td><td><code>admin_enabled = False</code> on the <code>SnapModel</code>, then register the package admin yourself</td></tr>
+    </tbody>
+  </table>
+  <p><code>admin_mixins</code> classes are placed <strong>first in the MRO</strong>, so their
+  <code>get_queryset</code> / <code>changelist_view</code> / actions wrap SnapAdmin's, which in turn
+  wraps Django/Unfold's <code>ModelAdmin</code>.</p>
+
+  <h3>Package matrix</h3>
+  <table>
+    <thead><tr><th>Package</th><th>Works with SnapAdmin?</th><th>Notes / recommended integration</th></tr></thead>
+    <tbody>
+      <tr><td><strong>django-mptt</strong> (tree structures)</td><td>✅</td><td>Multiple-inherit <code>MPTTModel</code> alongside <code>SnapModel</code>. For the tree UI in the admin, add <code>admin_mixins = [MPTTModelAdmin]</code>. Model fields still auto-generate.</td></tr>
+      <tr><td><strong>django-guardian</strong> (object-level perms)</td><td>✅</td><td>Guardian's models are untouched (not <code>SnapModel</code>s). For per-object permissions in the admin, <code>admin_mixins = [GuardedModelAdmin]</code>. SnapAdmin's REST API honours standard Django <code>has_perm</code>, which guardian backends extend.</td></tr>
+      <tr><td><strong>django-reversion</strong> (versioning)</td><td>✅</td><td><code>admin_mixins = [reversion.admin.VersionAdmin]</code> to get version history on the auto-generated admin. Reversion's own models are separate.</td></tr>
+      <tr><td><strong>django-debug-toolbar</strong></td><td>✅</td><td>Purely middleware/URLs; no interaction with model or admin generation. Add its middleware as usual.</td></tr>
+      <tr><td><strong>django-import-export</strong></td><td>✅</td><td><code>admin_mixins = [ImportExportModelAdmin]</code> layers import/export buttons onto the auto-generated changelist. (SnapAdmin also ships its own async export API.)</td></tr>
+      <tr><td><strong>django-simple-history</strong> (history)</td><td>✅</td><td>Add <code>HistoricalRecords()</code> to the model and <code>admin_mixins = [SimpleHistoryAdmin]</code>. The historical model is a plain model SnapAdmin ignores.</td></tr>
+      <tr><td><strong>django-filter</strong> (filtering)</td><td>✅</td><td>The SnapAdmin REST API uses standard DRF; add <code>DjangoFilterBackend</code> to <code>DEFAULT_FILTER_BACKENDS</code> (or per-view) and it composes with SnapAdmin's search/ordering backends. Admin filters come from the <code>filterable=True</code> field flag.</td></tr>
+      <tr><td><strong>django-taggit</strong> (tags)</td><td>✅</td><td>Taggit's <code>TaggableManager</code> is a normal field; it appears in the auto-generated form/API. Taggit's own <code>Tag</code>/<code>TaggedItem</code> models are not <code>SnapModel</code>s, so they are not auto-registered.</td></tr>
+    </tbody>
+  </table>
+  <p>Legend: ✅ compatible — no SnapAdmin change needed beyond the documented hook.</p>
+
+  <h3>Worked example — import/export + versioning on one model</h3>
+  <pre><code>from import_export.admin import ImportExportModelAdmin
+from reversion.admin import VersionAdmin
+from snapadmin import models as snap_models, fields as snap_fields
+
+class Invoice(snap_models.SnapModel):
+    number = snap_fields.SnapCharField(max_length=32, searchable=True, show_in_list=True, show_in_form=True)
+
+    # Compose ecosystem admin behaviour with SnapAdmin's auto-config:
+    admin_mixins = [ImportExportModelAdmin, VersionAdmin]</code></pre>
+  <p>The generated admin is <code>Invoice → ImportExportModelAdmin → VersionAdmin → (SnapAdmin mixins) →
+  ModelAdmin</code>: import/export buttons, version history, <strong>and</strong> SnapAdmin's
+  field-driven <code>list_display</code> / search / filters / PII masking / audit logging, all at once.</p>
+
+  <div class="callout callout-info">
+    <strong>When there's a genuine conflict</strong>
+    If a package needs to be the sole owner of a model's admin (rare — usually a custom
+    <code>AdminSite</code>), set <code>admin_enabled = False</code> on that <code>SnapModel</code> and
+    register the package admin yourself. SnapAdmin will not touch it, and the model's REST API /
+    GraphQL / search continue to work independently of the admin.
   </div>
 
   <!-- ── API REST ──────────────────────────────────────────────────────────── -->
@@ -1707,166 +1772,32 @@ for order in Order.objects.select_related("customer"):   # 1 query, total
 python manage.py seed_demo --no-index  # skip ES indexing (no ES cluster needed)</code></pre>
   <p>The command is idempotent — running it multiple times adds more data without duplicating existing records.</p>
 
-  <!-- ── Migration Guide: old package → SnapAdmin ─────────────────────────── -->
-  <h2 id="migration-from-autoadmin">🔄 Migration Guide: <code>drofji-automatically-django-admin</code> → SnapAdmin</h2>
+  <!-- ── Migration Guides ──────────────────────────────────────────────────── -->
+  <h2 id="migration-guides">🔄 Migration Guides</h2>
   <p>
-    The legacy package <code>drofji-automatically-django-admin</code> (import root
-    <code>drofji_autoadmin</code>, last tag <strong>v1.1.0</strong>) is being retired and its
-    repository removed. <strong>SnapAdmin is its direct successor</strong> — same declarative,
-    field-driven admin, now renamed and extended with a REST API, GraphQL, the Unfold theme,
-    Elasticsearch, GDPR retention and offline mode. The underlying Django field types are
-    unchanged, so this is a <strong>rename + settings swap, not a data migration</strong>.
+    Hard migrations — upgrades that need manual steps beyond reading the
+    <a href="https://github.com/drofji/django-snapadmin/tree/main/docs/releases">release notes</a> —
+    get a dedicated guide in
+    <a href="https://github.com/drofji/django-snapadmin/tree/main/docs/migrations"><code>docs/migrations/</code></a>.
+    Most releases don't need one; SnapAdmin aims for backward compatibility on every change.
   </p>
-
-  <div class="callout callout-success">
-    <strong>No data migration</strong>
-    SnapAdmin does not alter your existing model tables. The only new table is
-    <code>snapadmin_apitoken</code> (token auth). Your data stays exactly where it is.
-  </div>
-
-  <h3>1. Swap the package</h3>
-  <pre><code>pip uninstall drofji-automatically-django-admin
-pip install drofji-snapadmin
-# or pin the repo:
-pip install git+https://github.com/drofji/django-snapadmin.git</code></pre>
-  <p>If you pinned the old GitHub URL in <code>requirements.txt</code>, replace that line with
-  <code>drofji-snapadmin</code>.</p>
-
-  <h3>2. Rename the import root (<code>drofji_autoadmin</code> → <code>snapadmin</code>)</h3>
-  <pre><code># Before
-from drofji_autoadmin import models as drofji_models, fields as drofji_fields
-from drofji_autoadmin import validators
-
-# After
-from snapadmin import models as snap_models, fields as snap_fields
-from snapadmin import validators</code></pre>
-  <p>One-shot, repo-wide:</p>
-  <pre><code>grep -rl drofji_autoadmin . | xargs sed -i '' 's/drofji_autoadmin/snapadmin/g'</code></pre>
-
-  <h3>3. Rename the base class & fields (<code>AutoAdmin*</code> → <code>Snap*</code>)</h3>
-  <pre><code># Before
-class Product(drofji_models.AutoAdminModel):
-    name = drofji_fields.AutoAdminCharField(max_length=200, searchable=True)
-
-# After
-class Product(snap_models.SnapModel):
-    name = snap_fields.SnapCharField(max_length=200, searchable=True)</code></pre>
-  <p>All field flags (<code>show_in_list</code>, <code>searchable</code>, <code>filterable</code>,
-  <code>row</code>, <code>tab</code>, …) and the per-model <code>admin_overrides</code> dict keep
-  the same names and behaviour. Mechanical replace:</p>
-  <pre><code>grep -rl AutoAdmin . | xargs sed -i '' 's/AutoAdmin/Snap/g'
-# AutoAdminModel→SnapModel, AutoAdminCharField→SnapCharField, AutoAdminFunctionField→SnapFunctionField, …</code></pre>
-
-  <h3>4. Swap the theme in <code>INSTALLED_APPS</code></h3>
-  <p>The old package themed the admin with <code>admin_interface</code> + <code>colorfield</code>.
-  SnapAdmin uses <strong>Unfold</strong>. <strong>Remove the old theme apps</strong> (leaving them
-  alongside Unfold causes conflicting admin overrides) and add the new stack — order matters,
-  Unfold and its contrib apps must precede <code>django.contrib.admin</code>:</p>
-  <pre><code>INSTALLED_APPS = [
--   "admin_interface",
--   "colorfield",
-+   "unfold",
-+   "unfold.contrib.filters",
-+   "unfold.contrib.forms",
-+   "unfold.contrib.inlines",
-+   "django_ckeditor_5",
-    "django.contrib.admin",
-    "django.contrib.auth",
-    # … other django.contrib.* …
-    "rangefilter",            # keep — SnapAdmin still uses it
--   "drofji_autoadmin",
-+   "rest_framework",
-+   "drf_spectacular",
-+   "django_filters",
-+   "graphene_django",
-+   "snapadmin",
-    # your apps …
-]</code></pre>
-
-  <h3>5. Register the admin explicitly (new requirement)</h3>
-  <p>The old package auto-registered models purely by inheritance. SnapAdmin needs one explicit
-  call — add it to your app's <code>admin.py</code>, or your models won't appear in the admin:</p>
-  <pre><code># admin.py
-from snapadmin.models import SnapModel
-SnapModel.register_all_admins()</code></pre>
-
-  <h3>6. Replace color fields</h3>
-  <p>If you used <code>ColorField</code> from <code>django-colorfield</code>, switch to
-  <code>snap_fields.SnapColorField</code> (validates <code>#RRGGBB</code> / <code>#RGB</code>).</p>
-
-  <h3>7. (Optional) Wire up the new APIs</h3>
-  <p>SnapAdmin ships a REST API, GraphQL endpoint and Swagger UI — features the old package did
-  not have. Include the routes only if you want them:</p>
-  <pre><code># urls.py
-urlpatterns = [
-    path("admin/", admin.site.urls),
-    path("", include("snapadmin.urls")),   # /api/, /api/docs/, /graphql/
-]
-
-# settings.py — all default True
-SNAPADMIN_REST_API_ENABLED = True
-SNAPADMIN_GRAPHQL_ENABLED  = True
-SNAPADMIN_SWAGGER_ENABLED  = True
-ELASTICSEARCH_ENABLED      = False   # opt-in; needs the [elasticsearch] extra
-SNAPADMIN_ES_QUERY_ROUTING = True    # route ?search= on DUAL models to ES
-SNAPADMIN_ES_SEARCH_LIMIT  = 1000    # max ES hits per routed search
-SNAPADMIN_GRAPHQL_REQUIRE_AUTH = True  # auth + perms on every GraphQL resolver
-SNAPADMIN_GRAPHIQL_ENABLED = DEBUG     # GraphiQL playground — dev only</code></pre>
-
-  <h3>8. Migrate & collect static</h3>
-  <pre><code>python manage.py migrate          # creates only snapadmin_apitoken
-python manage.py collectstatic    # if you serve static yourself</code></pre>
-
-  <div class="callout callout-warn">
-    <strong>Don't run both packages at once</strong>
-    Keeping <code>drofji_autoadmin</code> installed and in <code>INSTALLED_APPS</code> alongside
-    SnapAdmin makes both try to register the admin → <code>AlreadyRegistered</code>. Fully
-    uninstall the old package and remove it from <code>INSTALLED_APPS</code> before enabling
-    SnapAdmin.
-  </div>
-
-  <!-- ── Migration Guide: same-package versions ───────────────────────────── -->
-  <h2 id="migration-from-v0">🔄 Migration Guide: v0.0.x → v0.1.x</h2>
-  <p>Version 0.1.0 is a significant rewrite. If you are upgrading from an older version, follow these steps.</p>
-
-  <h3>1. Update the package</h3>
-  <pre><code>pip install --upgrade django-snapadmin</code></pre>
-
-  <h3>2. Replace model field imports</h3>
-  <pre><code># Before (v0.0.x)
-from snapadmin.fields import CharField, IntegerField  # bare re-exports
-
-# After (v0.1.x)
-from snapadmin import fields as snap
-name = snap.SnapCharField(max_length=200, searchable=True, show_in_list=True)</code></pre>
-
-  <h3>3. Update SnapModel usage</h3>
-  <pre><code># Before (v0.0.x)
-from snapadmin.models import BaseModel
-class Product(BaseModel): ...
-
-# After (v0.1.x)
-from snapadmin.models import SnapModel
-class Product(SnapModel): ...</code></pre>
-
-  <h3>4. Admin registration</h3>
-  <pre><code># After (v0.1.x) — add to your app's admin.py:
-from snapadmin.models import SnapModel
-SnapModel.register_all_admins()  # registers all SnapModel subclasses</code></pre>
-
-  <h3>5. New settings</h3>
-  <pre><code># settings.py additions for v0.1.x:
-SNAPADMIN_REST_API_ENABLED = True    # default True
-SNAPADMIN_GRAPHQL_ENABLED  = True    # default True
-SNAPADMIN_SWAGGER_ENABLED  = True    # default True
-ELASTICSEARCH_ENABLED      = False   # default False — enable only with ES cluster
-SNAPADMIN_ES_QUERY_ROUTING = True    # default True — ?search= on DUAL models → ES
-SNAPADMIN_ES_SEARCH_LIMIT  = 1000    # default 1000 — max ES hits per routed search</code></pre>
-
-  <div class="callout callout-success">
-    <strong>No data migration needed</strong>
-    SnapAdmin does not add columns or constraints to your existing model tables. The only new table is <code>snapadmin_apitoken</code> (for the token auth feature). Run <code>python manage.py migrate</code> after upgrading.
-  </div>
+  <table>
+    <thead><tr><th>Migration</th><th>Guide</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Legacy <code>drofji-automatically-django-admin</code> → SnapAdmin</td>
+        <td><a href="https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/drofji-automatically-django-admin_to_django-snapadmin.md">drofji-automatically-django-admin_to_django-snapadmin.md</a></td>
+      </tr>
+      <tr>
+        <td>v0.0.x → v0.1.x (significant rewrite)</td>
+        <td><a href="https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/0.0.x_to_0.1.x.md">0.0.x_to_0.1.x.md</a></td>
+      </tr>
+      <tr>
+        <td>0.1.0a10 → 0.1.0a11 (migration history reset)</td>
+        <td><a href="https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/0.1.0a10_to_0.1.0a11.md">0.1.0a10_to_0.1.0a11.md</a></td>
+      </tr>
+    </tbody>
+  </table>
 
   <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
     SnapAdmin v0.1.0a11 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>

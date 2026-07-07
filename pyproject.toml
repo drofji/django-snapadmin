@@ -29,9 +29,8 @@ include = [
     "snapadmin/templates/**/*",
     "snapadmin/static/**/*",
     "snapadmin/locale/**/*",
-    "MIGRATING.md",
-    "COMPATIBILITY.md",
-    "CHANGELOG.md",
+    "docs/releases/**/*.txt",
+    "docs/migrations/**/*.md",
 ]
 
 # Extra links shown in the PyPI sidebar ("Project links"). `homepage`, `repository` and
@@ -39,7 +38,7 @@ include = [
 # adds the ones Poetry has no dedicated key for.
 [tool.poetry.urls]
 Issues = "https://github.com/drofji/django-snapadmin/issues"
-Changelog = "https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md"
+Releases = "https://github.com/drofji/django-snapadmin/releases"
 
 [tool.poetry.dependencies]
 python = ">=3.10"

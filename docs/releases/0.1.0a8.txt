@@ -1,0 +1,25 @@
+0.1.0a8 — 2026-07-05 — Eighth Alpha
+===================================
+
+Enterprise configuration pass: four settings-driven features that fit SnapAdmin's zero-boilerplate philosophy — each inert on stock single-database installs until you opt in. Closes issues #15, #13, #12 and #4/#16. Still a pre-release — APIs may change before `0.1.0` stable.
+
+Added
+=====
+
+Read-replica routing (`#15`)
+  `SNAPADMIN_ANALYTICS_DB_ALIAS` pins auto-generated read-only API list/retrieve querysets to a `DATABASES` replica via `.using()`. Writes (POST/PUT/PATCH/DELETE) and the object lookups behind them always stay on `default`, so replication lag can never stale or drop a mutation. Empty/unknown alias = no routing. New module `snapadmin.db`.
+
+PII data masking (`#12`)
+  `SNAPADMIN_MASKED_FIELDS` (`{"app.Model": ["email", …]}`) obfuscates sensitive fields in the admin changelist, hides them from the admin change form, and masks them in REST API responses for anyone lacking the new `snapadmin.view_raw_pii` permission (superusers see raw). New module `snapadmin.masking`; new permission via migration `0004`.
+
+SSO/OAuth2 login helper (`#13`)
+  `SNAPADMIN_SSO_PROVIDERS` renders corporate login buttons on the admin login page (context processor `snapadmin.sso.sso_providers` + includable `snapadmin/sso_buttons.html`) and exposes them at public `GET /api/sso-providers/` for headless frontends. A presentation wrapper only — no new auth dependency. New module `snapadmin.sso`.
+
+Admin-index nesting (`#4` / `#16`)
+  `SNAPADMIN_NESTED_APPS` folds auto-generated sections under existing app groups; `SNAPADMIN_HIDDEN_APPS` hides groups; `SNAPADMIN_APP_LABELS` renames headings. Wired by wrapping `admin.site.get_app_list` at startup — no custom `AdminSite`. New module `snapadmin.nesting`.
+
+Notes
+=====
+
+- Upgrading runs migration `0004_alter_apitoken_options`, which registers the `view_raw_pii` permission for the `snapadmin` app. No data changes.
+- Fixed a long-standing stale version string on the dashboard (`0.1.0a2` → the real version).

@@ -41,7 +41,9 @@ API token is stored in the repository**. Configure it once:
 
 1. Bump `version` in `pyproject.toml` (PEP 440: `0.1.0a7`, `0.1.0b1`, `1.0.0`). PyPI rejects
    re-uploads of an existing version.
-2. Update `CHANGELOG.md`, and the version badge/footer in `docs/index.html`.
+2. Finalize `docs/releases/Unreleased.txt` into `docs/releases/X.Y.Z.txt`, and update the version
+   badge/footer in `docs/index.html`. Add a `docs/migrations/` guide only if this release needs one
+   (see `docs/migrations/README.md`).
 3. Commit, then tag and push:
    ```bash
    git push origin main

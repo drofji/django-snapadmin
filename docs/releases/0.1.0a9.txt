@@ -1,0 +1,31 @@
+0.1.0a9 — 2026-07-05 — Ninth Alpha
+==================================
+
+Clears the rest of the enterprise backlog: audit trail, async export, large-dataset pagination, full i18n, WCAG accessibility, config checks, migration guide and ecosystem compatibility. Closes issues #1, #2, #3, #5, #6, #7, #8 and #9. Still a pre-release — APIs may change before `0.1.0` stable.
+
+Added
+=====
+
+Ecosystem compatibility (`#1`)
+  New `admin_mixins` attribute on `SnapModel` composes third-party admin mixins (`ImportExportModelAdmin`, `reversion.VersionAdmin`, `SimpleHistoryAdmin`, guardian's `GuardedModelAdmin`, `MPTTModelAdmin`, …) **on top of** SnapAdmin's auto-generated config instead of replacing it (placed first in the MRO). Documented the full compatibility story — SnapAdmin only auto-registers `SnapModel`s and never clobbers an existing admin — in new `COMPATIBILITY.md` with a per-package matrix (mppt / guardian / reversion / debug-toolbar / import-export / simple-history / django-filter / taggit). `admin_enabled = False` remains the full hand-off escape hatch.
+
+Internationalisation (i18n) (`#9`)
+  SnapAdmin's UI strings are wrapped in `gettext` and ship compiled catalogs for **10 locales**: English, Russian, German, Swiss German (`de_CH`, ß→ss), French, Swiss French (`fr_CH`), Spanish, Italian, Polish and Dutch. A minimal, accessible **language switcher** (`snapadmin/language_switcher.html`, backed by Django's `set_language`) lets managers change locale on the fly; missing strings **fall back to English** automatically. Sandbox wires `LocaleMiddleware`, `LANGUAGES` and `LOCALE_PATHS`.
+
+Accessibility — WCAG 2.1 AA / EAA (`#8`)
+  SnapAdmin's own UI is now screen-reader and keyboard friendly: a "skip to main content" link, ARIA landmarks (`banner` / `main` / `nav` / `footer`), accessible names on icon-only controls, decorative icons marked `aria-hidden`, heading semantics on section titles, `scope="col"` on table headers, a text alternative for the dashboard chart, a visible keyboard focus ring, and `rel="noopener"` on new-tab links. The SSO login partial is a labelled `role="group"`. (Admin changelist/form tables inherit Django + Unfold's own AA-level accessibility.)
+
+Startup configuration checks (`#2`)
+  Django system checks (`manage.py check`, `runserver`, `CI`) validate the SnapAdmin settings and surface typos early with an actionable hint instead of a silent no-op or a deep runtime error: unknown `SNAPADMIN_ANALYTICS_DB_ALIAS` (`W001`), a `SNAPADMIN_MASKED_FIELDS` key/field that doesn't resolve (`E001`/`E002`), a `SNAPADMIN_NESTED_APPS` target app that isn't installed (`W002`), and an SSO provider with no usable URL (`W003`). New module `snapadmin.checks`.
+
+Migration guide (`#3`)
+  New repo-root `MIGRATING.md` (linked from the README) with a step-by-step upgrade **checklist** from the legacy `drofji-automatically-django-admin` / `drofji-snapadmin` to `django-snapadmin`: package rename, `SnapModel` base, `Snap*` field types, `SNAPADMIN_*` settings, and the `admin.py` boilerplate that auto-registration replaces. (The docs site already carried a migration section; this adds the canonical, shippable checklist.)
+
+Async background export (`#6`)
+  `POST /api/exports/` enqueues a Celery job (`api.tasks.run_export`) that streams a SnapModel's rows to CSV or JSON in resumable chunks. Poll `GET /api/exports/<id>/` for status + progress (rows processed/total, percent, ETA seconds); cancel with `POST …/cancel/`; download the finished file with `GET …/download/`. **Fault-tolerant** — the writer resumes from the last persisted chunk if the worker restarts (`acks_late`); **cancellable** between chunks. New modules `snapadmin.exporting` + `snapadmin.api.exports`, model `SnapExportJob` (migration `0006`), settings `SNAPADMIN_EXPORT_ENABLED` / `_CHUNK_SIZE` / `_DIR`.
+
+Fast approximate-count pagination (`#5`)
+  `EstimatedCountPaginator` replaces the changelist's expensive `COUNT(*)` with PostgreSQL's `reltuples` planner estimate on **unfiltered** listings of tables past `SNAPADMIN_ESTIMATED_COUNT_THRESHOLD` (100 000), so multi-million-row admin pages stop timing out. Exact count everywhere it isn't safe (other DBs, filtered queries, small tables). Wired into every generated admin; kill-switch `SNAPADMIN_ESTIMATED_COUNT`. (FK columns are already auto-`select_related`'d in admin + API, and the API auto-`prefetch_related`s M2M.) New module `snapadmin.pagination`.
+
+Unalterable audit trail (`#7` — DORA / ISO 27001)
+  Every admin create/update/delete is recorded as an immutable `SnapadminAuditLog`: **who** (actor FK + text snapshot, IP, User-Agent), **what** (content type + object repr + before/after field diff) and **when** (tz-aware timestamp). Rows are append-only (`save`/`delete` raise once persisted) and the admin is fully read-only. New module `snapadmin.audit`; new setting `SNAPADMIN_AUDIT_LOG_ENABLED` (default `True`) + `SNAPADMIN_AUDIT_RETENTION_DAYS` (default `365`). SIEM export via `manage.py snapadmin_audit_export` (JSON lines / CSV, time/action/app/model filters, `--purge`). Migration `0005`.

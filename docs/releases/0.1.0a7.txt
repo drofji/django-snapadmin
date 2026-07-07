@@ -1,0 +1,18 @@
+0.1.0a7 — 2026-07-04 — Seventh Alpha
+====================================
+
+Ops & docs pass: a secure SSH/SFTP offsite backup transport, hands-off PyPI publishing, richer PyPI project links, and a documentation split that separates the installable package from the bundled demo plus a new guide on extending SnapAdmin. Still a pre-release — APIs may change before `0.1.0` stable.
+
+Added
+=====
+
+SFTP offsite backups
+  New `sftp` backup destination ships the encrypted dump over SSH/SFTP (`SNAPADMIN_BACKUP_SFTP_*`) with password or SSH-key auth, its own frequency (`_SFTP_EVERY_HOURS`) and the same retention pruning as the other destinations. Requires the optional `paramiko` dependency: `pip install django-snapadmin[backup]`. Use instead of, or alongside, the plain FTP `remote` destination.
+
+Automated PyPI publishing
+  `.github/workflows/publish.yml` builds and uploads every `v*` tag via PyPI Trusted Publishing (OIDC, no stored token); see `CONTRIBUTING.md`.
+
+Changed
+=======
+
+- PyPI project links now include **Documentation** (https://drofji.github.io/django-snapadmin/), **Issues** and **Changelog** alongside Homepage/Repository.
