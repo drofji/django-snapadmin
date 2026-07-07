@@ -236,3 +236,79 @@ class TestSerializerFactory:
         from snapadmin.api.serializers import get_serializer_for_model
         with pytest.raises(LookupError):
             get_serializer_for_model("demo", "DoesNotExist")
+
+
+# ── DynamicModelViewSet – count + streaming export (no-Celery bulk helpers) ────
+
+def _ndjson_rows(response):
+    """Decode a StreamingHttpResponse NDJSON body into a list of dicts."""
+    import json
+    body = b"".join(response.streaming_content).decode()
+    return [json.loads(line) for line in body.splitlines() if line]
+
+
+@pytest.mark.django_db
+class TestModelCount:
+    def test_count_returns_total(self, auth_client, many_products):
+        r = auth_client.get("/api/models/demo/Product/count/")
+        assert r.status_code == 200
+        assert r.json() == {"count": 30}
+
+    def test_count_honours_filters(self, auth_client, product, product_unavailable):
+        # Two products exist; only one is available.
+        r = auth_client.get("/api/models/demo/Product/count/?available=true")
+        assert r.status_code == 200
+        assert r.json()["count"] == 1
+
+    def test_count_carries_backend_header(self, auth_client, product):
+        r = auth_client.get("/api/models/demo/Product/count/")
+        assert r["X-Snap-Query-Backend"] == "database"
+
+    def test_count_unknown_model_404(self, auth_client):
+        assert auth_client.get("/api/models/demo/GhostModel/count/").status_code == 404
+
+    def test_count_unauthenticated_denied(self, anon_client):
+        assert anon_client.get("/api/models/demo/Product/count/").status_code in (401, 403)
+
+
+@pytest.mark.django_db
+class TestModelExport:
+    def test_export_streams_all_rows(self, auth_client, many_products):
+        r = auth_client.get("/api/models/demo/Product/export/")
+        assert r.status_code == 200
+        assert r["Content-Type"] == "application/x-ndjson"
+        rows = _ndjson_rows(r)
+        assert len(rows) == 30
+        assert all("id" in row and "name" in row for row in rows)
+
+    def test_export_content_disposition(self, auth_client, product):
+        r = auth_client.get("/api/models/demo/Product/export/")
+        assert r["Content-Disposition"] == 'attachment; filename="demo_product.ndjson"'
+
+    def test_export_respects_limit(self, auth_client, many_products):
+        r = auth_client.get("/api/models/demo/Product/export/?limit=5")
+        assert len(_ndjson_rows(r)) == 5
+
+    def test_export_honours_filters(self, auth_client, product, product_unavailable):
+        r = auth_client.get("/api/models/demo/Product/export/?available=true")
+        rows = _ndjson_rows(r)
+        assert len(rows) == 1
+        assert rows[0]["name"] == product.name
+
+    def test_export_invalid_limit_streams_all(self, auth_client, many_products):
+        # Non-numeric, zero and negative caps must not silently truncate.
+        for bad in ("abc", "0", "-3", ""):
+            rows = _ndjson_rows(
+                auth_client.get(f"/api/models/demo/Product/export/?limit={bad}")
+            )
+            assert len(rows) == 30, bad
+
+    def test_export_carries_backend_header(self, auth_client, product):
+        r = auth_client.get("/api/models/demo/Product/export/")
+        assert r["X-Snap-Query-Backend"] == "database"
+
+    def test_export_unknown_model_404(self, auth_client):
+        assert auth_client.get("/api/models/demo/GhostModel/export/").status_code == 404
+
+    def test_export_unauthenticated_denied(self, anon_client):
+        assert anon_client.get("/api/models/demo/Product/export/").status_code in (401, 403)

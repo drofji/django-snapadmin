@@ -89,6 +89,21 @@ if REST_API_ENABLED:
             name="model-list",
         ),
 
+        # No-Celery bulk helpers  ─  count + synchronous streaming export.
+        # Registered before the <int:pk> detail route; the int converter never
+        # matches "count"/"export" so ordering is not load-bearing, but keeping
+        # the collection-level routes together reads more clearly.
+        path(
+            "models/<str:app_label>/<str:model_name>/count/",
+            DynamicModelViewSet.as_view({"get": "count"}),
+            name="model-count",
+        ),
+        path(
+            "models/<str:app_label>/<str:model_name>/export/",
+            DynamicModelViewSet.as_view({"get": "export"}),
+            name="model-export",
+        ),
+
         # Dynamic model CRUD  ─  detail + update + delete
         path(
             "models/<str:app_label>/<str:model_name>/<int:pk>/",

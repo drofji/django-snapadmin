@@ -4,8 +4,11 @@ snapadmin/api/views.py
 SnapAdmin REST API views.
 """
 
+import json
+
 from django.apps import apps
 from django.conf import settings
+from django.http import StreamingHttpResponse
 from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.request import Request
@@ -211,7 +214,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         # (SNAPADMIN_ANALYTICS_DB_ALIAS). Only list/retrieve are routed: the
         # get_object() lookups behind update/partial_update/destroy must stay on
         # the primary so replication lag can never stale or drop a write.
-        if getattr(self, "action", None) in ("list", "retrieve") and hasattr(qs, "using"):
+        if getattr(self, "action", None) in ("list", "retrieve", "count", "export") and hasattr(qs, "using"):
             qs = route_read(qs)
 
         return qs
@@ -232,6 +235,89 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
         response = super().list(request, *args, **kwargs)
+        if getattr(settings, "SNAPADMIN_QUERY_BACKEND_HEADER", True):
+            response["X-Snap-Query-Backend"] = self._query_backend
+        return response
+
+    @staticmethod
+    def _parse_export_limit(request: Request) -> int | None:
+        """Optional ``?limit=`` cap for the streaming export.
+
+        Returns a positive int, or ``None`` (no cap) when the param is absent,
+        blank, non-numeric, or non-positive — a bad cap must never silently
+        truncate an export, so it degrades to "stream everything".
+        """
+        raw = request.query_params.get("limit")
+        if raw is None or raw == "":
+            return None
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    @extend_schema(summary="Count rows matching the current filters")
+    def count(self, request, *args, **kwargs):
+        """``GET .../count/?<filters>`` — match count for the filtered queryset.
+
+        Honours the same filter, search and permission backends as ``list`` but
+        returns only ``{"count": N}`` — a cheap way for a frontend to size a
+        result set (or a paginator) without pulling any rows.
+        """
+        model_class = self._get_model_class()
+        if model_class is None:
+            return Response(
+                {"detail": f"Model '{kwargs.get('model_name')}' not found in app '{kwargs.get('app_label')}'."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        queryset = self.filter_queryset(self.get_queryset())
+        response = Response({"count": queryset.count()})
+        if getattr(settings, "SNAPADMIN_QUERY_BACKEND_HEADER", True):
+            response["X-Snap-Query-Backend"] = self._query_backend
+        return response
+
+    @extend_schema(summary="Stream all matching rows as NDJSON (no pagination)")
+    def export(self, request, *args, **kwargs):
+        """``GET .../export/?<filters>[&limit=N]`` — stream every matching row.
+
+        The synchronous, no-Celery counterpart to the async export endpoint:
+        the full filtered queryset is streamed as newline-delimited JSON
+        (``application/x-ndjson``), one serialized object per line, without
+        pagination. Pass ``?limit=N`` to cap the number of rows. Rows are
+        pulled lazily (``iterator()`` where available) so arbitrarily large
+        tables never materialise in memory.
+        """
+        model_class = self._get_model_class()
+        if model_class is None:
+            return Response(
+                {"detail": f"Model '{kwargs.get('model_name')}' not found in app '{kwargs.get('app_label')}'."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        queryset = self.filter_queryset(self.get_queryset())
+        limit = self._parse_export_limit(request)
+        if limit is not None:
+            queryset = queryset[:limit]
+        serializer_class = self.get_serializer_class()
+
+        chunk_size = max(1, int(getattr(settings, "SNAPADMIN_EXPORT_CHUNK_SIZE", 1000)))
+
+        def stream():
+            # A capped queryset is already sliced (can't call iterator() on it);
+            # an uncapped one streams in chunks to keep memory flat. chunk_size
+            # is mandatory once the queryset carries prefetch_related (m2m/reverse
+            # relations), so it is always passed on the DB path.
+            if limit is None and hasattr(queryset, "iterator"):
+                source = queryset.iterator(chunk_size=chunk_size)
+            else:
+                source = iter(queryset)
+            for obj in source:
+                data = serializer_class(obj, context={"request": request}).data
+                yield json.dumps(data, default=str) + "\n"
+
+        response = StreamingHttpResponse(stream(), content_type="application/x-ndjson")
+        filename = f"{model_class._meta.app_label}_{model_class._meta.model_name}.ndjson"
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
         if getattr(settings, "SNAPADMIN_QUERY_BACKEND_HEADER", True):
             response["X-Snap-Query-Backend"] = self._query_backend
         return response

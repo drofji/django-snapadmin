@@ -680,6 +680,18 @@ SearchLog.snap_search("checkout")          # ES_ONLY: straight from the index
 for row in Product.objects.all().iterator(chunk_size=2000):
     ...</code></pre>
 
+  <h3>No-Celery bulk helpers — <code>count</code> + streaming <code>export</code></h3>
+  <p>Every dynamic model endpoint exposes two synchronous helpers that reuse the same filter,
+  search and permission backends as the list view — no Celery required:</p>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/models/&lt;app&gt;/&lt;Model&gt;/count/?&lt;filters&gt;</span><span class="endpoint-desc">Match count for the filtered queryset → <code>{"count": N}</code></span></div>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/models/&lt;app&gt;/&lt;Model&gt;/export/?&lt;filters&gt;&amp;limit=N</span><span class="endpoint-desc">Stream ALL matching rows as NDJSON (no pagination; optional <code>limit</code>)</span></div>
+  <p><code>count/</code> returns just the size of the filtered set — cheap paginator sizing without
+  pulling rows. <code>export/</code> streams the entire filtered queryset as newline-delimited JSON
+  (<code>application/x-ndjson</code>), one serialized object per line, pulled lazily in chunks
+  (<code>SNAPADMIN_EXPORT_CHUNK_SIZE</code>, default 1000) so huge tables never materialise in memory.
+  Both require the model's <code>view</code> permission. This is the synchronous counterpart to the
+  Celery-backed <code>/api/exports/</code> jobs above.</p>
+
   <h3>Hiding fields from the API — <code>api_exclude_fields</code></h3>
   <p>Columns listed in <code>api_exclude_fields</code> are removed from the REST serializer
   (responses <em>and</em> writes), the GraphQL object type and <code>/api/models/schema/</code> —

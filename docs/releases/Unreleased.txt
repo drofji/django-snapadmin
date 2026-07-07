@@ -27,6 +27,12 @@ Security
 Wysiwyg field values are now sanitized before they are rendered in the admin changelist
   Rich-text (wysiwyg) fields store raw HTML and default to ``show_in_list=True``, so their value is shown on the changelist page. Previously that value was passed straight to ``mark_safe``, which meant anyone able to write the field — a REST API token holder, a low-privileged staff member, or a bulk import — could store markup such as ``<img src=x onerror=...>`` that executed in an administrator's browser session (stored XSS, privilege escalation from field-write to admin-session). SnapAdmin now runs every wysiwyg value through an HTML sanitizer (``nh3``, a new core dependency) before marking it safe: common formatting is kept while ``<script>``, inline event handlers and unsafe URL schemes are stripped. Fields whose HTML is fully trusted can opt back into verbatim rendering with ``safe_html=True`` (e.g. ``SnapRichTextField(safe_html=True)``), and projects that need a custom policy can point the new ``SNAPADMIN_HTML_SANITIZER`` setting at their own ``Callable[[str], str]``. No database migration is required.
 
+Added
+=====
+
+Synchronous ``count`` and streaming ``export`` actions on the dynamic model API (no Celery)
+  Two new read-only endpoints complement the Celery-backed ``/api/exports/`` jobs for projects that don't run a worker. ``GET /api/models/<app>/<Model>/count/?<filters>`` returns ``{"count": N}`` for the filtered queryset — a cheap way to size a result set or a paginator without pulling rows. ``GET /api/models/<app>/<Model>/export/?<filters>[&limit=N]`` streams **every** matching row as newline-delimited JSON (``application/x-ndjson``), one serialized object per line, with no pagination and an optional row cap. Both reuse the list view's filter, search and permission backends (the model's ``view`` permission is required), and the export pulls rows lazily in chunks (``SNAPADMIN_EXPORT_CHUNK_SIZE``, default 1000, shared with the async export) so arbitrarily large tables never materialise in memory.
+
 Fixed
 =====
 

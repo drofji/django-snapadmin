@@ -467,6 +467,23 @@ persisted chunk (`acks_late`) instead of starting over — and are **cancellable
 private to their requester (superusers see all); the caller must hold the target model's `view`
 permission. Only `SnapModel`-backed models are exportable.
 
+#### No-Celery path — count + synchronous streaming export
+
+When you don't run Celery, every dynamic model endpoint also exposes two synchronous helpers that
+reuse the same filter, search and permission backends as the list view:
+
+```
+GET /api/models/<app>/<Model>/count/?<filters>          → {"count": N}   (match count, no rows)
+GET /api/models/<app>/<Model>/export/?<filters>[&limit=N]  → NDJSON stream of ALL matching rows
+```
+
+`count/` returns just the size of the filtered queryset — handy for sizing a paginator without
+pulling data. `export/` streams the **entire** filtered queryset as newline-delimited JSON
+(`application/x-ndjson`), one serialized object per line, with **no pagination**; pass `?limit=N`
+to cap the row count. Rows are pulled lazily in chunks (tunable via `SNAPADMIN_EXPORT_CHUNK_SIZE`,
+default 1000 — shared with the async export) so arbitrarily large tables never materialise in
+memory. Both require the model's `view` permission, just like `list`.
+
 ### 🌍 Internationalization (i18n)
 
 SnapAdmin's UI strings are wrapped in `gettext` and ship compiled translation catalogs for **10
