@@ -375,6 +375,14 @@ styled with Unfold assumptions. The shared design tokens (`--primary-color`,
 | `SnapFunctionField` | - | computed display column |
 | `SnapStatusBadgeField` | - | colored HTML badge column |
 
+> **Wysiwyg HTML is sanitized in the changelist.** Rich-text fields (`wysiwyg=True` /
+> `SnapRichTextField`) store raw HTML and show it on the changelist, so their value is
+> passed through an HTML sanitizer ([`nh3`](https://pypi.org/project/nh3/)) before display —
+> `<script>`, inline event handlers and unsafe URLs are stripped, preventing stored XSS from
+> untrusted writers. Pass `safe_html=True` on the field to render fully-trusted HTML verbatim,
+> or set `SNAPADMIN_HTML_SANITIZER` to a dotted path (`"myapp.security.clean_html"`,
+> a `Callable[[str], str]`) to plug in your own policy.
+
 ---
 
 ## ⚙️ Feature Toggles & Advanced Settings

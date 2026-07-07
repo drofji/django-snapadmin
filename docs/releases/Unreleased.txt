@@ -1,0 +1,37 @@
+Unreleased
+==========
+
+Add new changes here as you develop features. When you release, this file will be renamed to the version number (e.g. `0.1.0a12.txt`) and a new `Unreleased.txt` created.
+
+Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
+
+Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+Security
+========
+
+Wysiwyg field values are now sanitized before they are rendered in the admin changelist
+  Rich-text (wysiwyg) fields store raw HTML and default to ``show_in_list=True``, so their value is shown on the changelist page. Previously that value was passed straight to ``mark_safe``, which meant anyone able to write the field — a REST API token holder, a low-privileged staff member, or a bulk import — could store markup such as ``<img src=x onerror=...>`` that executed in an administrator's browser session (stored XSS, privilege escalation from field-write to admin-session). SnapAdmin now runs every wysiwyg value through an HTML sanitizer (``nh3``, a new core dependency) before marking it safe: common formatting is kept while ``<script>``, inline event handlers and unsafe URL schemes are stripped. Fields whose HTML is fully trusted can opt back into verbatim rendering with ``safe_html=True`` (e.g. ``SnapRichTextField(safe_html=True)``), and projects that need a custom policy can point the new ``SNAPADMIN_HTML_SANITIZER`` setting at their own ``Callable[[str], str]``. No database migration is required.
+
+Examples:
+
+Added
+=====
+
+New feature description
+  Details about what it does, how to use it, any new settings or module names.
+
+Changed
+=======
+
+- Breaking change or significant behavior change with migration notes if needed.
+
+Fixed
+=====
+
+- Bug title and what was wrong, now corrected.
+
+Security
+========
+
+- Any security fixes, CVE refs, workarounds noted.

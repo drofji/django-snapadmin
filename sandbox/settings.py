@@ -214,6 +214,11 @@ SNAPADMIN_ANALYTICS_DB_ALIAS = os.getenv('SNAPADMIN_ANALYTICS_DB_ALIAS', '')
 # Format: {"<key>": {"label": "...", "url": "/accounts/<p>/login/", "icon": "..."}}.
 SNAPADMIN_SSO_PROVIDERS = {}
 
+# Wysiwyg HTML sanitizer. Rich-text field values are sanitized before being shown
+# in the admin changelist (stored-XSS defense). Leave unset to use the built-in
+# nh3 allowlist, or point this at a dotted path to your own Callable[[str], str].
+# SNAPADMIN_HTML_SANITIZER = "myapp.security.clean_html"
+
 # PII masking (issue #12). Map "app_label.ModelName" → list of sensitive fields
 # obfuscated in the admin + REST API for users lacking `snapadmin.view_raw_pii`
 # (superusers always see raw). Empty → masking off.

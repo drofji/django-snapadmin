@@ -62,6 +62,7 @@ from snapadmin import fields as snapfields
 from snapadmin.fields import DjangoFieldAttributeEnum, SnapFieldAttributeEnum, SnapField
 from snapadmin.logging_config import get_logger
 from snapadmin.pagination import EstimatedCountPaginator
+from snapadmin.sanitize import sanitize_html
 
 logger = get_logger(__name__)
 
@@ -1312,7 +1313,13 @@ class SnapModel(models.Model):
                     field_obj = cls._meta.get_field(field_name)
                     @unfold_display(description=field_obj.verbose_name)
                     def _display(self, obj):
-                        return mark_safe(getattr(obj, field_name, ""))
+                        raw = getattr(obj, field_name, "") or ""
+                        # Wysiwyg values are attacker-controllable HTML. Sanitize
+                        # before mark_safe to prevent stored XSS in the changelist,
+                        # unless the field explicitly trusts its content.
+                        if getattr(field_obj, "safe_html", False):
+                            return mark_safe(raw)
+                        return mark_safe(sanitize_html(raw))
                     return _display
 
                 cls.admin_overrides[method_name] = make_wysiwyg_display(fn)

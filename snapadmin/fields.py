@@ -36,6 +36,7 @@ class SnapFieldAttributeEnum(str, Enum):
     MAX_SIZE_BYTES = "max_size_bytes"
     AUTOCOMPLETE = "autocomplete"
     WYSIWYG = "wysiwyg" # Added for Unfold/CKEditor integration
+    SAFE_HTML = "safe_html" # Opt out of wysiwyg HTML sanitization (trusted content)
     TAB = "tab" # Added for Unfold fieldset tabs
     ROW = "row" # Group fields in one row
 
@@ -96,6 +97,7 @@ class SnapField:
         self.updatable = kwargs[SnapFieldAttributeEnum.UPDATABLE.value]
         self.autocomplete = kwargs[SnapFieldAttributeEnum.AUTOCOMPLETE.value]
         self.wysiwyg = kwargs.get(SnapFieldAttributeEnum.WYSIWYG.value, False)
+        self.safe_html = kwargs.get(SnapFieldAttributeEnum.SAFE_HTML.value, False)
         self.tab = kwargs.get(SnapFieldAttributeEnum.TAB.value, None)
         self.row = kwargs.get(SnapFieldAttributeEnum.ROW.value, None)
 
@@ -112,6 +114,7 @@ class SnapField:
             SnapFieldAttributeEnum.UPDATABLE: True,
             SnapFieldAttributeEnum.AUTOCOMPLETE: False,
             SnapFieldAttributeEnum.WYSIWYG: False,
+            SnapFieldAttributeEnum.SAFE_HTML: False,
             SnapFieldAttributeEnum.TAB: None,
             SnapFieldAttributeEnum.ROW: None,
         }

@@ -418,8 +418,19 @@ class Product(snap_models.SnapModel):
     <tr><td><code>row</code></td><td>str</td><td>None</td><td>Group fields into a horizontal row</td></tr>
     <tr><td><code>tab</code></td><td>str</td><td>None</td><td>Place field into a specific Unfold tab</td></tr>
     <tr><td><code>wysiwyg</code></td><td>bool</td><td>False</td><td>Enable CKEditor 5 for TextFields</td></tr>
+    <tr><td><code>safe_html</code></td><td>bool</td><td>False</td><td>Render wysiwyg HTML verbatim in the changelist instead of sanitizing it — only for fully trusted content</td></tr>
     <tr><td><code>autocomplete</code></td><td>bool</td><td>False</td><td>Searchable autocomplete widget (relation fields)</td></tr>
   </table>
+
+  <p><strong>Wysiwyg HTML is sanitized by default.</strong> Rich-text fields
+  (<code>wysiwyg=True</code> / <code>SnapRichTextField</code>) store raw HTML and display it on
+  the changelist, so their value is passed through an HTML sanitizer
+  (<a href="https://pypi.org/project/nh3/"><code>nh3</code></a>) before rendering:
+  <code>&lt;script&gt;</code>, inline event handlers and unsafe URL schemes are stripped, which
+  prevents stored XSS from untrusted writers (API tokens, low-privileged staff, bulk imports).
+  Set <code>safe_html=True</code> on the field to trust its HTML and render it verbatim, or point
+  the <code>SNAPADMIN_HTML_SANITIZER</code> setting at a dotted path to your own
+  <code>Callable[[str], str]</code> to use a custom allowlist.</p>
 
   <h3>Available field types</h3>
   <p>Every field type below maps 1:1 to a Django field (except the computed ones) and accepts all the flags above.</p>

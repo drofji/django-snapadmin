@@ -46,7 +46,8 @@ class Product(snap_models.SnapModel):
             snap_fields.SnapStatusBadgeFieldChoice(False, "#991B1B", "#FEE2E2", "#EF4444"),
         ]
     )
-    # wysiwyg=True → renders a rich-text editor (TinyMCE/Quill) in the admin form
+    # wysiwyg=True → renders a rich-text editor (CKEditor 5) in the admin form. The stored HTML
+    # is sanitized before it is shown on the changelist; pass safe_html=True to trust it verbatim.
     description = snap_fields.SnapTextField(verbose_name=_("Description"), wysiwyg=True, show_in_form=True)
 
     # Unfold: compress empty tab panels into collapsible sections
