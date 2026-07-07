@@ -71,7 +71,8 @@ class TestCssInjection:
 
 class TestCoreSheetIsThemeAgnostic:
     @pytest.fixture(scope="class")
-    def source(self):
+    @staticmethod
+    def source():
         return _read_asset(CORE_CSS)
 
     def test_no_unfold_selectors(self, source):
@@ -90,7 +91,8 @@ class TestCoreSheetIsThemeAgnostic:
 
 class TestUnfoldSheetIsUnfoldScoped:
     @pytest.fixture(scope="class")
-    def source(self):
+    @staticmethod
+    def source():
         return _read_asset(UNFOLD_CSS)
 
     def test_contains_unfold_selectors(self, source):

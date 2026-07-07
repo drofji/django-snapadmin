@@ -26,7 +26,9 @@ def products(db):
     from decimal import Decimal
     for i in range(5):
         Product.objects.create(name=f"P{i}", price=Decimal(i))
-    return Product.objects.all()
+    # Ordered like the admin changelist hands it to the paginator (the base
+    # manager no longer injects a default order), so pagination is deterministic.
+    return Product.objects.order_by("-pk")
 
 
 # ── config ───────────────────────────────────────────────────────────────────

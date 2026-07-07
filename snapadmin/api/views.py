@@ -174,13 +174,16 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             # Plain listings (and DUAL models with routing off) stay on the
             # database: native pagination, no ES round-trip, no row cap.
             qs = model_class.objects.all()
-            # The base manager no longer injects a default order (it would leak
-            # into GROUP BY on aggregations), so apply the newest-first default
-            # here to keep list pagination deterministic. An explicit
-            # Meta.ordering or a client ``?ordering=`` still wins.
-            if not qs.ordered:
-                qs = qs.order_by("-pk")
             self.search_fields = self._db_search_fields(model_class)
+
+        # The base manager no longer injects a default order (it would leak into
+        # GROUP BY on aggregations), so guarantee a deterministic newest-first
+        # order for pagination on any DB-backed queryset — plain listings and the
+        # DB fallback returned when an ES search errors out. ES relevance order
+        # and EsQuerySet already report as ordered, so this is a no-op there. An
+        # explicit Meta.ordering or a client ``?ordering=`` still wins.
+        if hasattr(qs, "ordered") and not qs.ordered:
+            qs = qs.order_by("-pk")
 
         # Introspection of related fields is expensive in a tight loop.
         # We cache the field lists per model.

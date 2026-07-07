@@ -33,6 +33,13 @@ from snapadmin.backup import (
     store_remote_sftp,
 )
 
+# These tests deliberately swap out DATABASES to exercise different backup
+# engines (sqlite / pg_dump); Django's generic "Overriding setting DATABASES"
+# warning is expected here and only adds noise to the run.
+pytestmark = pytest.mark.filterwarnings(
+    "ignore:Overriding setting DATABASES can lead to unexpected behavior"
+)
+
 
 @pytest.fixture
 def sqlite_db(tmp_path):

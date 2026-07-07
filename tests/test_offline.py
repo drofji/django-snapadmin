@@ -94,7 +94,8 @@ class TestOfflineJsInjection:
 
 class TestOfflineJsAsset:
     @pytest.fixture(scope="class")
-    def source(self):
+    @staticmethod
+    def source():
         return _read_asset(OFFLINE_JS)
 
     def test_uses_indexeddb(self, source):
@@ -156,7 +157,8 @@ class TestConnectivityJsInjection:
 
 class TestConnectivityJsAsset:
     @pytest.fixture(scope="class")
-    def source(self):
+    @staticmethod
+    def source():
         return _read_asset(CONNECTIVITY_JS)
 
     def test_warns_when_offline_on_non_capable_page(self, source):
