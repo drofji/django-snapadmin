@@ -4,6 +4,7 @@ tests/test_model_api.py  –  Dynamic model CRUD API + schema endpoint tests
 
 from decimal import Decimal
 import pytest
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 
@@ -312,3 +313,64 @@ class TestModelExport:
 
     def test_export_unauthenticated_denied(self, anon_client):
         assert anon_client.get("/api/models/demo/Product/export/").status_code in (401, 403)
+
+
+# ── DynamicModelViewSet – deletion-veto hook (#B12) ───────────────────────────
+
+def _veto_all_deletes(request, obj):
+    """Test guard: forbid every deletion."""
+    return False
+
+
+def _veto_unavailable_products(request, obj):
+    """Test guard receiving (request, instance): only available rows deletable."""
+    return getattr(obj, "available", True)
+
+
+@pytest.mark.django_db
+class TestDeletionVeto:
+    def test_delete_allowed_by_default(self, auth_client, product):
+        # No hook override, no guard setting → the default path deletes (204).
+        from demo.models import Product
+        r = auth_client.delete(f"/api/models/demo/Product/{product.pk}/")
+        assert r.status_code == 204
+        assert not Product.objects.filter(pk=product.pk).exists()
+
+    def test_model_hook_veto_returns_403(self, auth_client, product, monkeypatch):
+        from demo.models import Product
+        monkeypatch.setattr(Product, "api_can_delete", lambda self, request: False)
+        r = auth_client.delete(f"/api/models/demo/Product/{product.pk}/")
+        assert r.status_code == 403
+        assert Product.objects.filter(pk=product.pk).exists()  # not deleted
+
+    def test_setting_guard_veto_returns_403(self, auth_client, product):
+        from demo.models import Product
+        with override_settings(
+            SNAPADMIN_API_DELETE_GUARD="tests.test_model_api._veto_all_deletes"
+        ):
+            r = auth_client.delete(f"/api/models/demo/Product/{product.pk}/")
+        assert r.status_code == 403
+        assert Product.objects.filter(pk=product.pk).exists()
+
+    def test_setting_guard_receives_object(self, auth_client, product, product_unavailable):
+        from demo.models import Product
+        guard = "tests.test_model_api._veto_unavailable_products"
+        with override_settings(SNAPADMIN_API_DELETE_GUARD=guard):
+            # Unavailable product is vetoed by the object-aware guard …
+            blocked = auth_client.delete(f"/api/models/demo/Product/{product_unavailable.pk}/")
+            # … while an available one still deletes.
+            allowed = auth_client.delete(f"/api/models/demo/Product/{product.pk}/")
+        assert blocked.status_code == 403
+        assert allowed.status_code == 204
+        assert Product.objects.filter(pk=product_unavailable.pk).exists()
+        assert not Product.objects.filter(pk=product.pk).exists()
+
+    def test_setting_guard_accepts_direct_callable(self, auth_client, product):
+        from demo.models import Product
+        with override_settings(SNAPADMIN_API_DELETE_GUARD=_veto_all_deletes):
+            r = auth_client.delete(f"/api/models/demo/Product/{product.pk}/")
+        assert r.status_code == 403
+        assert Product.objects.filter(pk=product.pk).exists()
+
+    def test_destroy_unknown_model_404(self, auth_client):
+        assert auth_client.delete("/api/models/demo/GhostModel/1/").status_code == 404

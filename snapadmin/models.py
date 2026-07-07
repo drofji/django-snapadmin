@@ -822,6 +822,25 @@ class SnapModel(models.Model):
         kwargs = {"request_timeout": 5, **getattr(settings, "ELASTICSEARCH_KWARGS", {})}
         return Elasticsearch([url], **kwargs)
 
+    def api_can_delete(self, request) -> bool:
+        """Per-object deletion veto for the REST API (default: allow).
+
+        Consulted by the dynamic model API's ``DELETE`` handler *after* the
+        normal model permission check. Override on a model to forbid deleting
+        specific objects without re-mounting the API routes — e.g. protect
+        superusers or "system" rows::
+
+            class Account(SnapModel):
+                def api_can_delete(self, request) -> bool:
+                    return not self.is_system
+
+        Returning ``False`` makes the endpoint respond ``403 Forbidden``. A
+        project-wide guard can also be configured with the
+        ``SNAPADMIN_API_DELETE_GUARD`` setting (a dotted path to a
+        ``Callable[[request, obj], bool]``); both must allow the delete.
+        """
+        return True
+
     @staticmethod
     def _derive_es_field_mapping(field) -> dict | None:
         """Best-fit ES mapping for one Django model field (es_auto_mapping)."""

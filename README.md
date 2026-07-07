@@ -566,6 +566,33 @@ class AuditLog(snap_models.SnapModel):
     api_exclude_fields = ["user_email"]         # never leaves the server via API
 ```
 
+### Vetoing deletes via the API
+
+Beyond model `delete` permissions, you can forbid deleting **specific objects** through the
+dynamic model API without re-mounting any routes. Two extension points are consulted before a
+`DELETE`, and **both** must allow it (either returning `False` → **403 Forbidden**):
+
+```python
+# 1) Per-model hook — override on the SnapModel:
+class Account(snap_models.SnapModel):
+    is_system = snap.SnapBooleanField(default=False)
+
+    def api_can_delete(self, request) -> bool:
+        return not self.is_system            # system rows are undeletable
+```
+
+```python
+# 2) Project-wide guard — a dotted path (or callable) taking (request, obj):
+# settings.py
+SNAPADMIN_API_DELETE_GUARD = "myproject.guards.protect_superusers"
+
+# myproject/guards.py
+def protect_superusers(request, obj) -> bool:
+    return not getattr(obj, "is_superuser", False)
+```
+
+Both default to allowing; unset the setting to rely solely on model permissions and the hook.
+
 ## 🧩 Integrating with Your Project
 
 SnapAdmin is built to drop into a real project without forcing you to write bridge code.
@@ -1383,6 +1410,7 @@ Copy `dist.env` to `.env` and configure:
 | `SNAPADMIN_USER_API_ENABLED` | `False` | Serve the admin-only user-management API (`/api/users/`, `/api/permissions/`) |
 | `SNAPADMIN_API_AUTHENTICATION_CLASSES` | token auth | API authenticator dotted paths (add session / JWT) |
 | `SNAPADMIN_ANALYTICS_DB_ALIAS` | — | `DATABASES` alias for read-only list/retrieve routing; empty = no routing |
+| `SNAPADMIN_API_DELETE_GUARD` | — | Dotted path to a `Callable[[request, obj], bool]` vetoing API deletes (403); AND-ed with each model's `api_can_delete` hook |
 | `SNAPADMIN_AUDIT_LOG_ENABLED` | `True` | Record admin create/update/delete as an immutable audit trail |
 | `SNAPADMIN_AUDIT_RETENTION_DAYS` | `365` | Retention window for `snapadmin_audit_export --purge` |
 | `SNAPADMIN_ESTIMATED_COUNT` | `True` | Use PostgreSQL's fast row estimate for huge, unfiltered changelists |

@@ -203,6 +203,12 @@ SNAPADMIN_ES_SEARCH_LIMIT = int(os.getenv('SNAPADMIN_ES_SEARCH_LIMIT', '1000'))
 # Expose the X-Snap-Query-Backend header on list responses (elasticsearch|database).
 SNAPADMIN_QUERY_BACKEND_HEADER = os.getenv('SNAPADMIN_QUERY_BACKEND_HEADER', 'True') == 'True'
 
+# Project-wide deletion veto for the dynamic model API: dotted path to a
+# Callable[[request, obj], bool]. Returning False makes DELETE respond 403.
+# Combined (AND) with each model's own SnapModel.api_can_delete(request) hook.
+# Unset (default) → deletes are governed solely by model permissions + hooks.
+SNAPADMIN_API_DELETE_GUARD = os.getenv('SNAPADMIN_API_DELETE_GUARD') or None
+
 # Read-replica routing: alias (from DATABASES) that auto-generated read-only
 # API list/retrieve querysets are pinned to via .using(). Writes always stay on
 # 'default'. Empty / unknown alias → no routing (safe for single-DB installs).

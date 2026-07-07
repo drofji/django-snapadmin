@@ -30,6 +30,9 @@ Wysiwyg field values are now sanitized before they are rendered in the admin cha
 Added
 =====
 
+Deletion-veto extension points for the dynamic model API
+  Projects can now forbid deleting specific objects through the REST API without re-mounting any routes. Before a ``DELETE`` the endpoint consults two guards, both of which must allow the delete (otherwise it responds ``403 Forbidden``): a per-object ``SnapModel.api_can_delete(request) -> bool`` hook (override it on a model — the base implementation allows) and a project-wide ``SNAPADMIN_API_DELETE_GUARD`` setting (a dotted path to, or a direct, ``Callable[[request, obj], bool]``). This runs after the normal model ``delete`` permission check, so it layers business rules ("superusers are undeletable", "system rows are protected") on top of permissions. Both default to allowing, so existing behaviour is unchanged.
+
 Synchronous ``count`` and streaming ``export`` actions on the dynamic model API (no Celery)
   Two new read-only endpoints complement the Celery-backed ``/api/exports/`` jobs for projects that don't run a worker. ``GET /api/models/<app>/<Model>/count/?<filters>`` returns ``{"count": N}`` for the filtered queryset — a cheap way to size a result set or a paginator without pulling rows. ``GET /api/models/<app>/<Model>/export/?<filters>[&limit=N]`` streams **every** matching row as newline-delimited JSON (``application/x-ndjson``), one serialized object per line, with no pagination and an optional row cap. Both reuse the list view's filter, search and permission backends (the model's ``view`` permission is required), and the export pulls rows lazily in chunks (``SNAPADMIN_EXPORT_CHUNK_SIZE``, default 1000, shared with the async export) so arbitrarily large tables never materialise in memory.
 

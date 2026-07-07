@@ -702,6 +702,20 @@ for row in Product.objects.all().iterator(chunk_size=2000):
 
     api_exclude_fields = ["user_email"]           # never leaves the server via API</code></pre>
 
+  <h3>Vetoing deletes — <code>api_can_delete</code> + <code>SNAPADMIN_API_DELETE_GUARD</code></h3>
+  <p>Forbid deleting <strong>specific objects</strong> through the dynamic model API without
+  re-mounting routes. Two extension points are consulted before every <code>DELETE</code> and
+  <strong>both</strong> must allow it — returning <code>False</code> responds <code>403</code>:</p>
+  <pre><code># 1) Per-model hook (default allows):
+class Account(SnapModel):
+    is_system = snap_fields.SnapBooleanField(default=False)
+
+    def api_can_delete(self, request) -> bool:
+        return not self.is_system          # system rows are undeletable
+
+# 2) Project-wide guard — dotted path to Callable[[request, obj], bool]:
+SNAPADMIN_API_DELETE_GUARD = "myproject.guards.protect_superusers"</code></pre>
+
   <!-- ── Integrating ───────────────────────────────────────────────────────── -->
   <h2 id="integrating">🧩 Integrating with Your Project</h2>
   <p>SnapAdmin drops into a real project without bridge code — authentication, the user model and

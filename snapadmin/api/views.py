@@ -9,6 +9,7 @@ import json
 from django.apps import apps
 from django.conf import settings
 from django.http import StreamingHttpResponse
+from django.utils.module_loading import import_string
 from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.request import Request
@@ -241,6 +242,45 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         if getattr(settings, "SNAPADMIN_QUERY_BACKEND_HEADER", True):
             response["X-Snap-Query-Backend"] = self._query_backend
         return response
+
+    @staticmethod
+    def _deletion_allowed(request, instance) -> bool:
+        """Consult the deletion-veto extension points before a DELETE.
+
+        Two independent guards, both of which must allow the delete:
+
+        * the object's own ``api_can_delete(request)`` hook (SnapModels default
+          to allowing), and
+        * a project-wide ``SNAPADMIN_API_DELETE_GUARD`` callable (dotted path or
+          callable) receiving ``(request, instance)``.
+        """
+        hook = getattr(instance, "api_can_delete", None)
+        if callable(hook) and not hook(request):
+            return False
+
+        guard = getattr(settings, "SNAPADMIN_API_DELETE_GUARD", None)
+        if guard:
+            guard_fn = import_string(guard) if isinstance(guard, str) else guard
+            if not guard_fn(request, instance):
+                return False
+
+        return True
+
+    def destroy(self, request, *args, **kwargs):
+        model_class = self._get_model_class()
+        if model_class is None:
+            return Response(
+                {"detail": f"Model '{kwargs.get('model_name')}' not found in app '{kwargs.get('app_label')}'."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        instance = self.get_object()
+        if not self._deletion_allowed(request, instance):
+            return Response(
+                {"detail": "Deletion of this object is not allowed."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        self.perform_destroy(instance)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @staticmethod
     def _parse_export_limit(request: Request) -> int | None:
