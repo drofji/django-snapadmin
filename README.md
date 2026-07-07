@@ -650,6 +650,11 @@ duplicated — re-running an import is idempotent. Because it bypasses `Model.sa
 model-level `full_clean()` validation is not run (validate upstream for speed). Demo:
 `python manage.py sync_exchange_rates`.
 
+Runs on **PostgreSQL, SQLite and MySQL/MariaDB**. `unique_fields` is always the conflict
+target; on MySQL/MariaDB (which upsert via `ON DUPLICATE KEY UPDATE`) it is inferred from the
+matching unique index instead of being passed explicitly, so the same call works on every
+backend without a `NotSupportedError`.
+
 ### Optional user-management API (admin-only)
 
 Enable `SNAPADMIN_USER_API_ENABLED = True` to expose admin-only endpoints for managing

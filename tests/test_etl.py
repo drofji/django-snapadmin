@@ -95,6 +95,46 @@ class TestUpsertFromSource:
             )
         assert summary["reindex"] is None
 
+    def _capture_bulk_create_kwargs(self, monkeypatch):
+        captured = {}
+
+        def fake_bulk_create(objs, **kwargs):
+            captured["kwargs"] = kwargs
+            return list(objs)
+
+        monkeypatch.setattr(ExchangeRate.objects, "bulk_create", fake_bulk_create)
+        return captured
+
+    def test_passes_unique_fields_when_backend_supports_target(self, monkeypatch):
+        # PostgreSQL/SQLite: the conflict target is required and forwarded.
+        from django.db import connections, router
+
+        conn = connections[router.db_for_write(ExchangeRate)]
+        monkeypatch.setattr(
+            conn.features, "supports_update_conflicts_with_target", True
+        )
+        captured = self._capture_bulk_create_kwargs(monkeypatch)
+        upsert_from_source(ExchangeRate, _rows(2), unique_fields=["code"])
+        assert captured["kwargs"]["unique_fields"] == ["code"]
+        assert captured["kwargs"]["update_conflicts"] is True
+
+    def test_omits_unique_fields_on_mysql_like_backend(self, monkeypatch):
+        # MySQL/MariaDB: ON DUPLICATE KEY UPDATE cannot take an explicit target,
+        # so unique_fields must NOT be forwarded (else NotSupportedError).
+        from django.db import connections, router
+
+        conn = connections[router.db_for_write(ExchangeRate)]
+        monkeypatch.setattr(
+            conn.features, "supports_update_conflicts_with_target", False
+        )
+        captured = self._capture_bulk_create_kwargs(monkeypatch)
+        upsert_from_source(ExchangeRate, _rows(2), unique_fields=["code"])
+        assert "unique_fields" not in captured["kwargs"]
+        assert captured["kwargs"]["update_conflicts"] is True
+        # update_fields is still derived (everything but the conflict target/pk).
+        assert "base" in captured["kwargs"]["update_fields"]
+        assert "code" not in captured["kwargs"]["update_fields"]
+
 
 @pytest.mark.django_db
 def test_sync_exchange_rates_command():

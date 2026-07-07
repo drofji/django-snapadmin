@@ -25,6 +25,7 @@ from __future__ import annotations
 from typing import Iterable, Iterator
 
 from django.conf import settings
+from django.db import connections, router
 
 from snapadmin.logging_config import get_logger
 from snapadmin.models import EsStorageMode, SnapModel
@@ -60,6 +61,10 @@ def upsert_from_source(
             materialised in full, so remote cursors of any size work.
         unique_fields: Conflict target — these fields must carry a unique
             constraint; matching rows are updated instead of duplicated.
+            Required on every backend. PostgreSQL/SQLite pass it as an explicit
+            ``ON CONFLICT`` target; MySQL/MariaDB upsert against the matching
+            unique index automatically (the target is omitted from the SQL to
+            avoid ``NotSupportedError``).
         update_fields: Fields to overwrite on conflict. Default: every key of
             the first row except ``unique_fields`` and the primary key.
         batch_size: Rows per ``bulk_create`` round-trip.
@@ -88,18 +93,33 @@ def upsert_from_source(
     resolved_update_fields = list(update_fields) if update_fields else None
     pk_name = model._meta.pk.name
 
+    # MySQL/MariaDB support `update_conflicts` via ``ON DUPLICATE KEY UPDATE``,
+    # which upserts against the table's existing unique/PK constraints and
+    # cannot take an explicit conflict target. Passing ``unique_fields`` there
+    # raises ``NotSupportedError``. PostgreSQL/SQLite use ``ON CONFLICT`` and
+    # *require* the target. Branch on the backend feature so the same call works
+    # on every supported database; ``unique_fields`` stays mandatory as the
+    # documented conflict target (those columns must carry a unique constraint
+    # on every backend — MySQL just infers it from the index).
+    connection = connections[router.db_for_write(model)]
+    pass_unique_fields = connection.features.supports_update_conflicts_with_target
+
     for batch in _batched(rows, batch_size):
         if resolved_update_fields is None:
             resolved_update_fields = [
                 key for key in batch[0]
                 if key not in unique_fields and key not in (pk_name, "pk")
             ]
+        create_kwargs = {
+            "update_conflicts": True,
+            "update_fields": resolved_update_fields,
+            "batch_size": batch_size,
+        }
+        if pass_unique_fields:
+            create_kwargs["unique_fields"] = unique_fields
         model.objects.bulk_create(
             [model(**row) for row in batch],
-            update_conflicts=True,
-            unique_fields=unique_fields,
-            update_fields=resolved_update_fields,
-            batch_size=batch_size,
+            **create_kwargs,
         )
         processed += len(batch)
         batches += 1

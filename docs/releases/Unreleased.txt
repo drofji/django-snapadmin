@@ -33,6 +33,9 @@ Fixed
 Aggregations on SnapModels no longer return wrong grouped counts
   The base SnapModel manager used to inject a default ``order_by("-pk")`` onto every unordered queryset. Django appends ordering columns to the ``GROUP BY`` clause, so a plain aggregation such as ``Item.objects.values("status").annotate(n=Count("pk"))`` was silently grouped by ``(status, pk)`` — one row per object instead of one row per status, with every count equal to 1. The manager no longer injects any default ordering, so aggregations group correctly. The newest-first (``-pk``) default that the changelist relied on is now applied in the admin layer (via the generated ``ModelAdmin.ordering``) and in the REST list view, so the admin order and API list pagination are unchanged. A model's own ``Meta.ordering`` is still honoured. No database migration is required.
 
+``upsert_from_source()`` now works on MySQL/MariaDB
+  The generic ETL helper passed ``unique_fields`` unconditionally to ``bulk_create(update_conflicts=True)``. PostgreSQL and SQLite need that explicit ``ON CONFLICT`` target, but MySQL/MariaDB upsert through ``ON DUPLICATE KEY UPDATE``, which cannot take one — so on those backends every import raised ``NotSupportedError``. The helper now branches on ``connection.features.supports_update_conflicts_with_target``: the target columns are forwarded on PostgreSQL/SQLite and omitted (inferred from the matching unique index) on MySQL/MariaDB. ``unique_fields`` stays required on every backend as the documented conflict target.
+
 Examples:
 
 Added

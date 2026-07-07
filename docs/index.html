@@ -759,6 +759,10 @@ summary = upsert_from_source(
 # {"processed": 5231, "batches": 6, "reindex": {"indexed": 5231}}</code></pre>
   <p>It bypasses <code>Model.save()</code>, so <code>full_clean()</code> is not run — validate
   upstream for speed. Demo: <code>python manage.py sync_exchange_rates</code>.</p>
+  <p>Works on PostgreSQL, SQLite and MySQL/MariaDB: <code>unique_fields</code> is always the
+  documented conflict target, but on MySQL/MariaDB (which upsert through
+  <code>ON DUPLICATE KEY UPDATE</code>) it is inferred from the matching unique index rather than
+  passed explicitly — SnapAdmin branches on the backend so the same call runs everywhere.</p>
 
   <h3>Optional user-management API (admin-only)</h3>
   <p>Set <code>SNAPADMIN_USER_API_ENABLED = True</code> for admin-only user/permission endpoints —
