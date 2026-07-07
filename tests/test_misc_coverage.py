@@ -141,13 +141,13 @@ class TestGraphqlSchema:
 @pytest.mark.django_db
 class TestTasksEdgeCases:
     def test_purge_expired_data_task_skips_es_only(self):
-        from snapadmin.api.tasks import purge_expired_data
+        from snapadmin.tasks import purge_expired_data
         # Run the task directly; it should not raise even with ES_ONLY models
         result = purge_expired_data.apply().get()
         assert "purged" in result
 
     def test_purge_expired_data_task_handles_exception(self):
-        from snapadmin.api.tasks import purge_expired_data
+        from snapadmin.tasks import purge_expired_data
         from demo.models import AuditLog
 
         # Patch model.objects.filter to raise

@@ -523,7 +523,7 @@ class TestBackupEntryPoints:
         assert "network: error: share offline" in out.getvalue()
 
     def test_celery_task(self, backup_env):
-        from snapadmin.api.tasks import run_db_backups as backup_task
+        from snapadmin.tasks import run_db_backups as backup_task
 
         result = backup_task.apply().result
         assert result["ran"] is True

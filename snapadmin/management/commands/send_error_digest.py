@@ -1,7 +1,7 @@
 """
 Send the grouped SnapAdmin error digest email.
 
-Cron-friendly alternative to the ``api.tasks.send_error_digest`` Celery task
+Cron-friendly alternative to the ``snapadmin.send_error_digest`` Celery task
 for deployments without a Celery worker:
 
     0 8 * * *  cd /app && python manage.py send_error_digest

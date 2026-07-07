@@ -1080,7 +1080,7 @@ SNAPADMIN_ERROR_RETENTION_DAYS = 30
 ```python
 CELERY_BEAT_SCHEDULE = {
     "send-error-digest": {
-        "task": "api.tasks.send_error_digest",
+        "task": "snapadmin.send_error_digest",
         "schedule": crontab(hour=8, minute=0),   # your choice of send time
     },
 }
@@ -1158,13 +1158,13 @@ SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = 168       # weekly
 > independent offsite copies.
 
 **Running** — the scheduler is a separate process from your web workers. Add the
-`api.tasks.run_db_backups` task to Celery Beat (an hourly check; each destination only
+`snapadmin.run_db_backups` task to Celery Beat (an hourly check; each destination only
 fires when its own interval has elapsed — last-run times persist across restarts):
 
 ```python
 CELERY_BEAT_SCHEDULE = {
     "run-db-backups": {
-        "task": "api.tasks.run_db_backups",
+        "task": "snapadmin.run_db_backups",
         "schedule": crontab(minute=30),   # hourly due-check
     },
 }

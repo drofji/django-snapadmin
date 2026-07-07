@@ -1,7 +1,15 @@
 """
-snapadmin/api/tasks.py
+snapadmin/tasks.py
 
-Celery background tasks for the API module.
+Celery background tasks for SnapAdmin.
+
+This module lives at ``snapadmin/tasks.py`` (not under a subpackage) so that a
+project's standard ``app.autodiscover_tasks()`` call registers every task
+automatically — Celery scans ``<app>/tasks.py`` for each ``INSTALLED_APPS``
+entry, and ``snapadmin`` is such an entry.
+
+All tasks are namespaced under ``snapadmin.*`` (e.g. ``snapadmin.run_export``).
+Reference them by that name in ``CELERY_BEAT_SCHEDULE``.
 """
 
 from celery import shared_task
@@ -9,10 +17,10 @@ from django.utils import timezone
 
 from snapadmin.logging_config import get_logger
 
-logger = get_logger("snapadmin.api.tasks")
+logger = get_logger("snapadmin.tasks")
 
 
-@shared_task(bind=True, name="api.tasks.purge_expired_tokens")
+@shared_task(bind=True, name="snapadmin.purge_expired_tokens")
 def purge_expired_tokens(self):
     from snapadmin.models import APIToken
 
@@ -27,7 +35,7 @@ def purge_expired_tokens(self):
     return {"deleted": count, "cutoff": cutoff.isoformat()}
 
 
-@shared_task(bind=True, name="api.tasks.purge_expired_data")
+@shared_task(bind=True, name="snapadmin.purge_expired_data")
 def purge_expired_data(self):
     """
     GDPR data retention cleanup.
@@ -62,7 +70,7 @@ def purge_expired_data(self):
     return {"purged": summary, "total": sum(summary.values())}
 
 
-@shared_task(bind=True, name="api.tasks.send_error_digest")
+@shared_task(bind=True, name="snapadmin.send_error_digest")
 def send_error_digest(self, hours: int = 24):
     """
     Daily grouped error digest email (schedule via Celery Beat; the digest
@@ -75,7 +83,7 @@ def send_error_digest(self, hours: int = 24):
     return summary
 
 
-@shared_task(bind=True, name="api.tasks.run_export", acks_late=True)
+@shared_task(bind=True, name="snapadmin.run_export", acks_late=True)
 def run_export(self, job_id):
     """Run (or resume) a background CSV/JSON export job (issue #6).
 
@@ -89,7 +97,7 @@ def run_export(self, job_id):
     return {"job_id": str(job_id)}
 
 
-@shared_task(bind=True, name="api.tasks.run_db_backups")
+@shared_task(bind=True, name="snapadmin.run_db_backups")
 def run_db_backups(self):
     """
     3-2-1 database backups: schedule this frequently (e.g. hourly) via Celery

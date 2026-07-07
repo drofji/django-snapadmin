@@ -112,7 +112,7 @@ class TestGraphqlResolvers:
 @pytest.mark.django_db
 class TestPurgeTaskEsOnly:
     def test_task_purges_es_only_model_with_retention(self):
-        from snapadmin.api.tasks import purge_expired_data
+        from snapadmin.tasks import purge_expired_data
         from demo.models import SearchLog
 
         # SearchLog is ES_ONLY but normally has no retention; give it one so the

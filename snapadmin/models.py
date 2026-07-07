@@ -305,7 +305,7 @@ class SnapExportJob(models.Model):
     """A background CSV/JSON export of a model's rows (issue #6).
 
     Created via ``POST /api/exports/``; a Celery task
-    (``api.tasks.run_export``) fills it in chunk by chunk, updating
+    (``snapadmin.run_export``) fills it in chunk by chunk, updating
     ``processed_rows`` so ``GET /api/exports/<id>/`` can report live progress and
     an ETA. Fault-tolerant: the writer resumes from ``processed_rows`` if the
     worker restarts. Cancellable: setting ``status`` to ``cancelled`` stops the

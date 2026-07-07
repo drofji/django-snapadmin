@@ -107,10 +107,20 @@ class ExportJobViewSet(
                             status=status.HTTP_403_FORBIDDEN)
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        job = SnapExportJob.objects.create(requested_by=request.user, **serializer.validated_data)
-
         # Enqueue the worker (runs synchronously under CELERY_TASK_ALWAYS_EAGER).
-        from snapadmin.api.tasks import run_export
+        # Celery is an optional dependency — surface a clear 503 instead of a raw
+        # ModuleNotFoundError (500) when it is not installed/configured.
+        try:
+            from snapadmin.tasks import run_export
+        except ImportError:
+            return Response(
+                {"detail": "Background export requires Celery. Install it with "
+                           "`pip install django-snapadmin[celery]` and configure a broker "
+                           "(CELERY_BROKER_URL)."},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        job = SnapExportJob.objects.create(requested_by=request.user, **serializer.validated_data)
         run_export.delay(str(job.pk))
 
         job.refresh_from_db()

@@ -13,7 +13,7 @@ Two independent notification channels, both driven by ``ErrorEvent`` rows that
      most one alert per ``SNAPADMIN_ERROR_ALERT_COOLDOWN_MINUTES``.
 
   2. **Daily digest** — ``send_error_digest()`` (Celery task
-     ``api.tasks.send_error_digest`` or the ``send_error_digest`` management
+     ``snapadmin.send_error_digest`` or the ``send_error_digest`` management
      command) groups the last 24h of errors by fingerprint, caps the report at
      ``SNAPADMIN_ERROR_DIGEST_MAX_GROUPS`` groups so the email never explodes,
      and purges events older than ``SNAPADMIN_ERROR_RETENTION_DAYS``.

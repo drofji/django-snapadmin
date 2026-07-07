@@ -19,7 +19,7 @@ The 3-2-1 rule — **3** copies of your data, on **2** different machines/media,
 Each destination has its own frequency (``SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS`` /
 ``_NETWORK_EVERY_HOURS`` / ``_REMOTE_EVERY_HOURS`` / ``_SFTP_EVERY_HOURS``):
 ``run_due_backups()`` — called
-by the ``api.tasks.run_db_backups`` Celery Beat task or from cron via
+by the ``snapadmin.run_db_backups`` Celery Beat task or from cron via
 ``manage.py db_backup`` — creates one dump and ships it only to the destinations
 whose interval has elapsed. Last-run times persist in a small JSON state file
 inside the local backup directory, and every destination keeps at most

@@ -406,7 +406,7 @@ class TestDigestEntryPoints:
 
     @override_settings(SNAPADMIN_ERROR_DIGEST_EMAILS=RECIPIENTS)
     def test_celery_task(self):
-        from snapadmin.api.tasks import send_error_digest as digest_task
+        from snapadmin.tasks import send_error_digest as digest_task
 
         _make_events(1)
         result = digest_task.apply().result

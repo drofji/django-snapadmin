@@ -23,7 +23,7 @@ from django.utils import timezone
 class TestPurgeExpiredTokens:
     def test_deletes_expired_tokens(self, db, admin_user):
         from snapadmin.models import APIToken
-        from snapadmin.api.tasks import purge_expired_tokens
+        from snapadmin.tasks import purge_expired_tokens
 
         APIToken.objects.create(
             user=admin_user,
@@ -39,7 +39,7 @@ class TestPurgeExpiredTokens:
         assert result["deleted"] >= 2
 
     def test_keeps_non_expired_tokens(self, api_token):
-        from snapadmin.api.tasks import purge_expired_tokens
+        from snapadmin.tasks import purge_expired_tokens
 
         before = __import__("snapadmin.models", fromlist=["APIToken"]).APIToken.objects.count()
         purge_expired_tokens()
@@ -49,7 +49,7 @@ class TestPurgeExpiredTokens:
     def test_keeps_inactive_tokens(self, inactive_token):
         """Inactive (but non-expired) tokens are NOT deleted – only expired ones are."""
         from snapadmin.models import APIToken
-        from snapadmin.api.tasks import purge_expired_tokens
+        from snapadmin.tasks import purge_expired_tokens
 
         pk = inactive_token.pk
         purge_expired_tokens()
@@ -57,7 +57,7 @@ class TestPurgeExpiredTokens:
 
     def test_returns_deleted_count(self, db, admin_user):
         from snapadmin.models import APIToken
-        from snapadmin.api.tasks import purge_expired_tokens
+        from snapadmin.tasks import purge_expired_tokens
 
         APIToken.objects.create(
             user=admin_user,
@@ -69,12 +69,12 @@ class TestPurgeExpiredTokens:
         assert result["deleted"] >= 1
 
     def test_returns_cutoff_timestamp(self, db):
-        from snapadmin.api.tasks import purge_expired_tokens
+        from snapadmin.tasks import purge_expired_tokens
         result = purge_expired_tokens()
         assert "cutoff" in result
 
     def test_zero_deleted_when_none_expired(self, api_token):
-        from snapadmin.api.tasks import purge_expired_tokens
+        from snapadmin.tasks import purge_expired_tokens
         result = purge_expired_tokens()
         # api_token never expires – nothing should be deleted
         assert result["deleted"] == 0

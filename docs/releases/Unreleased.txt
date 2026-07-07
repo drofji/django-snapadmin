@@ -7,6 +7,20 @@ Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Sec
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
 
+Changed
+=======
+
+Celery tasks moved to ``snapadmin/tasks.py`` and renamed to the ``snapadmin.*`` namespace (BREAKING)
+  The background tasks previously lived in ``snapadmin/api/tasks.py`` and were named ``api.tasks.*`` (e.g. ``api.tasks.purge_expired_data``). Because Celery's ``autodiscover_tasks()`` only scans ``<app>/tasks.py`` for each installed app, a standard Celery setup never registered them — Beat schedules produced "Received unregistered task" and the GDPR purge, error digest, database backups and async export silently never ran. The tasks now live in ``snapadmin/tasks.py`` (autodiscovered by the stock ``app.autodiscover_tasks()``) and are namespaced under ``snapadmin.*``. **Action required:** update every ``CELERY_BEAT_SCHEDULE`` entry, replacing ``"task": "api.tasks.X"`` with ``"task": "snapadmin.X"`` (``purge_expired_tokens``, ``purge_expired_data``, ``send_error_digest``, ``run_export``, ``run_db_backups``). If you imported these tasks in Python, change ``from snapadmin.api.tasks import ...`` to ``from snapadmin.tasks import ...``. No back-compat aliases are kept — the old names no longer resolve.
+
+The async-export endpoint now fails cleanly when Celery is not installed
+  ``POST /api/exports/`` enqueues a Celery task, but Celery is an optional dependency. Calling it without Celery installed used to raise a bare ``ModuleNotFoundError`` (HTTP 500). It now returns **HTTP 503** with an actionable message telling you to install the ``celery`` extra and configure a broker.
+
+Removed
+=======
+
+- ``snapadmin/api/tasks.py`` and the ``api.tasks.*`` task names — replaced by ``snapadmin/tasks.py`` / ``snapadmin.*`` (see Changed).
+
 Security
 ========
 

@@ -442,7 +442,7 @@ CELERY_BEAT_SCHEDULE = {
         "description": "Sync all Product records from DB to Elasticsearch (DUAL mode demo)",
     },
     "purge-expired-data": {
-        "task": "api.tasks.purge_expired_data",
+        "task": "snapadmin.purge_expired_data",
         "schedule": crontab(hour=1, minute=0),  # daily 1am
         "description": "GDPR - delete records older than data_retention_days on each model",
     },
@@ -452,18 +452,18 @@ CELERY_BEAT_SCHEDULE = {
         "description": "Compute and log daily business stats (products, customers, orders, revenue)",
     },
     "purge-expired-tokens": {
-        "task": "api.tasks.purge_expired_tokens",
+        "task": "snapadmin.purge_expired_tokens",
         "schedule": crontab(hour=3, minute=0),  # daily 3am
         "description": "Remove expired API tokens",
     },
     "send-error-digest": {
-        "task": "api.tasks.send_error_digest",
+        "task": "snapadmin.send_error_digest",
         # Send time is env-configurable: SNAPADMIN_ERROR_DIGEST_HOUR / _MINUTE
         "schedule": crontab(hour=SNAPADMIN_ERROR_DIGEST_HOUR, minute=SNAPADMIN_ERROR_DIGEST_MINUTE),
         "description": "Email the grouped 24h error digest and purge expired ErrorEvents",
     },
     "run-db-backups": {
-        "task": "api.tasks.run_db_backups",
+        "task": "snapadmin.run_db_backups",
         # Hourly check — each destination fires only when its own
         # SNAPADMIN_BACKUP_*_EVERY_HOURS interval has elapsed.
         "schedule": crontab(minute=30),

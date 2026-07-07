@@ -56,7 +56,7 @@ class TestPurgeExpiredDataTask:
         return obj
 
     def test_deletes_records_older_than_retention(self):
-        from snapadmin.api.tasks import purge_expired_data
+        from snapadmin.tasks import purge_expired_data
         old = self._create_old_log(days_old=91)
         result = purge_expired_data()
         from demo.models import AuditLog
@@ -64,35 +64,35 @@ class TestPurgeExpiredDataTask:
         assert result["total"] >= 1
 
     def test_keeps_records_within_retention(self):
-        from snapadmin.api.tasks import purge_expired_data
+        from snapadmin.tasks import purge_expired_data
         from demo.models import AuditLog
         recent = AuditLog.objects.create(action="logout", user_email="user@example.com")
         purge_expired_data()
         assert AuditLog.objects.filter(pk=recent.pk).exists()
 
     def test_returns_summary_dict(self):
-        from snapadmin.api.tasks import purge_expired_data
+        from snapadmin.tasks import purge_expired_data
         result = purge_expired_data()
         assert "purged" in result
         assert "total" in result
         assert isinstance(result["total"], int)
 
     def test_purge_returns_per_model_counts(self):
-        from snapadmin.api.tasks import purge_expired_data
+        from snapadmin.tasks import purge_expired_data
         self._create_old_log(days_old=100)
         result = purge_expired_data()
         assert "demo.AuditLog" in result["purged"]
         assert result["purged"]["demo.AuditLog"] >= 1
 
     def test_no_retention_model_not_in_summary(self):
-        from snapadmin.api.tasks import purge_expired_data
+        from snapadmin.tasks import purge_expired_data
         from demo.models import Product
         Product.objects.create(name="Safe Product", price=10)
         result = purge_expired_data()
         assert "demo.Product" not in result["purged"]
 
     def test_empty_db_returns_zero_total(self):
-        from snapadmin.api.tasks import purge_expired_data
+        from snapadmin.tasks import purge_expired_data
         result = purge_expired_data()
         assert isinstance(result["total"], int)
 

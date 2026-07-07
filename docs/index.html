@@ -1226,8 +1226,8 @@ reindex_products_to_elasticsearch.delay()</code></pre>
   <h3>Built-in Tasks</h3>
   <table>
     <tr><th>Task</th><th>Default Schedule</th><th>Description</th></tr>
-    <tr><td><code>api.tasks.purge_expired_tokens</code></td><td>Daily 3am</td><td>Delete all <code>APIToken</code> records past their expiration date</td></tr>
-    <tr><td><code>api.tasks.purge_expired_data</code></td><td>Daily 1am</td><td>GDPR — auto-delete records older than <code>data_retention_days</code> on each SnapModel</td></tr>
+    <tr><td><code>snapadmin.purge_expired_tokens</code></td><td>Daily 3am</td><td>Delete all <code>APIToken</code> records past their expiration date</td></tr>
+    <tr><td><code>snapadmin.purge_expired_data</code></td><td>Daily 1am</td><td>GDPR — auto-delete records older than <code>data_retention_days</code> on each SnapModel</td></tr>
     <tr><td><code>demo.tasks.reindex_products_to_elasticsearch</code></td><td>Daily midnight</td><td>Re-index all products to Elasticsearch (DUAL mode demo)</td></tr>
     <tr><td><code>demo.tasks.generate_daily_stats</code></td><td>Daily 2am</td><td>Compute and log daily business metrics (demo app)</td></tr>
   </table>
@@ -1254,7 +1254,7 @@ CELERY_BEAT_SCHEDULE = {
         "description": "Sync Product records (DUAL mode) to Elasticsearch",
     },
     "purge-expired-data": {
-        "task": "api.tasks.purge_expired_data",
+        "task": "snapadmin.purge_expired_data",
         "schedule": crontab(hour=1, minute=0),   # daily 1am
         "description": "GDPR — delete records older than data_retention_days",
     },
@@ -1264,7 +1264,7 @@ CELERY_BEAT_SCHEDULE = {
         "description": "Daily business stats",
     },
     "purge-expired-tokens": {
-        "task": "api.tasks.purge_expired_tokens",
+        "task": "snapadmin.purge_expired_tokens",
         "schedule": crontab(hour=3, minute=0),   # daily 3am
         "description": "Remove expired API tokens",
     },
@@ -1332,7 +1332,7 @@ logger.error("payment_failed", reason="card_declined")</code></pre>
   <h3>Running the cleanup</h3>
   <pre><code># Via Celery Beat (recommended — add to CELERY_BEAT_SCHEDULE):
 "purge-expired-data": {
-    "task": "api.tasks.purge_expired_data",
+    "task": "snapadmin.purge_expired_data",
     "schedule": crontab(hour=1, minute=0),
 }
 
@@ -1398,7 +1398,7 @@ SNAPADMIN_ERROR_RETENTION_DAYS = 30           # ErrorEvents older than this are 
   <h3>Scheduling the digest</h3>
   <pre><code># Celery Beat — the send time is entirely yours:
 "send-error-digest": {
-    "task": "api.tasks.send_error_digest",
+    "task": "snapadmin.send_error_digest",
     "schedule": crontab(hour=8, minute=0),
 }
 
@@ -1480,7 +1480,7 @@ SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = 168       # weekly</code></pre>
   <code>*_EVERY_HOURS</code> interval has elapsed (last-run times persist in a state file, surviving restarts):</p>
   <pre><code># Celery Beat:
 "run-db-backups": {
-    "task": "api.tasks.run_db_backups",
+    "task": "snapadmin.run_db_backups",
     "schedule": crontab(minute=30),   # hourly due-check
 }
 
