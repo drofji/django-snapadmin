@@ -37,6 +37,8 @@ include = [
     "docs/releases/**/*.txt",
     "docs/migrations/**/*.md",
     { path = "CHANGELOG.md", format = ["sdist", "wheel"] },
+    { path = "THIRD_PARTY_NOTICES.md", format = ["sdist", "wheel"] },
+    { path = "SECURITY.md", format = ["sdist"] },
 ]
 
 # Extra links shown in the PyPI sidebar ("Project links"). `homepage`, `repository` and

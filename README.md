@@ -1818,8 +1818,16 @@ The full step-by-step is in [docs/index.html](docs/index.html) under
 
 ---
 
+## 🔒 Security
+
+See [SECURITY.md](SECURITY.md) for how to report a vulnerability, the built-in protections, and a
+production hardening checklist.
+
 ## 📜 License
 
-MIT License — see [LICENSE](LICENSE).
+MIT License — see [LICENSE](LICENSE). The base install uses only permissive (MIT/BSD/Apache-2.0)
+dependencies and is safe for commercial/proprietary use; anything copyleft or commercial is an opt-in
+extra. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for the full breakdown of what is used,
+what is optional, and under which licence.
 
 
