@@ -195,6 +195,8 @@ SNAPADMIN_GRAPHQL_ENABLED = os.getenv('SNAPADMIN_GRAPHQL_ENABLED', 'True') == 'T
 # Optional extra segment prepended to every snapadmin route (REST/Swagger/GraphQL),
 # for projects whose mount point already collides (e.g. they own /api/). Empty = no-op.
 SNAPADMIN_URL_PREFIX = os.getenv('SNAPADMIN_URL_PREFIX', '')
+# Dashboard is staff-gated by default (it exposes infra details). True = public.
+SNAPADMIN_DASHBOARD_PUBLIC = os.getenv('SNAPADMIN_DASHBOARD_PUBLIC', 'False') == 'True'
 
 # Smart ES query routing: `?search=` API requests on DUAL models run on
 # Elasticsearch (fuzzy, relevance-ranked) instead of DB icontains. Global

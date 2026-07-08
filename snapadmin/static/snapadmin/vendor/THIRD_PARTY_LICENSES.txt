@@ -1,0 +1,19 @@
+Third-party assets vendored into the SnapAdmin dashboard
+========================================================
+
+These files are bundled so the dashboard renders without any external network
+requests (air-gapped / offline friendly). They are unmodified except where noted.
+
+chart.umd.min.js
+    Chart.js v4.4.1
+    (c) Chart.js Contributors — MIT License
+    https://www.chartjs.org/  ·  https://github.com/chartjs/Chart.js
+    Full licence text: LICENSE-chartjs.txt
+
+material-icons.css, material-icons.woff2
+    Material Icons (Google) — Apache License 2.0
+    https://github.com/google/material-design-icons
+    The CSS is the upstream Google Fonts stylesheet with its single font `src`
+    URL rewritten to reference the sibling `material-icons.woff2` file instead of
+    fonts.gstatic.com; the font binary is unmodified.
+    Full licence text: LICENSE-material-icons.txt

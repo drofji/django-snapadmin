@@ -24,6 +24,9 @@ Removed
 Security
 ========
 
+The system dashboard is now staff-gated by default
+  ``DashboardView`` (the SnapAdmin dashboard) rendered infrastructure details — hostname, processor, operating system, database name, live service health and ``ALLOWED_HOSTS`` — to **anonymous** callers, an information-disclosure risk on any deployment that wired it into a public URLconf. Access now requires an authenticated staff user (``is_staff``): unauthenticated callers are redirected to the login page and authenticated non-staff users get ``403``. Set ``SNAPADMIN_DASHBOARD_PUBLIC = True`` to restore the old open behaviour (e.g. an intentionally public status page). If you relied on the dashboard being reachable without logging in, add that setting or log in as staff.
+
 Wysiwyg field values are now sanitized before they are rendered in the admin changelist
   Rich-text (wysiwyg) fields store raw HTML and default to ``show_in_list=True``, so their value is shown on the changelist page. Previously that value was passed straight to ``mark_safe``, which meant anyone able to write the field — a REST API token holder, a low-privileged staff member, or a bulk import — could store markup such as ``<img src=x onerror=...>`` that executed in an administrator's browser session (stored XSS, privilege escalation from field-write to admin-session). SnapAdmin now runs every wysiwyg value through an HTML sanitizer (``nh3``, a new core dependency) before marking it safe: common formatting is kept while ``<script>``, inline event handlers and unsafe URL schemes are stripped. Fields whose HTML is fully trusted can opt back into verbatim rendering with ``safe_html=True`` (e.g. ``SnapRichTextField(safe_html=True)``), and projects that need a custom policy can point the new ``SNAPADMIN_HTML_SANITIZER`` setting at their own ``Callable[[str], str]``. No database migration is required.
 
@@ -44,6 +47,9 @@ Synchronous ``count`` and streaming ``export`` actions on the dynamic model API 
 
 Fixed
 =====
+
+The dashboard now shows the real installed version and loads no external assets
+  The dashboard's version badge was hardcoded to ``0.1.0a9`` and drifted from the packaged version. It is now read from the installed distribution metadata (``importlib.metadata.version("django-snapadmin")``, exposed as ``snapadmin.__version__``), so it always matches what is installed. The dashboard template also pulled Material Icons (Google Fonts), Font Awesome (cdnjs) and Chart.js (jsDelivr) from external CDNs, so it broke on air-gapped/offline deployments and leaked requests to third parties. Chart.js and Material Icons are now vendored into the package's ``static/snapadmin/vendor/`` and served via ``{% static %}``; Font Awesome (used only for a single GitHub icon) was dropped in favour of an inline SVG. The dashboard now renders with **no external network requests**.
 
 ``SnapPhoneField`` now accepts spaced international numbers
   ``SnapPhoneValidator`` rejected the common ``+49 89 1234567`` form: its E.164 branch allowed no separators and its national branch allowed separators but no leading ``+``, so a ``+``-prefixed grouped number matched neither. The validator now strips grouping separators (spaces, hyphens, parentheses) before matching, so international spaced/grouped forms such as ``+49 89 1234567`` and ``+1 (555) 123-4567`` validate alongside plain E.164 and national numbers — making the documented "E.164 or common national formats" true. Obvious junk (letters, too short/long, an E.164 country code starting with ``0``) is still rejected.

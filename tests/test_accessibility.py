@@ -10,14 +10,14 @@ language.
 
 import pytest
 from django.template import Context, Template
-from django.test import Client
 
 
 @pytest.mark.django_db
 class TestDashboardAccessibility:
     @pytest.fixture
-    def html(self):
-        return Client().get("/").content.decode()
+    def html(self, admin_client):
+        # The dashboard is staff-gated; render it as an authenticated admin.
+        return admin_client.get("/").content.decode()
 
     def test_document_language(self, html):
         assert '<html lang="en">' in html
@@ -52,12 +52,12 @@ class TestDashboardAccessibility:
 
 @pytest.mark.django_db
 class TestCronTableScope:
-    def test_headers_have_scope(self, admin_user, settings):
+    def test_headers_have_scope(self, admin_client, settings):
         # The cron table only renders when a beat schedule is configured.
         settings.CELERY_BEAT_SCHEDULE = {
             "demo": {"task": "x", "schedule": "*/5", "description": "d"}
         }
-        html = Client().get("/").content.decode()
+        html = admin_client.get("/").content.decode()
         assert '<th scope="col">Name</th>' in html
 
 

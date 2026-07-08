@@ -26,6 +26,64 @@ def test_dashboard_view(admin_client):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Dashboard access gate (info-disclosure hardening) + real version
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+def test_dashboard_redirects_anonymous_to_login(client):
+    # Anonymous callers must not see infra details — they are sent to login.
+    response = client.get(reverse('dashboard'))
+    assert response.status_code == 302
+    assert '/login' in response['Location'] or 'accounts/login' in response['Location']
+
+
+@pytest.mark.django_db
+def test_dashboard_forbids_non_staff(client, django_user_model):
+    user = django_user_model.objects.create_user(username='plain', password='pw')
+    client.force_login(user)
+    response = client.get(reverse('dashboard'))
+    assert response.status_code == 403
+
+
+@pytest.mark.django_db
+def test_dashboard_public_opt_out_allows_anonymous(client, settings):
+    settings.SNAPADMIN_DASHBOARD_PUBLIC = True
+    response = client.get(reverse('dashboard'))
+    assert response.status_code == 200
+    assert b"SnapAdmin Dashboard" in response.content
+
+
+@pytest.mark.django_db
+def test_dashboard_loads_no_external_asset_hosts(admin_client):
+    # The dashboard must render air-gapped: no CDN/font stylesheets or scripts.
+    html = admin_client.get(reverse('dashboard')).content.decode()
+    for host in (
+        'fonts.googleapis.com',
+        'fonts.gstatic.com',
+        'cdnjs.cloudflare.com',
+        'cdn.jsdelivr.net',
+    ):
+        assert host not in html, f"external host {host} still referenced"
+    # ...and the vendored replacements are wired in.
+    assert 'snapadmin/vendor/material-icons.css' in html
+    assert 'snapadmin/vendor/chart.umd.min.js' in html
+    # font-awesome is gone; the GitHub icon is now inline SVG.
+    assert 'fa-github' not in html
+    assert '<svg' in html
+
+
+@pytest.mark.django_db
+def test_dashboard_version_read_from_package_metadata(admin_client):
+    # The version is no longer hardcoded — it must match the package's __version__.
+    import snapadmin
+
+    from snapadmin.views import DashboardView
+    ctx = DashboardView().get_context_data()
+    assert ctx['version'] == snapadmin.__version__
+    assert ctx['version'] != '0.1.0a9'  # the old hardcoded string is gone
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Dashboard context - ES storage mode per model
 # ─────────────────────────────────────────────────────────────────────────────
 

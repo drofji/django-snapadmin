@@ -1,13 +1,39 @@
 
 import os
 import platform
+from django.contrib.auth.mixins import AccessMixin
 from django.views.generic import TemplateView
 from django.conf import settings
 from django.urls import reverse
 from django.db import connections
 from django.db.utils import OperationalError
 
-class DashboardView(TemplateView):
+from snapadmin import __version__
+
+
+class StaffRequiredMixin(AccessMixin):
+    """Gate a view behind an authenticated staff user unless opted out.
+
+    The dashboard exposes infrastructure details (hostname, processor, database
+    name, service health, ``ALLOWED_HOSTS``), so it must not be world-readable by
+    default. Access requires ``is_staff``; unauthenticated callers are sent to the
+    login page and authenticated non-staff get a 403. Set
+    ``SNAPADMIN_DASHBOARD_PUBLIC = True`` to serve it without any gate (e.g. an
+    intentionally public status page).
+    """
+
+    def dispatch(self, request, *args, **kwargs):
+        if getattr(settings, "SNAPADMIN_DASHBOARD_PUBLIC", False):
+            return super().dispatch(request, *args, **kwargs)
+        user = request.user
+        if not (user.is_authenticated and user.is_staff):
+            # Anonymous → redirect to login; authenticated-but-not-staff → 403.
+            self.raise_exception = user.is_authenticated
+            return self.handle_no_permission()
+        return super().dispatch(request, *args, **kwargs)
+
+
+class DashboardView(StaffRequiredMixin, TemplateView):
     """
     Main SnapAdmin dashboard view providing system health monitoring,
     quick links, and environment details.
@@ -84,7 +110,7 @@ class DashboardView(TemplateView):
             "cron_jobs": cron_jobs,
             "debug": settings.DEBUG,
             "allowed_hosts": settings.ALLOWED_HOSTS,
-            "version": "0.1.0a9",
+            "version": __version__,
             "graphql_enabled": getattr(settings, "SNAPADMIN_GRAPHQL_ENABLED", True),
         })
         return context

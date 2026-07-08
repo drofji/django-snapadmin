@@ -399,6 +399,7 @@ SNAPADMIN_REST_API_ENABLED = True   # REST CRUD endpoints (/api/models/…, /api
 SNAPADMIN_GRAPHQL_ENABLED = True    # GraphQL endpoint (/api/graphql/)
 SNAPADMIN_SWAGGER_ENABLED = True    # Swagger UI + ReDoc (/api/docs/, /api/redoc/)
 SNAPADMIN_URL_PREFIX = ""           # Extra segment prepended to every snapadmin route (see below)
+SNAPADMIN_DASHBOARD_PUBLIC = False  # Dashboard is staff-gated by default; True serves it to anyone
 ELASTICSEARCH_ENABLED = False       # Elasticsearch integration as a whole
 
 # Smart ES query routing (see "REST API in Practice" below)
@@ -1487,6 +1488,8 @@ Copy `dist.env` to `.env` and configure:
 | `SNAPADMIN_QUERY_BACKEND_HEADER` | `True` | Expose the `X-Snap-Query-Backend` header on list responses |
 | `SNAPADMIN_GRAPHQL_REQUIRE_AUTH` | `True` | Require auth + per-model perms on every GraphQL resolver |
 | `SNAPADMIN_GRAPHIQL_ENABLED` | `DEBUG` | GraphiQL playground — keep out of production |
+| `SNAPADMIN_URL_PREFIX` | `""` | Extra path segment prepended to every snapadmin route (relocate the whole API/GraphQL/Swagger surface) |
+| `SNAPADMIN_DASHBOARD_PUBLIC` | `False` | Serve the system dashboard without the default staff gate |
 | `SNAPADMIN_USER_API_ENABLED` | `False` | Serve the admin-only user-management API (`/api/users/`, `/api/permissions/`) |
 | `SNAPADMIN_API_AUTHENTICATION_CLASSES` | token auth | API authenticator dotted paths (add session / JWT) |
 | `SNAPADMIN_ANALYTICS_DB_ALIAS` | — | `DATABASES` alias for read-only list/retrieve routing; empty = no routing |
