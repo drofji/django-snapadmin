@@ -12,17 +12,24 @@ from enum import Enum
 
 @deconstructible
 class SnapPhoneValidator:
-    """Validates phone numbers in E.164 or common national formats."""
+    """Validates phone numbers in E.164 or common national formats.
 
-    _PATTERN = re.compile(
-        r"^\+?[1-9]\d{1,14}$"
-        r"|"
-        r"^(\(\d{1,4}\)|\d{1,4})[\s\-]?\d{2,4}[\s\-]?\d{2,4}[\s\-]?\d{0,4}$"
-    )
+    Common grouping separators — spaces, hyphens and parentheses — are stripped
+    before matching, so the international spaced form (``+49 89 1234567``) and the
+    national grouped form (``(089) 123-456``) both validate, not only the
+    separator-free E.164 form.
+    """
+
+    #: Applied to the *separator-normalised* value. Two branches:
+    #:  * ``\+?[1-9]\d{6,14}`` — international / E.164 (optional ``+``, country or
+    #:    trunk digit 1-9, then 6–14 more): 7–15 digits, no leading zero.
+    #:  * ``\d{7,15}`` — national numbers that keep a leading trunk zero
+    #:    (e.g. German ``089…``), which E.164 drops.
+    _PATTERN = re.compile(r"^(\+?[1-9]\d{6,14}|\d{7,15})$")
 
     def __call__(self, value: str) -> None:
-        clean = re.sub(r"[\s\-\(\)]", "", value)
-        if not self._PATTERN.match(value) or len(clean) < 7:
+        clean = re.sub(r"[\s\-()]", "", value)
+        if not self._PATTERN.match(clean):
             raise ValidationError(
                 _("Enter a valid phone number (e.g. +49151234567 or 089-123456)."),
                 code="invalid_phone",

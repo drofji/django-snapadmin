@@ -30,6 +30,9 @@ Wysiwyg field values are now sanitized before they are rendered in the admin cha
 Added
 =====
 
+Relocate the whole URL surface with ``SNAPADMIN_URL_PREFIX``
+  Projects that already own the path SnapAdmin is mounted at — most often ``/api/`` — can now move every SnapAdmin route (REST, Swagger/ReDoc and GraphQL) under one extra segment without editing their URLconf. Set ``SNAPADMIN_URL_PREFIX = "snapadmin/"`` and ``include("snapadmin.urls")`` serves ``.../snapadmin/models/…``, ``.../snapadmin/docs/``, ``.../snapadmin/graphql/`` and so on. Route **names are unchanged**, so ``reverse("model-list", …)`` and ``{% url %}`` keep working regardless of the prefix; the default (empty) keeps the historical layout. The simpler fix — mounting under an unused path via ``path("snapadmin/", include("snapadmin.urls"))`` — still works and is preferred when you control the mount point; the setting is for cases where you don't (SnapAdmin included at the site root, or pinned by an intermediate URLconf).
+
 Admin-only bulk Elasticsearch reindex endpoint
   Ops can now trigger a full ES reindex over HTTP without shell access. ``POST /api/es/reindex/`` reindexes every ES-enabled SnapModel (the same set as the ``snapadmin_reindex`` command, via ``es_reindex_all``). It is **off by default** and only served when ``SNAPADMIN_REINDEX_API_ENABLED = True`` (while disabled it responds ``404``), and it requires a Django staff user (``IsAdminUser``). By default it runs synchronously and returns a per-model summary; set ``SNAPADMIN_REINDEX_API_ASYNC = True`` to offload it to the new ``snapadmin.run_es_reindex`` Celery task instead (``202`` + task id), which responds ``503`` with an actionable message when Celery isn't installed. An optional ``chunk_size`` (body or query) tunes the bulk batch size. The model-discovery logic is now shared between the command, the task and the endpoint (``snapadmin.models.reindexable_snapmodels`` / ``run_reindex``).
 
@@ -41,6 +44,9 @@ Synchronous ``count`` and streaming ``export`` actions on the dynamic model API 
 
 Fixed
 =====
+
+``SnapPhoneField`` now accepts spaced international numbers
+  ``SnapPhoneValidator`` rejected the common ``+49 89 1234567`` form: its E.164 branch allowed no separators and its national branch allowed separators but no leading ``+``, so a ``+``-prefixed grouped number matched neither. The validator now strips grouping separators (spaces, hyphens, parentheses) before matching, so international spaced/grouped forms such as ``+49 89 1234567`` and ``+1 (555) 123-4567`` validate alongside plain E.164 and national numbers — making the documented "E.164 or common national formats" true. Obvious junk (letters, too short/long, an E.164 country code starting with ``0``) is still rejected.
 
 Aggregations on SnapModels no longer return wrong grouped counts
   The base SnapModel manager used to inject a default ``order_by("-pk")`` onto every unordered queryset. Django appends ordering columns to the ``GROUP BY`` clause, so a plain aggregation such as ``Item.objects.values("status").annotate(n=Count("pk"))`` was silently grouped by ``(status, pk)`` — one row per object instead of one row per status, with every count equal to 1. The manager no longer injects any default ordering, so aggregations group correctly. The newest-first (``-pk``) default that the changelist relied on is now applied in the admin layer (via the generated ``ModelAdmin.ordering``) and in the REST list view — including the database fallback served when an Elasticsearch search errors out — so the admin order and API list pagination stay deterministic and unchanged. A model's own ``Meta.ordering`` is still honoured. No database migration is required.

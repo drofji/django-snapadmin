@@ -29,6 +29,14 @@ SWAGGER_ENABLED = getattr(settings, "SNAPADMIN_SWAGGER_ENABLED", True)
 GRAPHQL_ENABLED = getattr(settings, "SNAPADMIN_GRAPHQL_ENABLED", True)
 # Admin-only user management API — off by default (opt-in surface).
 USER_API_ENABLED = getattr(settings, "SNAPADMIN_USER_API_ENABLED", False)
+# Optional extra path segment prepended to *every* snapadmin route. Projects that
+# already own the mount point (e.g. they include snapadmin at the site root, or
+# under "/api/" which collides with their own API) can relocate the whole surface
+# — REST, Swagger and GraphQL — under one namespace without editing their URLconf,
+# by setting e.g. SNAPADMIN_URL_PREFIX = "snapadmin/". Empty (default) is a no-op
+# and keeps the historical layout. Route *names* are unchanged, so reverse() and
+# {% url %} keep working regardless of the prefix.
+URL_PREFIX = getattr(settings, "SNAPADMIN_URL_PREFIX", "")
 
 logger = structlog.get_logger(__name__)
 
@@ -146,3 +154,9 @@ if GRAPHQL_ENABLED:
         ]
     except Exception as e:
         logger.warning("graphql_setup_failed", error=str(e))
+
+# Relocate the whole surface under SNAPADMIN_URL_PREFIX when set. Wrapping the
+# assembled patterns in a single include() keeps every route name intact (no
+# namespace is introduced) so downstream reverse()/{% url %} calls are unaffected.
+if URL_PREFIX:
+    urlpatterns = [path(f"{URL_PREFIX.strip('/')}/", include(urlpatterns))]

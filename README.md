@@ -176,11 +176,14 @@ GET  /api/customer/        …same for every SnapModel
 **GraphQL Playground** — `http://localhost:8000/api/graphql/`
 ```graphql
 query {
-  allProducts(first: 10) {
-    edges { node { id name price available } }
+  # Field name is all<Applabel><Model>s — here app "demo" + model "Product".
+  # Plain list (not a Relay connection), so select fields directly — no edges/node.
+  allDemoProducts(first: 10, search: "laptop") {
+    id name price available
   }
 }
 ```
+See [GraphQL field naming](#graphql-field-naming) for the full scheme.
 
 **System Dashboard** — `http://localhost:8000/admin/snapadmin/dashboard/`
 ```
@@ -395,6 +398,7 @@ Disabling a toggle removes the corresponding URL routes entirely (requests retur
 SNAPADMIN_REST_API_ENABLED = True   # REST CRUD endpoints (/api/models/…, /api/tokens/…)
 SNAPADMIN_GRAPHQL_ENABLED = True    # GraphQL endpoint (/api/graphql/)
 SNAPADMIN_SWAGGER_ENABLED = True    # Swagger UI + ReDoc (/api/docs/, /api/redoc/)
+SNAPADMIN_URL_PREFIX = ""           # Extra segment prepended to every snapadmin route (see below)
 ELASTICSEARCH_ENABLED = False       # Elasticsearch integration as a whole
 
 # Smart ES query routing (see "REST API in Practice" below)
@@ -843,6 +847,17 @@ urlpatterns = [
 ]
 ```
 
+> **Already own `/api/`?** SnapAdmin's routes (`/models/…`, `/docs/`, `/graphql/`, `/tokens/`, …) are
+> mounted wherever you `include("snapadmin.urls")` — so the simplest fix is to mount them under a path
+> you don't use, e.g. `path("snapadmin/", include("snapadmin.urls"))`. If you can't change the mount
+> point (you include SnapAdmin at the site root, or an intermediate URLconf pins it under `/api/`), set
+> **`SNAPADMIN_URL_PREFIX = "snapadmin/"`** to relocate the *entire* surface — REST, Swagger and GraphQL
+> — under that extra segment (e.g. `/api/snapadmin/models/…`). Route **names are unchanged**, so
+> `reverse("model-list", …)` and `{% url %}` keep working; leave it empty (the default) for the
+> historical layout. To confirm nothing collides after wiring it up, run
+> `python manage.py check` and `python manage.py show_urls` (django-extensions) and look for duplicate
+> paths.
+
 Prefer to keep the generic viewset but change *how* it behaves globally (extra filters, custom
 pagination)? Subclass `DynamicModelViewSet` and point your own route at it.
 
@@ -1012,6 +1027,51 @@ SearchLog.snap_search("checkout")               # ES_ONLY: served straight from 
 for row in Product.objects.all().iterator(chunk_size=2000):
     ...
 ```
+
+### GraphQL field naming
+
+The schema is generated from your `SnapModel`s — you never write it by hand, so the
+field names follow a fixed scheme. For a model `Product` in an app whose label is
+`demo`, two root query fields are generated (graphene lower-camel-cases the Python
+names, since `auto_camelcase` is on):
+
+| Query field | Python name | Arguments | Returns |
+|-------------|-------------|-----------|---------|
+| `demoProduct` | `demo_product` | `id: ID!` (required) | one object by primary key |
+| `allDemoProducts` | `all_demo_products` | `search: String`, `first: Int`, `offset: Int` | a plain list of objects |
+
+The general form is **`<applabel><Model>`** for the single-object field and
+**`all<Applabel><Model>s`** for the list field (from the raw
+`{app_label}_{model_lower}` / `all_{app_label}_{model_lower}s`). Pluralisation is
+naïve — a trailing `s` is appended, so `Category` becomes `allDemoCategorys`, not
+`allDemoCategories`. The object type is named `<Applabel><Model>Type`
+(e.g. `DemoProductType`).
+
+List arguments:
+
+- **`search`** — full-text query; routed to Elasticsearch for `DUAL`/`ES_ONLY`
+  models (the same smart routing as the REST `?search=`), otherwise a DB filter.
+- **`first`** — max number of rows to return (also caps the ES search size).
+- **`offset`** — number of rows to skip (combine with `first` to paginate).
+
+The result is a **plain list**, not a Relay connection, so select fields directly —
+there is no `edges`/`node` wrapper:
+
+```graphql
+query {
+  allDemoProducts(search: "laptop", first: 10, offset: 20) {
+    id
+    name
+    price
+    available
+  }
+  demoProduct(id: 42) { id name price }
+}
+```
+
+Fields listed in a model's `api_exclude_fields` are omitted from its GraphQL type
+too, exactly as for REST. Add or remove `SnapModel`s to change what the schema
+exposes — don't edit the generated schema.
 
 ### GraphQL — same tokens, same permissions
 

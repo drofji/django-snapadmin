@@ -89,6 +89,20 @@ class Command(BaseCommand):
 
     help = "Seed the database with demo data for SnapAdmin showcase."
 
+    def _write(self, msg):
+        """Write ``msg`` to stdout, dropping characters the console can't encode.
+
+        The status lines use decorative emoji (🌱 / ✅ / ⚠). Windows consoles
+        commonly run cp1252, which cannot encode them, so an unguarded write
+        aborts the whole command with ``UnicodeEncodeError``. Sanitising against
+        the stream's own encoding keeps the emoji on UTF-8 terminals while
+        degrading gracefully (to ``?``) elsewhere. ``StringIO`` (used in tests)
+        has no ``encoding``, so it falls back to UTF-8 and prints them verbatim.
+        """
+        encoding = getattr(self.stdout, "encoding", None) or "utf-8"
+        safe = msg.encode(encoding, errors="replace").decode(encoding)
+        self.stdout.write(safe)
+
     def add_arguments(self, parser):
         parser.add_argument(
             "--count",
@@ -112,7 +126,7 @@ class Command(BaseCommand):
         flush    = options["flush"]
         no_index = options["no_index"]
 
-        self.stdout.write(self.style.MIGRATE_HEADING("🌱  SnapAdmin Demo Seeder"))
+        self._write(self.style.MIGRATE_HEADING("🌱  SnapAdmin Demo Seeder"))
         self.stdout.write(f"   Objects per type : {count}")
         self.stdout.write(f"   Flush first      : {flush}")
         self.stdout.write(f"   ES indexing      : {'disabled' if no_index else 'enabled'}")
@@ -133,7 +147,7 @@ class Command(BaseCommand):
             token       = self._ensure_api_token(admin) if admin else None
 
         self.stdout.write("")
-        self.stdout.write(self.style.SUCCESS("✅  Seeding complete!"))
+        self._write(self.style.SUCCESS("✅  Seeding complete!"))
         self.stdout.write(f"   Categories : {len(categories)}")
         self.stdout.write(f"   Tags       : {len(tags)}")
         self.stdout.write(f"   Products   : {len(products)}")
@@ -256,7 +270,7 @@ class Command(BaseCommand):
         """Create Order records linking customers to random totals."""
         self.stdout.write("   Creating orders…")
         if not customers or not products:
-            self.stdout.write(self.style.WARNING("   ⚠  No customers/products — skipping orders."))
+            self._write(self.style.WARNING("   ⚠  No customers/products — skipping orders."))
             return []
 
         db_customers = list(Customer.objects.all()[:count])
@@ -302,13 +316,13 @@ class Command(BaseCommand):
             password = os.getenv("SNAPADMIN_SEED_ADMIN_PASSWORD", "")
             if not password:
                 if not settings.DEBUG:
-                    self.stdout.write(self.style.ERROR(
+                    self._write(self.style.ERROR(
                         "   ✖ Refusing to create a default admin with DEBUG=False — "
                         "set SNAPADMIN_SEED_ADMIN_PASSWORD and re-run."
                     ))
                     return None
                 password = "admin"
-                self.stdout.write(self.style.WARNING(
+                self._write(self.style.WARNING(
                     "   ⚠  Default admin/admin created (DEBUG only) — set "
                     "SNAPADMIN_SEED_ADMIN_PASSWORD for a real password!"
                 ))
@@ -336,7 +350,7 @@ class Command(BaseCommand):
         """Attempt to index products to Elasticsearch. Silently skips when ES is unavailable."""
         from demo.search import index_product, is_es_available
         if not is_es_available():
-            self.stdout.write(self.style.WARNING("   ⚠  Elasticsearch not available — skipping index."))
+            self._write(self.style.WARNING("   ⚠  Elasticsearch not available — skipping index."))
             return
 
         self.stdout.write("   Indexing products to Elasticsearch…")

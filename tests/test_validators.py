@@ -219,3 +219,44 @@ class TestValidatorEquality:
         assert v != "not_a_validator"
         assert v != 42
         assert v != None  # noqa: E711
+
+
+# ─── SnapPhoneValidator ───────────────────────────────────────────────────────
+
+class TestSnapPhoneValidator:
+    """E.164, national and spaced-international formats all validate; junk does not."""
+
+    @pytest.mark.parametrize(
+        "number",
+        [
+            "+49151234567",        # E.164, no separators
+            "+49 89 1234567",      # spaced international (the reported gap)
+            "+1 (555) 123-4567",   # international with parens + hyphen
+            "089-123456",          # national, leading trunk zero + hyphen
+            "(089) 123 456",       # national, parens + spaces
+            "0891234567",          # national, digits only
+            "1234567",             # minimal 7 digits
+        ],
+    )
+    def test_accepts_valid_numbers(self, number):
+        from snapadmin.validators import SnapPhoneValidator
+
+        SnapPhoneValidator()(number)  # must not raise
+
+    @pytest.mark.parametrize(
+        "number",
+        [
+            "",                # empty
+            "12345",           # too short (< 7 digits)
+            "+0123456789",     # E.164 country code cannot start with 0
+            "++49123456789",   # double plus
+            "12-34-56-ab",     # letters
+            "+123456789012345678",  # far too long (> 15 digits)
+        ],
+    )
+    def test_rejects_invalid_numbers(self, number):
+        from snapadmin.validators import SnapPhoneValidator
+
+        with pytest.raises(ValidationError) as exc:
+            SnapPhoneValidator()(number)
+        assert exc.value.code == "invalid_phone"

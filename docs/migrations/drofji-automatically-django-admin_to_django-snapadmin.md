@@ -13,12 +13,12 @@ this is a **rename + settings swap, not a data migration**.
 
 ```bash
 pip uninstall drofji-automatically-django-admin
-pip install drofji-snapadmin
+pip install django-snapadmin
 # or pin the repo:
 pip install git+https://github.com/drofji/django-snapadmin.git
 ```
 
-If you pinned the old GitHub URL in `requirements.txt`, replace that line with `drofji-snapadmin`.
+If you pinned the old GitHub URL in `requirements.txt`, replace that line with `django-snapadmin`.
 
 ## 2. Rename the import root (`drofji_autoadmin` → `snapadmin`)
 
@@ -125,6 +125,17 @@ SNAPADMIN_ES_SEARCH_LIMIT  = 1000    # max ES hits per routed search
 SNAPADMIN_GRAPHQL_REQUIRE_AUTH = True  # auth + perms on every GraphQL resolver
 SNAPADMIN_GRAPHIQL_ENABLED = DEBUG     # GraphiQL playground — dev only
 ```
+
+> **Route collisions.** `include("snapadmin.urls")` mounts SnapAdmin's routes
+> (`models/…`, `docs/`, `redoc/`, `graphql/`, `tokens/`, `health/`, …) at whatever path you give it.
+> Mounting at the site root (`path("", …)`) as above puts them at the top level; if your project
+> already serves any of those paths, mount SnapAdmin under a prefix instead —
+> `path("snapadmin/", include("snapadmin.urls"))`. When you can't change the mount point (an
+> intermediate URLconf already pins SnapAdmin under, say, `/api/`, which your own API also uses), set
+> **`SNAPADMIN_URL_PREFIX = "snapadmin/"`** in settings to relocate the entire surface under that extra
+> segment without touching your URLconf. Route names are unchanged, so `reverse()`/`{% url %}` keep
+> resolving. After wiring, run `python manage.py check` to catch obvious problems and inspect your URL
+> map (e.g. `manage.py show_urls` from django-extensions) for duplicate paths.
 
 ## 8. Migrate & collect static
 

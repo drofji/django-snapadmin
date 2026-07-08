@@ -914,6 +914,17 @@ class BigModel(snap_models.SnapModel):
     <li><strong>Endpoint</strong>: <code>/api/graphql/</code>; GraphiQL follows <code>DEBUG</code> (override with <code>SNAPADMIN_GRAPHIQL_ENABLED</code>).</li>
   </ul>
 
+  <h3>Field naming</h3>
+  <p>The schema is generated, so field names follow a fixed scheme. For a model
+  <code>Product</code> in an app labelled <code>demo</code>, graphene lower-camel-cases the generated
+  names into <code>demoProduct(id: ID!)</code> (one object by primary key) and
+  <code>allDemoProducts(search, first, offset)</code> (a list). The general form is
+  <code>&lt;applabel&gt;&lt;Model&gt;</code> and <code>all&lt;Applabel&gt;&lt;Model&gt;s</code>; pluralisation
+  is naïve (a trailing <code>s</code>), so <code>Category</code> &rarr; <code>allDemoCategorys</code>. The
+  object type is <code>&lt;Applabel&gt;&lt;Model&gt;Type</code>. List results are a <strong>plain list</strong>,
+  not a Relay connection — select fields directly, with no <code>edges</code>/<code>node</code> wrapper.
+  Fields in a model's <code>api_exclude_fields</code> are dropped from its GraphQL type as well.</p>
+
   <h3>Request Examples</h3>
   <pre><code># Same API tokens as REST — anonymous callers get "Authentication required."
 curl -H "Authorization: Token $TOKEN" -H "Content-Type: application/json" \
@@ -1049,6 +1060,16 @@ class ProductViewSet(viewsets.ModelViewSet):
 router = DefaultRouter()
 router.register(r"api/product", ProductViewSet, basename="product")
 urlpatterns = [*router.urls, path("", include("snapadmin.urls"))]</code></pre>
+  <div class="callout">
+    <strong>Already own <code>/api/</code>?</strong> SnapAdmin's routes live wherever you
+    <code>include("snapadmin.urls")</code>, so the simplest fix is to mount them under an unused path
+    (<code>path("snapadmin/", include("snapadmin.urls"))</code>). If you can't change the mount point
+    (SnapAdmin is included at the site root, or an intermediate URLconf pins it under <code>/api/</code>),
+    set <code>SNAPADMIN_URL_PREFIX = "snapadmin/"</code> to relocate the <em>whole</em> surface — REST,
+    Swagger and GraphQL — under that extra segment. Route <strong>names are unchanged</strong>, so
+    <code>reverse()</code>/<code>{% url %}</code> keep working; empty (the default) keeps the historical
+    layout.
+  </div>
   <p>Prefer to keep the generic viewset but change how it behaves globally? Subclass
   <code>DynamicModelViewSet</code> and point your own route at it.</p>
 

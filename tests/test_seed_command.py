@@ -72,6 +72,24 @@ class TestSeedDemoCommand:
         output = self._call(count=3)
         assert "Seeding complete" in output or "✅" in output
 
+    def test_runs_on_cp1252_console_without_unicode_error(self):
+        # Windows consoles commonly use cp1252, which cannot encode the 🌱/✅/⚠
+        # emoji in the status lines. Seeding must still complete (no
+        # UnicodeEncodeError), degrading the un-encodable glyphs gracefully.
+        import io
+
+        buffer = io.BytesIO()
+        stream = io.TextIOWrapper(buffer, encoding="cp1252", newline="")
+        call_command("seed_demo", count=2, no_index=True, stdout=stream)
+        stream.flush()
+        output = buffer.getvalue().decode("cp1252")
+
+        # The run finished and its summary reached the cp1252 stream...
+        assert "Seeding complete" in output
+        # ...with the emoji dropped (replaced), not raising on the way out.
+        assert "🌱" not in output
+        assert "✅" not in output
+
     def test_output_prints_token_key(self):
         output = self._call(count=3)
         # The raw key is hashed at rest, so a re-fetched token only exposes its
