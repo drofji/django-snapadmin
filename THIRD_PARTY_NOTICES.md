@@ -25,8 +25,8 @@ copyleft or commercially-restricted is an **optional extra** you choose to insta
 
 ## Core runtime dependencies (installed by the base package)
 
-Everything a plain `pip install django-snapadmin` pulls in. All permissive except one weak-copyleft
-item, flagged below.
+Everything a plain `pip install django-snapadmin` pulls in. **All permissive (MIT / BSD / Apache-2.0)**
+— no copyleft or commercial code in the base install.
 
 | Package | Licence | | Used for |
 |---------|---------|---|----------|
@@ -40,13 +40,6 @@ item, flagged below.
 | structlog | MIT or Apache-2.0 | 🟢 | Structured logging |
 | colorama | BSD-3-Clause | 🟢 | Coloured console output |
 | nh3 | MIT | 🟢 | HTML sanitisation (wysiwyg stored-XSS defence) |
-| **django-admin-autocomplete-filter** | **LGPL-3.0** | 🟡 | Admin autocomplete filters |
-
-> **The one weak-copyleft core dependency** is `django-admin-autocomplete-filter` (LGPL-3.0). Used
-> unmodified as a normal pip dependency it is fine for commercial/proprietary use (dynamic linking);
-> keep it replaceable and don't ship a modified fork closed-source. If your policy requires a
-> strictly-permissive-only tree, it can be made an optional extra — open an issue/ask and it will be
-> moved behind an extra like the others.
 
 ## Optional extras (installed only when you ask for them)
 
@@ -57,6 +50,7 @@ Nothing here is installed by a base `pip install`. Install via, e.g., `pip insta
 | `elasticsearch` | elasticsearch | Apache-2.0 | 🟢 | Full-text search (`ES_ONLY` / `DUAL` models) |
 | `celery` | celery, django-celery-beat, django-celery-results | BSD-3 / BSD / BSD | 🟢 | Background tasks (async export, GDPR purge, digests, backups) |
 | `extra-settings` | django-extra-settings | MIT | 🟢 | In-admin dynamic key/value `Setting` model |
+| `autocomplete-filter` | django-admin-autocomplete-filter | **LGPL-3.0** | 🟡 | `AutocompleteFilter` list filters in your own admin |
 | `backup` | paramiko | **LGPL-2.1** | 🟡 | SFTP transport for offsite backups |
 | `wysiwyg` | django-ckeditor-5 (BSD wrapper) **bundling CKEditor 5** | **GPL-2.0+ or commercial** | 🔴 | Rich-text fields (`SnapRichTextField` / `wysiwyg=True`) |
 
@@ -67,8 +61,9 @@ Nothing here is installed by a base `pip install`. Install via, e.g., `pip insta
 > with rich-text editing, obtain a CKEditor licence (they offer a free tier) or provide your own
 > widget. Using a `wysiwyg=True` field without the extra raises a clear `ImproperlyConfigured`.
 >
-> **`backup` (paramiko)** is LGPL-2.1 — the same weak-copyleft guidance as above applies, and it is
-> already optional.
+> **`backup` (paramiko)** and **`autocomplete-filter` (django-admin-autocomplete-filter)** are LGPL
+> — weak copyleft, fine for proprietary use as unmodified dynamically-imported dependencies, and both
+> are optional so the base tree stays strictly permissive.
 
 ## Bundled front-end assets (shipped inside the package)
 
@@ -88,8 +83,8 @@ for the bundled attribution note and full licence files.
 
 ## Summary
 
-- A base `pip install django-snapadmin` is **permissive** (MIT/BSD/Apache) except the single
-  weak-copyleft LGPL admin-filter helper, which is safe for proprietary use as an unmodified dependency.
-- **No GPL/commercial code is installed by default.** The only such item, CKEditor 5, is opt-in via
-  `django-snapadmin[wysiwyg]`.
+- A base `pip install django-snapadmin` is **fully permissive** (MIT/BSD/Apache-2.0) — no copyleft or
+  commercial code at all.
+- **No GPL/commercial code is installed by default.** CKEditor 5 (GPL/commercial) is opt-in via
+  `django-snapadmin[wysiwyg]`; the LGPL helpers are opt-in via `[backup]` and `[autocomplete-filter]`.
 - Related policy: [`SECURITY.md`](SECURITY.md) → "Supply chain".

@@ -54,7 +54,7 @@ INSTALLED_APPS = [
     'drf_spectacular',              # REQUIRED
     'django_filters',               # REQUIRED
     'graphene_django',              # REQUIRED for GraphQL
-    'admin_auto_filters',           # REQUIRED
+    'admin_auto_filters',           # Optional extra: django-snapadmin[autocomplete-filter] (LGPL; core doesn't use it)
     'rangefilter',                  # REQUIRED
     'snapadmin',                    # REQUIRED
 

@@ -290,6 +290,7 @@ The base install is self-contained. Opt into extra integrations with pip extras:
 | `backup` | `django-snapadmin[backup]` | `paramiko` | SFTP offsite database backups |
 | `extra-settings` | `django-snapadmin[extra-settings]` | `django-extra-settings` | An in-admin dynamic key/value `Setting` model (as the demo shows) |
 | `wysiwyg` | `django-snapadmin[wysiwyg]` | `django-ckeditor-5` | Rich-text fields (`SnapRichTextField` / `wysiwyg=True`) |
+| `autocomplete-filter` | `django-snapadmin[autocomplete-filter]` | `django-admin-autocomplete-filter` | `AutocompleteFilter` list filters in your own admin (LGPL) |
 | `all` | `django-snapadmin[all]` | everything above | — |
 
 > **`extra-settings` is optional and not used by SnapAdmin's core** (it was a required dependency

@@ -31,6 +31,9 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 - **Changed:** the wysiwyg editor (`django-ckeditor-5`, which bundles GPL/commercial CKEditor 5) is now
   an optional `[wysiwyg]` extra, imported lazily — the base package stays permissively licensed for
   commercial use.
+- **Changed:** `django-admin-autocomplete-filter` (LGPL, unused by the core) is now the optional
+  `[autocomplete-filter]` extra — the base install is now **fully permissive** (MIT/BSD/Apache), no
+  copyleft/commercial code by default.
 - **Added:** a Python × Django compatibility matrix in the README and `Framework :: Django :: 6.0`
   / per-minor Python classifiers; the suite runs green on Django 6.0.
 - **Fixed:** aggregations on SnapModels no longer return wrong grouped counts (default `-pk` ordering

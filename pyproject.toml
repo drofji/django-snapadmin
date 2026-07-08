@@ -54,7 +54,6 @@ python = ">=3.10"
 Django = ">=5.2"
 django-admin-rangefilter = ">=0.13.3"
 django-unfold = ">=0.40.0"
-django-admin-autocomplete-filter = ">=0.7.1"
 djangorestframework = ">=3.15.0"
 drf-spectacular = ">=0.27.0"
 django-filter = ">=24.0"
@@ -83,13 +82,19 @@ django-extra-settings = {version = ">=0.12.0", optional = true}
 # base package carries no GPL/commercial editor unless you opt into rich-text editing.
 django-ckeditor-5 = {version = ">=0.0.12", optional = true}
 
+# Optional: django-admin-autocomplete-filter (LGPL-3.0). The package core does not import
+# it — kept out of core so the base tree is strictly permissive (MIT/BSD/Apache). Add it only
+# if you want AutocompleteFilter list filters in your own admin.
+django-admin-autocomplete-filter = {version = ">=0.7.1", optional = true}
+
 [tool.poetry.extras]
 elasticsearch = ["elasticsearch"]
 celery = ["celery", "django-celery-beat", "django-celery-results"]
 backup = ["paramiko"]
 extra-settings = ["django-extra-settings"]
 wysiwyg = ["django-ckeditor-5"]
-all = ["elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "django-extra-settings", "django-ckeditor-5"]
+autocomplete-filter = ["django-admin-autocomplete-filter"]
+all = ["elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "django-extra-settings", "django-ckeditor-5", "django-admin-autocomplete-filter"]
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.0.0"
@@ -109,6 +114,8 @@ paramiko = ">=3.0.0"
 django-extra-settings = ">=0.12.0"
 # Demo uses wysiwyg rich-text fields; the package core does not depend on it.
 django-ckeditor-5 = ">=0.0.12"
+# Listed in the sandbox INSTALLED_APPS; the package core does not import it (LGPL, optional).
+django-admin-autocomplete-filter = ">=0.7.1"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

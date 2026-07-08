@@ -16,6 +16,9 @@ Celery tasks moved to ``snapadmin/tasks.py`` and renamed to the ``snapadmin.*`` 
 The async-export endpoint now fails cleanly when Celery is not installed
   ``POST /api/exports/`` enqueues a Celery task, but Celery is an optional dependency. Calling it without Celery installed used to raise a bare ``ModuleNotFoundError`` (HTTP 500). It now returns **HTTP 503** with an actionable message telling you to install the ``celery`` extra and configure a broker.
 
+``django-admin-autocomplete-filter`` is now an optional extra
+  It was a core dependency but the package core never imported it (it was only listed in the sandbox's ``INSTALLED_APPS``). As an LGPL-3.0 package it was also the last non-permissive item in the base tree. It is now the opt-in ``django-snapadmin[autocomplete-filter]`` extra (also in ``[all]``), so **a base install is now fully permissive (MIT / BSD / Apache-2.0)** — no copyleft or commercial code by default. Add the extra only if you use ``AutocompleteFilter`` list filters in your own admin.
+
 The wysiwyg rich-text editor (CKEditor 5) is now an optional extra
   ``django-ckeditor-5`` bundles CKEditor 5, which is dual-licensed **GPL-2.0+ or commercial**. To keep the base package fully permissive (MIT/BSD/Apache) and safe for commercial/proprietary use, it is no longer a core dependency — install ``django-snapadmin[wysiwyg]`` (also in ``[all]``) only if you use rich-text fields (``SnapRichTextField`` / ``wysiwyg=True``). ``SnapModel`` no longer imports the CKEditor widget at module load; the import happens lazily when a wysiwyg field is actually rendered, and if the extra is missing it raises a clear ``ImproperlyConfigured`` pointing at ``pip install django-snapadmin[wysiwyg]``. **Action required only if** you use wysiwyg fields: add the ``[wysiwyg]`` extra and keep ``django_ckeditor_5`` in ``INSTALLED_APPS``. Projects without rich-text fields can drop ``django_ckeditor_5`` from ``INSTALLED_APPS`` entirely.
 
