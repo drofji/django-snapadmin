@@ -11,7 +11,7 @@ from datetime import timedelta
 from enum import Enum
 
 from django.apps import apps
-from django.core.exceptions import FieldDoesNotExist, ValidationError
+from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured, ValidationError
 from django.contrib import admin
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.admin.models import ADDITION, CHANGE, DELETION, LogEntry
@@ -56,7 +56,26 @@ except (ImportError, RuntimeError):  # pragma: no cover
         return decorator
     UNFOLD_INSTALLED = False
 
-from django_ckeditor_5.widgets import CKEditor5Widget
+
+def _wysiwyg_widget():
+    """Return a CKEditor 5 widget for wysiwyg fields, importing it lazily.
+
+    ``django-ckeditor-5`` bundles CKEditor 5 (a GPL / commercial editor), so it is
+    an **optional** dependency — only projects that actually use wysiwyg fields
+    need it. Importing it here (rather than at module load) lets SnapModels load
+    without it installed; the clear error only fires if a wysiwyg field is used.
+    """
+    try:
+        from django_ckeditor_5.widgets import CKEditor5Widget
+    except ImportError as exc:
+        raise ImproperlyConfigured(
+            "A SnapModel field sets wysiwyg=True, which needs the CKEditor 5 "
+            "rich-text editor. Install the optional extra "
+            "`pip install django-snapadmin[wysiwyg]`, add 'django_ckeditor_5' to "
+            "INSTALLED_APPS and define CKEDITOR_5_CONFIGS['extends']."
+        ) from exc
+    return CKEditor5Widget(config_name="extends")
+
 
 from snapadmin import fields as snapfields
 from snapadmin.fields import DjangoFieldAttributeEnum, SnapFieldAttributeEnum, SnapField
@@ -1483,7 +1502,7 @@ class SnapModel(models.Model):
 
         def formfield_for_dbfield(self, db_field, request, **kwargs):
             if isinstance(db_field, (models.TextField, snapfields.SnapTextField)) and getattr(db_field, "wysiwyg", False):
-                kwargs["widget"] = CKEditor5Widget(config_name="extends")
+                kwargs["widget"] = _wysiwyg_widget()
             return super(ModelAdmin, self).formfield_for_dbfield(db_field, request, **kwargs)
 
         def get_fieldsets(self, request, obj=None):

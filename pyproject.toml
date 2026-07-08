@@ -52,7 +52,6 @@ python = ">=3.10"
 Django = ">=5.2"
 django-admin-rangefilter = ">=0.13.3"
 django-unfold = ">=0.40.0"
-django-ckeditor-5 = ">=0.0.12"
 django-admin-autocomplete-filter = ">=0.7.1"
 djangorestframework = ">=3.15.0"
 drf-spectacular = ">=0.27.0"
@@ -77,12 +76,18 @@ paramiko = {version = ">=3.0.0", optional = true}
 # needed if you want a dynamic key/value Settings model in the admin (as the demo shows).
 django-extra-settings = {version = ">=0.12.0", optional = true}
 
+# Optional: wysiwyg rich-text fields (SnapRichTextField / wysiwyg=True). django-ckeditor-5
+# bundles CKEditor 5, which is GPL / commercial-licensed — kept out of the core so the
+# base package carries no GPL/commercial editor unless you opt into rich-text editing.
+django-ckeditor-5 = {version = ">=0.0.12", optional = true}
+
 [tool.poetry.extras]
 elasticsearch = ["elasticsearch"]
 celery = ["celery", "django-celery-beat", "django-celery-results"]
 backup = ["paramiko"]
 extra-settings = ["django-extra-settings"]
-all = ["elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "django-extra-settings"]
+wysiwyg = ["django-ckeditor-5"]
+all = ["elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "django-extra-settings", "django-ckeditor-5"]
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.0.0"
@@ -100,6 +105,8 @@ redis = ">=5.0.0"
 paramiko = ">=3.0.0"
 # Demo uses a dynamic Settings model; the package core does not depend on it.
 django-extra-settings = ">=0.12.0"
+# Demo uses wysiwyg rich-text fields; the package core does not depend on it.
+django-ckeditor-5 = ">=0.0.12"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

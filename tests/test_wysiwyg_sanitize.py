@@ -90,3 +90,34 @@ class TestWysiwygChangelistRender:
         finally:
             field.safe_html = original
             Product.get_admin_fields()  # rebuild override with the restored flag
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Optional CKEditor 5: the wysiwyg widget is imported lazily so the package works
+# without django-ckeditor-5 (a GPL/commercial editor) installed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestWysiwygWidgetOptional:
+    def test_returns_ckeditor_widget_when_installed(self):
+        from snapadmin.models import _wysiwyg_widget
+
+        widget = _wysiwyg_widget()
+        # It is the CKEditor 5 widget (configured for the "extends" config).
+        assert type(widget).__name__ == "CKEditor5Widget"
+
+    def test_raises_actionable_error_when_ckeditor_missing(self):
+        import sys
+        from unittest import mock
+        from django.core.exceptions import ImproperlyConfigured
+
+        from snapadmin.models import _wysiwyg_widget
+
+        # Simulate django-ckeditor-5 not being installed: a None entry in
+        # sys.modules makes `from django_ckeditor_5.widgets import ...` raise
+        # ImportError, which the helper must translate into a clear config error.
+        with mock.patch.dict(sys.modules, {"django_ckeditor_5.widgets": None}):
+            with pytest.raises(ImproperlyConfigured) as exc:
+                _wysiwyg_widget()
+        msg = str(exc.value)
+        assert "wysiwyg" in msg
+        assert "django-snapadmin[wysiwyg]" in msg

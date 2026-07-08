@@ -289,6 +289,7 @@ The base install is self-contained. Opt into extra integrations with pip extras:
 | `celery` | `django-snapadmin[celery]` | `celery`, `django-celery-beat`, `django-celery-results` | Background tasks (async export, GDPR purge, digests, backups) |
 | `backup` | `django-snapadmin[backup]` | `paramiko` | SFTP offsite database backups |
 | `extra-settings` | `django-snapadmin[extra-settings]` | `django-extra-settings` | An in-admin dynamic key/value `Setting` model (as the demo shows) |
+| `wysiwyg` | `django-snapadmin[wysiwyg]` | `django-ckeditor-5` | Rich-text fields (`SnapRichTextField` / `wysiwyg=True`) |
 | `all` | `django-snapadmin[all]` | everything above | — |
 
 > **`extra-settings` is optional and not used by SnapAdmin's core** (it was a required dependency
@@ -302,14 +303,22 @@ The base install is self-contained. Opt into extra integrations with pip extras:
 >   `EXTRA_SETTINGS_ADMIN_APP` and, if you want, subclass its admin with `unfold.admin.ModelAdmin` and
 >   re-register it yourself.
 
+> **`wysiwyg` and commercial use.** The rich-text editor (`django-ckeditor-5`) bundles **CKEditor 5**,
+> which is dual-licensed **GPL-2.0+ or commercial**. It is kept out of the base install so the core
+> package carries no GPL/commercial code — the base is permissive (MIT/BSD/Apache) and safe for
+> commercial and proprietary use. Opt into `[wysiwyg]` only if you want rich-text fields, and for a
+> commercial product obtain a CKEditor licence (they offer a free tier) or supply your own widget.
+> Without the extra, using a `wysiwyg=True` field raises a clear `ImproperlyConfigured` telling you to
+> install it. (This is not legal advice — review dependency licences with counsel for commercial use.)
+
 ---
 
 ## 🛠 Usage & Configuration
 
 ### 1. Configure Settings
 Add the required apps to `INSTALLED_APPS` in `settings.py`. **Order matters** — `unfold`
-and its contrib apps must come *before* `django.contrib.admin`, and `django_ckeditor_5`
-must be present because `SnapModel` imports the CKEditor 5 widget at load time:
+and its contrib apps must come *before* `django.contrib.admin`. Add `django_ckeditor_5`
+**only if you use wysiwyg rich-text fields** (the `[wysiwyg]` extra — see below):
 ```python
 INSTALLED_APPS = [
     # Theme — must precede django.contrib.admin
@@ -318,8 +327,8 @@ INSTALLED_APPS = [
     "unfold.contrib.forms",
     "unfold.contrib.inlines",
 
-    # WYSIWYG (required — imported by SnapModel)
-    "django_ckeditor_5",
+    # WYSIWYG — only with the [wysiwyg] extra (SnapRichTextField / wysiwyg=True)
+    # "django_ckeditor_5",
 
     # Django core
     "django.contrib.admin",
@@ -343,9 +352,11 @@ INSTALLED_APPS = [
     # Your apps …
 ]
 ```
-> Installing `django-snapadmin` pulls in `django-unfold`, `django-ckeditor-5`,
-> `djangorestframework`, `drf-spectacular`, `django-filter` and `graphene-django`
-> automatically — you only need to list them in `INSTALLED_APPS`.
+> Installing `django-snapadmin` pulls in `django-unfold`, `djangorestframework`,
+> `drf-spectacular`, `django-filter` and `graphene-django` automatically — you only need to
+> list them in `INSTALLED_APPS`. `django-ckeditor-5` is **not** installed by default (it bundles
+> CKEditor 5, a GPL/commercial editor) — add it via the `[wysiwyg]` extra only if you use rich-text
+> fields.
 
 ### 2. Define your Model
 ```python
