@@ -79,25 +79,3 @@ Aggregations on SnapModels no longer return wrong grouped counts
 ``upsert_from_source()`` now works on MySQL/MariaDB
   The generic ETL helper passed ``unique_fields`` unconditionally to ``bulk_create(update_conflicts=True)``. PostgreSQL and SQLite need that explicit ``ON CONFLICT`` target, but MySQL/MariaDB upsert through ``ON DUPLICATE KEY UPDATE``, which cannot take one — so on those backends every import raised ``NotSupportedError``. The helper now branches on ``connection.features.supports_update_conflicts_with_target``: the target columns are forwarded on PostgreSQL/SQLite and omitted (inferred from the matching unique index) on MySQL/MariaDB. ``unique_fields`` stays required on every backend as the documented conflict target.
 
-Examples:
-
-Added
-=====
-
-New feature description
-  Details about what it does, how to use it, any new settings or module names.
-
-Changed
-=======
-
-- Breaking change or significant behavior change with migration notes if needed.
-
-Fixed
-=====
-
-- Bug title and what was wrong, now corrected.
-
-Security
-========
-
-- Any security fixes, CVE refs, workarounds noted.
