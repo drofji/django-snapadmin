@@ -147,3 +147,54 @@ python manage.py collectstatic    # if you serve static yourself
 > **Don't run both packages at once.** Keeping `drofji_autoadmin` installed and in `INSTALLED_APPS`
 > alongside SnapAdmin makes both try to register the admin → `AlreadyRegistered`. Fully uninstall the
 > old package and remove it from `INSTALLED_APPS` before enabling SnapAdmin.
+
+## 9. Historical migration files that import the old field classes
+
+Your app's **existing** migration files froze the old field classes into their `deconstruct()`
+output — e.g. `('name', drofji_autoadmin.fields.AutoAdminCharField(max_length=200))`. Once
+`drofji_autoadmin` is uninstalled, **any** command that loads the migration graph
+(`migrate`, `makemigrations`, `showmigrations`, tests spinning up a fresh DB) raises:
+
+```
+ModuleNotFoundError: No module named 'drofji_autoadmin'
+```
+
+This does **not** touch your data — it is purely an import-time failure in the frozen migration
+files. Only apps whose models used the old `AutoAdmin*` field classes are affected; Django's own
+`auth`, `sessions`, `contenttypes`, admin and any third-party apps are untouched. Pick one fix:
+
+**Option A — keep the old package importable (no migration reset).**
+Leave `drofji-automatically-django-admin` *installed* (via pip) but **remove it from
+`INSTALLED_APPS`**. Its field classes stay importable so the frozen `deconstruct()` references
+resolve, while it no longer registers any admin (so no `AlreadyRegistered` clash). Simplest, but it
+leaves a dead dependency in your environment forever.
+
+**Option B — reset the app's migrations to a fresh `0001` (recommended for a clean tree).**
+
+```bash
+# 1. BACK UP THE DATABASE FIRST.
+# 2. Delete the app's historical migrations (keep the package marker).
+rm yourapp/migrations/0*.py            # leaves yourapp/migrations/__init__.py
+
+# 3. Regenerate a single initial migration from the (now Snap*) models.
+python manage.py makemigrations yourapp
+
+# 4. Tell Django it is already applied — WITHOUT touching the existing schema.
+python manage.py migrate yourapp 0001 --fake
+```
+
+Step 4's `--fake` is safe **only if** the regenerated `0001` describes the schema that is already in
+the database. It does: the `Snap*` field classes are the renamed predecessor classes with unchanged
+column output — the Snap-only options (`searchable`, `filterable`, `show_in_list`, `row`, `tab`, …)
+are stripped in `deconstruct()` and never reach the database (see the "avoid unnecessary migrations"
+note in the docs), so `SnapCharField(max_length=200)` and the old `AutoAdminCharField(max_length=200)`
+generate the *identical* `varchar(200)` column. Before faking, confirm nothing drifted:
+
+```bash
+python manage.py migrate yourapp 0001 --fake --plan   # review what will be marked applied
+python manage.py sqlmigrate yourapp 0001              # eyeball the DDL vs your live schema
+```
+
+If `sqlmigrate` shows a column your database doesn't already have (e.g. you also changed a field's
+`max_length` or nullability during the move), don't `--fake` — apply that one change for real, or run
+a normal `migrate` on a scratch copy first.

@@ -6,7 +6,7 @@ Breaking Changes
 
 Migration history reset. `snapadmin` and `demo` each carried five incremental migrations accumulated since the first alpha (`0001`–`0006`). Squashed both down to a single `0001_initial.py` per app reflecting the current schema — no more incremental history to carry into `0.1.0` stable.
 
-**If you installed a previous alpha and already ran `migrate`**, drop and recreate your database (or `manage.py migrate snapadmin zero && manage.py migrate demo zero` first) before migrating on this version — the old and new `0001_initial` are not compatible migration histories. No model or API changes; this is purely a migration-file reorganization.
+**If you installed a previous alpha and already ran `migrate`**, the old (`0001`–`0006`) and new (`0001_initial`) histories are not compatible, so `migrate` will report an inconsistent history. Because the squash changed no tables, the non-destructive fix is to reset only the recorded migration rows and fake-apply the new initial — delete the `django_migrations` rows where `app IN ('snapadmin', 'demo')`, then run `manage.py migrate snapadmin --fake && manage.py migrate demo --fake`. See docs/migrations/0.1.0a10_to_0.1.0a11.md for the exact commands and verification. Do **not** run `migrate snapadmin zero` — it drops the app's tables and their data, and fails anyway now that the intermediate migration files are gone. No model or API changes; this is purely a migration-file reorganization.
 
 Changed
 =======

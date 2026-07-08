@@ -10,21 +10,35 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 
 ## Unreleased
 
+> Upgrading from 0.1.0a11? Two changes need action (Celery task rename, dashboard gate) —
+> see [`docs/migrations/0.1.0a11_to_0.1.0a12.md`](docs/migrations/0.1.0a11_to_0.1.0a12.md).
+
+- **Changed (BREAKING):** Celery tasks moved to `snapadmin/tasks.py` and renamed to the `snapadmin.*`
+  namespace (from `api.tasks.*`) so `autodiscover_tasks()` finds them. Update every
+  `CELERY_BEAT_SCHEDULE` entry and any imports; no back-compat aliases are kept.
 - **Security:** the system dashboard is now staff-gated by default (it exposed hostname,
   processor, OS, database name, service health and `ALLOWED_HOSTS` to anonymous callers).
   Opt out with `SNAPADMIN_DASHBOARD_PUBLIC = True`.
+- **Security:** wysiwyg field values are sanitized (via `nh3`, a new core dependency) before being
+  rendered in the admin changelist; opt back into raw HTML per field with `safe_html=True`.
 - **Added:** `SNAPADMIN_URL_PREFIX` relocates the entire route surface (REST, Swagger, GraphQL)
   under one extra path segment for projects that already own the mount point; route names are
   unchanged.
+- **Added:** admin-only bulk ES reindex endpoint (`POST /api/es/reindex/`, gated), a deletion-veto
+  hook for the dynamic model API, and synchronous `count` / streaming NDJSON `export` actions.
+- **Changed:** `django-extra-settings` is now an optional extra (`django-snapadmin[extra-settings]`),
+  not a forced core dependency — SnapAdmin's core never used it.
 - **Added:** a Python × Django compatibility matrix in the README and `Framework :: Django :: 6.0`
   / per-minor Python classifiers; the suite runs green on Django 6.0.
+- **Fixed:** aggregations on SnapModels no longer return wrong grouped counts (default `-pk` ordering
+  no longer leaks into `GROUP BY`); `upsert_from_source()` works on MySQL/MariaDB.
 - **Fixed:** the dashboard shows the real installed version and loads no external assets
   (Chart.js + Material Icons vendored, Font Awesome dropped for an inline SVG).
 - **Fixed:** `SnapPhoneField` accepts spaced international numbers (e.g. `+49 89 1234567`).
 - **Fixed:** the demo seeder no longer crashes on a cp1252 Windows console.
 - **Docs:** GraphQL field-naming scheme documented; per-model admin extension points
   (`admin_mixins` / `admin_overrides` / `css_admin_files` / `js_admin_files`) documented; migration
-  guide install name and `/api/` collision handling corrected.
+  guide install name and `/api/` collision handling corrected; a CHANGELOG now ships to pip users.
 
 See [`docs/releases/Unreleased.txt`](docs/releases/Unreleased.txt) for the full notes.
 

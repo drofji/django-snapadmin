@@ -63,7 +63,7 @@ INSTALLED_APPS = [
     'django_celery_results',         # Store task results in Django DB
 
     # Other modules
-    'extra_settings',               # Optional
+    'extra_settings',               # Optional extra: pip install django-snapadmin[extra-settings]
 
     # Local Apps
     'demo',                          # Testing
@@ -490,8 +490,12 @@ CELERY_BEAT_SCHEDULE = {
 }
 
 # ------------------------------------------------------------------------------
-# EXTRA SETTINGS
+# EXTRA SETTINGS (optional — django-snapadmin[extra-settings]; used by the demo only)
 # ------------------------------------------------------------------------------
+# EXTRA_SETTINGS_ADMIN_APP must match an INSTALLED_APPS entry. This project lists
+# apps by their bare label ('demo'), so the bare label works here; a project that
+# lists apps by their AppConfig dotted path ('demo.apps.DemoConfig') must pass that
+# dotted path instead — a bare 'demo' would not be found in INSTALLED_APPS.
 EXTRA_SETTINGS_ADMIN_APP = "demo"
 EXTRA_SETTINGS_CACHE_NAME = "extra_settings"
 EXTRA_SETTINGS_VERBOSE_NAME = _("Settings")

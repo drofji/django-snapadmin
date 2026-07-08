@@ -279,6 +279,29 @@ releases; pin an exact version in production.
 > development, not a CI-enforced grid. Treat combinations outside the "currently exercised" cells as
 > supported-but-untested, and report any incompatibility you hit.
 
+### Optional extras
+
+The base install is self-contained. Opt into extra integrations with pip extras:
+
+| Extra | `pip install` | Pulls in | For |
+|-------|---------------|----------|-----|
+| `elasticsearch` | `django-snapadmin[elasticsearch]` | `elasticsearch` | Full-text search / `ES_ONLY` / `DUAL` models |
+| `celery` | `django-snapadmin[celery]` | `celery`, `django-celery-beat`, `django-celery-results` | Background tasks (async export, GDPR purge, digests, backups) |
+| `backup` | `django-snapadmin[backup]` | `paramiko` | SFTP offsite database backups |
+| `extra-settings` | `django-snapadmin[extra-settings]` | `django-extra-settings` | An in-admin dynamic key/value `Setting` model (as the demo shows) |
+| `all` | `django-snapadmin[all]` | everything above | — |
+
+> **`extra-settings` is optional and not used by SnapAdmin's core** (it was a required dependency
+> before — now it isn't). Install the extra only if you want the dynamic `Setting` model. Two gotchas:
+> - **`EXTRA_SETTINGS_ADMIN_APP` must match an `INSTALLED_APPS` entry.** If you register apps by their
+>   `AppConfig` dotted path (`"shop.apps.ShopConfig"`), pass that dotted string — a bare label
+>   (`"shop"`) won't be found. If you list bare labels, use the bare label.
+> - **The `Setting` admin is not Unfold-styled.** `django-extra-settings` registers its own plain
+>   `ModelAdmin`; SnapAdmin does not ship a themed replacement (that would re-introduce the hard
+>   dependency). To match the Unfold theme, re-home it into one of your apps via
+>   `EXTRA_SETTINGS_ADMIN_APP` and, if you want, subclass its admin with `unfold.admin.ModelAdmin` and
+>   re-register it yourself.
+
 ---
 
 ## 🛠 Usage & Configuration

@@ -54,7 +54,6 @@ django-admin-rangefilter = ">=0.13.3"
 django-unfold = ">=0.40.0"
 django-ckeditor-5 = ">=0.0.12"
 django-admin-autocomplete-filter = ">=0.7.1"
-django-extra-settings = ">=0.12.0"
 djangorestframework = ">=3.15.0"
 drf-spectacular = ">=0.27.0"
 django-filter = ">=24.0"
@@ -74,11 +73,16 @@ django-celery-results = {version = ">=2.5.0", optional = true}
 # Optional: SSH/SFTP offsite backup transport (SNAPADMIN_BACKUP_SFTP_*)
 paramiko = {version = ">=3.0.0", optional = true}
 
+# Optional: django-extra-settings — the package core does not use it; it is only
+# needed if you want a dynamic key/value Settings model in the admin (as the demo shows).
+django-extra-settings = {version = ">=0.12.0", optional = true}
+
 [tool.poetry.extras]
 elasticsearch = ["elasticsearch"]
 celery = ["celery", "django-celery-beat", "django-celery-results"]
 backup = ["paramiko"]
-all = ["elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko"]
+extra-settings = ["django-extra-settings"]
+all = ["elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "django-extra-settings"]
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.0.0"
@@ -94,6 +98,8 @@ django-celery-beat = ">=2.6.0"
 django-celery-results = ">=2.5.0"
 redis = ">=5.0.0"
 paramiko = ">=3.0.0"
+# Demo uses a dynamic Settings model; the package core does not depend on it.
+django-extra-settings = ">=0.12.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]
