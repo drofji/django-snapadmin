@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "django-snapadmin"
-version = "0.1.0a11"
+version = "0.1.0b1"
 description = "Define your Django models once — instantly get an admin panel, REST API, GraphQL and full-text search. Zero boilerplate."
 authors = ["Alexander Wiese"]
 license = "MIT"
@@ -10,7 +10,7 @@ repository = "https://github.com/drofji/django-snapadmin.git"
 documentation = "https://drofji.github.io/django-snapadmin/"
 keywords = ["django", "admin", "rest-api", "graphql", "elasticsearch", "unfold", "declarative"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Web Environment",
     "Framework :: Django",
     "Framework :: Django :: 5.2",

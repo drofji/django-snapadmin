@@ -6,12 +6,19 @@ version-by-version summary; the full, prose release notes for each version live 
 project documentation.
 
 The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and is in the
-**alpha** series (`0.1.0aN`) — the public API may still change between alphas.
+**beta** series (`0.1.0bN`) — the public API is stabilising but may still change before `0.1.0` stable.
 
 ## Unreleased
 
-> Upgrading from 0.1.0a11? Two changes need action (Celery task rename, dashboard gate) —
-> see [`docs/migrations/0.1.0a11_to_0.1.0a12.md`](docs/migrations/0.1.0a11_to_0.1.0a12.md).
+_Nothing yet._
+
+## 0.1.0b1 — 2026-07-08
+
+First beta. Completes a downstream-integrator feedback pass, hardens the dashboard, and reorganises
+optional dependencies so a base install is fully permissively licensed. Carries a few breaking changes.
+
+> Upgrading from 0.1.0a11? A few changes need action (Celery task rename, dashboard gate, deps moved
+> to extras) — see [`docs/migrations/0.1.0a11_to_0.1.0b1.md`](docs/migrations/0.1.0a11_to_0.1.0b1.md).
 
 - **Changed (BREAKING):** Celery tasks moved to `snapadmin/tasks.py` and renamed to the `snapadmin.*`
   namespace (from `api.tasks.*`) so `autodiscover_tasks()` finds them. Update every
@@ -46,7 +53,7 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   (`admin_mixins` / `admin_overrides` / `css_admin_files` / `js_admin_files`) documented; migration
   guide install name and `/api/` collision handling corrected; a CHANGELOG now ships to pip users.
 
-See [`docs/releases/Unreleased.txt`](docs/releases/Unreleased.txt) for the full notes.
+See [`docs/releases/0.1.0b1.txt`](docs/releases/0.1.0b1.txt) for the full notes.
 
 ## 0.1.0a11 — 2026-07-05
 

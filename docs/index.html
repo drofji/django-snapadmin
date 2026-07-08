@@ -221,7 +221,7 @@
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <h2>⚡ SnapAdmin</h2>
-    <span>Documentation v0.1.0a11</span>
+    <span>Documentation v0.1.0b1</span>
   </div>
   <div class="nav-search">
     <input type="search" id="navSearch" placeholder="Filter sections…" autocomplete="off">
@@ -282,15 +282,16 @@
     <p class="subtitle">Automatic, beautiful, production-ready Django Admin — zero boilerplate. REST &amp; GraphQL, Elasticsearch, offline mode and GDPR retention, all from your model definitions.</p>
 
     <div class="callout callout-success" style="text-align: left; margin: 18px auto 0;">
-      <strong>What's New in v0.1.0a11</strong>
-      <strong>Migration history reset — breaking for existing installs.</strong> <code>snapadmin</code>
-      and <code>demo</code> each squash their five incremental migrations into a single
-      <code>0001_initial.py</code>, ahead of the <code>0.1.0</code> stable cut. If you already ran
-      <code>migrate</code> on a previous alpha, drop and recreate your database before migrating on
-      this version. No model or API changes otherwise. a9's enterprise backlog (audit trail, async
-      export, fast pagination, 10-locale i18n, WCAG 2.1 AA, config health checks, ecosystem
-      compatibility) and a8's enterprise-config features (read-replica routing, PII masking, SSO,
-      admin nesting) remain — see <a href="#enterprise-config">Enterprise config</a>.
+      <strong>What's New in v0.1.0b1 — first beta</strong>
+      The alpha series graduates to beta after a downstream-integrator feedback pass. Highlights:
+      the whole route surface can be relocated with <code>SNAPADMIN_URL_PREFIX</code>; the system
+      dashboard is now <strong>staff-gated by default</strong> (info-disclosure fix) and renders with no
+      external assets; wysiwyg values are sanitized against stored XSS. Notably, optional dependencies
+      were reorganised so a <strong>base install is fully permissively licensed (MIT/BSD/Apache)</strong>
+      — CKEditor 5 (GPL/commercial) and the LGPL helpers now live behind opt-in extras.
+      <strong>Breaking:</strong> Celery tasks were renamed to the <code>snapadmin.*</code> namespace and
+      the dashboard gate is on by default — see
+      <a href="#migration-guides">the a11 → b1 migration guide</a>.
     </div>
 
     <div class="card-grid">
@@ -1880,14 +1881,14 @@ python manage.py seed_demo --no-index  # skip ES indexing (no ES cluster needed)
         <td><a href="https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/0.1.0a10_to_0.1.0a11.md">0.1.0a10_to_0.1.0a11.md</a></td>
       </tr>
       <tr>
-        <td>0.1.0a11 → 0.1.0a12 (Celery task rename, dashboard staff gate, wysiwyg/extra-settings now optional)</td>
-        <td><a href="https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/0.1.0a11_to_0.1.0a12.md">0.1.0a11_to_0.1.0a12.md</a></td>
+        <td>0.1.0a11 → 0.1.0b1 (Celery task rename, dashboard staff gate, deps moved to optional extras)</td>
+        <td><a href="https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/0.1.0a11_to_0.1.0b1.md">0.1.0a11_to_0.1.0b1.md</a></td>
       </tr>
     </tbody>
   </table>
 
   <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
-    SnapAdmin v0.1.0a11 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
+    SnapAdmin v0.1.0b1 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
   </div>
 
 </main>

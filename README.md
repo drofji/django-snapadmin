@@ -188,7 +188,7 @@ See [GraphQL field naming](#graphql-field-naming) for the full scheme.
 **System Dashboard** — `http://localhost:8000/admin/snapadmin/dashboard/`
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  System Dashboard                          v0.1.0a11    │
+│  System Dashboard                          v0.1.0b1     │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
 │  │ Product  │ │ Customer │ │  Order   │ │ AuditLog │  │
 │  │  50 rows │ │  50 rows │ │  50 rows │ │  50 rows │  │
@@ -266,8 +266,8 @@ pip install git+https://github.com/drofji/django-snapadmin.git
 ### Compatibility
 
 SnapAdmin requires **Python ≥ 3.10** and **Django ≥ 5.2** (no upper bound pinned). The package is
-**alpha** (`Development Status :: 3 - Alpha`) — the public API may still shift between `0.1.0aN`
-releases; pin an exact version in production.
+**beta** (`Development Status :: 4 - Beta`) — the public API is stabilising but may still change before
+`0.1.0` stable; pin an exact version in production.
 
 | | Versions | Status |
 |---|----------|--------|

@@ -4,19 +4,19 @@ This document covers how to report a vulnerability in **django-snapadmin**, whic
 fixes, the security features the package ships, and how to deploy it safely. For the licences of the
 code SnapAdmin depends on or bundles, see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
-> **Alpha software.** SnapAdmin is in the `0.1.0aN` alpha series and has **not** had an independent
+> **Beta software.** SnapAdmin is in the `0.1.0bN` beta series and has **not** had an independent
 > security audit. Review it before using it on sensitive or internet-facing deployments, and pin an
 > exact version in production.
 
 ## Supported versions
 
-Security fixes are made against the **latest published release** on PyPI. Older alphas do not receive
-backported patches — upgrade to the newest version to get security fixes.
+Security fixes are made against the **latest published release** on PyPI. Older pre-releases do not
+receive backported patches — upgrade to the newest version to get security fixes.
 
 | Version | Supported |
 |---------|-----------|
-| Latest `0.1.0aN` on PyPI | ✅ |
-| Any older alpha | ❌ (upgrade) |
+| Latest release on PyPI (currently `0.1.0b1`) | ✅ |
+| Any older alpha/beta | ❌ (upgrade) |
 
 ## Reporting a vulnerability
 

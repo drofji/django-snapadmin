@@ -1,0 +1,103 @@
+0.1.0b1 — 2026-07-08 — First Beta
+=================================
+
+The alpha series graduates to beta. This release completes a downstream-integrator feedback pass,
+hardens the dashboard, and — notably — reorganises optional dependencies so a base install is fully
+permissively licensed and safe for commercial use. It carries a few breaking changes (Celery task
+rename, dashboard staff gate, dependencies moved behind extras); see the migration guide.
+
+Upgrading: see docs/migrations/0.1.0a11_to_0.1.0b1.md for the exact steps.
+
+Changed
+=======
+
+Celery tasks moved to ``snapadmin/tasks.py`` and renamed to the ``snapadmin.*`` namespace (BREAKING)
+  The background tasks previously lived in ``snapadmin/api/tasks.py`` and were named ``api.tasks.*`` (e.g. ``api.tasks.purge_expired_data``). Because Celery's ``autodiscover_tasks()`` only scans ``<app>/tasks.py`` for each installed app, a standard Celery setup never registered them — Beat schedules produced "Received unregistered task" and the GDPR purge, error digest, database backups and async export silently never ran. The tasks now live in ``snapadmin/tasks.py`` (autodiscovered by the stock ``app.autodiscover_tasks()``) and are namespaced under ``snapadmin.*``. **Action required:** update every ``CELERY_BEAT_SCHEDULE`` entry, replacing ``"task": "api.tasks.X"`` with ``"task": "snapadmin.X"`` (``purge_expired_tokens``, ``purge_expired_data``, ``send_error_digest``, ``run_export``, ``run_db_backups``). If you imported these tasks in Python, change ``from snapadmin.api.tasks import ...`` to ``from snapadmin.tasks import ...``. No back-compat aliases are kept — the old names no longer resolve. Step-by-step upgrade instructions (with the full old→new task-name table) are in ``docs/migrations/0.1.0a11_to_0.1.0b1.md``.
+
+The async-export endpoint now fails cleanly when Celery is not installed
+  ``POST /api/exports/`` enqueues a Celery task, but Celery is an optional dependency. Calling it without Celery installed used to raise a bare ``ModuleNotFoundError`` (HTTP 500). It now returns **HTTP 503** with an actionable message telling you to install the ``celery`` extra and configure a broker.
+
+``django-admin-autocomplete-filter`` is now an optional extra
+  It was a core dependency but the package core never imported it (it was only listed in the sandbox's ``INSTALLED_APPS``). As an LGPL-3.0 package it was also the last non-permissive item in the base tree. It is now the opt-in ``django-snapadmin[autocomplete-filter]`` extra (also in ``[all]``), so **a base install is now fully permissive (MIT / BSD / Apache-2.0)** — no copyleft or commercial code by default. Add the extra only if you use ``AutocompleteFilter`` list filters in your own admin.
+
+The wysiwyg rich-text editor (CKEditor 5) is now an optional extra
+  ``django-ckeditor-5`` bundles CKEditor 5, which is dual-licensed **GPL-2.0+ or commercial**. To keep the base package fully permissive (MIT/BSD/Apache) and safe for commercial/proprietary use, it is no longer a core dependency — install ``django-snapadmin[wysiwyg]`` (also in ``[all]``) only if you use rich-text fields (``SnapRichTextField`` / ``wysiwyg=True``). ``SnapModel`` no longer imports the CKEditor widget at module load; the import happens lazily when a wysiwyg field is actually rendered, and if the extra is missing it raises a clear ``ImproperlyConfigured`` pointing at ``pip install django-snapadmin[wysiwyg]``. **Action required only if** you use wysiwyg fields: add the ``[wysiwyg]`` extra and keep ``django_ckeditor_5`` in ``INSTALLED_APPS``. Projects without rich-text fields can drop ``django_ckeditor_5`` from ``INSTALLED_APPS`` entirely.
+
+``django-extra-settings`` is now an optional extra, not a core dependency
+  SnapAdmin's core never imported ``django-extra-settings`` — only the demo uses it for its dynamic key/value ``Setting`` model — yet it was pulled in on every ``pip install django-snapadmin``. It is now an opt-in extra: ``pip install django-snapadmin[extra-settings]`` (also part of ``[all]``). **Action required only if** you relied on SnapAdmin installing it transitively and use its ``Setting`` model — add the extra, or depend on ``django-extra-settings`` directly. The README documents two integration gotchas that bit downstream users: ``EXTRA_SETTINGS_ADMIN_APP`` must match an ``INSTALLED_APPS`` entry (use the ``AppConfig`` dotted path if that is how you register apps, not the bare label), and the shipped ``Setting`` admin is not Unfold-themed (re-home it via ``EXTRA_SETTINGS_ADMIN_APP`` and subclass its admin if you want the theme — SnapAdmin does not ship a themed replacement, which would re-introduce the hard dependency).
+
+Removed
+=======
+
+- ``snapadmin/api/tasks.py`` and the ``api.tasks.*`` task names — replaced by ``snapadmin/tasks.py`` / ``snapadmin.*`` (see Changed).
+
+Security
+========
+
+The system dashboard is now staff-gated by default
+  ``DashboardView`` (the SnapAdmin dashboard) rendered infrastructure details — hostname, processor, operating system, database name, live service health and ``ALLOWED_HOSTS`` — to **anonymous** callers, an information-disclosure risk on any deployment that wired it into a public URLconf. Access now requires an authenticated staff user (``is_staff``): unauthenticated callers are redirected to the login page and authenticated non-staff users get ``403``. Set ``SNAPADMIN_DASHBOARD_PUBLIC = True`` to restore the old open behaviour (e.g. an intentionally public status page). If you relied on the dashboard being reachable without logging in, add that setting or log in as staff. See ``docs/migrations/0.1.0a11_to_0.1.0b1.md``.
+
+Wysiwyg field values are now sanitized before they are rendered in the admin changelist
+  Rich-text (wysiwyg) fields store raw HTML and default to ``show_in_list=True``, so their value is shown on the changelist page. Previously that value was passed straight to ``mark_safe``, which meant anyone able to write the field — a REST API token holder, a low-privileged staff member, or a bulk import — could store markup such as ``<img src=x onerror=...>`` that executed in an administrator's browser session (stored XSS, privilege escalation from field-write to admin-session). SnapAdmin now runs every wysiwyg value through an HTML sanitizer (``nh3``, a new core dependency) before marking it safe: common formatting is kept while ``<script>``, inline event handlers and unsafe URL schemes are stripped. Fields whose HTML is fully trusted can opt back into verbatim rendering with ``safe_html=True`` (e.g. ``SnapRichTextField(safe_html=True)``), and projects that need a custom policy can point the new ``SNAPADMIN_HTML_SANITIZER`` setting at their own ``Callable[[str], str]``. No database migration is required.
+
+Added
+=====
+
+A CHANGELOG is now shipped to pip users, and stale issue references were removed
+  A concise, version-by-version ``CHANGELOG.md`` now lives at the repository root and is included in **both** the source distribution and the wheel (previously the per-version notes under ``docs/releases/`` shipped in the sdist only, so ``pip install``-only users had no changelog). A ``Changelog`` project URL points PyPI and ``pip show`` at it; ``docs/releases/*.txt`` remains the full, authoritative release notes and ``CHANGELOG.md`` the short index. Separately, the ``(issue #N)`` markers scattered through the package's docstrings and comments were removed — they referred to a planning notebook, not a public tracker, so they resolved to nothing for anyone reading the installed source.
+
+Compatibility matrix and Django 6.0 support declared
+  The README now carries a Python × Django compatibility matrix (supported range vs the versions the suite is actively exercised against) and calls out the alpha API-stability caveat. The package metadata adds ``Framework :: Django :: 6.0`` and per-minor ``Programming Language :: Python :: 3.10``–``3.13`` classifiers to match the declared ``python >= 3.10`` / ``Django >= 5.2`` support; the full suite currently runs green on Django 6.0. There is still no automated multi-version CI grid, so combinations outside the exercised cells are supported-but-untested.
+
+Security policy and third-party licence notices
+  The project now ships a ``SECURITY.md`` (how to report a vulnerability, the built-in protections, and a production hardening checklist) and a ``THIRD_PARTY_NOTICES.md`` (every runtime dependency and optional extra with its licence and a permissive/weak-copyleft/commercial tier, so it is clear at a glance what a base install pulls in versus what is opt-in). ``THIRD_PARTY_NOTICES.md`` ships in the sdist and wheel; ``SECURITY.md`` in the sdist. Both are linked from the README.
+
+Relocate the whole URL surface with ``SNAPADMIN_URL_PREFIX``
+  Projects that already own the path SnapAdmin is mounted at — most often ``/api/`` — can now move every SnapAdmin route (REST, Swagger/ReDoc and GraphQL) under one extra segment without editing their URLconf. Set ``SNAPADMIN_URL_PREFIX = "snapadmin/"`` and ``include("snapadmin.urls")`` serves ``.../snapadmin/models/…``, ``.../snapadmin/docs/``, ``.../snapadmin/graphql/`` and so on. Route **names are unchanged**, so ``reverse("model-list", …)`` and ``{% url %}`` keep working regardless of the prefix; the default (empty) keeps the historical layout. The simpler fix — mounting under an unused path via ``path("snapadmin/", include("snapadmin.urls"))`` — still works and is preferred when you control the mount point; the setting is for cases where you don't (SnapAdmin included at the site root, or pinned by an intermediate URLconf).
+
+Admin-only bulk Elasticsearch reindex endpoint
+  Ops can now trigger a full ES reindex over HTTP without shell access. ``POST /api/es/reindex/`` reindexes every ES-enabled SnapModel (the same set as the ``snapadmin_reindex`` command, via ``es_reindex_all``). It is **off by default** and only served when ``SNAPADMIN_REINDEX_API_ENABLED = True`` (while disabled it responds ``404``), and it requires a Django staff user (``IsAdminUser``). By default it runs synchronously and returns a per-model summary; set ``SNAPADMIN_REINDEX_API_ASYNC = True`` to offload it to the new ``snapadmin.run_es_reindex`` Celery task instead (``202`` + task id), which responds ``503`` with an actionable message when Celery isn't installed. An optional ``chunk_size`` (body or query) tunes the bulk batch size. The model-discovery logic is now shared between the command, the task and the endpoint (``snapadmin.models.reindexable_snapmodels`` / ``run_reindex``).
+
+Deletion-veto extension points for the dynamic model API
+  Projects can now forbid deleting specific objects through the REST API without re-mounting any routes. Before a ``DELETE`` the endpoint consults two guards, both of which must allow the delete (otherwise it responds ``403 Forbidden``): a per-object ``SnapModel.api_can_delete(request) -> bool`` hook (override it on a model — the base implementation allows) and a project-wide ``SNAPADMIN_API_DELETE_GUARD`` setting (a dotted path to, or a direct, ``Callable[[request, obj], bool]``). This runs after the normal model ``delete`` permission check, so it layers business rules ("superusers are undeletable", "system rows are protected") on top of permissions. Both default to allowing, so existing behaviour is unchanged.
+
+Synchronous ``count`` and streaming ``export`` actions on the dynamic model API (no Celery)
+  Two new read-only endpoints complement the Celery-backed ``/api/exports/`` jobs for projects that don't run a worker. ``GET /api/models/<app>/<Model>/count/?<filters>`` returns ``{"count": N}`` for the filtered queryset — a cheap way to size a result set or a paginator without pulling rows. ``GET /api/models/<app>/<Model>/export/?<filters>[&limit=N]`` streams **every** matching row as newline-delimited JSON (``application/x-ndjson``), one serialized object per line, with no pagination and an optional row cap. Both reuse the list view's filter, search and permission backends (the model's ``view`` permission is required), and the export pulls rows lazily in chunks (``SNAPADMIN_EXPORT_CHUNK_SIZE``, default 1000, shared with the async export) so arbitrarily large tables never materialise in memory.
+
+Fixed
+=====
+
+The dashboard now shows the real installed version and loads no external assets
+  The dashboard's version badge was hardcoded to ``0.1.0a9`` and drifted from the packaged version. It is now read from the installed distribution metadata (``importlib.metadata.version("django-snapadmin")``, exposed as ``snapadmin.__version__``), so it always matches what is installed. The dashboard template also pulled Material Icons (Google Fonts), Font Awesome (cdnjs) and Chart.js (jsDelivr) from external CDNs, so it broke on air-gapped/offline deployments and leaked requests to third parties. Chart.js and Material Icons are now vendored into the package's ``static/snapadmin/vendor/`` and served via ``{% static %}``; Font Awesome (used only for a single GitHub icon) was dropped in favour of an inline SVG. The dashboard now renders with **no external network requests**.
+
+``SnapPhoneField`` now accepts spaced international numbers
+  ``SnapPhoneValidator`` rejected the common ``+49 89 1234567`` form: its E.164 branch allowed no separators and its national branch allowed separators but no leading ``+``, so a ``+``-prefixed grouped number matched neither. The validator now strips grouping separators (spaces, hyphens, parentheses) before matching, so international spaced/grouped forms such as ``+49 89 1234567`` and ``+1 (555) 123-4567`` validate alongside plain E.164 and national numbers — making the documented "E.164 or common national formats" true. Obvious junk (letters, too short/long, an E.164 country code starting with ``0``) is still rejected.
+
+Aggregations on SnapModels no longer return wrong grouped counts
+  The base SnapModel manager used to inject a default ``order_by("-pk")`` onto every unordered queryset. Django appends ordering columns to the ``GROUP BY`` clause, so a plain aggregation such as ``Item.objects.values("status").annotate(n=Count("pk"))`` was silently grouped by ``(status, pk)`` — one row per object instead of one row per status, with every count equal to 1. The manager no longer injects any default ordering, so aggregations group correctly. The newest-first (``-pk``) default that the changelist relied on is now applied in the admin layer (via the generated ``ModelAdmin.ordering``) and in the REST list view — including the database fallback served when an Elasticsearch search errors out — so the admin order and API list pagination stay deterministic and unchanged. A model's own ``Meta.ordering`` is still honoured. No database migration is required.
+
+``upsert_from_source()`` now works on MySQL/MariaDB
+  The generic ETL helper passed ``unique_fields`` unconditionally to ``bulk_create(update_conflicts=True)``. PostgreSQL and SQLite need that explicit ``ON CONFLICT`` target, but MySQL/MariaDB upsert through ``ON DUPLICATE KEY UPDATE``, which cannot take one — so on those backends every import raised ``NotSupportedError``. The helper now branches on ``connection.features.supports_update_conflicts_with_target``: the target columns are forwarded on PostgreSQL/SQLite and omitted (inferred from the matching unique index) on MySQL/MariaDB. ``unique_fields`` stays required on every backend as the documented conflict target.
+
+Examples:
+
+Added
+=====
+
+New feature description
+  Details about what it does, how to use it, any new settings or module names.
+
+Changed
+=======
+
+- Breaking change or significant behavior change with migration notes if needed.
+
+Fixed
+=====
+
+- Bug title and what was wrong, now corrected.
+
+Security
+========
+
+- Any security fixes, CVE refs, workarounds noted.
