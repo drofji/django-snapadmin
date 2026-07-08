@@ -85,7 +85,7 @@ def send_error_digest(self, hours: int = 24):
 
 @shared_task(bind=True, name="snapadmin.run_export", acks_late=True)
 def run_export(self, job_id):
-    """Run (or resume) a background CSV/JSON export job (issue #6).
+    """Run (or resume) a background CSV/JSON export job.
 
     ``acks_late`` + the job's resumable writer mean a worker restart re-runs the
     task and continues from the last persisted chunk instead of starting over.

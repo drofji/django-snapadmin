@@ -1,7 +1,7 @@
 """
 snapadmin/masking.py
 
-PII data masking (issue #12).
+PII data masking.
 
 Obfuscates sensitive fields (emails, phone numbers, IDs, …) in both the admin
 and the auto-generated REST API. Which fields are sensitive is declared once, in

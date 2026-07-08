@@ -1,7 +1,7 @@
 """
 snapadmin/pagination.py
 
-Fast, timeout-proof pagination for very large admin tables (issue #5).
+Fast, timeout-proof pagination for very large admin tables.
 
 On a multi-million-row table the changelist's ``SELECT COUNT(*)`` is the single
 most expensive query — it can dominate render time or time out entirely.

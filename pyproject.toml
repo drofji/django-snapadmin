@@ -14,11 +14,16 @@ classifiers = [
     "Environment :: Web Environment",
     "Framework :: Django",
     "Framework :: Django :: 5.2",
+    "Framework :: Django :: 6.0",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Software Development :: Libraries :: Application Frameworks",
     "Topic :: Internet :: WWW/HTTP :: Site Management",
 ]
@@ -31,6 +36,7 @@ include = [
     "snapadmin/locale/**/*",
     "docs/releases/**/*.txt",
     "docs/migrations/**/*.md",
+    { path = "CHANGELOG.md", format = ["sdist", "wheel"] },
 ]
 
 # Extra links shown in the PyPI sidebar ("Project links"). `homepage`, `repository` and
@@ -39,6 +45,7 @@ include = [
 [tool.poetry.urls]
 Issues = "https://github.com/drofji/django-snapadmin/issues"
 Releases = "https://github.com/drofji/django-snapadmin/releases"
+Changelog = "https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md"
 
 [tool.poetry.dependencies]
 python = ">=3.10"

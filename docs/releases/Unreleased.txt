@@ -33,6 +33,12 @@ Wysiwyg field values are now sanitized before they are rendered in the admin cha
 Added
 =====
 
+A CHANGELOG is now shipped to pip users, and stale issue references were removed
+  A concise, version-by-version ``CHANGELOG.md`` now lives at the repository root and is included in **both** the source distribution and the wheel (previously the per-version notes under ``docs/releases/`` shipped in the sdist only, so ``pip install``-only users had no changelog). A ``Changelog`` project URL points PyPI and ``pip show`` at it; ``docs/releases/*.txt`` remains the full, authoritative release notes and ``CHANGELOG.md`` the short index. Separately, the ``(issue #N)`` markers scattered through the package's docstrings and comments were removed — they referred to a planning notebook, not a public tracker, so they resolved to nothing for anyone reading the installed source.
+
+Compatibility matrix and Django 6.0 support declared
+  The README now carries a Python × Django compatibility matrix (supported range vs the versions the suite is actively exercised against) and calls out the alpha API-stability caveat. The package metadata adds ``Framework :: Django :: 6.0`` and per-minor ``Programming Language :: Python :: 3.10``–``3.13`` classifiers to match the declared ``python >= 3.10`` / ``Django >= 5.2`` support; the full suite currently runs green on Django 6.0. There is still no automated multi-version CI grid, so combinations outside the exercised cells are supported-but-untested.
+
 Relocate the whole URL surface with ``SNAPADMIN_URL_PREFIX``
   Projects that already own the path SnapAdmin is mounted at — most often ``/api/`` — can now move every SnapAdmin route (REST, Swagger/ReDoc and GraphQL) under one extra segment without editing their URLconf. Set ``SNAPADMIN_URL_PREFIX = "snapadmin/"`` and ``include("snapadmin.urls")`` serves ``.../snapadmin/models/…``, ``.../snapadmin/docs/``, ``.../snapadmin/graphql/`` and so on. Route **names are unchanged**, so ``reverse("model-list", …)`` and ``{% url %}`` keep working regardless of the prefix; the default (empty) keeps the historical layout. The simpler fix — mounting under an unused path via ``path("snapadmin/", include("snapadmin.urls"))`` — still works and is preferred when you control the mount point; the setting is for cases where you don't (SnapAdmin included at the site root, or pinned by an intermediate URLconf).
 

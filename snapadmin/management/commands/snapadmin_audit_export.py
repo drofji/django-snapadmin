@@ -1,7 +1,7 @@
 """
 management/commands/snapadmin_audit_export.py
 
-Export the SnapAdmin audit trail for an external SIEM (issue #7).
+Export the SnapAdmin audit trail for an external SIEM.
 
 Streams audit-log rows to stdout (or ``--output FILE``) as newline-delimited
 JSON (default, ideal for log shippers) or CSV. Filter by time window, action,

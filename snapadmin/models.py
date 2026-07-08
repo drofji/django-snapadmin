@@ -252,7 +252,7 @@ class ErrorEvent(models.Model):
 
 
 class SnapadminAuditLog(models.Model):
-    """An append-only record of one administrative create/update/delete (issue #7).
+    """An append-only record of one administrative create/update/delete.
 
     Written by :func:`snapadmin.audit.record_audit` for actions performed through
     a SnapAdmin-generated admin. Rows are **immutable**: ``save`` refuses to
@@ -302,7 +302,7 @@ class SnapadminAuditLog(models.Model):
 
 
 class SnapExportJob(models.Model):
-    """A background CSV/JSON export of a model's rows (issue #6).
+    """A background CSV/JSON export of a model's rows.
 
     Created via ``POST /api/exports/``; a Celery task
     (``snapadmin.run_export``) fills it in chunk by chunk, updating
@@ -603,7 +603,7 @@ class SnapSaveMixin:
     def save_model(self, request, obj, form, change):
         if not change:
             super().save_model(request, obj, form, change)
-            # Audit trail (issue #7): snapshot the created field values.
+            # Audit trail: snapshot the created field values.
             from snapadmin import audit
             created = {
                 name: {"old": None, "new": audit.format_value(form.cleaned_data.get(name))}
@@ -641,7 +641,7 @@ class SnapSaveMixin:
             audit.record_audit(request, audit.UPDATE, obj, changes)
 
     def delete_model(self, request, obj):
-        # Capture the object before it is gone (issue #7).
+        # Capture the object before it is gone.
         from snapadmin import audit
         audit.record_audit(request, audit.DELETE, obj, None)
         super().delete_model(request, obj)
@@ -698,7 +698,7 @@ class SnapModel(models.Model):
     css_admin_files = []
     snap_inlines = []
     admin_sections = []
-    # Ecosystem compatibility (issue #1): extra ModelAdmin base classes prepended
+    # Ecosystem compatibility: extra ModelAdmin base classes prepended
     # to the auto-generated admin, so third-party admin mixins compose with
     # SnapAdmin's config instead of replacing it — e.g.
     #   admin_mixins = [ImportExportModelAdmin]         # django-import-export
@@ -1460,7 +1460,7 @@ class SnapModel(models.Model):
             "list_per_page": cls.list_per_page,
             "list_max_show_all": cls.list_max_show_all,
             "show_full_result_count": cls.show_full_result_count,
-            # Fast, timeout-proof changelist count on huge tables (issue #5).
+            # Fast, timeout-proof changelist count on huge tables.
             # Safe by construction: only estimates unfiltered, large PostgreSQL
             # tables, exact everywhere else (see snapadmin.pagination).
             "paginator": EstimatedCountPaginator,
@@ -1490,7 +1490,7 @@ class SnapModel(models.Model):
             # If we have rows, Unfold needs specific layout classes
             fs = super(ModelAdmin, self).get_fieldsets(request, obj)
 
-            # PII masking (issue #12): drop masked fields from the change form for
+            # PII masking: drop masked fields from the change form for
             # users without PII access, so raw values never reach an editable
             # input. The changelist shows them masked (see PIIMaskingAdminMixin).
             from snapadmin.masking import get_masked_fields, user_can_view_pii
@@ -1524,7 +1524,7 @@ class SnapModel(models.Model):
         admin_attrs["get_fieldsets"] = get_fieldsets
         admin_attrs.update(getattr(cls, "admin_overrides", {}))
 
-        # Ecosystem admin mixins (issue #1) come first in the MRO so their
+        # Ecosystem admin mixins come first in the MRO so their
         # behaviour (import/export, versioning, history, object perms) wraps
         # SnapAdmin's, which in turn wraps Django/Unfold's ModelAdmin.
         extra_mixins = tuple(getattr(cls, "admin_mixins", []) or [])

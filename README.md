@@ -263,6 +263,22 @@ pip install django-snapadmin
 pip install git+https://github.com/drofji/django-snapadmin.git
 ```
 
+### Compatibility
+
+SnapAdmin requires **Python ≥ 3.10** and **Django ≥ 5.2** (no upper bound pinned). The package is
+**alpha** (`Development Status :: 3 - Alpha`) — the public API may still shift between `0.1.0aN`
+releases; pin an exact version in production.
+
+| | Versions | Status |
+|---|----------|--------|
+| **Python** | 3.10 · 3.11 · 3.12 · 3.13 | Supported (declared floor 3.10). Test suite is currently exercised on **3.12**. |
+| **Django** | 5.2 (LTS) · 6.0 | Supported. The suite currently runs green on **Django 6.0**; **5.2** is the declared floor. |
+
+> **No multi-version CI yet.** There is no automated Python×Django test matrix in CI — the numbers
+> above reflect the declared support range and the versions the suite is actively run against during
+> development, not a CI-enforced grid. Treat combinations outside the "currently exercised" cells as
+> supported-but-untested, and report any incompatibility you hit.
+
 ---
 
 ## 🛠 Usage & Configuration
@@ -811,6 +827,40 @@ class Product(snap_models.SnapModel):
     def on_sale(cls):                                  # your own query helper
         return cls.objects.filter(price__lt=100)
 ```
+
+**Customising the generated `ModelAdmin` (no `admin.py` needed).** `register_admin()` builds one
+`ModelAdmin` per model from class attributes you declare on the `SnapModel` itself — so you extend the
+admin by setting attributes, not by writing an `admin.py`:
+
+| Attribute | Type | Effect on the generated `ModelAdmin` |
+|-----------|------|--------------------------------------|
+| `admin_mixins` | `list[type]` | Extra `ModelAdmin` base classes **prepended** to the MRO (e.g. `[ImportExportModelAdmin]`, `[GuardedModelAdmin]`) — the integration hook for other admin packages |
+| `admin_overrides` | `dict[str, Any]` | Arbitrary attributes/methods merged onto the class **last**, so they win over the generated defaults (e.g. `{"list_per_page": 25, "get_queryset": my_fn}`) |
+| `css_admin_files` | `str \| list[str]` | Extra stylesheets appended to the admin `Media.css` (static paths) |
+| `js_admin_files` | `str \| list[str]` | Extra scripts appended to the admin `Media.js` (static paths) |
+
+```python
+class Product(snap_models.SnapModel):
+    name = snap.SnapCharField(max_length=200, searchable=True)
+
+    admin_mixins    = [ImportExportModelAdmin]          # extra ModelAdmin base(s)
+    css_admin_files = "yourapp/product_admin.css"       # → generated Media.css
+    js_admin_files  = ["yourapp/product_admin.js"]      # → generated Media.js
+    admin_overrides = {"list_per_page": 25}             # wins over generated defaults
+```
+
+These are the supported replacement for hand-writing `class Media` / a custom `admin.site.register`:
+SnapAdmin owns the registration (`register_admin()` per model, `register_all_admins()` for a whole app
+label), and merges your `css_admin_files` / `js_admin_files` into the `Media` it generates. The
+`formatted_id` helper (a zero-padded id display used by the generated admin) is also public on
+`snapadmin.models` if you need the same formatting in an override. All three of
+`css_admin_files` / `js_admin_files` / `formatted_id` are current, supported API.
+
+> **Static namespace.** SnapAdmin serves its own admin assets under the **`snapadmin/`** static
+> namespace (`snapadmin/js/admin.js`, `snapadmin/css/admin.css`, …) — *not* the predecessor package's
+> path. If you are migrating from `drofji-automatically-django-admin` and hardcoded a static URL or a
+> template `{% static %}` path pointing at its old `drofji_autoadmin/…` (or bare `admin.js`) assets,
+> update it to the `snapadmin/…` namespace; a mechanical class rename won't fix a hardcoded asset path.
 
 ### 4. Add custom REST endpoints (or override CRUD for one model)
 

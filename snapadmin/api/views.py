@@ -407,7 +407,7 @@ class ModelSchemaView(SnapAPIAuthMixin, APIView):
 
 
 class SSOProviderView(APIView):
-    """Public list of configured SSO providers for headless frontends (issue #13).
+    """Public list of configured SSO providers for headless frontends.
 
     Exposes the same ``SNAPADMIN_SSO_PROVIDERS`` the admin login page renders so
     a custom frontend can show identical corporate login buttons. Read-only and

@@ -1,7 +1,7 @@
 """
 snapadmin/exporting.py
 
-Asynchronous, fault-tolerant background export of model rows (issue #6).
+Asynchronous, fault-tolerant background export of model rows.
 
 Large synchronous exports time out; this module streams a model's rows to a
 CSV or JSON file in chunks, tracking progress on a :class:`SnapExportJob` so an

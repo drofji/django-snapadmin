@@ -1,7 +1,7 @@
 """
 snapadmin/audit.py
 
-Unalterable audit trail for administrative activity (issue #7).
+Unalterable audit trail for administrative activity.
 
 Django's built-in ``LogEntry`` is minimal and editable straight from the DB.
 For DORA / ISO 27001 SnapAdmin records a richer, append-only

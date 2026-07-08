@@ -181,7 +181,7 @@ class ErrorEventAdmin(ModelAdmin):
 
 
 class SnapadminAuditLogAdmin(ModelAdmin):
-    """Fully read-only view of the immutable audit trail (issue #7).
+    """Fully read-only view of the immutable audit trail.
 
     Add, change and delete are all disabled — the trail is append-only and must
     not be alterable from the admin. Rows are written by

@@ -1,7 +1,7 @@
 """
 snapadmin/sso.py
 
-Modular enterprise SSO / OAuth2 login helper (issue #13).
+Modular enterprise SSO / OAuth2 login helper.
 
 SnapAdmin does **not** implement SSO itself — that stays with the auth backend
 you already run (``django-allauth``, ``social-auth-app-django``, mozilla-django-

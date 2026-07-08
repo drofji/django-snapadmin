@@ -1,7 +1,7 @@
 """
 snapadmin/api/exports.py
 
-Asynchronous background export API (issue #6).
+Asynchronous background export API.
 
     POST   /api/exports/                 start an export → returns a job (id + status)
     GET    /api/exports/                 list your export jobs

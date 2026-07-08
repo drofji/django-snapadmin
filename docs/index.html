@@ -514,6 +514,18 @@ SnapModel.register_all_admins()</code></pre>
   <p><code>admin_mixins</code> classes are placed <strong>first in the MRO</strong>, so their
   <code>get_queryset</code> / <code>changelist_view</code> / actions wrap SnapAdmin's, which in turn
   wraps Django/Unfold's <code>ModelAdmin</code>.</p>
+  <p>Beyond mixins, three more <code>SnapModel</code> attributes tune the <em>generated</em>
+  <code>ModelAdmin</code> without an <code>admin.py</code>: <code>admin_overrides</code> — a dict of
+  attributes/methods merged on <strong>last</strong> so they win over the defaults (e.g.
+  <code>{"list_per_page": 25}</code>); and <code>css_admin_files</code> / <code>js_admin_files</code>
+  (a static path or list) appended to the generated <code>Media.css</code> / <code>Media.js</code>.
+  These are the supported alternative to hand-writing <code>class Media</code> or your own
+  <code>admin.site.register</code> — SnapAdmin owns registration via <code>register_admin()</code> (one
+  model) and <code>register_all_admins()</code> (a whole app label). The zero-padded id helper
+  <code>snapadmin.models.formatted_id</code> is public for use in overrides. SnapAdmin serves its own
+  admin assets under the <code>snapadmin/</code> static namespace (<code>snapadmin/js/admin.js</code>,
+  <code>snapadmin/css/admin.css</code>, …); when migrating from the predecessor package, update any
+  hardcoded <code>drofji_autoadmin/…</code> (or bare <code>admin.js</code>) static path to it.</p>
 
   <h3>Package matrix</h3>
   <table>

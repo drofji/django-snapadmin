@@ -1,7 +1,7 @@
 """
 snapadmin/checks.py
 
-Startup configuration checks (issue #2 — onboarding / drop-in DX).
+Startup configuration checks (onboarding / drop-in DX).
 
 SnapAdmin is settings-driven, so a typo in a setting used to fail silently or
 deep inside a request. These Django system checks (run on ``manage.py check``,
