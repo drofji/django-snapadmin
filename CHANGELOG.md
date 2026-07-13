@@ -2,8 +2,8 @@
 
 All notable changes to **django-snapadmin** are recorded here. This file is a concise,
 version-by-version summary; the full, prose release notes for each version live in
-[`docs/releases/`](docs/releases/) (shipped in the source distribution) and online in the
-project documentation.
+[the docs repository](https://github.com/drofji/django-snapadmin/tree/main/docs/releases/) 
+(shipped in the source distribution) and online in the project documentation.
 
 The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and is in the
 **beta** series (`0.1.0bN`) — the public API is stabilising but may still change before `0.1.0` stable.
@@ -18,7 +18,7 @@ First beta. Completes a downstream-integrator feedback pass, hardens the dashboa
 optional dependencies so a base install is fully permissively licensed. Carries a few breaking changes.
 
 > Upgrading from 0.1.0a11? A few changes need action (Celery task rename, dashboard gate, deps moved
-> to extras) — see [`docs/migrations/0.1.0a11_to_0.1.0b1.md`](docs/migrations/0.1.0a11_to_0.1.0b1.md).
+> to extras) — see [the migration guide](https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/0.1.0a11_to_0.1.0b1.md).
 
 - **Changed (BREAKING):** Celery tasks moved to `snapadmin/tasks.py` and renamed to the `snapadmin.*`
   namespace (from `api.tasks.*`) so `autodiscover_tasks()` finds them. Update every
@@ -53,7 +53,7 @@ optional dependencies so a base install is fully permissively licensed. Carries 
   (`admin_mixins` / `admin_overrides` / `css_admin_files` / `js_admin_files`) documented; migration
   guide install name and `/api/` collision handling corrected; a CHANGELOG now ships to pip users.
 
-See [`docs/releases/0.1.0b1.txt`](docs/releases/0.1.0b1.txt) for the full notes.
+See [the full release notes](https://github.com/drofji/django-snapadmin/blob/main/docs/releases/0.1.0b1.txt) for more detail.
 
 ## 0.1.0a11 — 2026-07-05
 
