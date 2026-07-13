@@ -51,6 +51,10 @@ Key protections:
 - **GraphQL** requires authentication and per-model permissions when
   `SNAPADMIN_GRAPHQL_REQUIRE_AUTH = True` (default). The GraphiQL playground follows `DEBUG` unless
   overridden with `SNAPADMIN_GRAPHIQL_ENABLED` — keep it off in production.
+- **The dynamic model API only ever resolves `SnapModel` subclasses.** `/api/models/<app>/<model>/`
+  404s for any Django model that isn't declared as a `SnapModel` (e.g. `auth.User`), regardless of the
+  caller's Django permissions — the generic API surface can never be used to read or write a model that
+  wasn't intentionally opted in via `SnapModel`.
 
 ### API tokens
 - Tokens are **hashed with SHA-256 at rest** — the raw key is shown **once** at creation and never

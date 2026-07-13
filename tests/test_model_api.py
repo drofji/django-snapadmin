@@ -95,6 +95,51 @@ class TestProductCRUD:
         assert auth_client.get("/api/models/ghost_app/Product/").status_code == 404
 
 
+# ── DynamicModelViewSet – non-SnapModel models are not exposed ──────────────
+
+@pytest.mark.django_db
+class TestNonSnapModelRejected:
+    def test_list_non_snapmodel_returns_404(self, auth_client):
+        assert auth_client.get("/api/models/auth/User/").status_code == 404
+
+    def test_retrieve_non_snapmodel_returns_404(self, auth_client, admin_user):
+        r = auth_client.get(f"/api/models/auth/User/{admin_user.pk}/")
+        assert r.status_code == 404
+
+    def test_create_non_snapmodel_returns_404(self, auth_client):
+        r = auth_client.post(
+            "/api/models/auth/User/",
+            {"username": "hacker", "password": "whatever"},
+            format="json",
+        )
+        assert r.status_code == 404
+
+    def test_delete_non_snapmodel_returns_404(self, auth_client, admin_user):
+        r = auth_client.delete(f"/api/models/auth/User/{admin_user.pk}/")
+        assert r.status_code == 404
+
+    def test_update_non_snapmodel_returns_404(self, auth_client, admin_user):
+        r = auth_client.patch(
+            f"/api/models/auth/User/{admin_user.pk}/",
+            {"is_superuser": True},
+            format="json",
+        )
+        assert r.status_code == 404
+
+    def test_get_model_class_returns_none_for_non_snapmodel(self):
+        from snapadmin.api.views import DynamicModelViewSet
+        view = DynamicModelViewSet()
+        view.kwargs = {"app_label": "auth", "model_name": "User"}
+        assert view._get_model_class() is None
+
+    def test_get_model_class_returns_model_for_real_snapmodel(self):
+        from snapadmin.api.views import DynamicModelViewSet
+        from demo.models import Product
+        view = DynamicModelViewSet()
+        view.kwargs = {"app_label": "demo", "model_name": "Product"}
+        assert view._get_model_class() is Product
+
+
 # ── DynamicModelViewSet – Customer ───────────────────────────────────────────
 
 @pytest.mark.django_db

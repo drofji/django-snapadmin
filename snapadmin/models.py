@@ -811,6 +811,10 @@ class SnapModel(models.Model):
         ordering = ["-pk"]
 
     @classmethod
+    def is_concrete_subclass(cls, model: type) -> bool:
+        return issubclass(model, SnapModel) and model is not SnapModel
+
+    @classmethod
     def get_es_index_name(cls) -> str:
         return cls.es_index_name or f"snap_{cls._meta.app_label}_{cls._meta.model_name.lower()}"
 

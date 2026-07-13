@@ -104,9 +104,12 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         app_label  = self.kwargs["app_label"]
         model_name = self.kwargs["model_name"]
         try:
-            return apps.get_model(app_label, model_name)
+            model = apps.get_model(app_label, model_name)
         except LookupError:
             return None
+        if not SnapModel.is_concrete_subclass(model):
+            return None
+        return model
 
     def _es_routing_enabled(self, model_class) -> bool:
         """Whether full-text API queries for this model may be routed to ES.
@@ -230,6 +233,15 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             return get_serializer_for_model(app_label, model_name)
         except LookupError:
             return None
+
+    def create(self, request, *args, **kwargs):
+        model_class = self._get_model_class()
+        if model_class is None:
+            return Response(
+                {"detail": f"Model '{kwargs.get('model_name')}' not found in app '{kwargs.get('app_label')}'."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return super().create(request, *args, **kwargs)
 
     def list(self, request, *args, **kwargs):
         model_class = self._get_model_class()
@@ -375,7 +387,7 @@ class ModelSchemaView(SnapAPIAuthMixin, APIView):
         results = []
 
         for model in apps.get_models():
-            if not (issubclass(model, SnapModel) and model is not SnapModel):
+            if not SnapModel.is_concrete_subclass(model):
                 continue
 
             app_label  = model._meta.app_label

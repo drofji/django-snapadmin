@@ -76,7 +76,7 @@ def get_dynamic_graphql_schema():
     query_attrs: dict = {}
 
     for model in apps.get_models():
-        if issubclass(model, SnapModel) and model is not SnapModel:
+        if SnapModel.is_concrete_subclass(model):
             try:
                 type_name = f"{model._meta.app_label.capitalize()}{model.__name__}Type"
 
