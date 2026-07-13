@@ -1,0 +1,25 @@
+0.1.0b2 — 2026-07-13 — Second Beta
+==================================
+
+A security fix for the dynamic model API plus a packaging fix for the installed CHANGELOG's doc
+links. No breaking changes; a drop-in upgrade from 0.1.0b1.
+
+Security
+--------
+
+- ``DynamicModelViewSet`` (the generic ``/api/models/<app>/<model>/`` endpoint) resolved any
+  Django model registered in the project, not just ``SnapModel`` subclasses — unlike the schema
+  endpoint, which already filtered to ``SnapModel``. A caller with Django permissions on a
+  non-SnapModel (e.g. ``auth.User``) could list, retrieve, create, update or delete it through the
+  generic API, bypassing the opt-in ``SnapModel`` surface entirely and exposing fields such as
+  password hashes. The viewset now resolves ``SnapModel`` subclasses only; any other model 404s,
+  mirroring the schema endpoint's existing behavior.
+
+Fixed
+-----
+
+- The root ``CHANGELOG.md`` (shipped in the wheel since 0.1.0b1) linked to
+  ``docs/migrations/0.1.0a11_to_0.1.0b1.md`` and ``docs/releases/0.1.0b1.txt`` using relative
+  paths. Those files are sdist-only, so pip-installed users following the links from a wheel
+  install got a 404. Links now point at the absolute GitHub URLs, which resolve regardless of
+  installation source.

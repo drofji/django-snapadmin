@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "django-snapadmin"
-version = "0.1.0b1"
+version = "0.1.0b2"
 description = "Define your Django models once — instantly get an admin panel, REST API, GraphQL and full-text search. Zero boilerplate."
 authors = ["Alexander Wiese"]
 license = "MIT"

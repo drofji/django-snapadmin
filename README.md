@@ -188,7 +188,7 @@ See [GraphQL field naming](#graphql-field-naming) for the full scheme.
 **System Dashboard** — `http://localhost:8000/admin/snapadmin/dashboard/`
 ```
 ┌─────────────────────────────────────────────────────────┐
-│  System Dashboard                          v0.1.0b1     │
+│  System Dashboard                          v0.1.0b2     │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐  │
 │  │ Product  │ │ Customer │ │  Order   │ │ AuditLog │  │
 │  │  50 rows │ │  50 rows │ │  50 rows │ │  50 rows │  │

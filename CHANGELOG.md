@@ -12,6 +12,16 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 
 _Nothing yet._
 
+## 0.1.0b2 — 2026-07-13
+
+- **Security:** the generic dynamic model API (`/api/models/<app>/<model>/`) now only resolves
+  `SnapModel` subclasses, mirroring the schema endpoint. Previously any registered Django model
+  (e.g. `auth.User`) could be listed, retrieved, created, updated or deleted through it.
+- **Fixed:** doc links in the installed `CHANGELOG.md` now use absolute GitHub URLs instead of
+  relative paths that 404 outside a source checkout.
+
+See [the full release notes](https://github.com/drofji/django-snapadmin/blob/main/docs/releases/0.1.0b2.txt) for more detail.
+
 ## 0.1.0b1 — 2026-07-08
 
 First beta. Completes a downstream-integrator feedback pass, hardens the dashboard, and reorganises
