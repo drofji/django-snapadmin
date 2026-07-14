@@ -10,6 +10,24 @@ Each notable change should be a paragraph or bullet, explaining what changed and
 Security
 ========
 
+GraphQL relation permission + PII masking parity with REST
+  The auto-generated GraphQL schema bypassed two access controls the REST API enforces. First,
+  only the two top-level resolvers per model ran a permission check: every FK / M2M / reverse
+  relation graphene_django auto-generated resolved with no check at all, so a caller with ``view``
+  permission on model ``A`` could read a related model ``B`` through ``A { relatedB { … } }``
+  without holding ``view`` on ``B`` (or outside its API-token ``allowed_models`` scope), even when
+  ``B`` was not exposed as a top-level query field. Second, PII masking
+  (``SNAPADMIN_MASKED_FIELDS``) was applied only in the REST serializer, so a field configured for
+  masking came back **unmasked** over GraphQL for a user who would see it masked over REST. Both
+  are now fixed: every generated ``DjangoObjectType`` carries a ``get_queryset`` guard that runs
+  the same authentication + per-model ``view`` + token-scope check on **every** relation the query
+  traverses, and masked fields get per-field resolvers that mask exactly as the REST serializer
+  does (raw only when the requester may view raw PII, ``mask_value()`` otherwise). **Behavior
+  change:** a related object the caller may not view now resolves as a ``Permission denied.`` error
+  instead of the object's real data, and a masked field now returns its masked value over GraphQL.
+  The schema remains read-only (no mutations). This code path is unreleased, so no upgrade action
+  is required.
+
 New ``api_write_fields`` mass-assignment guard
   Field exposure and field *writability* were previously the same knob: any field not listed in
   a model's ``api_exclude_fields`` was both readable and writable through the auto-generated REST
@@ -66,6 +84,24 @@ SSO provider open-redirect fix
   ``manage.py check`` now warns (``snapadmin.W005``) on a provider with a protocol-relative or
   disallowed-host URL.
 
+Export filters restricted to the target model's own fields
+  ``POST /api/exports/`` accepted an arbitrary JSON ``filters`` dict and fed it straight into
+  ``queryset.filter(**filters)`` with no validation beyond checking that the target model itself
+  was exportable. Because the caller's ``view`` permission was only ever checked against that
+  target model, a key that traversed a relationship (``category__internal_note``,
+  ``customer__ssn__icontains``, a reverse foreign key, a many-to-many lookup, ...) could reach
+  fields on a *related* model the caller was never authorized to view — using the export's
+  row-count / success-vs-empty-result as a boolean or prefix exfiltration oracle, or targeting an
+  unindexed column / expensive join as a resource-exhaustion vector. ``filters`` keys are now
+  validated in ``ExportJobCreateSerializer.validate()`` against an allowlist built from the target
+  model's own concrete fields (relations, reverse relations and many-to-many fields are never
+  eligible — no ``fk__field`` traversal is possible), and each allowlisted field only accepts a
+  small, type-appropriate set of lookups (e.g. ``exact``/``in``/``icontains`` for text,
+  ``exact``/``in``/``gte``/``lte`` for numbers and dates, ``exact``/``in`` on a foreign key's
+  ``_id`` column). A request with an unknown field, a relation-traversing key, or a disallowed
+  lookup now gets a ``400`` naming the rejected key(s); exports filtered only on the model's own
+  fields continue to work exactly as before.
+
 Database backup hardening
   SFTP offsite backups now **verify the remote host key against known_hosts** instead of trusting
   it on first connect. The previous trust-on-first-use policy silently accepted any host key,
@@ -89,6 +125,64 @@ Database backup hardening
   validator at all, silently discarding ``allowed_extensions`` / ``max_size_bytes``. Both now
   build the validator and round-trip the configuration correctly, so the limits you declare are
   the limits that are enforced.
+
+Assorted cosmetic-vs-security and deployment-topology fixes
+  Five independent small fixes. **Docs:** ``SNAPADMIN_HIDDEN_APPS`` was documented without making
+  clear that it is a *cosmetic* index-page filter — the underlying ``ModelAdmin`` URLs for a hidden
+  app stay registered and reachable by any staff user holding the model's Django permission. The
+  ``snapadmin/nesting.py`` docstring, ``README.md`` and ``docs/index.html`` now say so explicitly,
+  pointing at Django's standard permission system as the actual access control mechanism.
+  **Custom AdminSite detection:** ``install_nested_apps()`` only ever patches
+  ``django.contrib.admin.site``, the default ``AdminSite`` — a project serving ``/admin/`` from a
+  different ``AdminSite`` instance silently never saw ``SNAPADMIN_NESTED_APPS`` /
+  ``SNAPADMIN_HIDDEN_APPS`` / ``SNAPADMIN_APP_LABELS`` applied there, with no indication why.
+  Reliably detecting the active site from ``AppConfig.ready()`` isn't possible (URLconf and app
+  ready-order aren't guaranteed at that point), so a new system check,
+  ``snapadmin.W006`` (``check_nesting_active_site``), instead warns at ``manage.py check`` time
+  when nesting settings are configured and another ``AdminSite`` with a non-empty registry is
+  detected via ``django.contrib.admin.sites.all_sites``. **Error digest consistency:**
+  ``send_error_digest()`` computed its subject-line total from an eager ``.count()`` but then
+  called ``purge_expired_events()`` — which deletes rows — *before* handing the same lazy queryset
+  to ``group_events()``, whose own aggregation query could then reflect fewer rows than the total
+  already reported. Grouping now happens against the pre-purge snapshot, and the retention purge
+  runs afterward, so the subject and body of a digest email always agree. **Validator message:**
+  ``SnapFileValidator``'s encoding check wrapped its own "no encoding matched" ``ValidationError``
+  inside the same broad ``try/except Exception`` guarding file I/O, so a genuinely invalid encoding
+  was always reported as the generic "Could not verify file encoding." instead of the specific
+  "Invalid encoding. Allowed: ..." message. The ``try/except`` now wraps only the file
+  read/seek, so the specific message reaches the caller. **File handle leak:** the Docker-detection
+  helper in the admin dashboard's environment panel (``_get_environment_details()``) opened
+  ``/proc/self/cgroup`` without a context manager or explicit close, relying on garbage collection
+  to release the handle. It's now opened with ``with``, unchanged short-circuit behavior preserved
+  (only opened when ``/.dockerenv`` doesn't already indicate Docker and the cgroup file exists).
+
+Changed
+=======
+
+**Breaking:** auto-generated REST API filters now default text fields to exact match, not
+substring
+  Every ``CharField``/``TextField``/``EmailField``/``URLField``/``SlugField`` on a ``SnapModel``
+  gets an auto-generated ``django-filter`` entry (see ``snapadmin/api/filters.py``). The bare
+  query parameter — ``?field=value`` — previously ran ``lookup_expr="icontains"``, i.e. a
+  leading-wildcard ``LIKE '%value%'``. That can never use a database index (Postgres cannot use a
+  b-tree index for a pattern with a leading wildcard, so every such request is a full table scan
+  on the underlying column) and is also semantically surprising for key-like fields: ``?sku=123``
+  matched ``sku=91234`` too, since any value *containing* the query string matched. ``?field=value``
+  now performs an **exact** match instead — index-usable, and no more surprise superstring hits.
+  Substring search hasn't been removed, only renamed: it is still available, explicitly, via
+  ``?field__icontains=value``. Text fields also gained explicit ``?field__startswith=value`` and
+  ``?field__in=a,b,c`` lookups, following the same suffix pattern the numeric/date filters already
+  used for ``__gte``/``__lte``. **Action required** if you (or a frontend) call the auto-generated
+  API with a bare text filter expecting a substring match: switch that query parameter to the
+  ``__icontains`` suffix. A new optional model attribute, ``api_filter_lookups``, lets a specific
+  model widen or narrow the lookup set for one of its own fields without waiting on a library-wide
+  default change, e.g. ``api_filter_lookups = {"name": ["exact", "icontains"]}`` restores the old
+  bare-key substring behaviour for just that field. Left unset (the default), every text field uses
+  the new ``exact`` + ``icontains``/``startswith``/``in`` suffix set described above. This also
+  hardens against a minor denial-of-service angle: an indexable exact-match filter is far cheaper
+  for the database to serve than a forced full table scan on every text-filtered ``list``/``count``/
+  ``export`` request, which any caller with a valid API token could previously trigger repeatedly
+  on a large table just by filtering on a text field.
 
 Fixed
 =====
@@ -114,6 +208,30 @@ Fixed
   ``snapadmin`` in ``INSTALLED_APPS``; the only requirement is that ``django.contrib.admin`` precede
   ``snapadmin`` there, which Django's project template already guarantees. No configuration change
   is needed, and installs without the extra are unaffected.
+
+GDPR purge correctness: surfaced secondary-store failures, fixed retention_days=0, fixed inflated counts
+  Three bugs in the GDPR/data-retention purge machinery are fixed. First, ``SnapModel.purge_expired()``
+  on a ``DUAL``-mode model (rows mirrored to Elasticsearch) previously deleted from the database, then
+  attempted to clear the matching Elasticsearch documents and only logged a warning if that failed —
+  the purge was reported as a clean success even when the "purged" personal data was still live and
+  searchable via the API. ``purge_expired()`` now raises ``snapadmin.models.SnapPurgeError`` when the
+  ES-side delete fails, and the ``purge_expired_data`` Celery task (as well as the
+  ``purge_expired_data`` management command) surfaces that as a per-model error instead of counting the
+  model as purged; the task's returned summary dict now has an ``errors`` key alongside ``purged`` and
+  ``total`` for exactly this. There is still no two-phase commit across the database and Elasticsearch
+  — the database delete has already happened by the time the ES failure is raised — but the failure is
+  no longer silent. ``_delete_pks_from_es`` also now issues a single bulk ``delete_by_query`` (an
+  ``ids`` filter) instead of one ``es.delete()`` call per primary key, matching the bulk pattern already
+  used by the ``ES_ONLY`` purge path. Second, ``snapadmin.monitoring.purge_expired_events()`` had no
+  guard against a non-positive ``SNAPADMIN_ERROR_RETENTION_DAYS`` — setting it to ``0``, the intuitive
+  way to mean "keep forever", instead collapsed the cutoff to roughly "now" and deleted the entire
+  ``ErrorEvent`` table on the next digest run. It now returns ``0`` immediately for
+  ``retention_days <= 0``, matching the guard ``SnapModel.purge_expired()`` already had. Third, every
+  purge count returned by ``SnapModel.purge_expired()`` (``DB_ONLY`` and ``DUAL`` modes) now reflects
+  the target model's own row count, captured before the delete, rather than Django's
+  ``QuerySet.delete()`` total — which includes rows cascade-deleted via ``on_delete=CASCADE`` on
+  related models and could report a count far larger than the number of target rows actually purged,
+  and larger than the matching ``dry_run=True`` count for the same rows.
 
 Enforced API pagination and throttling
   ``DynamicModelViewSet`` now enforces pagination and rate limiting itself, instead of relying on

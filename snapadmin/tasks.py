@@ -42,12 +42,17 @@ def purge_expired_data(self):
 
     Scans all registered SnapModel subclasses for a non-None
     data_retention_days attribute and deletes records older than that limit.
-    Returns a summary dict with per-model deleted counts.
+    Returns a summary dict with per-model deleted counts. A model whose purge
+    only partially succeeded (e.g. the database delete went through but a
+    secondary store such as Elasticsearch could not be cleared — see
+    ``SnapModel.purge_expired`` / ``SnapPurgeError``) is reported under
+    ``errors``, not ``purged`` — it must not be mistaken for a clean purge.
     """
     from django.apps import apps
     from snapadmin.models import SnapModel
 
     summary: dict[str, int] = {}
+    errors: dict[str, str] = {}
     now = timezone.now()
 
     for model in apps.get_models():
@@ -65,9 +70,10 @@ def purge_expired_data(self):
             summary[label] = count
             logger.info("purge_expired_data_deleted", model=label, count=count)
         except Exception as exc:
+            errors[label] = str(exc)
             logger.error("purge_expired_data_error", model=label, error=str(exc))
 
-    return {"purged": summary, "total": sum(summary.values())}
+    return {"purged": summary, "total": sum(summary.values()), "errors": errors}
 
 
 @shared_task(bind=True, name="snapadmin.send_error_digest")

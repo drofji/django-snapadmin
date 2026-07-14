@@ -4,11 +4,13 @@ from graphene_django import DjangoObjectType
 from graphene_django.views import GraphQLView
 from django.apps import apps
 from django.conf import settings
+from django.db.models import Model, QuerySet
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
-from graphql import GraphQLError
+from graphql import GraphQLError, GraphQLResolveInfo
 
 from snapadmin.logging_config import get_logger
+from snapadmin.masking import get_masked_fields, mask_value, user_can_view_pii
 from snapadmin.models import SnapModel, EsStorageMode
 
 logger = get_logger(__name__)
@@ -42,6 +44,50 @@ def _check_access(info, model) -> None:
     perm = f"{model._meta.app_label}.view_{model._meta.model_name}"
     if not user.has_perm(perm):
         raise GraphQLError("Permission denied.")
+
+
+def _make_relation_guard(model: type[Model]) -> classmethod:
+    """Build a ``get_queryset`` classmethod that permission-checks relations.
+
+    graphene_django calls ``DjangoObjectType.get_queryset(queryset, info)``
+    whenever it resolves a type through a relation — directly for to-many
+    relations (reverse FK / M2M via ``DjangoListField``) and, once the method
+    is overridden, for to-one relations too (FK / O2O are routed through
+    ``get_node`` → ``get_queryset``). Attaching this guard to every generated
+    type extends the top-level ``_check_access`` contract to *every* traversed
+    relation, so a caller cannot read a related model it lacks ``view``
+    permission on (or that falls outside its API-token scope). On denial it
+    raises the same ``GraphQLError`` the top-level resolvers raise, rather than
+    returning the related object.
+    """
+
+    @classmethod
+    def get_queryset(cls: type[DjangoObjectType], queryset: QuerySet, info: GraphQLResolveInfo) -> QuerySet:
+        _check_access(info, model)
+        return queryset
+
+    return get_queryset
+
+
+def _make_masked_resolver(field_name: str):
+    """Build a field resolver that masks configured PII in GraphQL output.
+
+    Mirrors the REST serializer (:class:`snapadmin.api.serializers.
+    PIIMaskingSerializerMixin`): the raw attribute is returned only when the
+    requesting user may view raw PII (see
+    :func:`snapadmin.masking.user_can_view_pii`), otherwise the value is passed
+    through :func:`snapadmin.masking.mask_value`. Fails closed — an absent or
+    anonymous user gets the masked value.
+    """
+
+    def resolve_masked(root: Model, info: GraphQLResolveInfo) -> object:
+        value = getattr(root, field_name)
+        user = getattr(info.context, "user", None)
+        if user_can_view_pii(user):
+            return value
+        return mask_value(value)
+
+    return resolve_masked
 
 
 class SnapGraphQLView(GraphQLView):
@@ -87,7 +133,16 @@ def get_dynamic_graphql_schema():
                     meta_attr = type('Meta', (), {'model': model, 'exclude': excluded})
                 else:
                     meta_attr = type('Meta', (), {'model': model, 'fields': "__all__"})
-                object_type = type(type_name, (DjangoObjectType,), {'Meta': meta_attr})
+
+                # Namespace for the DjangoObjectType. get_queryset extends the
+                # per-model view-permission check to every relation traversed
+                # from this type; per-field resolvers mask configured PII so it
+                # never leaves GraphQL unmasked (mirroring the REST serializer).
+                type_attrs: dict = {'Meta': meta_attr, 'get_queryset': _make_relation_guard(model)}
+                for masked_field in get_masked_fields(model._meta.app_label, model._meta.model_name):
+                    if masked_field not in excluded:
+                        type_attrs[f"resolve_{masked_field}"] = _make_masked_resolver(masked_field)
+                object_type = type(type_name, (DjangoObjectType,), type_attrs)
 
                 # Add fields to Query
                 field_name = f"{model._meta.app_label}_{model.__name__.lower()}"

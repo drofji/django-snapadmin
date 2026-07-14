@@ -17,6 +17,7 @@ their requester; superusers see all.
 import os
 
 from django.apps import apps
+from django.db import models as django_models
 from django.http import FileResponse
 from rest_framework import mixins, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -25,6 +26,78 @@ from rest_framework.response import Response
 from snapadmin.api.authentication import SnapAPIAuthMixin, token_has_permission
 from snapadmin.exporting import export_enabled, output_path
 from snapadmin.models import APIToken, SnapExportJob, SnapModel
+
+#: JSON-compatible scalar/collection values a filter value may hold.
+FilterValue = str | int | float | bool | list[object] | None
+
+
+def _allowed_filters_for_model(model: type[django_models.Model]) -> dict[str, set[str]]:
+    """Allowlist of own-field name -> permitted lookup suffixes for export filters.
+
+    Only concrete fields declared directly on ``model`` itself are eligible (mirrors
+    the field enumeration in ``snapadmin.api.filters._build_filters_for_model``, which
+    builds django-filter ``FilterSet`` classes from the same "own field" notion) — a
+    field without a ``column`` attribute is a reverse relation or a many-to-many, both
+    of which require traversing a join and are therefore never allowlisted. Each
+    eligible field maps to a small, type-appropriate set of lookup suffixes; a bare key
+    (no ``__suffix``) is treated as ``exact``.
+    """
+    allowed: dict[str, set[str]] = {}
+    for field in model._meta.get_fields():
+        if not hasattr(field, "column"):
+            continue
+        name = field.name
+        if isinstance(field, (
+            django_models.CharField,
+            django_models.TextField,
+            django_models.EmailField,
+            django_models.URLField,
+            django_models.SlugField,
+        )):
+            allowed[name] = {"exact", "in", "icontains"}
+        elif isinstance(field, django_models.UUIDField):
+            allowed[name] = {"exact", "in"}
+        elif isinstance(field, django_models.BooleanField):
+            allowed[name] = {"exact"}
+        elif isinstance(field, (
+            django_models.IntegerField,
+            django_models.BigIntegerField,
+            django_models.SmallIntegerField,
+            django_models.PositiveIntegerField,
+            django_models.PositiveSmallIntegerField,
+            django_models.FloatField,
+            django_models.DecimalField,
+        )):
+            allowed[name] = {"exact", "in", "gte", "lte"}
+        elif isinstance(field, (django_models.DateTimeField, django_models.DateField)):
+            allowed[name] = {"exact", "in", "gte", "lte"}
+        elif isinstance(field, django_models.ForeignKey):
+            allowed[f"{name}_id"] = {"exact", "in"}
+    return allowed
+
+
+def _validate_export_filters(model: type[django_models.Model], filters: dict[str, FilterValue]) -> None:
+    """Reject any ``filters`` key that is not an allowlisted own-field + safe lookup.
+
+    Guards against ``qs.filter(**job.filters)`` (see ``snapadmin.exporting._run``) being
+    used as a relation-traversal oracle: a caller authorized to export model A must not
+    be able to reach fields on a related model B (``fk__field``, a reverse relation, a
+    many-to-many, ...) that their ``view`` permission on A never covered, nor use an
+    arbitrary Django lookup as a resource-exhaustion vector.
+    """
+    allowed = _allowed_filters_for_model(model)
+    rejected: list[str] = []
+    for key in filters:
+        field_name, _, lookup = key.partition("__")
+        lookup = lookup or "exact"
+        if field_name not in allowed or lookup not in allowed[field_name]:
+            rejected.append(key)
+    if rejected:
+        raise serializers.ValidationError(
+            f"Invalid filter key(s): {', '.join(sorted(rejected))}. Filters may only "
+            "target the exported model's own fields with an allowed lookup "
+            "(no relation traversal)."
+        )
 
 
 class ExportJobSerializer(serializers.ModelSerializer):
@@ -57,7 +130,7 @@ class ExportJobCreateSerializer(serializers.ModelSerializer):
         model = SnapExportJob
         fields = ["app_label", "model", "export_format", "filters"]
 
-    def validate(self, attrs):
+    def validate(self, attrs: dict[str, object]) -> dict[str, object]:
         app_label, model_name = attrs["app_label"], attrs["model"]
         try:
             model = apps.get_model(app_label, model_name)
@@ -69,6 +142,10 @@ class ExportJobCreateSerializer(serializers.ModelSerializer):
         request = self.context["request"]
         if not _can_view(request, app_label, model_name):
             raise serializers.ValidationError("You do not have permission to export this model.")
+
+        filters = attrs.get("filters") or {}
+        if filters:
+            _validate_export_filters(model, filters)
         return attrs
 
 

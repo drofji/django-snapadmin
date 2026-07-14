@@ -134,6 +134,31 @@ class TestEncodingValidation:
         v = SnapFileValidator(allowed_encodings=[FileEncodingEnum.ASCII, FileEncodingEnum.UTF8])
         v(_make_file("text.txt", content=b"pure ascii"))
 
+    def test_invalid_encoding_raises_specific_message(self):
+        """A genuinely-invalid encoding must surface its own actionable message,
+        not the generic 'Could not verify' fallback meant for I/O failures."""
+        v = SnapFileValidator(allowed_encodings=[FileEncodingEnum.ASCII])
+        non_ascii = "Ümlauts".encode("utf-8")
+        with pytest.raises(ValidationError) as exc_info:
+            v(_make_file("unicode.txt", content=non_ascii))
+        assert exc_info.value.messages == ["Invalid encoding. Allowed: ascii"]
+
+    def test_unreadable_file_raises_generic_message(self):
+        """A real I/O failure while reading/seeking the upload still gets the
+        generic 'Could not verify' message — only that risk is caught broadly."""
+        v = SnapFileValidator(allowed_encodings=[FileEncodingEnum.UTF8])
+
+        class _BrokenFile:
+            name = "broken.txt"
+            size = 10
+
+            def read(self, *args, **kwargs):
+                raise OSError("disk exploded")
+
+        with pytest.raises(ValidationError) as exc_info:
+            v(_BrokenFile())
+        assert exc_info.value.messages == ["Could not verify file encoding."]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Combined constraints

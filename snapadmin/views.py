@@ -153,7 +153,10 @@ class DashboardView(StaffRequiredMixin, TemplateView):
 
     def _get_environment_details(self):
         # Environment Detection
-        is_docker = os.path.exists('/.dockerenv') or os.path.exists('/proc/self/cgroup') and any('docker' in line for line in open('/proc/self/cgroup'))
+        is_docker = os.path.exists('/.dockerenv')
+        if not is_docker and os.path.exists('/proc/self/cgroup'):
+            with open('/proc/self/cgroup') as cgroup_file:
+                is_docker = any('docker' in line for line in cgroup_file)
 
         return {
             "mode": "Docker" if is_docker else "Local",

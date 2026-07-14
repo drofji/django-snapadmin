@@ -4,7 +4,7 @@ tests/test_dashboard_extended.py
 Coverage for snapadmin/views.py — ES monitoring, OperationalError, environment detection.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 from django.contrib.auth.models import User
@@ -86,3 +86,41 @@ class TestDashboardViewExtended:
         assert "mode" in env
         assert "os" in env
         assert env["mode"] in ("Docker", "Local")
+
+    def test_get_environment_details_dockerenv_short_circuits_cgroup_open(self):
+        """When /.dockerenv already proves Docker, /proc/self/cgroup must not be opened."""
+        view = _make_view_with_request("env_dockerenv")
+        with patch("os.path.exists", return_value=True):
+            with patch("snapadmin.views.open", create=True) as mocked_open:
+                env = view._get_environment_details()
+        mocked_open.assert_not_called()
+        assert env["mode"] == "Docker"
+
+    def test_get_environment_details_cgroup_docker_uses_context_manager(self):
+        """The cgroup fallback path must open the file as a context manager
+        (no leaked file handle) and detect Docker from its contents."""
+        view = _make_view_with_request("env_cgroup_docker")
+        m = mock_open(read_data="1:name=systemd:/docker/abcdef1234567890\n")
+        with patch("os.path.exists", side_effect=lambda p: p == "/proc/self/cgroup"):
+            with patch("snapadmin.views.open", m, create=True):
+                env = view._get_environment_details()
+        m.assert_called_once_with("/proc/self/cgroup")
+        m.return_value.__enter__.assert_called_once()
+        m.return_value.__exit__.assert_called_once()
+        assert env["mode"] == "Docker"
+
+    def test_get_environment_details_cgroup_no_docker_marker(self):
+        view = _make_view_with_request("env_cgroup_nodocker")
+        m = mock_open(read_data="1:name=systemd:/\n")
+        with patch("os.path.exists", side_effect=lambda p: p == "/proc/self/cgroup"):
+            with patch("snapadmin.views.open", m, create=True):
+                env = view._get_environment_details()
+        assert env["mode"] == "Local"
+
+    def test_get_environment_details_local_no_docker_indicators(self):
+        view = _make_view_with_request("env_local")
+        with patch("os.path.exists", return_value=False):
+            with patch("snapadmin.views.open", create=True) as mocked_open:
+                env = view._get_environment_details()
+        mocked_open.assert_not_called()
+        assert env["mode"] == "Local"

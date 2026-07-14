@@ -247,6 +247,14 @@ def send_error_digest(*, hours: int = 24) -> dict:
     since = timezone.now() - timedelta(hours=hours)
     events = ErrorEvent.objects.filter(created_at__gte=since)
     total = events.count()
+    # Snapshot total and the grouped breakdown from the *same* pre-purge state:
+    # events is a lazy queryset, so if purge_expired_events() ran first and
+    # deleted rows counted in `total`, group_events()'s own re-evaluation of
+    # `events` could then aggregate a different, smaller set of rows — leaving
+    # the digest subject's total and the body's grouped counts disagreeing.
+    groups, hidden_groups, hidden_events = group_events(
+        events, max_groups=config.digest_max_groups
+    )
     purged = purge_expired_events(config=config)
 
     if not config.digest_enabled:
@@ -258,9 +266,6 @@ def send_error_digest(*, hours: int = 24) -> dict:
         logger.warning("error_digest_no_recipients", errors=total)
         return {"sent": False, "reason": "no_recipients", "errors": total, "purged": purged}
 
-    groups, hidden_groups, hidden_events = group_events(
-        events, max_groups=config.digest_max_groups
-    )
     _send_email(
         subject=(
             f"[SnapAdmin] Error digest — {total} errors in {len(groups)} groups "
@@ -296,13 +301,22 @@ def send_error_digest(*, hours: int = 24) -> dict:
 
 
 def purge_expired_events(*, config: ErrorMonitorConfig | None = None) -> int:
-    """Delete events older than ``SNAPADMIN_ERROR_RETENTION_DAYS``."""
+    """Delete events older than ``SNAPADMIN_ERROR_RETENTION_DAYS``.
+
+    A non-positive ``retention_days`` (e.g. ``0``, meant by an operator as
+    "keep forever") is treated as "retention not configured" and purges
+    nothing — otherwise the cutoff would collapse to roughly "now" and wipe
+    the entire table on the next digest run.
+    """
     from snapadmin.models import ErrorEvent
 
     config = config or get_config()
+    if not config.retention_days or config.retention_days <= 0:
+        return 0
     cutoff = timezone.now() - timedelta(days=config.retention_days)
-    deleted, _ = ErrorEvent.objects.filter(created_at__lt=cutoff).delete()
-    return deleted
+    count = ErrorEvent.objects.filter(created_at__lt=cutoff).count()
+    ErrorEvent.objects.filter(created_at__lt=cutoff).delete()
+    return count
 
 
 def _send_email(

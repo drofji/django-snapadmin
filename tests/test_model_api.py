@@ -508,6 +508,132 @@ class TestApiWriteFieldsAllowlist:
         assert r.json()["name"] == product.name
 
 
+# ── auto-generated text-field filters — exact-by-default (#PERF1) ────────────
+
+@pytest.fixture
+def product_filterset_override(monkeypatch):
+    """Product.api_filter_lookups = {"name": ["exact", "icontains"]} for the duration
+    of the test.
+
+    Bypasses (and restores) the module-level filterset cache in
+    ``snapadmin.api.filters`` so the HTTP-level tests observe the patched attribute
+    instead of an already-built, library-default FilterSet class.
+    """
+    from snapadmin.api import filters as filters_module
+    from demo.models import Product
+
+    monkeypatch.setattr(
+        Product, "api_filter_lookups", {"name": ["exact", "icontains"]}, raising=False
+    )
+    filters_module._filterset_cache.pop("demo.product", None)
+    yield
+    filters_module._filterset_cache.pop("demo.product", None)
+
+
+@pytest.mark.django_db
+class TestAutoFilterTextFieldLookups:
+    def test_bare_field_filter_is_exact_match(self, auth_client):
+        from demo.models import Product
+        Product.objects.create(name="Laptop", price=Decimal("10.00"))
+        Product.objects.create(name="Laptop Pro", price=Decimal("20.00"))
+
+        r = auth_client.get("/api/models/demo/Product/?name=Laptop")
+        assert r.status_code == 200
+        names = [row["name"] for row in r.json()["results"]]
+        assert names == ["Laptop"]
+
+    def test_bare_field_filter_no_longer_matches_superstring(self, auth_client):
+        # Old behaviour: icontains meant "?name=Laptop" also matched "Laptop Pro".
+        from demo.models import Product
+        Product.objects.create(name="Laptop Pro", price=Decimal("20.00"))
+
+        r = auth_client.get("/api/models/demo/Product/?name=Laptop")
+        assert r.status_code == 200
+        assert r.json()["results"] == []
+
+    def test_icontains_suffix_performs_substring_match(self, auth_client):
+        from demo.models import Product
+        Product.objects.create(name="Laptop", price=Decimal("10.00"))
+        Product.objects.create(name="Laptop Pro", price=Decimal("20.00"))
+
+        r = auth_client.get("/api/models/demo/Product/?name__icontains=Laptop")
+        assert r.status_code == 200
+        names = {row["name"] for row in r.json()["results"]}
+        assert names == {"Laptop", "Laptop Pro"}
+
+    def test_startswith_suffix_available(self, auth_client):
+        from demo.models import Product
+        Product.objects.create(name="Laptop", price=Decimal("10.00"))
+        Product.objects.create(name="Desktop", price=Decimal("20.00"))
+
+        r = auth_client.get("/api/models/demo/Product/?name__startswith=Lap")
+        assert r.status_code == 200
+        names = [row["name"] for row in r.json()["results"]]
+        assert names == ["Laptop"]
+
+    def test_in_suffix_accepts_comma_separated_values(self, auth_client):
+        from demo.models import Product
+        Product.objects.create(name="Laptop", price=Decimal("10.00"))
+        Product.objects.create(name="Desktop", price=Decimal("20.00"))
+        Product.objects.create(name="Tablet", price=Decimal("30.00"))
+
+        r = auth_client.get("/api/models/demo/Product/?name__in=Laptop,Tablet")
+        assert r.status_code == 200
+        names = {row["name"] for row in r.json()["results"]}
+        assert names == {"Laptop", "Tablet"}
+
+    def test_model_override_applies_only_configured_lookups(
+        self, product_filterset_override
+    ):
+        from snapadmin.api.filters import build_filterset_for_model
+        from demo.models import Product
+
+        filterset_cls = build_filterset_for_model(Product)
+        name_keys = {
+            k for k in filterset_cls.base_filters if k == "name" or k.startswith("name__")
+        }
+        assert name_keys == {"name", "name__icontains"}
+
+        # A field with no per-model override still gets the library default set.
+        description_keys = {
+            k for k in filterset_cls.base_filters
+            if k == "description" or k.startswith("description__")
+        }
+        assert description_keys == {
+            "description", "description__icontains", "description__startswith", "description__in",
+        }
+
+    def test_model_without_override_uses_library_default_for_every_text_field(self):
+        from snapadmin.api.filters import build_filterset_for_model
+        from demo.models import Product
+
+        filterset_cls = build_filterset_for_model(Product)
+        name_keys = {
+            k for k in filterset_cls.base_filters if k == "name" or k.startswith("name__")
+        }
+        assert name_keys == {"name", "name__icontains", "name__startswith", "name__in"}
+
+    def test_cache_stays_independent_per_model_despite_override(
+        self, product_filterset_override
+    ):
+        from snapadmin.api.filters import build_filterset_for_model
+        from demo.models import Product, Customer
+
+        product_fs = build_filterset_for_model(Product)
+        customer_fs = build_filterset_for_model(Customer)
+
+        product_name_keys = {
+            k for k in product_fs.base_filters if k == "name" or k.startswith("name__")
+        }
+        customer_email_keys = {
+            k for k in customer_fs.base_filters if k == "email" or k.startswith("email__")
+        }
+        assert product_name_keys == {"name", "name__icontains"}
+        assert customer_email_keys == {
+            "email", "email__icontains", "email__startswith", "email__in",
+        }
+
+
 # ── DynamicModelViewSet – always-on pagination (#SEC4) ────────────────────────
 
 @pytest.mark.django_db

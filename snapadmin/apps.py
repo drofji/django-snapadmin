@@ -18,6 +18,11 @@ def install_nested_apps():
 
     No-op unless nesting/hide/rename settings are configured, and idempotent so a
     double ``ready()`` (autoreload, test reloads) can't stack wrappers.
+
+    This only patches ``django.contrib.admin.site`` — the default ``AdminSite``.
+    A project serving ``/admin/`` from a *different* ``AdminSite`` instance won't
+    see these settings applied there; ``snapadmin.checks.check_nesting_active_site``
+    (``snapadmin.W006``) warns when that mismatch is detectable at check time.
     """
     from django.contrib import admin
     from snapadmin.nesting import apply_nested_apps, nesting_configured

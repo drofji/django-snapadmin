@@ -131,23 +131,27 @@ class SnapFileValidator:
             try:
                 content = file.read(1024 * 1024)
                 file.seek(0)
-
-                is_valid = False
-                for enc in self.allowed_encodings:
-                    try:
-                        content.decode(enc)
-                        is_valid = True
-                        break
-                    except (UnicodeDecodeError, LookupError):
-                        continue
-
-                if not is_valid:
-                    raise ValidationError(
-                        _("Invalid encoding. Allowed: %(encodings)s"),
-                        params={'encodings': ", ".join(self.allowed_encodings)}
-                    )
             except Exception:
+                # Only the actual I/O risk (reading/rewinding the upload) is
+                # caught here — a genuinely invalid encoding is a normal,
+                # expected outcome of the loop below and must not be swallowed
+                # into this generic message.
                 raise ValidationError(_("Could not verify file encoding."))
+
+            is_valid = False
+            for enc in self.allowed_encodings:
+                try:
+                    content.decode(enc)
+                    is_valid = True
+                    break
+                except (UnicodeDecodeError, LookupError):
+                    continue
+
+            if not is_valid:
+                raise ValidationError(
+                    _("Invalid encoding. Allowed: %(encodings)s"),
+                    params={'encodings': ", ".join(self.allowed_encodings)}
+                )
 
     def __eq__(self, other):
         """

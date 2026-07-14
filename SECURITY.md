@@ -49,8 +49,12 @@ Key protections:
 - **Permissions are enforced everywhere.** REST and GraphQL both require the caller to hold the model's
   Django `view` / change permissions; there is no anonymous data access by default.
 - **GraphQL** requires authentication and per-model permissions when
-  `SNAPADMIN_GRAPHQL_REQUIRE_AUTH = True` (default). The GraphiQL playground follows `DEBUG` unless
-  overridden with `SNAPADMIN_GRAPHIQL_ENABLED` — keep it off in production.
+  `SNAPADMIN_GRAPHQL_REQUIRE_AUTH = True` (default). The check applies to **every relation the query
+  traverses**, not just the top-level query field: reading `A { relatedB { … } }` requires the
+  `view` permission (and, for token auth, the `allowed_models` scope) on **both** `A` and `B`. A
+  related object the caller may not view resolves as a `Permission denied.` error rather than
+  leaking its data. The GraphiQL playground follows `DEBUG` unless overridden with
+  `SNAPADMIN_GRAPHIQL_ENABLED` — keep it off in production.
 - **The dynamic model API only ever resolves `SnapModel` subclasses.** `/api/models/<app>/<model>/`
   404s for any Django model that isn't declared as a `SnapModel` (e.g. `auth.User`), regardless of the
   caller's Django permissions — the generic API surface can never be used to read or write a model that
@@ -70,6 +74,15 @@ Key protections:
   can opt back into verbatim HTML with `safe_html=True`; a custom policy can be supplied via
   `SNAPADMIN_HTML_SANITIZER` (a dotted path to a `Callable[[str], str]`).
 - Data access goes through the Django ORM / DRF serializers — no hand-built SQL from user input.
+- **`POST /api/exports/` `filters` are restricted to the target model's own fields.** The dict is
+  applied as `queryset.filter(**filters)`, so an unvalidated key could otherwise traverse a
+  relationship (`fk__field`, a reverse relation, a many-to-many lookup) to reach fields on a
+  related model the caller's `view` permission never covered, turning the export into a
+  boolean/prefix exfiltration oracle. `ExportJobCreateSerializer` now validates every key against
+  an allowlist of the model's own concrete fields, each restricted to a small, type-appropriate
+  set of lookups (e.g. `exact`/`in`/`icontains` for text, `exact`/`in`/`gte`/`lte` for numbers and
+  dates) — an unknown field, a relation-traversing key, or a disallowed lookup is rejected with a
+  `400` before the queryset is ever built.
 
 ### Open redirect
 - **SSO provider URLs are never resolved to an external origin from a same-site-looking value.**
@@ -96,8 +109,9 @@ Key protections:
   the choice explicitly, so the exposure is a deliberate decision rather than an oversight.
 
 ### Data protection & auditability
-- **PII masking** — `SNAPADMIN_MASKED_FIELDS` masks configured fields in the admin and API for users
-  without PII-view permission; masked fields are also dropped from the change form for those users.
+- **PII masking** — `SNAPADMIN_MASKED_FIELDS` masks configured fields in the admin, the REST API and
+  GraphQL for users without PII-view permission; masked fields are also dropped from the change form
+  for those users. A masked field is masked identically whether it is read over REST or GraphQL.
 - **Immutable audit trail** (`SNAPADMIN_AUDIT_LOG_ENABLED`) records every admin create/update/delete;
   retention via `SNAPADMIN_AUDIT_RETENTION_DAYS` and `snapadmin_audit_export` for SIEM ingestion.
 - **Backups** — 3-2-1 database backups with local/network/FTP(S)/SFTP targets; transport credentials

@@ -66,6 +66,43 @@ class TestNestedApps:
         assert [w.id for w in checks.check_nested_apps(None)] == ["snapadmin.W002"]
 
 
+# ── nesting settings vs. active AdminSite ───────────────────────────────────
+
+class TestNestingActiveSite:
+    def test_unconfigured_ok(self):
+        assert checks.check_nesting_active_site(None) == []
+
+    @override_settings(SNAPADMIN_HIDDEN_APPS=["silk"])
+    def test_configured_with_only_default_site_ok(self):
+        # No other AdminSite instance carries a registry, so the default site
+        # (which install_nested_apps() patches) is presumably the one in use.
+        assert checks.check_nesting_active_site(None) == []
+
+    @override_settings(SNAPADMIN_HIDDEN_APPS=["silk"])
+    def test_other_site_without_models_does_not_warn(self):
+        from django.contrib.admin.sites import AdminSite
+
+        empty_site = AdminSite(name="empty_custom")
+        try:
+            assert checks.check_nesting_active_site(None) == []
+        finally:
+            del empty_site
+
+    @override_settings(SNAPADMIN_HIDDEN_APPS=["silk"])
+    def test_other_site_with_registered_models_warns(self):
+        from django.contrib.admin.sites import AdminSite
+        from demo.models import Product
+
+        custom_site = AdminSite(name="custom")
+        custom_site.register(Product)
+        try:
+            result = checks.check_nesting_active_site(None)
+            assert [w.id for w in result] == ["snapadmin.W006"]
+            assert "custom" in result[0].msg
+        finally:
+            custom_site.unregister(Product)
+
+
 # ── sso providers ────────────────────────────────────────────────────────────
 
 class TestSsoProviders:

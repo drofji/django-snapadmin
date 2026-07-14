@@ -20,6 +20,30 @@ custom ``AdminSite``::
 The regrouping is applied by wrapping ``admin.site.get_app_list`` at startup
 (see :class:`snapadmin.apps.SnapAdminConfig`), and only when at least one of the
 settings above is non-empty — stock single-app installs are untouched.
+
+.. warning::
+   ``SNAPADMIN_HIDDEN_APPS`` is **cosmetic only** — it removes an app group from
+   the rendered admin **index page**, nothing more. The underlying
+   ``ModelAdmin`` URLs for those models (``/admin/<label>/<model>/``,
+   ``.../add/``, ``.../<id>/change/``, ``.../<id>/delete/``) stay registered
+   and reachable by any staff user who holds the model's Django permission,
+   regardless of whether its app group is hidden from the index. Hiding an app
+   here is a UX convenience (declutter a busy sidebar), **not** an access
+   control mechanism. To actually restrict who can reach a model, use Django's
+   standard permission system (``user_permissions`` / groups, or a custom
+   ``ModelAdmin.has_*_permission``) — see
+   https://docs.djangoproject.com/en/stable/topics/auth/default/#permissions-and-authorization.
+
+.. warning::
+   The wrapping described above only patches ``django.contrib.admin.site`` —
+   the default ``AdminSite`` singleton. If your project registers models on a
+   *different* ``AdminSite`` instance (a custom subclass, or Unfold's own site
+   if you construct one explicitly) and that site — not ``admin.site`` — is the
+   one mounted at ``/admin/``, these settings are silently ignored: nothing
+   patches that site's ``get_app_list``. ``manage.py check`` warns
+   (``snapadmin.W006``) when nesting settings are configured and a non-default
+   ``AdminSite`` with registered models is detected. See
+   :func:`snapadmin.checks.check_nesting_active_site`.
 """
 
 from django.conf import settings
@@ -31,7 +55,11 @@ def get_nested_apps() -> dict:
 
 
 def get_hidden_apps() -> set:
-    """App labels to omit from the admin index."""
+    """App labels to omit from the admin index.
+
+    Cosmetic only — see the module warning above. This does not restrict
+    access to the hidden app's models; use Django's permission system for that.
+    """
     return set(getattr(settings, "SNAPADMIN_HIDDEN_APPS", None) or [])
 
 

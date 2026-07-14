@@ -13,6 +13,7 @@ from decimal import Decimal
 import pytest
 from django.test import override_settings
 from django.utils import timezone
+from rest_framework import serializers
 
 from snapadmin import exporting
 from snapadmin.models import SnapExportJob
@@ -319,3 +320,176 @@ class TestExportApi:
     def test_anon_denied(self, anon_client):
         r = anon_client.post("/api/exports/", {"app_label": "demo", "model": "Product"}, format="json")
         assert r.status_code in (401, 403)
+
+
+# ── filters allowlist (#SEC5) ────────────────────────────────────────────────
+
+class TestAllowedFiltersForModel:
+    """Unit coverage of the own-field/lookup allowlist dispatch."""
+
+    def test_own_fields_only(self):
+        from demo.models import Product
+        from snapadmin.api.exports import _allowed_filters_for_model
+        allowed = _allowed_filters_for_model(Product)
+        # Relations requiring a join are never allowlisted.
+        assert "tags" not in allowed
+        assert "orderitem" not in allowed
+        # FK is only reachable via its "<name>_id" column, not the relation name.
+        assert "category" not in allowed
+        assert allowed["category_id"] == {"exact", "in"}
+
+    def test_text_field_lookups(self):
+        from demo.models import Product
+        from snapadmin.api.exports import _allowed_filters_for_model
+        assert _allowed_filters_for_model(Product)["name"] == {"exact", "in", "icontains"}
+
+    def test_boolean_field_lookups(self):
+        from demo.models import Product
+        from snapadmin.api.exports import _allowed_filters_for_model
+        assert _allowed_filters_for_model(Product)["available"] == {"exact"}
+
+    def test_numeric_field_lookups(self):
+        from demo.models import Product
+        from snapadmin.api.exports import _allowed_filters_for_model
+        assert _allowed_filters_for_model(Product)["price"] == {"exact", "in", "gte", "lte"}
+
+    def test_datetime_field_lookups(self):
+        from demo.models import Order
+        from snapadmin.api.exports import _allowed_filters_for_model
+        assert _allowed_filters_for_model(Order)["created_at"] == {"exact", "in", "gte", "lte"}
+
+    def test_uuid_field_lookups(self):
+        from demo.models import Showcase
+        from snapadmin.api.exports import _allowed_filters_for_model
+        assert _allowed_filters_for_model(Showcase)["uuid_field"] == {"exact", "in"}
+
+
+class TestValidateExportFilters:
+    """Unit coverage of the key/lookup rejection logic."""
+
+    def test_relation_traversal_rejected(self):
+        from demo.models import Order
+        from snapadmin.api.exports import _validate_export_filters
+        with pytest.raises(serializers.ValidationError) as exc:
+            _validate_export_filters(Order, {"customer__email": "x"})
+        assert "customer__email" in str(exc.value)
+
+    def test_unknown_field_rejected(self):
+        from demo.models import Product
+        from snapadmin.api.exports import _validate_export_filters
+        with pytest.raises(serializers.ValidationError) as exc:
+            _validate_export_filters(Product, {"nonexistent_field": "x"})
+        assert "nonexistent_field" in str(exc.value)
+
+    def test_disallowed_lookup_rejected(self):
+        from demo.models import Product
+        from snapadmin.api.exports import _validate_export_filters
+        with pytest.raises(serializers.ValidationError) as exc:
+            _validate_export_filters(Product, {"name__gte": "x"})
+        assert "name__gte" in str(exc.value)
+
+    def test_valid_filters_pass(self):
+        from demo.models import Product
+        from snapadmin.api.exports import _validate_export_filters
+        _validate_export_filters(
+            Product, {"name__icontains": "P", "price__gte": "1", "available": True,
+                      "category_id": 1},
+        )  # must not raise
+
+
+@pytest.mark.django_db
+class TestExportFilterValidationApi:
+    """POST /api/exports/ end-to-end filter allowlist enforcement."""
+
+    def test_relation_traversal_rejected(self, auth_client, products):
+        from demo.models import Category
+        Category.objects.create(name="C1", slug="c1")
+        r = auth_client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Product", "filters": {"category__name": "C1"}},
+            format="json",
+        )
+        assert r.status_code == 400
+        assert "category__name" in str(r.json())
+
+    def test_m2m_relation_rejected(self, auth_client, products):
+        r = auth_client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Product", "filters": {"tags__name": "x"}},
+            format="json",
+        )
+        assert r.status_code == 400
+        assert "tags__name" in str(r.json())
+
+    def test_unknown_field_rejected(self, auth_client, products):
+        r = auth_client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Product", "filters": {"nonexistent_field": "x"}},
+            format="json",
+        )
+        assert r.status_code == 400
+        assert "nonexistent_field" in str(r.json())
+
+    def test_disallowed_lookup_rejected(self, auth_client, products):
+        r = auth_client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Product", "filters": {"price__icontains": "1"}},
+            format="json",
+        )
+        assert r.status_code == 400
+        assert "price__icontains" in str(r.json())
+
+    def test_valid_char_filter_applied(self, auth_client, products):
+        r = auth_client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Product", "filters": {"name__icontains": "P1"}},
+            format="json",
+        )
+        assert r.status_code == 201, r.content
+        assert r.json()["processed_rows"] == 1
+
+    def test_valid_number_filter_applied(self, auth_client, products):
+        r = auth_client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Product", "filters": {"price__gte": "3"}},
+            format="json",
+        )
+        assert r.status_code == 201, r.content
+        assert r.json()["processed_rows"] == 2  # price 3 and 4
+
+    def test_valid_boolean_filter_applied(self, auth_client, products):
+        r = auth_client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Product", "filters": {"available": True}},
+            format="json",
+        )
+        assert r.status_code == 201, r.content
+        assert r.json()["processed_rows"] == 5  # all products default available=True
+
+    def test_valid_fk_id_filter_applied(self, auth_client):
+        from demo.models import Customer, Order
+        c1 = Customer.objects.create(first_name="A", last_name="A", email="a@example.com")
+        c2 = Customer.objects.create(first_name="B", last_name="B", email="b@example.com")
+        Order.objects.create(customer=c1, total="10.00")
+        Order.objects.create(customer=c1, total="20.00")
+        Order.objects.create(customer=c2, total="30.00")
+        r = auth_client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Order", "filters": {"customer_id": c1.pk}},
+            format="json",
+        )
+        assert r.status_code == 201, r.content
+        assert r.json()["processed_rows"] == 2
+
+    def test_valid_date_filter_applied(self, auth_client):
+        from demo.models import Customer, Order
+        customer = Customer.objects.create(first_name="A", last_name="A", email="a@example.com")
+        Order.objects.create(customer=customer, total="10.00")
+        cutoff = (timezone.now() - timezone.timedelta(days=1)).isoformat()
+        r = auth_client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Order", "filters": {"created_at__gte": cutoff}},
+            format="json",
+        )
+        assert r.status_code == 201, r.content
+        assert r.json()["processed_rows"] == 1

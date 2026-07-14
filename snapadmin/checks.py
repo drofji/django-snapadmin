@@ -117,6 +117,45 @@ def check_sso_providers(app_configs, **kwargs):
     return warnings
 
 
+def check_nesting_active_site(app_configs, **kwargs):
+    """Warn when nesting settings are configured but another AdminSite is in play.
+
+    ``install_nested_apps()`` (``snapadmin/apps.py``) only patches
+    ``django.contrib.admin.site`` — the default ``AdminSite`` singleton. Reliably
+    telling *which* ``AdminSite`` actually serves ``/admin/`` isn't possible from
+    ``AppConfig.ready()`` (URLconf isn't guaranteed loaded yet, and app ready()
+    order isn't guaranteed either), so this check runs later instead: by the time
+    ``manage.py check`` runs, every ``AdminSite`` a project has instantiated and
+    registered models on is discoverable via ``django.contrib.admin.sites.all_sites``.
+    If one of those isn't the default site, nesting settings applied to the
+    default site may never reach the index the user actually sees.
+    """
+    from snapadmin.nesting import nesting_configured
+
+    if not nesting_configured():
+        return []
+
+    from django.contrib.admin.sites import all_sites, site as default_site
+
+    other_sites = sorted(
+        getattr(s, "name", repr(s))
+        for s in all_sites
+        if s is not default_site and getattr(s, "_registry", None)
+    )
+    if not other_sites:
+        return []
+    return [Warning(
+        "SNAPADMIN_NESTED_APPS / SNAPADMIN_HIDDEN_APPS / SNAPADMIN_APP_LABELS are "
+        "configured, but at least one AdminSite other than the default "
+        f"django.contrib.admin.site also has models registered on it: {', '.join(other_sites)}.",
+        hint="SnapAdmin only patches the default site's get_app_list. If that other "
+             "site is the one serving /admin/, these settings are silently ignored there. "
+             "Register your models on django.contrib.admin.site instead, or apply "
+             "snapadmin.nesting.apply_nested_apps to your custom site's get_app_list yourself.",
+        id="snapadmin.W006",
+    )]
+
+
 def check_api_write_fields(app_configs, **kwargs):
     if not getattr(settings, "SNAPADMIN_REST_API_ENABLED", True):
         return []
@@ -141,6 +180,7 @@ ALL_CHECKS = [
     check_analytics_db_alias,
     check_masked_fields,
     check_nested_apps,
+    check_nesting_active_site,
     check_sso_providers,
     check_api_write_fields,
 ]

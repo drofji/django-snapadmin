@@ -400,7 +400,16 @@ class SnapExportJob(models.Model):
 class SnapModelAttributeEnum(str, Enum):
     ADMIN_OVERRIDES = "admin_overrides"
 
-    
+
+class SnapPurgeError(Exception):
+    """Raised when a GDPR purge cannot be fully applied across every storage layer.
+
+    Typically means the primary database delete succeeded but a secondary
+    store (e.g. the Elasticsearch mirror) could not be cleared — the caller
+    must not treat the affected model as cleanly purged.
+    """
+
+
 class EsStorageMode(str, Enum):
     """Modes for Elasticsearch integration."""
 
@@ -757,6 +766,21 @@ class SnapModel(models.Model):
     # non-excluded field stays writable — a snapadmin.W004 system check warns
     # about this so the tradeoff is a deliberate choice, not an oversight.
     api_write_fields: list[str] | None = None
+
+    # Per-model override for the auto-generated REST API filters (see
+    # snapadmin.api.filters). By default every text-type field (CharField,
+    # TextField, EmailField, URLField, SlugField) exposes exact/icontains/
+    # startswith/in lookups, with the bare ``?field=value`` query parameter
+    # performing an *exact* match — index-usable, unlike the previous default
+    # of an implicit substring (icontains) match on every text field, which
+    # could not use an index and matched unrelated superstrings. Substring
+    # search stays available via the explicit ``?field__icontains=value``
+    # suffix. Set a field's lookup list here to widen or narrow that default
+    # for one field on one model, e.g.
+    #   api_filter_lookups = {"name": ["exact", "icontains"]}
+    # Left as None (the default), every text field uses the library default
+    # lookup set.
+    api_filter_lookups: dict[str, list[str]] | None = None
 
     # Optional index-level settings applied when the ES index is first created —
     # e.g. custom analyzers under "analysis", "number_of_shards", "number_of_replicas".
@@ -1225,20 +1249,31 @@ class SnapModel(models.Model):
     # ------------------------------------------------------------------
 
     @classmethod
-    def _delete_pks_from_es(cls, pks) -> None:
-        """Best-effort removal of the given primary keys from the ES index.
+    def _delete_pks_from_es(cls, pks: list) -> bool:
+        """Remove the given primary keys from the ES index via a single bulk call.
 
         Used by the DUAL-mode purge: ``QuerySet.delete()`` is a bulk SQL DELETE
         that never calls ``Model.delete()``, so the ES mirror would otherwise be
-        left behind. We collect the pks before the DB delete and clear them here.
+        left behind. We collect the pks before the DB delete and clear them here
+        with one bulk ``delete_by_query`` (an ``ids`` filter) rather than one
+        ``es.delete()`` call per pk.
+
+        Returns ``True`` when the ES mirror was cleared (or there was nothing to
+        do), ``False`` when the ES delete failed. Callers must treat ``False``
+        as a purge failure for this model's secondary store, not as success —
+        the personal data may still be live and searchable via ES.
         """
         if not pks or not getattr(settings, "ELASTICSEARCH_ENABLED", False):
-            return
+            return True
         try:
             es = cls.get_es_client()
             index_name = cls.get_es_index_name()
-            for pk in pks:
-                es.delete(index=index_name, id=pk, ignore=[404])
+            es.delete_by_query(
+                index=index_name,
+                body={"query": {"ids": {"values": list(pks)}}},
+                ignore=[404],
+            )
+            return True
         except Exception as exc:
             logger.warning(
                 "es_purge_delete_failed",
@@ -1246,6 +1281,7 @@ class SnapModel(models.Model):
                 pk_count=len(pks),
                 error=str(exc),
             )
+            return False
 
     @classmethod
     def _purge_expired_es_only(cls, cutoff, retention_field, dry_run: bool) -> int:
@@ -1286,7 +1322,17 @@ class SnapModel(models.Model):
         * ``ES_ONLY`` — delete the matching documents from Elasticsearch.
 
         Returns the number of records purged (or that *would* be purged when
-        ``dry_run=True``); returns ``0`` when retention is not configured.
+        ``dry_run=True``); returns ``0`` when retention is not configured. The
+        count always reflects this model's own rows, never the cascade-inflated
+        total that ``QuerySet.delete()`` reports when related rows are removed
+        via ``on_delete=CASCADE``.
+
+        For ``DUAL`` mode, raises :class:`SnapPurgeError` if the database delete
+        succeeds but the Elasticsearch mirror cannot be cleared — the caller
+        must not report that model as fully purged in that case. There is no
+        two-phase commit across the DB and ES; the DB delete has already
+        happened by the time this is raised, which is a known limitation of
+        purging across heterogeneous stores.
         """
         retention_days = getattr(cls, "data_retention_days", None)
         if not retention_days or retention_days <= 0:
@@ -1305,11 +1351,18 @@ class SnapModel(models.Model):
 
         if cls.es_storage_mode == EsStorageMode.DUAL:
             pks = list(qs.values_list("pk", flat=True))
-            count, _ = qs.delete()
-            cls._delete_pks_from_es(pks)
+            count = len(pks)
+            qs.delete()
+            if not cls._delete_pks_from_es(pks):
+                raise SnapPurgeError(
+                    f"{cls.__name__}: {count} row(s) deleted from the database, "
+                    "but the Elasticsearch mirror could not be cleared; personal "
+                    "data may still be live and searchable via ES."
+                )
             return count
 
-        count, _ = qs.delete()
+        count = qs.count()
+        qs.delete()
         return count
 
     # ------------------------------------------------------------------

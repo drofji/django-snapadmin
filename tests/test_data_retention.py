@@ -205,9 +205,10 @@ class TestPurgeExpiredDual:
 
         assert count == 1
         assert not AuditLog.objects.filter(pk=old.pk).exists()
-        mock_es.delete.assert_called_once_with(
-            index=AuditLog.get_es_index_name(), id=old.pk, ignore=[404]
-        )
+        mock_es.delete_by_query.assert_called_once()
+        _, kwargs = mock_es.delete_by_query.call_args
+        assert kwargs["index"] == AuditLog.get_es_index_name()
+        assert kwargs["body"]["query"]["ids"]["values"] == [old.pk]
 
     def test_dry_run_skips_db_and_es(self):
         from demo.models import AuditLog
@@ -224,17 +225,63 @@ class TestPurgeExpiredDual:
 
         assert count == 1
         assert AuditLog.objects.filter(pk=old.pk).exists()
-        mock_es.delete.assert_not_called()
+        mock_es.delete_by_query.assert_not_called()
+
+    def test_es_failure_raises_and_is_not_reported_as_success(self):
+        """If the ES mirror can't be cleared, purge_expired() must not report a
+        clean success — the DB rows are already gone, but the caller (the Celery
+        task / management command) needs to know this model's purge is partial.
+        """
+        from demo.models import AuditLog
+        from snapadmin.models import EsStorageMode, SnapPurgeError
+        from unittest.mock import MagicMock, patch
+        from django.test import override_settings
+
+        old = self._old_log(91)
+        mock_es = MagicMock()
+        mock_es.delete_by_query.side_effect = RuntimeError("es unreachable")
+        with override_settings(ELASTICSEARCH_ENABLED=True), \
+             patch.object(AuditLog, "es_storage_mode", EsStorageMode.DUAL), \
+             patch.object(AuditLog, "get_es_client", return_value=mock_es):
+            with pytest.raises(SnapPurgeError):
+                AuditLog.purge_expired()
+
+        # The DB delete already happened (no 2PC across stores) — but the
+        # exception is what tells the caller this purge was not clean.
+        assert not AuditLog.objects.filter(pk=old.pk).exists()
+
+    def test_task_reports_es_failure_as_error_not_purged(self):
+        """The Celery task must surface a partial DUAL purge as an error, not
+        silently count the model as fully purged.
+        """
+        from demo.models import AuditLog
+        from snapadmin.models import EsStorageMode
+        from snapadmin.tasks import purge_expired_data
+        from unittest.mock import MagicMock, patch
+        from django.test import override_settings
+
+        self._old_log(91)
+        mock_es = MagicMock()
+        mock_es.delete_by_query.side_effect = RuntimeError("es unreachable")
+        with override_settings(ELASTICSEARCH_ENABLED=True), \
+             patch.object(AuditLog, "es_storage_mode", EsStorageMode.DUAL), \
+             patch.object(AuditLog, "get_es_client", return_value=mock_es):
+            result = purge_expired_data()
+
+        assert "demo.AuditLog" not in result["purged"]
+        assert "demo.AuditLog" in result["errors"]
 
 
 class TestDeletePksFromEs:
-    """_delete_pks_from_es is best-effort and must never raise."""
+    """_delete_pks_from_es issues one bulk delete_by_query call and reports
+    success/failure via its return value instead of swallowing failures silently.
+    """
 
     def test_no_pks_is_noop(self):
         from demo.models import Product
         from unittest.mock import patch
         with patch.object(Product, "get_es_client") as client:
-            Product._delete_pks_from_es([])
+            assert Product._delete_pks_from_es([]) is True
             client.assert_not_called()
 
     def test_es_disabled_is_noop(self):
@@ -243,26 +290,31 @@ class TestDeletePksFromEs:
         from django.test import override_settings
         with override_settings(ELASTICSEARCH_ENABLED=False), \
              patch.object(Product, "get_es_client") as client:
-            Product._delete_pks_from_es([1, 2])
+            assert Product._delete_pks_from_es([1, 2]) is True
             client.assert_not_called()
 
-    def test_deletes_each_pk(self):
+    def test_bulk_deletes_all_pks_in_one_call(self):
         from demo.models import Product
         from unittest.mock import MagicMock, patch
         from django.test import override_settings
         mock_es = MagicMock()
         with override_settings(ELASTICSEARCH_ENABLED=True), \
              patch.object(Product, "get_es_client", return_value=mock_es):
-            Product._delete_pks_from_es([7, 8])
-        assert mock_es.delete.call_count == 2
+            assert Product._delete_pks_from_es([7, 8, 9]) is True
+        mock_es.delete_by_query.assert_called_once()
+        mock_es.delete.assert_not_called()
+        _, kwargs = mock_es.delete_by_query.call_args
+        assert kwargs["index"] == Product.get_es_index_name()
+        assert kwargs["body"] == {"query": {"ids": {"values": [7, 8, 9]}}}
+        assert kwargs["ignore"] == [404]
 
-    def test_swallows_exceptions(self):
+    def test_reports_failure_without_raising(self):
         from demo.models import Product
         from unittest.mock import patch
         from django.test import override_settings
         with override_settings(ELASTICSEARCH_ENABLED=True), \
              patch.object(Product, "get_es_client", side_effect=RuntimeError("boom")):
-            Product._delete_pks_from_es([1])  # must not raise
+            assert Product._delete_pks_from_es([1]) is False  # must not raise
 
 
 class TestPurgeExpiredEsOnly:
@@ -311,3 +363,53 @@ class TestPurgeExpiredEsOnly:
              patch.object(SearchLog, "data_retention_days", 30), \
              patch.object(SearchLog, "get_es_client", side_effect=RuntimeError("boom")):
             assert SearchLog.purge_expired() == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# purge_expired() counts must reflect the target model's own rows, not
+# Django's cascade-inflated QuerySet.delete() total (on_delete=CASCADE children)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestPurgeExpiredCountNotCascadeInflated:
+    """Order -> OrderItem is on_delete=CASCADE: purging an old Order also
+    deletes its OrderItem rows in the same SQL DELETE. QuerySet.delete()'s
+    total would then count both, inflating the reported purge size well past
+    what a preceding dry_run=True (a plain qs.count() on Order alone) reports.
+    """
+
+    def _old_order_with_items(self, days_old: int, item_count: int = 3):
+        from decimal import Decimal
+        from demo.models import Customer, Order, OrderItem, Product
+
+        customer = Customer.objects.create(
+            first_name="Cascade", last_name="Test", email="cascade@example.com",
+            origin="status_a", active=True,
+        )
+        order = Order.objects.create(customer=customer, total=Decimal("42.00"))
+        Order.objects.filter(pk=order.pk).update(
+            created_at=timezone.now() - timedelta(days=days_old)
+        )
+        product = Product.objects.create(name="Cascade Product", price=Decimal("5.00"))
+        for _ in range(item_count):
+            OrderItem.objects.create(order=order, product=product, quantity=1, price=Decimal("5.00"))
+        return order
+
+    def test_purge_count_matches_dry_run_despite_cascade(self):
+        from demo.models import Order, OrderItem
+
+        with patch.object(Order, "data_retention_days", 30, create=True):
+            old_order = self._old_order_with_items(days_old=45, item_count=3)
+
+            dry_run_count = Order.purge_expired(dry_run=True)
+            assert dry_run_count == 1
+
+            live_count = Order.purge_expired()
+
+        # The cascade actually happened...
+        assert not Order.objects.filter(pk=old_order.pk).exists()
+        assert OrderItem.objects.filter(order_id=old_order.pk).count() == 0
+        # ...but the reported count is the target row count, matching dry_run,
+        # not Django's cascade-inflated delete() total (1 order + 3 items = 4).
+        assert live_count == 1
+        assert live_count == dry_run_count

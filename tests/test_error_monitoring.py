@@ -333,6 +333,48 @@ class TestErrorDigest:
         assert purge_expired_events() == 2
         assert ErrorEvent.objects.count() == 1
 
+    @override_settings(SNAPADMIN_ERROR_RETENTION_DAYS=0)
+    def test_purge_expired_events_retention_zero_deletes_nothing(self):
+        """retention_days=0 is the intuitive way to write 'keep forever'; it
+        must not collapse the cutoff to ~now and wipe the whole table.
+        """
+        _make_events(2, age=timedelta(days=8))
+        _make_events(1)
+        assert purge_expired_events() == 0
+        assert ErrorEvent.objects.count() == 3
+
+    @override_settings(SNAPADMIN_ERROR_RETENTION_DAYS=-1)
+    def test_purge_expired_events_negative_retention_deletes_nothing(self):
+        _make_events(2, age=timedelta(days=8))
+        assert purge_expired_events() == 0
+        assert ErrorEvent.objects.count() == 2
+
+    @override_settings(
+        SNAPADMIN_ERROR_DIGEST_EMAILS=RECIPIENTS,
+        SNAPADMIN_ERROR_RETENTION_DAYS=1,
+    )
+    def test_digest_total_and_body_stay_consistent_when_purge_overlaps_window(self):
+        # A wide digest window (48h) plus a short retention (1 day = 24h) means
+        # one of these two events falls inside the reported digest window *and*
+        # is eligible for the retention purge that runs as part of the same call.
+        # `events` is a lazy queryset: purging it before group_events() evaluates
+        # it would silently drop the purged event from the grouped body while
+        # the already-computed `total` still counted it — subject vs. body drift.
+        _make_events(1, exception_class="ValueError", path="/a/", age=timedelta(hours=1))
+        _make_events(1, exception_class="TypeError", path="/b/", age=timedelta(hours=30))
+
+        summary = send_error_digest(hours=48)
+
+        assert summary["errors"] == 2
+        assert summary["groups"] == 2
+        assert summary["purged"] == 1
+        message = mail.outbox[0]
+        assert "2 errors in 2 groups" in message.subject
+        assert "ValueError" in message.body
+        assert "TypeError" in message.body
+        # The purge-eligible event is actually gone by the time the call returns.
+        assert ErrorEvent.objects.count() == 1
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Middleware

@@ -4,6 +4,13 @@ snapadmin/api/filters.py
 Dynamic filter generation for SnapAdmin REST API.
 Automatically builds a django-filter FilterSet for any model based on field types.
 drf-spectacular introspects the filter backend and exposes all parameters in Swagger.
+
+Text-type fields (CharField, TextField, EmailField, URLField, SlugField) default the
+*bare* ``?field=value`` query parameter to an exact match — index-usable, unlike a
+leading-wildcard substring search. Substring matching stays available through the
+explicit ``?field__icontains=value`` suffix (mirroring the ``__gte``/``__lte`` suffix
+pattern already used below for numeric and date fields). A model can widen or narrow
+the lookup set for one of its own fields via ``SnapModel.api_filter_lookups``.
 """
 
 import django_filters
@@ -12,9 +19,41 @@ from django_filters.rest_framework import DjangoFilterBackend
 
 _filterset_cache: dict = {}
 
+# Text-type model fields that get the exact/icontains/startswith/in lookup set below.
+_TEXT_FIELD_TYPES = (
+    django_models.CharField,
+    django_models.TextField,
+    django_models.EmailField,
+    django_models.URLField,
+    django_models.SlugField,
+)
 
-def _build_filters_for_model(model_class) -> dict:
-    filters = {}
+# Library default lookup set for a text field when the model hasn't overridden it via
+# api_filter_lookups. "exact" is exposed on the bare field name (no suffix); every
+# other lookup is exposed as an explicit "<field>__<lookup>" suffix.
+_TEXT_LOOKUPS_DEFAULT: list[str] = ["exact", "icontains", "startswith", "in"]
+
+
+class _CharInFilter(django_filters.BaseInFilter, django_filters.CharFilter):
+    """CharFilter accepting a comma-separated list, for ``__in`` lookups."""
+
+
+def _text_filter_for_lookup(name: str, lookup: str) -> tuple[str, django_filters.Filter]:
+    """Return the ``(query_param, Filter)`` pair for one text-field lookup.
+
+    "exact" is bound to the bare field name so ``?field=value`` performs an exact,
+    index-usable match; every other lookup gets an explicit "<field>__<lookup>" key.
+    """
+    if lookup == "exact":
+        return name, django_filters.CharFilter(field_name=name, lookup_expr="exact")
+    if lookup == "in":
+        return f"{name}__in", _CharInFilter(field_name=name, lookup_expr="in")
+    return f"{name}__{lookup}", django_filters.CharFilter(field_name=name, lookup_expr=lookup)
+
+
+def _build_filters_for_model(model_class: type[django_models.Model]) -> dict[str, django_filters.Filter]:
+    filters: dict[str, django_filters.Filter] = {}
+    model_lookups: dict[str, list[str]] = getattr(model_class, "api_filter_lookups", None) or {}
 
     for field in model_class._meta.get_fields():
         if not hasattr(field, "column"):
@@ -22,14 +61,11 @@ def _build_filters_for_model(model_class) -> dict:
 
         name = field.name
 
-        if isinstance(field, (
-            django_models.CharField,
-            django_models.TextField,
-            django_models.EmailField,
-            django_models.URLField,
-            django_models.SlugField,
-        )):
-            filters[name] = django_filters.CharFilter(lookup_expr="icontains")
+        if isinstance(field, _TEXT_FIELD_TYPES):
+            lookups = model_lookups.get(name, _TEXT_LOOKUPS_DEFAULT)
+            for lookup in lookups:
+                key, filter_instance = _text_filter_for_lookup(name, lookup)
+                filters[key] = filter_instance
 
         elif isinstance(field, django_models.UUIDField):
             filters[name] = django_filters.UUIDFilter(lookup_expr="exact")

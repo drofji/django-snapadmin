@@ -224,9 +224,10 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Elasticsearch Ready** | Multi-mode storage (`DB_ONLY`, `DUAL`, `ES_ONLY`) for blazing fast search. |
 | **Smart ES Query Routing** | `?search=` REST queries on `DUAL` models run on Elasticsearch automatically (fuzzy, relevance-ranked); plain listings stay on the DB. Toggle globally (`SNAPADMIN_ES_QUERY_ROUTING`) or per model (`es_query_routing`). |
 | **Auto ES Mapping** | `es_auto_mapping = True` derives the index mapping from your model fields (text + `.raw` keyword subfields, dates, numerics); `es_mapping` entries override per field, `es_index_settings` adds analyzers/shards. |
-| **Secured GraphQL** | Every resolver enforces authentication (session or API token) + per-model Django permissions — the same contract as REST. `search`/`first`/`offset` arguments included. |
+| **Secured GraphQL** | Every resolver enforces authentication (session or API token) + per-model Django permissions — the same contract as REST — on **every traversed relation**, not just top-level fields; `SNAPADMIN_MASKED_FIELDS` are masked in GraphQL output too. `search`/`first`/`offset` arguments included. |
 | **API Field Privacy** | `api_exclude_fields` hides sensitive columns from REST, GraphQL and schema introspection while the admin keeps showing them. |
 | **API Write Allowlist** | `api_write_fields` restricts which fields accept a client-supplied value on REST create/update — a mass-assignment guard for status flags, ownership FKs and other fields that must only change server-side. A system check (`snapadmin.W004`) flags any model that hasn't set it. |
+| **Indexable Auto-Filters** | Text fields (`CharField`/`TextField`/`EmailField`/`URLField`/`SlugField`) default `?field=value` to an exact, index-usable match; substring search stays available via `?field__icontains=`/`__startswith`/`__in`. Override the lookup set per field with `api_filter_lookups` on the model. |
 | **GDPR Data Retention** | Per-model `data_retention_days` parameter with automatic Celery cleanup task. |
 | **Error Monitoring & Email Alerts** | Optional middleware records every unhandled exception / 5xx as a browsable `ErrorEvent`; emails a **spike alert** when N errors hit within 15 minutes and a **daily grouped digest** (Celery Beat or cron) — thresholds, window, recipients and send time all configurable. |
 | **3-2-1 Database Backups** | Scheduled DB dumps (SQLite copy / `pg_dump`, gzip) shipped to configurable destinations — a **local** directory, a **network** server (mounted share), and an **offsite** copy over **FTP/FTPS** or **SSH/SFTP** — each with its **own frequency** and retention. |
@@ -297,8 +298,11 @@ The base install is self-contained. Opt into extra integrations with pip extras:
 > **`extra-settings` is optional and not used by SnapAdmin's core** (it was a required dependency
 > before — now it isn't). Install the extra only if you want the dynamic `Setting` model. Two gotchas:
 > - **`EXTRA_SETTINGS_ADMIN_APP` must match an `INSTALLED_APPS` entry.** If you register apps by their
->   `AppConfig` dotted path (`"shop.apps.ShopConfig"`), pass that dotted string — a bare label
->   (`"shop"`) won't be found. If you list bare labels, use the bare label.
+>   `AppConfig` dotted path (`"shop.apps.ShopConfig"`, e.g. an app nested under a package like
+>   `"myproject.apps.billing"`), pass that dotted string — a bare label (`"shop"`, `"billing"`) won't
+>   be found. If you list bare labels, use the bare label. `django-extra-settings`'s own error message
+>   here names the label you passed, not the dotted path it actually expects, which makes this easy to
+>   misdiagnose — this is an upstream limitation of `django-extra-settings`, not a SnapAdmin bug.
 > - **The `Setting` admin is Unfold-styled automatically.** `django-extra-settings` registers its own
 >   plain `ModelAdmin`, which would render unstyled next to the rest of the themed site. SnapAdmin fixes
 >   this for you: from `SnapAdminConfig.ready()` it re-registers the `Setting` admin (or its proxy, when
@@ -493,7 +497,7 @@ SNAPADMIN_MASKED_FIELDS = {}           # {"app.Model": ["email", ...]} → mask 
 SNAPADMIN_SSO_PROVIDERS = {}           # {"azure": {"label": "...", "url": "/accounts/azure/login/"}}
 SNAPADMIN_SSO_ALLOWED_HOSTS = []       # ["login.microsoftonline.com"] → restrict absolute SSO provider urls to these hosts
 SNAPADMIN_NESTED_APPS = {}             # {"snapadmin": "auth"} → fold sections under existing app groups
-SNAPADMIN_HIDDEN_APPS = []             # ["silk"] → hide app groups from the admin index
+SNAPADMIN_HIDDEN_APPS = []             # ["silk"] → hide app groups from the admin index (cosmetic; not access control)
 SNAPADMIN_APP_LABELS = {}              # {"auth": "Administration"} → rename an app group heading
 
 # Compliance & audit
@@ -588,9 +592,9 @@ Four settings-driven features, each safe on stock single-database installs (iner
   replication lag can never stale or drop a mutation. An empty or unknown alias is a no-op.
 - **PII masking** — declare sensitive fields once in `SNAPADMIN_MASKED_FIELDS`
   (`{"users.UserModel": ["email", "phone_number"]}`). They are obfuscated in the admin changelist,
-  removed from the admin change form, and masked in the REST API responses for anyone who is not a
-  superuser or a holder of the `snapadmin.view_raw_pii` permission. Emails become `a***@domain.com`,
-  other values `+3********78`.
+  removed from the admin change form, and masked in both the REST API and GraphQL responses for
+  anyone who is not a superuser or a holder of the `snapadmin.view_raw_pii` permission. Emails
+  become `a***@domain.com`, other values `+3********78`.
 - **SSO/OAuth2 login buttons** — SnapAdmin only *renders* the providers you already wired into
   `AUTHENTICATION_BACKENDS`/URLconf (django-allauth, social-auth, mozilla-django-oidc); it adds no
   auth dependency. `SNAPADMIN_SSO_PROVIDERS` drives login-page buttons (add the
@@ -603,7 +607,14 @@ Four settings-driven features, each safe on stock single-database installs (iner
   provider URLs to a known allowlist of identity providers.
 - **Admin-index nesting** — `SNAPADMIN_NESTED_APPS` folds auto-generated sections under existing app
   groups so the index stays uncluttered; `SNAPADMIN_HIDDEN_APPS` hides groups and
-  `SNAPADMIN_APP_LABELS` renames headings — no custom `AdminSite` required.
+  `SNAPADMIN_APP_LABELS` renames headings — no custom `AdminSite` required. **`SNAPADMIN_HIDDEN_APPS`
+  is cosmetic only:** it removes an app group from the rendered index page, but the underlying
+  `ModelAdmin` URLs stay registered and reachable by any staff user with the model's Django
+  permission — it is not an access control mechanism. Use Django's standard permission system
+  (`user_permissions` / groups, or a custom `ModelAdmin.has_*_permission`) to actually restrict
+  access. These settings also only patch `django.contrib.admin.site` (the default `AdminSite`); if
+  your project serves `/admin/` from a different `AdminSite` instance, they are silently ignored
+  there — `manage.py check` warns (`snapadmin.W006`) when that's detectable.
 
 ### 🛡️ Compliance & audit
 
@@ -660,6 +671,26 @@ class Account(snap_models.SnapModel):
 Leaving `api_write_fields` unset (the default) keeps every non-excluded field
 writable, matching prior behaviour — a `snapadmin.W004` system check warns on
 every model that hasn't made the choice explicitly.
+
+Auto-generated REST filters default a text field's bare `?field=value` query
+parameter to an **exact** match (index-usable), not a substring search — the bare
+key always means exact, but the *extra* lookups exposed alongside it (as
+`?field__<lookup>=` suffixes) are per-field and overridable via
+`api_filter_lookups`:
+
+```python
+class Product(snap_models.SnapModel):
+    sku  = snap.SnapCharField(max_length=32, unique=True)   # exact only — no substring lookup at all
+    name = snap.SnapCharField(max_length=200)               # library default: exact + __icontains/__startswith/__in
+
+    # narrow "sku" to exact-only (drop the unused __icontains/__startswith/__in
+    # suffixes from Swagger); every other text field on this model still gets
+    # the library default
+    api_filter_lookups = {"sku": ["exact"]}
+```
+
+Substring search is never fully removed by the new default — it's just reachable
+through the explicit `?field__icontains=value` suffix instead of the bare key.
 
 ### Vetoing deletes via the API
 
@@ -998,6 +1029,7 @@ Several extension points need no subclassing — just settings:
 | Whether GraphQL requires auth / exposes GraphiQL | `SNAPADMIN_GRAPHQL_REQUIRE_AUTH` / `SNAPADMIN_GRAPHIQL_ENABLED` | [Feature Toggles](#-feature-toggles--advanced-settings) |
 | Hiding fields from every API surface | `api_exclude_fields` on the model | table above |
 | Restricting which fields REST create/update can write | `api_write_fields` on the model | table above |
+| Widening/narrowing a text field's auto-filter lookups | `api_filter_lookups` on the model | table above |
 
 > **GraphQL** is generated dynamically from your `SnapModel`s and enforces the *same* per-model
 > permissions and `api_exclude_fields` as REST — extend it by adding/removing SnapModels and
@@ -1032,8 +1064,12 @@ curl -H "Authorization: Token $TOKEN" "$BASE/models/schema/"
 # Plain listing — paginated, served by the database
 curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?page=2"
 
-# Field filters (auto-generated from field types, visible in Swagger)
+# Field filters (auto-generated from field types, visible in Swagger).
+# Text fields: bare "?field=value" is an exact, index-usable match; substring
+# search is explicit via "__icontains" (also: "__startswith", "__in").
 curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?available=true&price__gte=100"
+curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?name=Laptop+Pro"
+curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?name__icontains=laptop"
 
 # Full CRUD
 curl -X POST -H "Authorization: Token $TOKEN" -H "Content-Type: application/json" \
@@ -1203,8 +1239,13 @@ exposes — don't edit the generated schema.
 
 GraphQL enforces the **same access contract as REST**: every resolver requires an
 authenticated caller (admin session or `Authorization: Token`) holding the model's
-`view` permission; a token's `allowed_models` scope applies on top. List fields
-accept `search` (ES-routed for `DUAL`/`ES_ONLY` models), `first` and `offset`:
+`view` permission; a token's `allowed_models` scope applies on top. The check runs
+on **every relation the query traverses**, not just the top-level field — reading
+`A { relatedB { … } }` requires `view` on both `A` and `B`, and a related object
+you may not view resolves as a `Permission denied.` error instead of leaking its
+data. Fields configured in `SNAPADMIN_MASKED_FIELDS` come back masked over GraphQL
+exactly as they do over REST. List fields accept `search` (ES-routed for
+`DUAL`/`ES_ONLY` models), `first` and `offset`:
 
 ```bash
 curl -H "Authorization: Token $TOKEN" -H "Content-Type: application/json" \

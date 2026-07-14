@@ -583,8 +583,11 @@ curl -H "Authorization: Token $TOKEN" "$BASE/models/schema/"
 # Plain listing — paginated, served by the database
 curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?page=2"
 
-# Auto-generated field filters (full per-model list visible in Swagger)
+# Auto-generated field filters (full per-model list visible in Swagger).
+# Text fields: bare "?field=value" is an exact, index-usable match; substring
+# search is explicit via "__icontains" (also: "__startswith", "__in").
 curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?available=true&price__gte=100"
+curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?name__icontains=laptop"
 
 # Create, update, delete
 curl -X POST -H "Authorization: Token $TOKEN" -H "Content-Type: application/json" \
@@ -727,6 +730,27 @@ for row in Product.objects.all().iterator(chunk_size=2000):
   — the <code>snapadmin.W004</code> system check warns on any model that hasn't made the choice
   explicitly, so the exposure is deliberate rather than an oversight.</p>
 
+  <h3>Auto-filter lookups — <code>api_filter_lookups</code></h3>
+  <p>Every text-type field (<code>CharField</code>/<code>TextField</code>/<code>EmailField</code>/
+  <code>URLField</code>/<code>SlugField</code>) gets an auto-generated filter. The bare
+  <code>?field=value</code> query parameter is always an <strong>exact</strong>, index-usable match;
+  substring, prefix and multi-value lookups are exposed as explicit suffixes —
+  <code>?field__icontains=</code>, <code>?field__startswith=</code>, <code>?field__in=a,b,c</code>.
+  Set <code>api_filter_lookups</code> to widen or narrow which of those suffixes exist for a
+  specific field on a specific model:</p>
+  <pre><code>class Product(SnapModel):
+    sku  = snap_fields.SnapCharField(max_length=32, unique=True)  # exact only — no substring lookup at all
+    name = snap_fields.SnapCharField(max_length=200)              # library default: exact + __icontains/__startswith/__in
+
+    # narrow "sku" to exact-only; every other text field on this model still
+    # gets the library default lookup set
+    api_filter_lookups = {"sku": ["exact"]}</code></pre>
+  <p>Left unset (the default), every text field uses the library default lookup set shown above.
+  <strong>Breaking change from earlier releases:</strong> the bare key used to run
+  <code>lookup_expr="icontains"</code> — a leading-wildcard substring match that cannot use a
+  database index. Callers relying on that now need <code>?field__icontains=value</code> instead of
+  the bare key. See <code>docs/releases/Unreleased.txt</code> for the full upgrade note.</p>
+
   <h3>Vetoing deletes — <code>api_can_delete</code> + <code>SNAPADMIN_API_DELETE_GUARD</code></h3>
   <p>Forbid deleting <strong>specific objects</strong> through the dynamic model API without
   re-mounting routes. Two extension points are consulted before every <code>DELETE</code> and
@@ -850,9 +874,9 @@ SNAPADMIN_ANALYTICS_DB_ALIAS = "read_replica"</code></pre>
 
   <h3>PII data masking</h3>
   <p>Declare sensitive fields once. They are obfuscated in the admin changelist, dropped from the
-  admin change form, and masked in REST API responses for anyone who is not a superuser or a holder of
-  the <code>snapadmin.view_raw_pii</code> permission. Emails become <code>a***@domain.com</code>, other
-  values <code>+3********78</code>.</p>
+  admin change form, and masked in both REST API and GraphQL responses for anyone who is not a
+  superuser or a holder of the <code>snapadmin.view_raw_pii</code> permission. Emails become
+  <code>a***@domain.com</code>, other values <code>+3********78</code>.</p>
   <pre><code># settings.py
 SNAPADMIN_MASKED_FIELDS = {
     "users.UserModel": ["email", "phone_number"],
@@ -882,6 +906,18 @@ SNAPADMIN_SSO_PROVIDERS = {
 SNAPADMIN_NESTED_APPS = {"snapadmin": "auth"}   # move snapadmin models under "auth"
 SNAPADMIN_HIDDEN_APPS = ["silk"]                # hide these groups from the index
 SNAPADMIN_APP_LABELS  = {"auth": "Administration"}  # rename a group heading</code></pre>
+  <div class="callout callout-warn">
+    <strong><code>SNAPADMIN_HIDDEN_APPS</code> is cosmetic, not access control.</strong> It removes an
+    app group from the rendered admin index page only — the underlying <code>ModelAdmin</code> URLs
+    (<code>/admin/&lt;label&gt;/&lt;model&gt;/add|change|delete/</code> etc.) stay registered and
+    reachable by any staff user who holds the model's Django permission. To actually restrict who can
+    reach a model, use Django's standard permission system (<code>user_permissions</code> / groups, or
+    a custom <code>ModelAdmin.has_*_permission</code>) — hiding a group here is purely a decluttering
+    convenience. These settings also only patch <code>django.contrib.admin.site</code> (the default
+    <code>AdminSite</code>); a project serving <code>/admin/</code> from a different <code>AdminSite</code>
+    instance won't see them applied there — <code>manage.py check</code> warns
+    (<code>snapadmin.W006</code>) when that's detectable.
+  </div>
 
   <h3>Unalterable audit trail <span class="badge">DORA / ISO 27001</span></h3>
   <p>Django's built-in <code>LogEntry</code> is minimal and editable straight from the DB. SnapAdmin
@@ -934,7 +970,8 @@ class BigModel(snap_models.SnapModel):
   <p>SnapAdmin provides a dynamic GraphQL interface powered by Graphene-Django.</p>
   <ul style="margin: 8px 0 14px 20px; font-size: 14px;">
     <li><strong>Auto-Schema</strong>: All <code>SnapModel</code> subclasses are automatically added to the schema.</li>
-    <li><strong>Secured by default</strong>: every resolver requires authentication (admin session or API token) and the model's Django <code>view</code> permission — the same contract as REST. Token <code>allowed_models</code> scopes apply on top.</li>
+    <li><strong>Secured by default</strong>: every resolver requires authentication (admin session or API token) and the model's Django <code>view</code> permission — the same contract as REST — enforced on <strong>every relation the query traverses</strong>, not just top-level fields. Reading <code>A { relatedB { … } }</code> needs <code>view</code> on both models; a related object you may not view resolves as a <code>Permission denied.</code> error rather than leaking its data. Token <code>allowed_models</code> scopes apply on top.</li>
+    <li><strong>PII masking</strong>: fields in <code>SNAPADMIN_MASKED_FIELDS</code> are masked in GraphQL output exactly as in the REST API — raw only for superusers and <code>snapadmin.view_raw_pii</code> holders.</li>
     <li><strong>Unified Fetching</strong>: the <code>search</code> argument routes to Elasticsearch for <code>DUAL</code>/<code>ES_ONLY</code> models; <code>first</code>/<code>offset</code> paginate.</li>
     <li><strong>Endpoint</strong>: <code>/api/graphql/</code>; GraphiQL follows <code>DEBUG</code> (override with <code>SNAPADMIN_GRAPHIQL_ENABLED</code>).</li>
   </ul>
@@ -1107,6 +1144,7 @@ urlpatterns = [*router.urls, path("", include("snapadmin.urls"))]</code></pre>
     <tr><td>GraphQL auth / GraphiQL exposure</td><td><code>SNAPADMIN_GRAPHQL_REQUIRE_AUTH</code> / <code>SNAPADMIN_GRAPHIQL_ENABLED</code></td></tr>
     <tr><td>Hiding fields from every API surface</td><td><code>api_exclude_fields</code> on the model</td></tr>
     <tr><td>Restricting which fields REST create/update can write</td><td><code>api_write_fields</code> on the model</td></tr>
+    <tr><td>Widening/narrowing a text field's auto-filter lookups</td><td><code>api_filter_lookups</code> on the model</td></tr>
   </table>
   <div class="callout">
     <strong>GraphQL</strong> is generated dynamically from your <code>SnapModel</code>s and enforces
