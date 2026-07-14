@@ -22,7 +22,7 @@
         </div>
     </div>
 
-    <input type="hidden" name="{{ name }}" id="hidden-input-{{ name }}" value='[]'>
+    <input type="hidden" name="{{ name }}" id="hidden-input-{{ name }}" value='{{ current_values_json|safe }}'>
 </div>
 
 <script>
