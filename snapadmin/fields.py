@@ -10,7 +10,7 @@ from enum import Enum
 
 from django import forms
 from django.db import models
-from django.core import validators
+from django.core import checks, validators
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
@@ -57,18 +57,22 @@ class DjangoFieldAttributeEnum(str, Enum):
 # Base mixin
 # ===========================================================================
 
-def _strip_auto_validator(deconstructed, validator_cls):
+def _strip_auto_validator(deconstructed, auto_instance):
     """Drop the auto-injected validator from a field's ``deconstruct()`` output.
 
     Fields like :class:`SnapColorField` add their validator in ``__init__``. If
     ``deconstruct()`` also reports it, every reconstruction re-adds another copy,
     so the validator list grows on each migration and ``makemigrations`` never
     converges. Removing it here lets ``__init__`` re-add exactly one.
+
+    Filtering is by *identity* (``is``), not class: it removes only the exact
+    instance ``__init__`` built for this field, so a caller-supplied validator of
+    the same class (passed via ``validators=[...]``) is left untouched.
     """
     name, path, args, kwargs = deconstructed
     validators = kwargs.get(DjangoFieldAttributeEnum.VALIDATORS.value)
     if validators:
-        kept = [v for v in validators if not isinstance(v, validator_cls)]
+        kept = [v for v in validators if v is not auto_instance]
         if kept:
             kwargs[DjangoFieldAttributeEnum.VALIDATORS.value] = kept
         else:
@@ -184,6 +188,29 @@ class SnapField:
 
         cls.deconstruct = deconstruct
 
+        # Any class past the guard above is a real Django Field, so it also has
+        # Field.check. Django resolves `check` to Field.check (which precedes this
+        # mixin in every Snap field's MRO and does not call super()), so defining
+        # `check` on the mixin directly would be silently shadowed. Wrap the
+        # resolved `check` instead, mirroring the deconstruct wrapper above, so
+        # the contradiction check composes with Django's own field checks.
+        base_check = cls.check
+
+        def check(self, **kwargs):
+            errors = base_check(self, **kwargs)
+            if getattr(self, "required", False) and getattr(self, "null", False):
+                errors.append(checks.Error(
+                    f"{self.name!r} sets required=True but is also nullable (null=True) — contradictory.",
+                    hint="required=True already forces null=False/blank=False unless you explicitly "
+                         "override them; remove the explicit null=True, or drop required=True if the "
+                         "field should stay optional.",
+                    obj=self,
+                    id="snapadmin.E003",
+                ))
+            return errors
+
+        cls.check = check
+
 
 class SnapNotDatabaseField(SnapField):
     pass
@@ -279,19 +306,53 @@ class SnapFileField(models.FileField, SnapField):
             allowed_encodings=allowed_encodings,
             max_size_bytes=max_size_bytes,
         )
+        # Keep the resolved config and the exact validator instance so
+        # deconstruct() can re-serialise the limits (Django strips non-Django
+        # kwargs) and strip precisely the auto validator by identity.
+        self._snap_allowed_extensions = allowed_extensions
+        self._snap_allowed_encodings = allowed_encodings
+        self._snap_max_size_bytes = max_size_bytes
+        self._snap_auto_validator = file_validator
         kwargs.setdefault(DjangoFieldAttributeEnum.VALIDATORS.value, []).append(file_validator)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
     def deconstruct(self):
-        # __init__ always re-injects the SnapFileValidator, so strip it here to
-        # keep deconstruct/reconstruct idempotent (otherwise it accumulates and
-        # makemigrations never converges).
-        return _strip_auto_validator(super().deconstruct(), snap_validators.SnapFileValidator)
+        # __init__ rebuilds the SnapFileValidator from the config kwargs below,
+        # so strip the auto instance and re-emit the config as plain kwargs;
+        # otherwise a reconstructed field silently loses its extension/size/
+        # encoding limits and the validator list never converges.
+        name, path, args, kwargs = _strip_auto_validator(super().deconstruct(), self._snap_auto_validator)
+        if self._snap_allowed_extensions is not None:
+            kwargs["allowed_extensions"] = self._snap_allowed_extensions
+        if self._snap_allowed_encodings is not None:
+            kwargs["allowed_encodings"] = self._snap_allowed_encodings
+        if self._snap_max_size_bytes is not None:
+            kwargs["max_size_bytes"] = self._snap_max_size_bytes
+        return name, path, args, kwargs
 
 class SnapImageField(models.ImageField, SnapField):
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
+        allowed_extensions = kwargs.pop(SnapFieldAttributeEnum.ALLOWED_EXTENSIONS, None)
+        max_size_bytes = kwargs.pop(SnapFieldAttributeEnum.MAX_SIZE_BYTES, None)
+        # allowed_encodings is a text-file concept and does not apply to images.
+        image_validator = snap_validators.SnapFileValidator(
+            allowed_extensions=allowed_extensions,
+            max_size_bytes=max_size_bytes,
+        )
+        self._snap_allowed_extensions = allowed_extensions
+        self._snap_max_size_bytes = max_size_bytes
+        self._snap_auto_validator = image_validator
+        kwargs.setdefault(DjangoFieldAttributeEnum.VALIDATORS.value, []).append(image_validator)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+    def deconstruct(self):
+        name, path, args, kwargs = _strip_auto_validator(super().deconstruct(), self._snap_auto_validator)
+        if self._snap_allowed_extensions is not None:
+            kwargs["allowed_extensions"] = self._snap_allowed_extensions
+        if self._snap_max_size_bytes is not None:
+            kwargs["max_size_bytes"] = self._snap_max_size_bytes
+        return name, path, args, kwargs
 
 class SnapBooleanField(models.BooleanField, SnapField):
     def __init__(self, **kwargs):
@@ -356,11 +417,12 @@ class SnapPhoneField(models.CharField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         cleaned = self.handleDjangoKwargs(**kwargs)
         cleaned.setdefault(DjangoFieldAttributeEnum.VALIDATORS.value, [])
-        cleaned[DjangoFieldAttributeEnum.VALIDATORS.value].append(SnapPhoneValidator())
+        self._snap_auto_validator = SnapPhoneValidator()
+        cleaned[DjangoFieldAttributeEnum.VALIDATORS.value].append(self._snap_auto_validator)
         super().__init__(**cleaned)
 
     def deconstruct(self):
-        return _strip_auto_validator(super().deconstruct(), snap_validators.SnapPhoneValidator)
+        return _strip_auto_validator(super().deconstruct(), self._snap_auto_validator)
 
 class SnapColorField(models.CharField, SnapField):
     """CharField pre-wired with hex color validation (#RRGGBB / #RGB)."""
@@ -371,11 +433,12 @@ class SnapColorField(models.CharField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         cleaned = self.handleDjangoKwargs(**kwargs)
         cleaned.setdefault(DjangoFieldAttributeEnum.VALIDATORS.value, [])
-        cleaned[DjangoFieldAttributeEnum.VALIDATORS.value].append(SnapColorValidator())
+        self._snap_auto_validator = SnapColorValidator()
+        cleaned[DjangoFieldAttributeEnum.VALIDATORS.value].append(self._snap_auto_validator)
         super().__init__(**cleaned)
 
     def deconstruct(self):
-        return _strip_auto_validator(super().deconstruct(), snap_validators.SnapColorValidator)
+        return _strip_auto_validator(super().deconstruct(), self._snap_auto_validator)
 
 class SnapFunctionField(SnapNotDatabaseField):
     def __init__(self, func, verbose_name=None, show_in_list=True,

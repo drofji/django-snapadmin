@@ -6,3 +6,14 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+Security
+--------
+
+- ``SnapFileField`` and ``SnapImageField`` no longer silently drop their upload restrictions across a migration round-trip. Previously ``deconstruct()`` stripped the auto-built ``SnapFileValidator`` without re-serialising ``allowed_extensions`` / ``allowed_encodings`` / ``max_size_bytes``, so any field cloned by Django's migration machinery (``makemigrations``, squash, reload) was rebuilt with an unbounded, any-extension validator — quietly removing the size and file-type limits you configured. ``SnapImageField`` went further and never built a validator at all, silently discarding ``allowed_extensions`` / ``max_size_bytes``. Both now build the validator and round-trip the configuration correctly, so the limits you declare are the limits that are enforced.
+
+Fixed
+-----
+
+- The auto-injected validator on ``SnapFileField``, ``SnapImageField``, ``SnapPhoneField`` and ``SnapColorField`` is now stripped from ``deconstruct()`` by identity rather than by class. A caller-supplied validator of the same class passed via ``validators=[...]`` is no longer wrongly removed and now survives migration round-trips unchanged.
+- A field declared ``required=True`` together with an explicit ``null=True`` is a contradiction (mandatory yet nullable at the database level) that used to pass silently, since the explicit ``null=True`` overrode what ``required=True`` would otherwise force. It now raises a ``snapadmin.E003`` system-check error during ``manage.py check`` with guidance on how to resolve it.
