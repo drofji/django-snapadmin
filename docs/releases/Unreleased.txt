@@ -6,3 +6,8 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+Security
+--------
+
+``mask_value()`` no longer coerces every value to a string before masking. Non-string PII (``int``, ``float``, ``Decimal``, ``bool``) previously leaked real digits through the star pattern once stringified (e.g. an integer PII value would show its first and last two digits); these types now return a fixed ``"***"`` sentinel instead. ``list`` and ``dict`` values are now masked recursively, element-by-element (and value-by-value, keys untouched), instead of being flattened into a single mangled string that exposed structure and substrings. Short strings of 3-5 characters (e.g. a 5-digit PIN) previously kept their first and last character visible; they are now fully starred like 1-2 character strings, closing a leak for short codes and IDs.
