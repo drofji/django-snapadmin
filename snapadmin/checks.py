@@ -10,6 +10,8 @@ actionable hint. Everything here is advisory: a warning never blocks boot, and
 each check is a no-op when its feature is unconfigured.
 """
 
+from urllib.parse import urlparse
+
 from django.apps import apps
 from django.conf import settings
 from django.core.checks import Error, Warning
@@ -80,6 +82,9 @@ def check_nested_apps(app_configs, **kwargs):
 def check_sso_providers(app_configs, **kwargs):
     warnings = []
     providers = getattr(settings, "SNAPADMIN_SSO_PROVIDERS", None) or {}
+    allowed_hosts = {
+        host.lower() for host in (getattr(settings, "SNAPADMIN_SSO_ALLOWED_HOSTS", None) or [])
+    }
     for key, meta in providers.items():
         if not isinstance(meta, dict) or not (meta.get("url") or "").strip():
             warnings.append(Warning(
@@ -87,6 +92,25 @@ def check_sso_providers(app_configs, **kwargs):
                 hint="Each provider needs a dict with a non-empty 'url', e.g. "
                      "{'label': '…', 'url': '/accounts/azure/login/'}.",
                 id="snapadmin.W003",
+            ))
+            continue
+        url = meta["url"].strip()
+        netloc = urlparse(url).netloc
+        if url.startswith("//"):
+            warnings.append(Warning(
+                f"SNAPADMIN_SSO_PROVIDERS[{key!r}]['url'] = {url!r} is protocol-relative.",
+                hint="A protocol-relative URL (starting with '//') resolves to an external "
+                     "origin and will not render. Use a site-relative path ('/accounts/…') "
+                     "or a full absolute URL ('https://…').",
+                id="snapadmin.W005",
+            ))
+        elif allowed_hosts and netloc and netloc.lower() not in allowed_hosts:
+            warnings.append(Warning(
+                f"SNAPADMIN_SSO_PROVIDERS[{key!r}]['url'] host {netloc!r} is not in "
+                f"SNAPADMIN_SSO_ALLOWED_HOSTS and will not render.",
+                hint="Add the host to SNAPADMIN_SSO_ALLOWED_HOSTS or point the provider "
+                     "at an allowed identity provider.",
+                id="snapadmin.W005",
             ))
     return warnings
 

@@ -436,7 +436,10 @@ class SSOProviderView(APIView):
         providers = get_sso_providers()
         for p in providers:
             # Absolutise relative login URLs so a cross-origin frontend can use
-            # them directly; leave absolute provider URLs untouched.
-            if p["url"].startswith("/"):
+            # them directly; leave absolute provider URLs untouched. A leading
+            # "//" is protocol-relative, not site-relative — build_absolute_uri
+            # would resolve it to an external origin, so it's excluded here too
+            # (defense in depth: get_sso_providers() already filters these out).
+            if p["url"].startswith("/") and not p["url"].startswith("//"):
                 p["url"] = request.build_absolute_uri(p["url"])
         return Response({"providers": providers, "count": len(providers)})

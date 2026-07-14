@@ -6,3 +6,20 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+Security
+--------
+
+- ``SNAPADMIN_SSO_PROVIDERS`` entries with a protocol-relative ``url`` (``//host/path``) are now
+  dropped by ``get_sso_providers()`` instead of being resolved by ``SSOProviderView`` into an
+  absolute URL on an attacker-chosen external origin. ``"//evil.example.com/login"`` satisfies a
+  naive ``url.startswith("/")`` same-site check but ``request.build_absolute_uri()`` resolves it to
+  ``https://evil.example.com/login`` — an open-redirect login button if the setting is ever built
+  from a templated source (env var, admin-editable setting, generated value) rather than a
+  hardcoded Python literal. ``SSOProviderView`` now also checks for the ``//`` prefix directly, as
+  defense in depth independent of ``get_sso_providers()``. A new optional setting,
+  ``SNAPADMIN_SSO_ALLOWED_HOSTS``, lets operators further restrict *absolute* provider URLs to a
+  host allowlist; it is opt-in and empty by default, so deployments that legitimately point
+  providers at external identity providers (Microsoft, Okta, Keycloak, …) see no behavior change.
+  ``manage.py check`` now warns (``snapadmin.W005``) on a provider with a protocol-relative or
+  disallowed-host URL.
