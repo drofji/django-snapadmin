@@ -6,6 +6,8 @@ sensitive fields in the REST API and the admin for anyone who isn't a superuser
 or an explicit PII-permission holder.
 """
 
+from decimal import Decimal
+
 import pytest
 from types import SimpleNamespace
 
@@ -40,14 +42,64 @@ class TestMaskValue:
         assert mask_value("ab") == "**"
         assert mask_value("x") == "*"
 
-    def test_medium_value_reveals_head_and_tail(self):
-        assert mask_value("abc") == "a*c"
+    @pytest.mark.parametrize("s", ["abc", "abcd", "abcde"])
+    def test_under_six_chars_fully_masked(self, s):
+        # 3-5 char strings used to leak head/tail (e.g. "abc" -> "a*c"); now
+        # they're fully starred like 1-2 char strings, so no real character
+        # from a short code/PIN survives.
+        assert mask_value(s) == "*" * len(s)
 
     def test_long_value_reveals_two_each_end(self):
         assert mask_value("+33123456778") == "+3********78"
 
-    def test_non_string_coerced(self):
-        assert mask_value(1234567) == "12***67"
+    def test_six_char_boundary_reveals_two_each_end(self):
+        assert mask_value("abcdef") == "ab**ef"
+
+    @pytest.mark.parametrize(
+        "value",
+        [1234567, 12, -7, 3.14159, 0.0, Decimal("1234.56")],
+    )
+    def test_numeric_values_return_sentinel(self, value):
+        # int/float/Decimal must never be coerced to str and star-masked by
+        # digit count: that leaks length/magnitude. A fixed sentinel reveals
+        # nothing.
+        assert mask_value(value) == "***"
+
+    @pytest.mark.parametrize("value", [True, False])
+    def test_bool_returns_sentinel(self, value):
+        # bool is a subclass of int in Python, so this must be checked first
+        # or it silently falls into (and passes) the int branch too - the
+        # result is the same sentinel either way, but the ordering matters
+        # for correctness if the int branch ever changes.
+        assert mask_value(value) == "***"
+
+    def test_list_masks_each_element(self):
+        assert mask_value(["alice@example.com", 42, "ab"]) == [
+            "a***@example.com",
+            "***",
+            "**",
+        ]
+
+    def test_nested_list_masks_recursively(self):
+        assert mask_value([["abcdef", 1], [True]]) == [["ab**ef", "***"], ["***"]]
+
+    def test_dict_masks_values_not_keys(self):
+        assert mask_value({"email": "alice@example.com", "age": 30}) == {
+            "email": "a***@example.com",
+            "age": "***",
+        }
+
+    def test_nested_dict_masks_recursively(self):
+        assert mask_value({"contact": {"email": "alice@example.com"}, "codes": [1, 2]}) == {
+            "contact": {"email": "a***@example.com"},
+            "codes": ["***", "***"],
+        }
+
+    def test_unrecognized_type_falls_back_to_str_masking(self):
+        import datetime
+
+        value = datetime.date(2026, 7, 14)
+        assert mask_value(value) == "20******14"
 
 
 # ── get_masked_fields() ──────────────────────────────────────────────────────
@@ -108,7 +160,7 @@ class TestApiSerializerMasking:
     def test_unprivileged_gets_masked(self, customer, regular_user):
         data = self._serialize(customer, regular_user)
         assert data["email"] == "a***@example.com"
-        assert data["first_name"] == "A***e"  # "Alice" (len 5) → 1-char head/tail
+        assert data["first_name"] == "*****"  # "Alice" (len 5) → fully starred
         assert data["last_name"] == "Smith"    # not masked
 
     @override_settings(SNAPADMIN_MASKED_FIELDS=CUST)
