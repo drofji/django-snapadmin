@@ -6,3 +6,21 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+
+Fixed
+=====
+
+Unfold styling for the optional ``django-extra-settings`` admin
+  When the ``[extra-settings]`` extra was installed, its ``Setting`` admin rendered as a plain,
+  unstyled ``django.contrib.admin.ModelAdmin`` — extra_settings registers its own admin and knows
+  nothing about Unfold, so the page looked out of place next to the rest of the themed site.
+  SnapAdmin now upgrades that registration to an Unfold-derived admin automatically: from
+  ``SnapAdminConfig.ready()`` it re-registers the ``Setting`` admin (or its proxy, when
+  ``EXTRA_SETTINGS_ADMIN_APP`` re-homes it) with a class that inherits ``unfold.admin.ModelAdmin``
+  on top of extra_settings' own configuration, so ``list_display``, ``search_fields``, fieldsets
+  and media are all preserved while the page picks up the Unfold theme. This runs from ``ready()``
+  rather than an ``admin.py`` so it works regardless of where ``extra_settings`` sits relative to
+  ``snapadmin`` in ``INSTALLED_APPS``; the only requirement is that ``django.contrib.admin`` precede
+  ``snapadmin`` there, which Django's project template already guarantees. No configuration change
+  is needed, and installs without the extra are unaffected.

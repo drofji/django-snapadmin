@@ -298,11 +298,16 @@ The base install is self-contained. Opt into extra integrations with pip extras:
 > - **`EXTRA_SETTINGS_ADMIN_APP` must match an `INSTALLED_APPS` entry.** If you register apps by their
 >   `AppConfig` dotted path (`"shop.apps.ShopConfig"`), pass that dotted string — a bare label
 >   (`"shop"`) won't be found. If you list bare labels, use the bare label.
-> - **The `Setting` admin is not Unfold-styled.** `django-extra-settings` registers its own plain
->   `ModelAdmin`; SnapAdmin does not ship a themed replacement (that would re-introduce the hard
->   dependency). To match the Unfold theme, re-home it into one of your apps via
->   `EXTRA_SETTINGS_ADMIN_APP` and, if you want, subclass its admin with `unfold.admin.ModelAdmin` and
->   re-register it yourself.
+> - **The `Setting` admin is Unfold-styled automatically.** `django-extra-settings` registers its own
+>   plain `ModelAdmin`, which would render unstyled next to the rest of the themed site. SnapAdmin fixes
+>   this for you: from `SnapAdminConfig.ready()` it re-registers the `Setting` admin (or its proxy, when
+>   `EXTRA_SETTINGS_ADMIN_APP` re-homes it) with a class that inherits `unfold.admin.ModelAdmin` on top of
+>   extra_settings' own configuration — `list_display`, `search_fields`, fieldsets and media are all
+>   preserved, and the page picks up the Unfold theme. No manual subclassing needed. This works
+>   regardless of whether `extra_settings` is listed before or after `snapadmin` in `INSTALLED_APPS`; the
+>   only requirement is that **`django.contrib.admin` precede `snapadmin`** there (Django's project
+>   template already does this). If you install the extra without Unfold, the styling step is simply a
+>   no-op.
 
 > **`wysiwyg` and commercial use.** The rich-text editor (`django-ckeditor-5`) bundles **CKEditor 5**,
 > which is dual-licensed **GPL-2.0+ or commercial**. It is kept out of the base install so the core
