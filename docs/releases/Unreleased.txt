@@ -6,3 +6,24 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+Security
+--------
+
+Hardened the database backup stack (``snapadmin/backup.py``):
+
+- SFTP offsite backups now **verify the remote host key against known_hosts**
+  instead of trusting it on first connect. The previous trust-on-first-use policy
+  silently accepted any host key, leaving a man-in-the-middle window on the first
+  connection. **Behavior change / action required:** if you use ``sftp`` offsite
+  backups, you must pre-populate ``~/.ssh/known_hosts`` for the backup host (as the
+  service user running the backups) before they will succeed — for example
+  ``ssh-keyscan -H offsite.example.com >> ~/.ssh/known_hosts`` during deployment, or
+  a one-off interactive ``ssh`` to accept the key. An unknown host now fails the
+  backup with a clear error rather than silently trusting it. FTP/FTPS and local /
+  network destinations are unaffected.
+
+- The PostgreSQL dump path now **streams ``pg_dump`` output directly into gzip**
+  rather than buffering the entire uncompressed dump in memory first, avoiding an
+  out-of-memory risk on large databases. A failed ``pg_dump`` now removes the
+  partial ``.gz`` file it produced. No configuration or behavior change for callers.

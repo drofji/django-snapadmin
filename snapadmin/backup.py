@@ -139,15 +139,22 @@ def create_db_dump(target_dir: Path) -> Path:
             "-U", str(db.get("USER") or ""),
             str(db.get("NAME") or ""),
         ]
-        result = subprocess.run(
+        # Stream pg_dump's stdout straight into gzip so the whole uncompressed
+        # dump never has to fit in memory at once — a large database would OOM
+        # the worker otherwise.
+        process = subprocess.Popen(
             command,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             env={**os.environ, "PGPASSWORD": str(db.get("PASSWORD") or "")},
         )
-        if result.returncode != 0:
-            raise BackupError(f"pg_dump failed: {result.stderr.decode(errors='replace')}")
         with gzip.open(out, "wb") as dst:
-            dst.write(result.stdout)
+            shutil.copyfileobj(process.stdout, dst)
+        stderr_output = process.stderr.read()
+        returncode = process.wait()
+        if returncode != 0:
+            out.unlink(missing_ok=True)
+            raise BackupError(f"pg_dump failed: {stderr_output.decode(errors='replace')}")
         return out
 
     raise BackupError(f"Unsupported database engine for backups: {engine}")
@@ -219,6 +226,14 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
     Authenticates with a private key (``SNAPADMIN_BACKUP_SFTP_KEY_FILE``) when set,
     otherwise with ``SNAPADMIN_BACKUP_SFTP_PASSWORD``. Requires the optional
     ``paramiko`` dependency — install ``django-snapadmin[backup]``.
+
+    Host keys are verified against ``~/.ssh/known_hosts`` (loaded via
+    ``load_system_host_keys()``): a host whose key is not already known is
+    rejected rather than silently trusted, so an operator must pre-populate
+    ``known_hosts`` for the SFTP target before offsite backups will work — e.g.
+    ``ssh-keyscan -H offsite.example.com >> ~/.ssh/known_hosts`` during deployment,
+    or a one-off ``ssh`` connection as the service user. This closes the
+    man-in-the-middle window that a trust-on-first-use policy would leave open.
     """
     if not config.sftp_host:
         raise BackupError("SNAPADMIN_BACKUP_SFTP_HOST is not configured.")
@@ -231,7 +246,10 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
 
     client = paramiko.SSHClient()
     client.load_system_host_keys()  # honour ~/.ssh/known_hosts if present
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    # Reject unknown host keys instead of trust-on-first-use: silently accepting
+    # any key on first connect would hand a man-in-the-middle a permanent foothold
+    # on the offsite copy. The operator must pre-populate known_hosts.
+    client.set_missing_host_key_policy(paramiko.RejectPolicy())
     connect_kwargs = {
         "hostname": config.sftp_host,
         "port": config.sftp_port,

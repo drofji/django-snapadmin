@@ -1368,9 +1368,13 @@ SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = 168       # weekly
 ```
 
 > **SFTP vs FTP** — prefer `sftp` for offsite copies: the transport is encrypted end-to-end and
-> can authenticate with an SSH key. It honours `~/.ssh/known_hosts` if present and otherwise
-> auto-accepts the host key on first connect. Enable `sftp` and `remote` together for two
-> independent offsite copies.
+> can authenticate with an SSH key. The backup host's key is **verified against
+> `~/.ssh/known_hosts`** — an unknown host is rejected, not trusted on first connect (this
+> prevents a man-in-the-middle from hijacking the offsite copy). Before enabling `sftp`, add
+> the host's key to `known_hosts` for the user that runs the backups, e.g.
+> `ssh-keyscan -H offsite.example.com >> ~/.ssh/known_hosts` during deployment, or connect once
+> with `ssh` and accept the key. Enable `sftp` and `remote` together for two independent offsite
+> copies.
 
 **Running** — the scheduler is a separate process from your web workers. Add the
 `snapadmin.run_db_backups` task to Celery Beat (an hourly check; each destination only
