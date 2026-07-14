@@ -84,6 +84,34 @@ class TestSsoProviders:
     def test_non_dict_warns(self):
         assert [w.id for w in checks.check_sso_providers(None)] == ["snapadmin.W003"]
 
+    @override_settings(SNAPADMIN_SSO_PROVIDERS={
+        "evil": {"label": "Evil", "url": "//evil.example.com/login"},
+    })
+    def test_protocol_relative_url_warns(self):
+        assert [w.id for w in checks.check_sso_providers(None)] == ["snapadmin.W005"]
+
+    @override_settings(
+        SNAPADMIN_SSO_PROVIDERS={"okta": {"url": "https://okta.example.com/login"}},
+        SNAPADMIN_SSO_ALLOWED_HOSTS=["login.microsoftonline.com"],
+    )
+    def test_disallowed_host_warns(self):
+        assert [w.id for w in checks.check_sso_providers(None)] == ["snapadmin.W005"]
+
+    @override_settings(
+        SNAPADMIN_SSO_PROVIDERS={
+            "azure": {"url": "https://login.microsoftonline.com/tenant/authorize"},
+        },
+        SNAPADMIN_SSO_ALLOWED_HOSTS=["login.microsoftonline.com"],
+    )
+    def test_allowed_host_ok(self):
+        assert checks.check_sso_providers(None) == []
+
+    @override_settings(SNAPADMIN_SSO_PROVIDERS={
+        "okta": {"url": "https://okta.example.com/login"},
+    })
+    def test_allowed_hosts_unset_does_not_warn(self):
+        assert checks.check_sso_providers(None) == []
+
 
 # ── API write-fields allowlist ─────────────────────────────────────────────────
 

@@ -14,6 +14,10 @@ from snapadmin.sso import get_sso_providers, sso_enabled, sso_providers
 
 AZURE = {"label": "Login with Microsoft", "url": "/accounts/azure/login/", "icon": "az"}
 KEYCLOAK = {"label": "Corporate Keycloak", "url": "https://kc.example.com/auth"}
+AZURE_EXTERNAL = {
+    "label": "Login with Microsoft",
+    "url": "https://login.microsoftonline.com/tenant/oauth2/authorize",
+}
 
 
 # ── get_sso_providers() normalisation ────────────────────────────────────────
@@ -50,6 +54,48 @@ class TestGetSsoProviders:
     @override_settings(SNAPADMIN_SSO_PROVIDERS=None)
     def test_none_setting_is_safe(self):
         assert get_sso_providers() == []
+
+    @override_settings(SNAPADMIN_SSO_PROVIDERS={
+        "evil": {"label": "Evil", "url": "//evil.example.com/login"},
+        "good": {"url": "/g/"},
+    })
+    def test_protocol_relative_url_dropped(self):
+        assert [p["key"] for p in get_sso_providers()] == ["good"]
+
+    @override_settings(
+        SNAPADMIN_SSO_PROVIDERS={"okta": {"url": "https://okta.example.com/login"}},
+        SNAPADMIN_SSO_ALLOWED_HOSTS=["login.microsoftonline.com"],
+    )
+    def test_allowed_hosts_drops_non_matching_absolute_url(self):
+        assert get_sso_providers() == []
+
+    @override_settings(
+        SNAPADMIN_SSO_PROVIDERS={"azure": AZURE_EXTERNAL},
+        SNAPADMIN_SSO_ALLOWED_HOSTS=["login.microsoftonline.com"],
+    )
+    def test_allowed_hosts_keeps_matching_absolute_url(self):
+        result = get_sso_providers()
+        assert [p["key"] for p in result] == ["azure"]
+        assert result[0]["url"] == AZURE_EXTERNAL["url"]
+
+    @override_settings(
+        SNAPADMIN_SSO_PROVIDERS={"azure": AZURE_EXTERNAL},
+        SNAPADMIN_SSO_ALLOWED_HOSTS=["LOGIN.MICROSOFTONLINE.COM"],
+    )
+    def test_allowed_hosts_comparison_is_case_insensitive(self):
+        assert [p["key"] for p in get_sso_providers()] == ["azure"]
+
+    @override_settings(SNAPADMIN_SSO_PROVIDERS={"azure": AZURE_EXTERNAL})
+    def test_allowed_hosts_unset_keeps_any_absolute_url(self):
+        # Default behaviour: no host restriction unless the operator opts in.
+        assert [p["key"] for p in get_sso_providers()] == ["azure"]
+
+    @override_settings(
+        SNAPADMIN_SSO_PROVIDERS={"local": {"url": "/accounts/login/"}},
+        SNAPADMIN_SSO_ALLOWED_HOSTS=["login.microsoftonline.com"],
+    )
+    def test_allowed_hosts_does_not_affect_relative_urls(self):
+        assert [p["key"] for p in get_sso_providers()] == ["local"]
 
 
 # ── context processor + partial template ─────────────────────────────────────
@@ -96,3 +142,27 @@ class TestSsoProviderEndpoint:
         r = anon_client.get("/api/sso-providers/")
         assert r.status_code == 200
         assert r.json() == {"providers": [], "count": 0}
+
+    def test_endpoint_never_resolves_protocol_relative_url_to_external_origin(
+        self, anon_client, monkeypatch
+    ):
+        # get_sso_providers() already filters these out, but the view has its
+        # own belt-and-braces check — prove it holds even if something
+        # upstream (a future refactor, a direct call from elsewhere) slips a
+        # protocol-relative url past it.
+        import snapadmin.sso
+
+        monkeypatch.setattr(
+            snapadmin.sso,
+            "get_sso_providers",
+            lambda: [{
+                "key": "evil", "label": "Evil",
+                "url": "//evil.example.com/login", "icon": "",
+            }],
+        )
+        r = anon_client.get("/api/sso-providers/")
+        assert r.status_code == 200
+        url = r.json()["providers"][0]["url"]
+        # Left untouched: not resolved into an absolute https://evil.example.com/... origin.
+        assert url == "//evil.example.com/login"
+        assert not url.startswith("http")

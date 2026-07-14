@@ -476,6 +476,7 @@ SNAPADMIN_API_AUTHENTICATION_CLASSES = [
 SNAPADMIN_ANALYTICS_DB_ALIAS = ""      # Route read-only list/retrieve to a replica; writes stay on 'default'
 SNAPADMIN_MASKED_FIELDS = {}           # {"app.Model": ["email", ...]} → mask PII in admin + API
 SNAPADMIN_SSO_PROVIDERS = {}           # {"azure": {"label": "...", "url": "/accounts/azure/login/"}}
+SNAPADMIN_SSO_ALLOWED_HOSTS = []       # ["login.microsoftonline.com"] → restrict absolute SSO provider urls to these hosts
 SNAPADMIN_NESTED_APPS = {}             # {"snapadmin": "auth"} → fold sections under existing app groups
 SNAPADMIN_HIDDEN_APPS = []             # ["silk"] → hide app groups from the admin index
 SNAPADMIN_APP_LABELS = {}              # {"auth": "Administration"} → rename an app group heading
@@ -580,6 +581,11 @@ Four settings-driven features, each safe on stock single-database installs (iner
   auth dependency. `SNAPADMIN_SSO_PROVIDERS` drives login-page buttons (add the
   `snapadmin.sso.sso_providers` context processor and `{% include "snapadmin/sso_buttons.html" %}`
   to a login override) and a public `GET /api/sso-providers/` endpoint for headless frontends.
+  Protocol-relative provider URLs (`//host/path`) are always dropped — they have no legitimate use
+  here and would otherwise resolve to an external origin. If `SNAPADMIN_SSO_PROVIDERS` is ever built
+  from something other than a hardcoded literal (an env var, an admin-editable setting, a generated
+  value), opt into `SNAPADMIN_SSO_ALLOWED_HOSTS` (a list of hostnames) to also restrict *absolute*
+  provider URLs to a known allowlist of identity providers.
 - **Admin-index nesting** — `SNAPADMIN_NESTED_APPS` folds auto-generated sections under existing app
   groups so the index stays uncluttered; `SNAPADMIN_HIDDEN_APPS` hides groups and
   `SNAPADMIN_APP_LABELS` renames headings — no custom `AdminSite` required.

@@ -71,6 +71,18 @@ Key protections:
   `SNAPADMIN_HTML_SANITIZER` (a dotted path to a `Callable[[str], str]`).
 - Data access goes through the Django ORM / DRF serializers — no hand-built SQL from user input.
 
+### Open redirect
+- **SSO provider URLs are never resolved to an external origin from a same-site-looking value.**
+  `get_sso_providers()` drops any `SNAPADMIN_SSO_PROVIDERS` entry whose `url` is protocol-relative
+  (`//host/path`) — such a value looks site-relative but `request.build_absolute_uri()` resolves it
+  to a different host, which would otherwise become an open-redirect login button if the setting is
+  ever built from a templated source (env var, admin-editable setting, generated value) rather than a
+  hardcoded literal. `SSOProviderView` applies the same check independently as defense in depth. An
+  optional `SNAPADMIN_SSO_ALLOWED_HOSTS` allowlist further restricts *absolute* provider URLs to known
+  hosts when set; it is opt-in and off by default, since pointing a provider at a genuinely external
+  identity provider (e.g. `https://login.microsoftonline.com/...`) is the normal, expected case.
+  `manage.py check` warns (`snapadmin.W005`) on a misconfigured provider before it ships.
+
 ### Information disclosure
 - The **system dashboard is staff-gated by default** (it surfaces hostname, processor, OS, database
   name, service health and `ALLOWED_HOSTS`). Anonymous callers are redirected to login and non-staff
