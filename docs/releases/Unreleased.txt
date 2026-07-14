@@ -6,3 +6,23 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+Security
+--------
+
+* `DynamicModelViewSet` now enforces pagination and rate limiting itself, instead
+  of relying on the host project's own `REST_FRAMEWORK` settings. Previously,
+  `SNAPADMIN_THROTTLE_ANON`/`SNAPADMIN_THROTTLE_USER` were documented but never
+  read by the library, and `list` responses were only paginated because the demo
+  project happened to configure `DEFAULT_PAGINATION_CLASS` itself — a project
+  installing `django-snapadmin` without also setting that up could serve an
+  unbounded `list` that serializes an entire table into memory in one response,
+  and had no rate limiting on the dynamic model API at all. `list` is now always
+  paginated (`SnapDynamicPagination`, default page size 25 via
+  `SNAPADMIN_API_PAGE_SIZE`, hard ceiling 500 via `SNAPADMIN_API_MAX_PAGE_SIZE`
+  on client-requested `?page_size=`), and every request against
+  `DynamicModelViewSet` is throttled per `SNAPADMIN_THROTTLE_ANON` (default
+  `60/min`) and `SNAPADMIN_THROTTLE_USER` (default `600/min`), both readable
+  independently of DRF's `DEFAULT_THROTTLE_RATES`. Set either throttle setting to
+  `None` to disable it. The streaming `export` action and the `count` action are
+  unaffected by pagination, as before.

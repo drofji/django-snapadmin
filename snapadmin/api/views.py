@@ -15,6 +15,7 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
+from rest_framework.throttling import AnonRateThrottle, UserRateThrottle
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
 
@@ -22,6 +23,7 @@ from snapadmin.api.authentication import SnapAPIAuthMixin, token_has_permission
 from snapadmin.db import route_read
 from snapadmin.api.filters import SnapAdminFilterBackend
 from snapadmin.models import APIToken, EsStorageMode, SnapModel
+from snapadmin.pagination import SnapDynamicPagination
 from snapadmin.api.serializers import (
     APITokenCreateSerializer,
     APITokenSerializer,
@@ -35,6 +37,34 @@ _model_field_cache = {}
 class IsTokenOwnerOrAdmin(permissions.BasePermission):
     def has_object_permission(self, request, view, obj: APIToken):
         return obj.user == request.user or request.user.is_superuser
+
+
+class SnapAnonRateThrottle(AnonRateThrottle):
+    """Anonymous-caller rate limit, read straight from ``SNAPADMIN_THROTTLE_ANON``.
+
+    Overriding ``get_rate()`` bypasses DRF's ``DEFAULT_THROTTLE_RATES`` settings
+    dict entirely, so this applies even in a host project that sets no
+    ``REST_FRAMEWORK`` throttle config of its own. A falsy setting value (e.g.
+    ``None``) disables throttling for this scope.
+    """
+
+    scope = "snapadmin_anon"
+
+    def get_rate(self) -> str | None:
+        return getattr(settings, "SNAPADMIN_THROTTLE_ANON", "60/min")
+
+
+class SnapUserRateThrottle(UserRateThrottle):
+    """Authenticated-caller rate limit, read from ``SNAPADMIN_THROTTLE_USER``.
+
+    See :class:`SnapAnonRateThrottle` — same independence from DRF's
+    ``DEFAULT_THROTTLE_RATES``.
+    """
+
+    scope = "snapadmin_user"
+
+    def get_rate(self) -> str | None:
+        return getattr(settings, "SNAPADMIN_THROTTLE_USER", "600/min")
 
 
 class TokenModelPermission(permissions.BasePermission):
@@ -99,6 +129,8 @@ class APITokenViewSet(
 class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, TokenModelPermission]
     filter_backends = [SnapAdminFilterBackend, SearchFilter, OrderingFilter]
+    pagination_class = SnapDynamicPagination
+    throttle_classes = [SnapAnonRateThrottle, SnapUserRateThrottle]
 
     def _get_model_class(self):
         app_label  = self.kwargs["app_label"]

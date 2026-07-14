@@ -38,9 +38,18 @@ DATABASES = {
 ELASTICSEARCH_ENABLED = False
 
 # ── Throttling: off — the suite fires hundreds of requests per minute ────────
+# The DRF-level DEFAULT_THROTTLE_CLASSES/DEFAULT_THROTTLE_RATES pop below only
+# matters for views that still rely on DRF's global throttle config.
+# DynamicModelViewSet no longer does: SnapAnonRateThrottle/SnapUserRateThrottle
+# read SNAPADMIN_THROTTLE_ANON/SNAPADMIN_THROTTLE_USER directly via get_rate(),
+# bypassing DEFAULT_THROTTLE_RATES entirely — so throttling must also be
+# disabled here, at the source those classes actually consult. A falsy value
+# (None) makes DRF's SimpleRateThrottle treat the scope as unlimited.
 REST_FRAMEWORK = {**REST_FRAMEWORK}  # noqa: F405
 REST_FRAMEWORK.pop("DEFAULT_THROTTLE_CLASSES", None)
 REST_FRAMEWORK.pop("DEFAULT_THROTTLE_RATES", None)
+SNAPADMIN_THROTTLE_ANON = None
+SNAPADMIN_THROTTLE_USER = None
 
 # ── Celery: run tasks synchronously, no broker ───────────────────────────────
 CELERY_TASK_ALWAYS_EAGER = True

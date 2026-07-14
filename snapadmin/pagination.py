@@ -25,6 +25,7 @@ from django.core.paginator import Paginator
 from django.db import connections
 from django.db.models import QuerySet
 from django.utils.functional import cached_property
+from rest_framework.pagination import PageNumberPagination
 
 DEFAULT_THRESHOLD = 100_000
 
@@ -76,3 +77,26 @@ class EstimatedCountPaginator(Paginator):
             if estimate is not None and estimate >= _estimate_threshold():
                 return estimate
         return super().count
+
+
+class SnapDynamicPagination(PageNumberPagination):
+    """Always-on ``list`` pagination for :class:`DynamicModelViewSet`.
+
+    Applied directly on the viewset (not via DRF's ``DEFAULT_PAGINATION_CLASS``)
+    so every project gets it regardless of its own ``REST_FRAMEWORK`` settings —
+    without this, a project that installs snapadmin and sets no pagination
+    default gets an unbounded ``list`` that serializes an entire table in one
+    response. ``SNAPADMIN_API_PAGE_SIZE`` (default 25) sets the page size;
+    ``SNAPADMIN_API_MAX_PAGE_SIZE`` (default 500) caps what a client can request
+    via ``?page_size=``.
+    """
+
+    page_size_query_param = "page_size"
+
+    @property
+    def page_size(self) -> int:
+        return int(getattr(settings, "SNAPADMIN_API_PAGE_SIZE", 25))
+
+    @property
+    def max_page_size(self) -> int:
+        return int(getattr(settings, "SNAPADMIN_API_MAX_PAGE_SIZE", 500))
