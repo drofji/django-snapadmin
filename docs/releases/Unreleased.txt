@@ -8,6 +8,7 @@ Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Sec
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
 
 Security
+<<<<<<< HEAD
 ========
 
 New ``api_write_fields`` mass-assignment guard
@@ -33,3 +34,39 @@ New ``api_write_fields`` mass-assignment guard
   flattened into a single mangled string that exposed structure and substrings. Short strings of
   3-5 characters (e.g. a 5-digit PIN) previously kept their first and last character visible; they
   are now fully starred like 1-2 character strings, closing a leak for short codes and IDs.
+
+``SmartModelSelectorWidget`` fail-open fix
+  ``SmartModelSelectorWidget`` (used for ``APIToken.allowed_models`` in the admin) rendered its
+  hidden input with a hardcoded ``value='[]'``, relying entirely on client-side JS to repopulate it
+  with the token's actual current scope before submit. If that JS didn't run — a CSP blocking it, a
+  JS error, or ``JSON.parse`` throwing on an unexpected character in a model's ``verbose_name`` — a
+  plain form submit sent the literal empty list. Since ``APIToken.can_access_model()`` treats an
+  empty ``allowed_models`` as "unrestricted, fall back to the user's Django permissions" (documented,
+  intentional behavior — see ``SECURITY.md``), simply re-saving a restricted token through the admin
+  could silently widen it to every model the owning user has Django permissions for. The widget now
+  renders the real current value server-side, so a no-JS round trip preserves the actual scope, and
+  additionally treats a missing/empty/unparseable submission as "no change" (via
+  ``value_omitted_from_data``) rather than "clear", so a broken submission can no longer wipe an
+  existing restriction even as defense in depth. One consequence: this widget can no longer be used
+  to deliberately clear ``allowed_models`` back to ``[]`` — only to widen it by adding entries or
+  narrow it to a non-empty subset. That's intentional: a scope that can silently self-widen on save
+  is a worse failure mode than a scope that can't be fully cleared from one screen.
+=======
+--------
+
+- ``SmartModelSelectorWidget`` (used for ``APIToken.allowed_models`` in the admin) rendered its
+  hidden input with a hardcoded ``value='[]'``, relying entirely on client-side JS to repopulate it
+  with the token's actual current scope before submit. If that JS didn't run — a CSP blocking it, a
+  JS error, or ``JSON.parse`` throwing on an unexpected character in a model's ``verbose_name`` — a
+  plain form submit sent the literal empty list. Since ``APIToken.can_access_model()`` treats an
+  empty ``allowed_models`` as "unrestricted, fall back to the user's Django permissions" (documented,
+  intentional behavior — see ``SECURITY.md``), simply re-saving a restricted token through the admin
+  could silently widen it to every model the owning user has Django permissions for. The widget now
+  renders the real current value server-side, so a no-JS round trip preserves the actual scope, and
+  additionally treats a missing/empty/unparseable submission as "no change" (via
+  ``value_omitted_from_data``) rather than "clear", so a broken submission can no longer wipe an
+  existing restriction even as defense in depth. One consequence: this widget can no longer be used
+  to deliberately clear ``allowed_models`` back to ``[]`` — only to widen it by adding entries or
+  narrow it to a non-empty subset. That's intentional: a scope that can silently self-widen on save
+  is a worse failure mode than a scope that can't be fully cleared from one screen.
+>>>>>>> worktree-agent-a9409aa38f9c464b4

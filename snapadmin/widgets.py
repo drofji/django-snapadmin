@@ -38,12 +38,39 @@ class SmartModelSelectorWidget(forms.Widget):
 
         context["all_models_json"] = json.dumps(all_models)
         context["current_values"] = current_values
+        context["current_values_json"] = json.dumps(current_values)
         context["name"] = name
         return context
 
     def render(self, name, value, attrs=None, renderer=None):
         context = self.get_context(name, value, attrs)
         return mark_safe(render_to_string(self.template_name, context))
+
+    def value_omitted_from_data(self, data, files, name):
+        # An empty/missing/unparseable submission is treated as "no change" rather
+        # than "clear to []", because [] means "unrestricted, fall back to the
+        # user's Django permissions" (see APIToken.can_access_model). If the page's
+        # JS fails to repopulate the hidden input (CSP block, JS error, a stray
+        # character in some model's verbose_name breaking JSON.parse), the browser
+        # would otherwise submit a literal '[]' and silently widen a restricted
+        # token's scope to everything the owning user can touch. Returning True
+        # here makes Django's construct_instance() skip the field entirely, so the
+        # token keeps its existing allowed_models. The tradeoff: this widget can
+        # never be used to deliberately clear allowed_models back to [] — only to
+        # widen it by adding entries or narrow it to a non-empty subset. A scope
+        # that silently self-widens on save is a worse failure mode than a scope
+        # that can't be fully cleared from one screen.
+        raw = data.get(name)
+        if raw in (None, ""):
+            return True
+        if isinstance(raw, (list, dict)):
+            parsed = raw
+        else:
+            try:
+                parsed = json.loads(raw)
+            except (TypeError, ValueError):
+                return True
+        return parsed == []
 
     class Media:
         js = ["snapadmin/js/model_selector.js"]
