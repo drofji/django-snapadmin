@@ -313,6 +313,16 @@ The base install is self-contained. Opt into extra integrations with pip extras:
 > Without the extra, using a `wysiwyg=True` field raises a clear `ImproperlyConfigured` telling you to
 > install it. (This is not legal advice — review dependency licences with counsel for commercial use.)
 
+> **MySQL driver and commercial use.** SnapAdmin itself carries no MySQL driver dependency. However, if
+> you configure Django to use MySQL (via `DATABASES[...]['ENGINE'] = 'django.db.backends.mysql'`), you
+> must separately install `mysqlclient` (GPL-2.0-or-later). This is fine for internal or
+> non-redistributed applications, but check your license posture before shipping a closed-source product.
+> Django also supports the pure-Python driver `PyMySQL` — install it and call `pymysql.install_as_MySQLdb()`
+> in your project's `__init__.py` or early in `settings.py` before Django loads. PyMySQL carries a
+> permissive MIT license, trading off performance: it is pure-Python and slower than the C-extension
+> `mysqlclient`, so production deployments typically prefer the latter. (This is not legal advice —
+> review dependency licences with counsel for commercial use.)
+
 ---
 
 ## 🛠 Usage & Configuration
