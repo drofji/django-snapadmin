@@ -1539,9 +1539,14 @@ class AuditLog(snap_models.SnapModel):
 
 ### REST pagination
 
-The REST API paginates by default (`PageNumberPagination`, `PAGE_SIZE = 25`), so large
-collections are never serialized in one response. Tune it via the `REST_FRAMEWORK`
-setting.
+`DynamicModelViewSet.list` always paginates — enforced directly on the viewset via
+`SnapDynamicPagination`, so it applies even in a fresh project with an empty
+`REST_FRAMEWORK` setting. Default page size is 25 (`SNAPADMIN_API_PAGE_SIZE`); a
+client may request a larger page with `?page_size=`, up to a hard ceiling of 500
+(`SNAPADMIN_API_MAX_PAGE_SIZE`) — a value above the ceiling is clamped, not
+honoured verbatim. Large collections can never be serialized unbounded in one
+response. `export` (streaming NDJSON) and `count` are unaffected by design — see
+**REST API in Practice** above.
 
 ### Offloading search to Elasticsearch
 
@@ -1634,8 +1639,10 @@ Copy `dist.env` to `.env` and configure:
 | `SNAPADMIN_EXPORT_DIR` | `BASE_DIR/exports` | Directory export files are written to |
 | `ELASTICSEARCH_KWARGS` | `{request_timeout: 5}` | Extra kwargs merged into the `Elasticsearch(...)` client |
 | `SNAPADMIN_ES_CLIENT_FACTORY` | — | Dotted path to a zero-arg callable returning a custom ES client |
-| `SNAPADMIN_THROTTLE_ANON` | `60/min` | DRF rate limit for anonymous callers |
-| `SNAPADMIN_THROTTLE_USER` | `600/min` | DRF rate limit for authenticated clients |
+| `SNAPADMIN_API_PAGE_SIZE` | `25` | Default `list` page size on `DynamicModelViewSet` |
+| `SNAPADMIN_API_MAX_PAGE_SIZE` | `500` | Hard ceiling on client-requested `?page_size=` |
+| `SNAPADMIN_THROTTLE_ANON` | `60/min` | Rate limit for anonymous callers of `DynamicModelViewSet`, enforced by the viewset itself regardless of the host project's `REST_FRAMEWORK` config; `None` disables it |
+| `SNAPADMIN_THROTTLE_USER` | `600/min` | Rate limit for authenticated callers of `DynamicModelViewSet`, same enforcement; `None` disables it |
 | `SNAPADMIN_SEED_ADMIN_PASSWORD` | — | Password for the seeded superuser; `admin/admin` default allowed only with `DEBUG=True` |
 | `EMAIL_HOST` / `EMAIL_PORT` | `localhost` / `587` | SMTP server for notification emails |
 | `EMAIL_HOST_USER` / `EMAIL_HOST_PASSWORD` | — | SMTP credentials |

@@ -506,3 +506,119 @@ class TestApiWriteFieldsAllowlist:
         r = auth_client.get(f"/api/models/demo/Product/{product.pk}/")
         assert r.status_code == 200
         assert r.json()["name"] == product.name
+
+
+# ── DynamicModelViewSet – always-on pagination (#SEC4) ────────────────────────
+
+@pytest.mark.django_db
+class TestDynamicListPagination:
+    def test_list_paginated_with_default_page_size(self, auth_client, many_products):
+        # 30 rows, SNAPADMIN_API_PAGE_SIZE unset → default page size 25.
+        r = auth_client.get("/api/models/demo/Product/")
+        assert r.status_code == 200
+        data = r.json()
+        assert len(data["results"]) == 25
+        assert data["count"] == 30
+
+    def test_list_respects_custom_default_page_size(self, auth_client, many_products):
+        with override_settings(SNAPADMIN_API_PAGE_SIZE=5):
+            r = auth_client.get("/api/models/demo/Product/")
+        assert len(r.json()["results"]) == 5
+
+    def test_list_client_page_size_honoured_below_max(self, auth_client, many_products):
+        r = auth_client.get("/api/models/demo/Product/?page_size=3")
+        assert r.status_code == 200
+        assert len(r.json()["results"]) == 3
+
+    def test_list_client_page_size_clamped_to_max(self, auth_client, many_products):
+        with override_settings(SNAPADMIN_API_MAX_PAGE_SIZE=10):
+            r = auth_client.get("/api/models/demo/Product/?page_size=1000")
+        assert r.status_code == 200
+        # 30 rows exist; an unclamped request would return all 30 on one page.
+        assert len(r.json()["results"]) == 10
+
+    def test_list_page_size_default_max_is_500(self, auth_client, many_products):
+        # Default SNAPADMIN_API_MAX_PAGE_SIZE (500) comfortably fits all 30 rows.
+        r = auth_client.get("/api/models/demo/Product/?page_size=1000")
+        assert r.status_code == 200
+        assert len(r.json()["results"]) == 30
+
+
+# ── DynamicModelViewSet – snapadmin-native throttling (#SEC4) ────────────────
+
+@pytest.mark.django_db
+class TestDynamicViewSetThrottling:
+    @pytest.fixture(autouse=True)
+    def _clear_throttle_cache(self):
+        from django.core.cache import cache
+        cache.clear()
+        yield
+        cache.clear()
+
+    def test_low_user_rate_returns_429_after_limit(self, auth_client, product):
+        with override_settings(SNAPADMIN_THROTTLE_USER="2/min", SNAPADMIN_THROTTLE_ANON=None):
+            first = auth_client.get("/api/models/demo/Product/")
+            second = auth_client.get("/api/models/demo/Product/")
+            third = auth_client.get("/api/models/demo/Product/")
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert third.status_code == 429
+
+    def test_anon_throttle_enforces_low_rate(self):
+        # DynamicModelViewSet requires IsAuthenticated, and DRF checks
+        # permissions before throttles — an anonymous HTTP request never
+        # reaches the throttle at all (it 401/403s first). Exercise
+        # SnapAnonRateThrottle directly instead, the same way DRF would.
+        from django.contrib.auth.models import AnonymousUser
+        from django.core.cache import cache
+        from django.test import RequestFactory
+        from snapadmin.api.views import SnapAnonRateThrottle
+
+        cache.clear()
+        request = RequestFactory().get("/")
+        request.user = AnonymousUser()
+        with override_settings(SNAPADMIN_THROTTLE_ANON="2/min"):
+            assert SnapAnonRateThrottle().allow_request(request, view=None) is True
+            assert SnapAnonRateThrottle().allow_request(request, view=None) is True
+            assert SnapAnonRateThrottle().allow_request(request, view=None) is False
+        cache.clear()
+
+    def test_anon_throttle_none_setting_allows_unlimited_requests(self):
+        from django.contrib.auth.models import AnonymousUser
+        from django.core.cache import cache
+        from django.test import RequestFactory
+        from snapadmin.api.views import SnapAnonRateThrottle
+
+        cache.clear()
+        request = RequestFactory().get("/")
+        request.user = AnonymousUser()
+        with override_settings(SNAPADMIN_THROTTLE_ANON=None):
+            for _ in range(10):
+                assert SnapAnonRateThrottle().allow_request(request, view=None) is True
+        cache.clear()
+
+    def test_anon_and_user_throttle_default_rates(self, monkeypatch):
+        # The test settings pin both to None (see sandbox/settings_test.py) so
+        # the suite never throttles itself. Simulate a host project that never
+        # set either setting at all by swapping in a bare namespace for the
+        # module-level `settings` name get_rate() reads from.
+        import types
+        from snapadmin.api import views as views_module
+        from snapadmin.api.views import SnapAnonRateThrottle, SnapUserRateThrottle
+
+        monkeypatch.setattr(views_module, "settings", types.SimpleNamespace())
+
+        assert SnapAnonRateThrottle().get_rate() == "60/min"
+        assert SnapUserRateThrottle().get_rate() == "600/min"
+
+    def test_none_rate_disables_user_throttling(self, auth_client, product):
+        # SNAPADMIN_THROTTLE_USER is None in the test settings by default: a
+        # burst well above any real-world rate must never trip a 429.
+        for _ in range(20):
+            r = auth_client.get("/api/models/demo/Product/")
+            assert r.status_code == 200
+
+    def test_none_setting_value_explicitly_disables_throttle(self, auth_client, product):
+        with override_settings(SNAPADMIN_THROTTLE_USER=None, SNAPADMIN_THROTTLE_ANON=None):
+            for _ in range(10):
+                assert auth_client.get("/api/models/demo/Product/").status_code == 200
