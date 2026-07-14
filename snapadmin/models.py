@@ -748,6 +748,16 @@ class SnapModel(models.Model):
     # The admin is unaffected.
     api_exclude_fields: list[str] = []
 
+    # API write allowlist. When set to a list, only the named fields accept a
+    # client-supplied value on REST create/update — every other field becomes
+    # read-only through the API (it may still be returned in responses, unless
+    # also listed in api_exclude_fields). Use it to stop mass-assignment on
+    # fields that must only ever change server-side (status flags, ownership
+    # FKs, computed/internal columns). Left as None (the default), every
+    # non-excluded field stays writable — a snapadmin.W004 system check warns
+    # about this so the tradeoff is a deliberate choice, not an oversight.
+    api_write_fields: list[str] | None = None
+
     # Optional index-level settings applied when the ES index is first created —
     # e.g. custom analyzers under "analysis", "number_of_shards", "number_of_replicas".
     # Existing indexes are never altered (most index settings are static in ES);

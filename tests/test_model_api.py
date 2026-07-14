@@ -419,3 +419,90 @@ class TestDeletionVeto:
 
     def test_destroy_unknown_model_404(self, auth_client):
         assert auth_client.delete("/api/models/demo/GhostModel/1/").status_code == 404
+
+
+# ── api_write_fields allowlist ────────────────────────────────────────────────
+
+@pytest.fixture
+def restricted_product_serializer(monkeypatch):
+    """Product.api_write_fields = ["available"] for the duration of the test.
+
+    Bypasses (and restores) the module-level serializer cache in
+    ``snapadmin.api.serializers`` so the HTTP-level tests observe the patched
+    attribute instead of an already-built, unrestricted serializer class.
+    """
+    from snapadmin.api import serializers as serializers_module
+    from demo.models import Product
+
+    monkeypatch.setattr(Product, "api_write_fields", ["available"], raising=False)
+    serializers_module._serializer_cache.pop("demo.Product", None)
+    yield
+    serializers_module._serializer_cache.pop("demo.Product", None)
+
+
+@pytest.mark.django_db
+class TestApiWriteFieldsAllowlist:
+    def test_default_unset_leaves_every_field_writable(self):
+        from snapadmin.api.serializers import build_model_serializer
+        from demo.models import Product
+        fields = build_model_serializer(Product)().fields
+        assert fields["name"].read_only is False
+        assert fields["price"].read_only is False
+        assert fields["available"].read_only is False
+
+    def test_explicit_list_forces_other_fields_read_only(self, monkeypatch):
+        from snapadmin.api.serializers import build_model_serializer
+        from demo.models import Product
+        monkeypatch.setattr(Product, "api_write_fields", ["available"], raising=False)
+        fields = build_model_serializer(Product)().fields
+        assert fields["available"].read_only is False
+        assert fields["name"].read_only is True
+        assert fields["price"].read_only is True
+
+    def test_non_writable_field_still_readable(self, monkeypatch):
+        # Restricting writes must not narrow what api_exclude_fields controls.
+        from snapadmin.api.serializers import build_model_serializer
+        from demo.models import Product
+        monkeypatch.setattr(Product, "api_write_fields", ["available"], raising=False)
+        fields = build_model_serializer(Product)().fields
+        assert "name" in fields
+        assert "price" in fields
+
+    def test_pk_stays_read_only_even_if_listed(self, monkeypatch):
+        from snapadmin.api.serializers import build_model_serializer
+        from demo.models import Product
+        monkeypatch.setattr(Product, "api_write_fields", ["id"], raising=False)
+        fields = build_model_serializer(Product)().fields
+        assert fields["id"].read_only is True
+
+    def test_update_ignores_non_allowlisted_field(
+        self, auth_client, product, restricted_product_serializer
+    ):
+        original_name = product.name
+        r = auth_client.patch(
+            f"/api/models/demo/Product/{product.pk}/",
+            {"name": "Hacked Name", "available": False},
+            format="json",
+        )
+        assert r.status_code == 200
+        assert r.json()["available"] is False
+        product.refresh_from_db()
+        assert product.name == original_name
+
+    def test_update_still_persists_allowlisted_field(
+        self, auth_client, product, restricted_product_serializer
+    ):
+        from demo.models import Product
+        auth_client.patch(
+            f"/api/models/demo/Product/{product.pk}/",
+            {"available": False},
+            format="json",
+        )
+        assert Product.objects.get(pk=product.pk).available is False
+
+    def test_read_response_still_includes_non_allowlisted_field(
+        self, auth_client, product, restricted_product_serializer
+    ):
+        r = auth_client.get(f"/api/models/demo/Product/{product.pk}/")
+        assert r.status_code == 200
+        assert r.json()["name"] == product.name

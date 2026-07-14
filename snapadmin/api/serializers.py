@@ -39,6 +39,31 @@ class PIIMaskingSerializerMixin:
         return data
 
 
+class WriteFieldAllowlistSerializerMixin:
+    """Restricts which fields accept client-supplied values via ``api_write_fields``.
+
+    When the bound model declares ``api_write_fields`` (a list, not ``None``),
+    every field not named in that list is forced read-only on this serializer —
+    it can still be returned in responses (read exposure stays controlled by
+    ``api_exclude_fields``), but any value a client sends for it is silently
+    ignored on create/update, the same way DRF already ignores unknown input
+    keys. Left unset (``None``, the default), this mixin is a no-op and every
+    field keeps whatever writability ``ModelSerializer`` gave it.
+    """
+
+    _snap_write_fields: list[str] | None = None  # set by build_model_serializer
+
+    def get_fields(self):
+        fields = super().get_fields()
+        if self._snap_write_fields is not None:
+            allowed = set(self._snap_write_fields)
+            for name, field in fields.items():
+                if name not in allowed:
+                    field.read_only = True
+                    field.required = False
+        return fields
+
+
 class APITokenSerializer(serializers.ModelSerializer):
     owner_username = serializers.CharField(source="user.get_username", read_only=True)
     is_expired = serializers.BooleanField(read_only=True)
@@ -98,10 +123,15 @@ def build_model_serializer(model_class):
     else:
         meta_attrs["fields"] = "__all__"
     meta_class = type("Meta", (), meta_attrs)
+    write_fields = getattr(model_class, "api_write_fields", None)
     serializer_class = type(
         f"{model_class.__name__}Serializer",
-        (PIIMaskingSerializerMixin, serializers.ModelSerializer),
-        {"Meta": meta_class, "_snap_model": model_class},
+        (WriteFieldAllowlistSerializerMixin, PIIMaskingSerializerMixin, serializers.ModelSerializer),
+        {
+            "Meta": meta_class,
+            "_snap_model": model_class,
+            "_snap_write_fields": list(write_fields) if write_fields is not None else None,
+        },
     )
     return serializer_class
 

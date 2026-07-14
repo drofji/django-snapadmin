@@ -120,6 +120,7 @@ def test_snapmodel_attribute_defaults():
         "es_auto_mapping": False,
         "es_query_routing": True,
         "api_exclude_fields": [],
+        "api_write_fields": None,
         "data_retention_days": None,
         "data_retention_field": "created_at",
         "offline_mode": False,

@@ -14,6 +14,8 @@ from django.apps import apps
 from django.conf import settings
 from django.core.checks import Error, Warning
 
+from snapadmin.models import SnapModel
+
 
 def _resolve_model(dotted: str):
     """``"app.Model"`` → model class, or ``None`` if unresolvable."""
@@ -91,11 +93,32 @@ def check_sso_providers(app_configs, **kwargs):
     return warnings
 
 
+def check_api_write_fields(app_configs, **kwargs):
+    if not getattr(settings, "SNAPADMIN_REST_API_ENABLED", True):
+        return []
+    warnings = []
+    for model in apps.get_models():
+        if not SnapModel.is_concrete_subclass(model):
+            continue
+        if getattr(model, "api_write_fields", None) is None:
+            warnings.append(Warning(
+                f"{model._meta.label} has no api_write_fields set — every field not "
+                "listed in api_exclude_fields is writable through the auto-generated "
+                "API (create/update).",
+                hint="Set api_write_fields = [...] on the model to restrict which "
+                     "fields accept client-supplied values (a mass-assignment guard). "
+                     "Leave unset only for models where every field is safe to write.",
+                id="snapadmin.W004",
+            ))
+    return warnings
+
+
 ALL_CHECKS = [
     check_analytics_db_alias,
     check_masked_fields,
     check_nested_apps,
     check_sso_providers,
+    check_api_write_fields,
 ]
 
 

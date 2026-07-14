@@ -85,6 +85,30 @@ class TestSsoProviders:
         assert [w.id for w in checks.check_sso_providers(None)] == ["snapadmin.W003"]
 
 
+# ── API write-fields allowlist ─────────────────────────────────────────────────
+
+class TestApiWriteFields:
+    @override_settings(SNAPADMIN_REST_API_ENABLED=False)
+    def test_disabled_api_returns_no_warnings(self):
+        assert checks.check_api_write_fields(None) == []
+
+    def test_model_without_write_fields_warns(self):
+        result = checks.check_api_write_fields(None)
+        assert result  # every demo SnapModel leaves api_write_fields unset
+        assert {w.id for w in result} == {"snapadmin.W004"}
+
+    def test_warns_once_per_unconfigured_model(self):
+        from demo.models import Product
+        result = checks.check_api_write_fields(None)
+        assert any("demo.Product" in w.msg for w in result)
+
+    def test_model_with_write_fields_set_does_not_warn(self, monkeypatch):
+        from demo.models import Product
+        monkeypatch.setattr(Product, "api_write_fields", ["name"], raising=False)
+        result = checks.check_api_write_fields(None)
+        assert not any("demo.Product" in w.msg for w in result)
+
+
 # ── integration ──────────────────────────────────────────────────────────────
 
 class TestIntegration:

@@ -188,6 +188,12 @@ class AuditLog(snap_models.SnapModel):
     # GraphQL or /api/models/schema/ — the admin still shows it.
     api_exclude_fields = ["user_email"]
 
+    # api_write_fields → only "action" accepts a client-supplied value on
+    # create/update through the API; created_at is already read-only
+    # (auto_now_add) and user_email is excluded above, so this is the
+    # mass-assignment allowlist for whatever's left as the model grows.
+    api_write_fields = ["action"]
+
     class Meta:
         verbose_name = _("Audit Log")
         verbose_name_plural = _("Audit Logs")

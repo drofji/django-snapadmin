@@ -6,3 +6,20 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+Security
+========
+
+New ``api_write_fields`` mass-assignment guard
+  Field exposure and field *writability* were previously the same knob: any field not listed in
+  a model's ``api_exclude_fields`` was both readable and writable through the auto-generated REST
+  API, so a plain ``SnapModel`` subclass accepted create/update payloads on every column, including
+  ones that should never be client-settable (status flags, ownership foreign keys, computed or
+  otherwise internal fields). A new optional ``api_write_fields`` model attribute splits the two:
+  set it to an explicit list of field names and every other field is forced read-only through REST
+  create/update (it can still be returned in responses, unless also excluded). Leaving it unset
+  keeps the previous, fully-writable behaviour — this is not a breaking change — but a new
+  ``snapadmin.W004`` system check now warns on every ``SnapModel`` that hasn't set it, so the
+  exposure becomes a deliberate choice rather than an unnoticed default. GraphQL is unaffected: the
+  generated schema has no mutations, so it was never writable. See ``api_write_fields`` in the
+  README and SECURITY.md for usage.

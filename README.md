@@ -226,6 +226,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Auto ES Mapping** | `es_auto_mapping = True` derives the index mapping from your model fields (text + `.raw` keyword subfields, dates, numerics); `es_mapping` entries override per field, `es_index_settings` adds analyzers/shards. |
 | **Secured GraphQL** | Every resolver enforces authentication (session or API token) + per-model Django permissions — the same contract as REST. `search`/`first`/`offset` arguments included. |
 | **API Field Privacy** | `api_exclude_fields` hides sensitive columns from REST, GraphQL and schema introspection while the admin keeps showing them. |
+| **API Write Allowlist** | `api_write_fields` restricts which fields accept a client-supplied value on REST create/update — a mass-assignment guard for status flags, ownership FKs and other fields that must only change server-side. A system check (`snapadmin.W004`) flags any model that hasn't set it. |
 | **GDPR Data Retention** | Per-model `data_retention_days` parameter with automatic Celery cleanup task. |
 | **Error Monitoring & Email Alerts** | Optional middleware records every unhandled exception / 5xx as a browsable `ErrorEvent`; emails a **spike alert** when N errors hit within 15 minutes and a **daily grouped digest** (Celery Beat or cron) — thresholds, window, recipients and send time all configurable. |
 | **3-2-1 Database Backups** | Scheduled DB dumps (SQLite copy / `pg_dump`, gzip) shipped to configurable destinations — a **local** directory, a **network** server (mounted share), and an **offsite** copy over **FTP/FTPS** or **SSH/SFTP** — each with its **own frequency** and retention. |
@@ -622,6 +623,23 @@ class AuditLog(snap_models.SnapModel):
     api_exclude_fields = ["user_email"]         # never leaves the server via API
 ```
 
+Restrict which fields a client can actually write through the API — everything
+else stays read-only (still returned in responses unless also excluded above),
+so subclassing `SnapModel` doesn't silently make every column mass-assignable:
+
+```python
+class Account(snap_models.SnapModel):
+    owner     = snap.SnapForeignKey(User, on_delete=django_models.CASCADE)
+    is_locked = snap.SnapBooleanField(default=False)   # server-only status flag
+    balance   = snap.SnapDecimalField(max_digits=12, decimal_places=2)  # computed
+
+    api_write_fields = ["owner"]   # is_locked / balance never accept a client value
+```
+
+Leaving `api_write_fields` unset (the default) keeps every non-excluded field
+writable, matching prior behaviour — a `snapadmin.W004` system check warns on
+every model that hasn't made the choice explicitly.
+
 ### Vetoing deletes via the API
 
 Beyond model `delete` permissions, you can forbid deleting **specific objects** through the
@@ -958,6 +976,7 @@ Several extension points need no subclassing — just settings:
 | How the Elasticsearch client is built | `ELASTICSEARCH_KWARGS` / `SNAPADMIN_ES_CLIENT_FACTORY` | [Configurable ES client](#configurable-elasticsearch-client) |
 | Whether GraphQL requires auth / exposes GraphiQL | `SNAPADMIN_GRAPHQL_REQUIRE_AUTH` / `SNAPADMIN_GRAPHIQL_ENABLED` | [Feature Toggles](#-feature-toggles--advanced-settings) |
 | Hiding fields from every API surface | `api_exclude_fields` on the model | table above |
+| Restricting which fields REST create/update can write | `api_write_fields` on the model | table above |
 
 > **GraphQL** is generated dynamically from your `SnapModel`s and enforces the *same* per-model
 > permissions and `api_exclude_fields` as REST — extend it by adding/removing SnapModels and

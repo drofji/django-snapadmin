@@ -711,6 +711,22 @@ for row in Product.objects.all().iterator(chunk_size=2000):
 
     api_exclude_fields = ["user_email"]           # never leaves the server via API</code></pre>
 
+  <h3>Restricting writes — <code>api_write_fields</code></h3>
+  <p>Field exposure and field <em>writability</em> are separate controls. By default every field not
+  listed in <code>api_exclude_fields</code> also accepts a client-supplied value on REST create/update
+  — set <code>api_write_fields</code> to an explicit list to change that: any field not named there is
+  forced read-only through the API (still returned in responses unless also excluded above). Use it
+  for status flags, ownership FKs and other columns that must only ever change server-side:</p>
+  <pre><code>class Account(SnapModel):
+    owner     = snap_fields.SnapForeignKey(User, on_delete=models.CASCADE)
+    is_locked = snap_fields.SnapBooleanField(default=False)   # server-only status flag
+    balance   = snap_fields.SnapDecimalField(max_digits=12, decimal_places=2)  # computed
+
+    api_write_fields = ["owner"]   # is_locked / balance never accept a client value</code></pre>
+  <p>Leaving it unset (the default) keeps every non-excluded field writable, matching prior behaviour
+  — the <code>snapadmin.W004</code> system check warns on any model that hasn't made the choice
+  explicitly, so the exposure is deliberate rather than an oversight.</p>
+
   <h3>Vetoing deletes — <code>api_can_delete</code> + <code>SNAPADMIN_API_DELETE_GUARD</code></h3>
   <p>Forbid deleting <strong>specific objects</strong> through the dynamic model API without
   re-mounting routes. Two extension points are consulted before every <code>DELETE</code> and
@@ -1090,6 +1106,7 @@ urlpatterns = [*router.urls, path("", include("snapadmin.urls"))]</code></pre>
     <tr><td>How the Elasticsearch client is built</td><td><code>ELASTICSEARCH_KWARGS</code> / <code>SNAPADMIN_ES_CLIENT_FACTORY</code></td></tr>
     <tr><td>GraphQL auth / GraphiQL exposure</td><td><code>SNAPADMIN_GRAPHQL_REQUIRE_AUTH</code> / <code>SNAPADMIN_GRAPHIQL_ENABLED</code></td></tr>
     <tr><td>Hiding fields from every API surface</td><td><code>api_exclude_fields</code> on the model</td></tr>
+    <tr><td>Restricting which fields REST create/update can write</td><td><code>api_write_fields</code> on the model</td></tr>
   </table>
   <div class="callout">
     <strong>GraphQL</strong> is generated dynamically from your <code>SnapModel</code>s and enforces

@@ -77,6 +77,11 @@ Key protections:
   get `403`. Opt into a public status page only deliberately with `SNAPADMIN_DASHBOARD_PUBLIC = True`.
 - **`api_exclude_fields`** hides sensitive columns from every API surface (REST, GraphQL, schema
   introspection) while the admin keeps showing them.
+- **`api_write_fields`** guards against mass assignment: when set, only the listed fields accept a
+  client-supplied value on REST create/update — every other field is forced read-only through the
+  API (it may still be returned in responses). Left unset, every non-excluded field stays writable,
+  matching pre-existing behaviour; the `snapadmin.W004` system check flags any model that hasn't made
+  the choice explicitly, so the exposure is a deliberate decision rather than an oversight.
 
 ### Data protection & auditability
 - **PII masking** — `SNAPADMIN_MASKED_FIELDS` masks configured fields in the admin and API for users
