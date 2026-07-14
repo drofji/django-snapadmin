@@ -592,3 +592,136 @@ class TestValidatorDeconstructStability:
         assert any(isinstance(v, MaxLengthValidator) for v in kwargs["validators"])
         from snapadmin.validators import SnapColorValidator
         assert not any(isinstance(v, SnapColorValidator) for v in kwargs["validators"])
+
+
+# ── SnapFileField / SnapImageField validator config round-trips (BUG A / BUG B) ─
+
+class TestFileFieldValidatorConfig:
+    """SnapFileField/SnapImageField must preserve their validator config across
+    deconstruct/reconstruct, and never strip a caller-supplied validator of the
+    same class as the auto-built one."""
+
+    def _config(self, validator):
+        return (
+            validator.allowed_extensions,
+            validator.allowed_encodings,
+            validator.max_size_bytes,
+        )
+
+    def test_file_field_config_survives_round_trips(self):
+        from snapadmin.fields import SnapFileField
+        from snapadmin.validators import SnapFileValidator
+
+        field = SnapFileField(
+            allowed_extensions=["pdf", "txt"],
+            allowed_encodings=["utf-8"],
+            max_size_bytes=1024,
+        )
+        # Exactly one auto validator on the live field, carrying the config.
+        assert len(field._validators) == 1
+        assert self._config(field._validators[0]) == (["pdf", "txt"], ["utf-8"], 1024)
+
+        name, path, args, kwargs = field.deconstruct()
+        for _ in range(3):
+            # Config re-serialised as plain kwargs, not as a live validator.
+            assert kwargs["allowed_extensions"] == ["pdf", "txt"]
+            assert kwargs["allowed_encodings"] == ["utf-8"]
+            assert kwargs["max_size_bytes"] == 1024
+            assert not kwargs.get("validators")  # auto validator stripped
+            rebuilt = SnapFileField(*args, **kwargs)
+            assert len(rebuilt._validators) == 1
+            assert self._config(rebuilt._validators[0]) == (["pdf", "txt"], ["utf-8"], 1024)
+            name, path, args, kwargs = rebuilt.deconstruct()
+
+    def test_file_field_no_config_stays_clean(self):
+        from snapadmin.fields import SnapFileField
+
+        kwargs = SnapFileField().deconstruct()[3]
+        assert "allowed_extensions" not in kwargs
+        assert "allowed_encodings" not in kwargs
+        assert "max_size_bytes" not in kwargs
+        assert not kwargs.get("validators")
+
+    def test_user_supplied_file_validator_survives(self):
+        from snapadmin.fields import SnapFileField
+        from snapadmin.validators import SnapFileValidator
+
+        user_validator = SnapFileValidator(allowed_extensions=["csv"])
+        field = SnapFileField(
+            allowed_extensions=["pdf"],
+            validators=[user_validator],
+        )
+        # Two validators live: the caller's and the auto-built one.
+        assert len(field._validators) == 2
+
+        name, path, args, kwargs = field.deconstruct()
+        # Only the auto validator is stripped; the caller's identical-class one stays.
+        assert kwargs["validators"] == [user_validator]
+        assert kwargs["allowed_extensions"] == ["pdf"]
+
+        rebuilt = SnapFileField(*args, **kwargs)
+        assert len(rebuilt._validators) == 2
+        survivors = [
+            v for v in rebuilt._validators
+            if self._config(v) == (["csv"], None, None)
+        ]
+        assert len(survivors) == 1
+
+    def test_image_field_builds_validator_from_config(self):
+        from snapadmin.fields import SnapImageField
+
+        field = SnapImageField(allowed_extensions=["jpg", "png"], max_size_bytes=5000)
+        assert len(field._validators) == 1
+        v = field._validators[0]
+        assert v.allowed_extensions == ["jpg", "png"]
+        assert v.max_size_bytes == 5000
+
+    def test_image_field_config_survives_round_trips(self):
+        from snapadmin.fields import SnapImageField
+
+        field = SnapImageField(allowed_extensions=["jpg"], max_size_bytes=2048)
+        name, path, args, kwargs = field.deconstruct()
+        for _ in range(3):
+            assert kwargs["allowed_extensions"] == ["jpg"]
+            assert kwargs["max_size_bytes"] == 2048
+            assert "allowed_encodings" not in kwargs  # not an image concept
+            assert not kwargs.get("validators")
+            rebuilt = SnapImageField(*args, **kwargs)
+            assert len(rebuilt._validators) == 1
+            name, path, args, kwargs = rebuilt.deconstruct()
+
+    def test_image_field_no_config_stays_clean(self):
+        from snapadmin.fields import SnapImageField
+
+        kwargs = SnapImageField().deconstruct()[3]
+        assert "allowed_extensions" not in kwargs
+        assert "max_size_bytes" not in kwargs
+        assert not kwargs.get("validators")
+
+
+# ── required=True + explicit null=True contradiction (BUG C) ───────────────────
+
+class TestRequiredNullContradictionCheck:
+    """A field declared required=True yet explicitly null=True is a contradiction
+    and must surface as a snapadmin.E003 system-check error."""
+
+    def _check(self, field):
+        field.set_attributes_from_name("x")
+        return field.check()
+
+    def test_required_and_null_flagged(self):
+        errors = self._check(SnapBooleanField(required=True, null=True))
+        assert "snapadmin.E003" in [e.id for e in errors]
+
+    def test_required_only_not_flagged(self):
+        errors = self._check(SnapBooleanField(required=True))
+        assert "snapadmin.E003" not in [e.id for e in errors]
+
+    def test_optional_null_default_not_flagged(self):
+        errors = self._check(SnapBooleanField(required=False, null=True))
+        assert "snapadmin.E003" not in [e.id for e in errors]
+
+    def test_check_still_runs_django_base_checks(self):
+        # The wrapper must compose with Django's own field checks, not replace them.
+        errors = self._check(SnapCharField(max_length=10, required=True, null=True))
+        assert "snapadmin.E003" in [e.id for e in errors]
