@@ -49,3 +49,6 @@ class SnapAdminConfig(AppConfig):
 
         from snapadmin.checks import register_checks
         register_checks()
+
+        from snapadmin.extra_settings_admin import apply_unfold_styling
+        apply_unfold_styling()
