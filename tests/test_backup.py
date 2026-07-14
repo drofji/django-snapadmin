@@ -7,9 +7,8 @@ Tests for the 3-2-1 database backup stack (v0.1.0a5):
 
 import gzip
 import json
-import subprocess
 from datetime import timedelta
-from io import StringIO
+from io import BytesIO, StringIO
 from pathlib import Path
 
 import pytest
@@ -65,6 +64,18 @@ def backup_env(tmp_path, sqlite_db):
         SNAPADMIN_BACKUP_KEEP=3,
     ):
         yield {"local": local, "network": network}
+
+
+class FakePopen:
+    """Stand-in for subprocess.Popen streaming a fixed stdout/stderr."""
+
+    def __init__(self, stdout, stderr, returncode):
+        self.stdout = BytesIO(stdout)
+        self.stderr = BytesIO(stderr)
+        self._returncode = returncode
+
+    def wait(self):
+        return self._returncode
 
 
 class FakeFTP:
@@ -160,6 +171,7 @@ class FakeSSHClient:
 
     instances: list["FakeSSHClient"] = []
     fail_chdir_once = False  # class-level toggle a test flips before the call
+    connect_error: Exception | None = None  # set to raise from connect()
 
     def __init__(self):
         self.connect_kwargs = None
@@ -177,6 +189,8 @@ class FakeSSHClient:
 
     def connect(self, **kwargs):
         self.connect_kwargs = kwargs
+        if FakeSSHClient.connect_error is not None:
+            raise FakeSSHClient.connect_error
 
     def open_sftp(self):
         self.sftp = FakeSFTP(FakeSSHClient.fail_chdir_once)
@@ -192,8 +206,9 @@ def fake_sftp(monkeypatch):
 
     FakeSSHClient.instances = []
     FakeSSHClient.fail_chdir_once = False
+    FakeSSHClient.connect_error = None
     monkeypatch.setattr(paramiko, "SSHClient", FakeSSHClient)
-    monkeypatch.setattr(paramiko, "AutoAddPolicy", lambda: "autoadd-policy")
+    monkeypatch.setattr(paramiko, "RejectPolicy", lambda: "reject-policy")
     return FakeSSHClient
 
 
@@ -237,12 +252,12 @@ class TestCreateDump:
     def test_postgres_dump_uses_pg_dump(self, tmp_path, monkeypatch):
         recorded = {}
 
-        def fake_run(command, capture_output, env):
+        def fake_popen(command, stdout, stderr, env):
             recorded["command"] = command
             recorded["env"] = env
-            return subprocess.CompletedProcess(command, 0, stdout=b"PG SQL", stderr=b"")
+            return FakePopen(stdout=b"PG SQL", stderr=b"", returncode=0)
 
-        monkeypatch.setattr(backup_module.subprocess, "run", fake_run)
+        monkeypatch.setattr(backup_module.subprocess, "Popen", fake_popen)
         databases = {
             "default": {
                 "ENGINE": "django.db.backends.postgresql",
@@ -253,24 +268,30 @@ class TestCreateDump:
         with override_settings(DATABASES=databases):
             dump = create_db_dump(tmp_path)
         assert dump.name.endswith(".sql.gz")
+        # stdout streamed straight into gzip, byte-for-byte identical to the old
+        # buffer-then-write path
         assert gzip.decompress(dump.read_bytes()) == b"PG SQL"
         assert recorded["command"][0] == "pg_dump"
         assert recorded["command"][-1] == "snap"
         assert "-h" in recorded["command"] and "db" in recorded["command"]
         assert recorded["env"]["PGPASSWORD"] == "pw"
 
-    def test_postgres_dump_failure_raises(self, tmp_path, monkeypatch):
+    def test_postgres_dump_failure_raises_and_cleans_up_partial(self, tmp_path, monkeypatch):
+        # pg_dump can emit some bytes on stdout before failing; the streaming
+        # writer will have created a partial .gz that must not be left behind.
         monkeypatch.setattr(
             backup_module.subprocess,
-            "run",
-            lambda command, capture_output, env: subprocess.CompletedProcess(
-                command, 1, stdout=b"", stderr=b"connection refused"
+            "Popen",
+            lambda command, stdout, stderr, env: FakePopen(
+                stdout=b"partial dump", stderr=b"connection refused", returncode=1
             ),
         )
         databases = {"default": {"ENGINE": "django.db.backends.postgresql", "NAME": "snap"}}
         with override_settings(DATABASES=databases):
             with pytest.raises(BackupError, match="connection refused"):
                 create_db_dump(tmp_path)
+        # the corrupt partial dump was removed
+        assert list(tmp_path.glob(f"{BACKUP_PREFIX}*")) == []
 
     def test_unsupported_engine_raises(self, tmp_path):
         databases = {"default": {"ENGINE": "django.db.backends.oracle", "NAME": "x"}}
@@ -378,7 +399,8 @@ class TestDestinations:
         client = fake_sftp.instances[0]
         # host-key verification wired up, password auth (no key_filename)
         assert client.host_keys_loaded is True
-        assert client.policy == "autoadd-policy"
+        # unknown host keys are rejected, not trust-on-first-use (MITM hardening)
+        assert client.policy == "reject-policy"
         assert client.connect_kwargs["hostname"] == "offsite.example.com"
         assert client.connect_kwargs["port"] == 22
         assert client.connect_kwargs["password"] == "pw"
@@ -407,6 +429,22 @@ class TestDestinations:
         assert "password" not in client.connect_kwargs  # key auth branch
         assert client.sftp.mkdir_calls == ["/"]
         assert client.sftp.chdir_calls == ["/"]
+
+    @override_settings(SNAPADMIN_BACKUP_SFTP_HOST="unknown.example.com")
+    def test_store_sftp_unknown_host_rejected(self, tmp_path, fake_sftp):
+        # RejectPolicy makes paramiko raise SSHException for a host whose key is
+        # not already in known_hosts; the store function must propagate it.
+        import paramiko
+
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+        FakeSSHClient.connect_error = paramiko.SSHException(
+            "Server 'unknown.example.com' not found in known_hosts"
+        )
+        with pytest.raises(paramiko.SSHException, match="known_hosts"):
+            store_remote_sftp(source, get_backup_config())
+        # nothing was uploaded to the untrusted host
+        assert fake_sftp.instances[0].sftp is None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
