@@ -7,6 +7,64 @@ Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Sec
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
 
+Added
+=====
+
+``SNAPADMIN_EXPORT_MAX_ROWS`` — row ceiling on the synchronous streaming export
+  ``GET .../export/`` (the synchronous, no-Celery counterpart to ``POST /api/exports/``) previously
+  had no upper bound: an unbounded or accidentally-ineffective filter with no explicit ``?limit=``
+  just started streaming the entire matching table, holding a database connection open until the
+  client gave up or the table finished streaming — with nothing steering the caller toward the
+  async export endpoint that exists specifically for large result sets. The new optional
+  ``SNAPADMIN_EXPORT_MAX_ROWS`` setting (default ``0`` = unlimited, unchanged from today) sets a
+  ceiling: when it's configured and no valid ``?limit=`` was passed, ``export()`` now runs a
+  ``count()`` on the filtered queryset *before* streaming, and responds ``413 Payload Too Large``
+  (reporting the actual match count and pointing at ``POST /api/exports/``) instead of opening a
+  stream that may never finish. An explicit, valid ``?limit=`` is treated as the caller opting into
+  a bounded response themselves and is never blocked by the ceiling, however large.
+
+``SNAPADMIN_EXPORT_LIMIT_MAX`` — hard cap on ``?limit=``
+  A new, separate optional setting caps any explicit ``?limit=`` passed to ``.../export/`` down to
+  a configured maximum (default ``0`` = no clamp, unchanged from today) instead of always honouring
+  an arbitrarily large caller-supplied value.
+
+JSON key-path filtering for the auto-generated REST API (``api_json_filters``)
+  The auto-generated filter set had no branch at all for ``JSONField`` — a model whose payload lives
+  in a JSON column could not be filtered through the dynamic REST API in any way. A new optional
+  model attribute, ``api_json_filters``, declares which key-paths within which JSON field should be
+  filterable: ``api_json_filters = {"payload": ["a.b", "a.c"]}`` exposes ``?payload__a__b=value`` and
+  ``?payload__a__c=value`` as query parameters (a dotted key-path becomes double-underscore-separated
+  in the parameter name, mirroring Django's own lookup convention). A match covers two cases in one
+  query parameter, since the same key-path can hold either shape from row to row: a **scalar match**
+  (the JSON value at the path equals the given value exactly) and a **list-membership match** (the
+  JSON value at the path is itself a list and the given value is one of its elements). The scalar case
+  uses Django's JSON key-transform exact lookup, which every backend supports natively, including
+  SQLite. The list-membership case prefers Django's native ``__contains=[value]`` JSON-containment
+  lookup where the backend supports it, but SQLite reports
+  ``connection.features.supports_json_field_contains = False`` and raises ``NotSupportedError`` for
+  that lookup — since SQLite is the default database for local development and the test suite, the
+  filter detects this via ``connection.features.supports_json_field_contains`` and falls back to a
+  row-by-row Python membership check on the extracted JSON value instead, so list-membership filtering
+  works out of the box on SQLite too, not just on PostgreSQL/MySQL. A model that doesn't set
+  ``api_json_filters`` (the default) exposes no JSON filters at all, matching prior behavior. **JSON
+  columns carry no index**, so any of these filters — on every backend — is always a full table scan;
+  for filtering JSON data at scale on large tables, use ``SnapModel.es_search()`` (the Elasticsearch
+  integration) instead of the DB-backed auto-filters.
+
+Changed
+=======
+
+Non-positive ``?limit=`` on the streaming export now rejects with ``400`` instead of silently streaming everything
+  **Behavior change.** ``_parse_export_limit()`` previously treated every invalid ``?limit=`` —
+  missing, blank, non-numeric, zero, or negative — the same way: fall back to unlimited (stream
+  every matching row). That made sense for a garbled value (a non-numeric ``?limit=`` should never
+  silently truncate an export) but meant an explicit non-positive value — almost always a caller
+  mistake, e.g. ``?limit=0`` or a typo'd negative number — degraded to the single most expensive
+  possible response instead of surfacing the mistake. A missing, blank, or non-numeric ``?limit=``
+  still degrades to "stream everything", unchanged; an explicit zero or negative ``?limit=`` now
+  responds ``400 Bad Request`` instead. If you relied on ``?limit=0`` meaning "unlimited", switch to
+  omitting ``?limit=`` entirely.
+
 Security
 ========
 
@@ -247,3 +305,34 @@ Enforced API pagination and throttling
   ``60/min``) and ``SNAPADMIN_THROTTLE_USER`` (default ``600/min``), both readable independently of
   DRF's ``DEFAULT_THROTTLE_RATES``. Set either throttle setting to ``None`` to disable it. The
   streaming ``export`` action and the ``count`` action are unaffected by pagination, as before.
+
+Async export: torn-write duplication, no single-flight, local-disk-only, OFFSET drift
+  The background export writer (``snapadmin.exporting``) had four related reliability gaps, all
+  fixed together since the fixes share one mechanism. **Torn-write duplication:** each chunk used
+  to flush its rows to the file and *then* persist ``processed_rows`` as a separate save — a crash
+  between the two left the file ahead of the checkpoint, and resuming from the stale checkpoint
+  re-wrote (duplicated) rows already on disk. Chunks are now written and ``fsync``-ed to disk
+  *before* the checkpoint is persisted, and the checkpoint is a primary-key cursor
+  (``SnapExportJob.cursor_pk``) plus the confirmed byte length (``cursor_bytes``) rather than a row
+  count — on resume, any bytes past ``cursor_bytes`` are truncated (an unconfirmed tail, safe to
+  discard) and the writer continues from ``pk__gt=cursor_pk``, so a crash can only under-count,
+  never duplicate. **OFFSET drift:** paging switched from ``LIMIT/OFFSET`` (which silently skips or
+  duplicates rows when a concurrent insert/delete shifts the window) to that same primary-key
+  cursor — immune to concurrent writes elsewhere in the table. **No single-flight:** nothing
+  previously stopped a redelivered Celery task or a manual re-trigger from running the same job on
+  two workers at once and interleaving writes into one file. ``run_export_job`` now claims the job
+  with an atomic ``pending``/``failed`` → ``processing`` compare-and-set; a worker that loses the
+  claim (the job is already ``processing``) returns immediately without touching the file. Tradeoff:
+  a worker that crashes mid-``processing`` leaves the job stuck there — there is no heartbeat/TTL
+  auto-recovery — an operator resets it to ``pending`` to retry, and the crash-safe resume above
+  picks up from the last checkpoint rather than restarting. **Local-disk-only:** the write path
+  (``exporting.py``) and the download endpoint (``ExportJobViewSet.download``) both now go through
+  Django's storage API instead of raw ``open()``/``os.path.exists()``, via a new
+  ``SNAPADMIN_EXPORT_STORAGE`` setting (a dotted ``Storage`` class); left unset it defaults to a
+  local ``FileSystemStorage`` rooted at ``SNAPADMIN_EXPORT_DIR``, so existing installs keep working
+  with no configuration change. Setting it to a remote backend (S3, GCS, shared network storage, …)
+  makes a completed job downloadable from any web instance, not just the one that happens to share a
+  filesystem with the Celery worker that produced it. **New field:** ``SnapExportJob`` gained
+  ``cursor_pk`` and ``cursor_bytes`` (migration ``0002``); ``processed_rows`` keeps its existing
+  meaning as a row count for ``progress_percent``/``eta_seconds`` reporting. Existing rows default to
+  an empty cursor (start from the beginning), so upgrading is safe with no manual data migration.

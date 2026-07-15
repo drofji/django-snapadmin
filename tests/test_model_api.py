@@ -341,13 +341,22 @@ class TestModelExport:
         assert len(rows) == 1
         assert rows[0]["name"] == product.name
 
-    def test_export_invalid_limit_streams_all(self, auth_client, many_products):
-        # Non-numeric, zero and negative caps must not silently truncate.
-        for bad in ("abc", "0", "-3", ""):
+    def test_export_garbled_limit_streams_all(self, auth_client, many_products):
+        # Non-numeric, blank or absent caps must not silently truncate.
+        for bad in ("abc", ""):
             rows = _ndjson_rows(
                 auth_client.get(f"/api/models/demo/Product/export/?limit={bad}")
             )
             assert len(rows) == 30, bad
+
+    def test_export_nonpositive_limit_rejected(self, auth_client, many_products):
+        # An explicit zero/negative limit is a caller mistake, not a garbled
+        # value: it is rejected outright rather than silently streaming
+        # everything (see _parse_export_limit's docstring for the rationale).
+        for bad in ("0", "-3"):
+            r = auth_client.get(f"/api/models/demo/Product/export/?limit={bad}")
+            assert r.status_code == 400, bad
+            assert "detail" in r.json()
 
     def test_export_carries_backend_header(self, auth_client, product):
         r = auth_client.get("/api/models/demo/Product/export/")
@@ -358,6 +367,53 @@ class TestModelExport:
 
     def test_export_unauthenticated_denied(self, anon_client):
         assert anon_client.get("/api/models/demo/Product/export/").status_code in (401, 403)
+
+    @override_settings(SNAPADMIN_EXPORT_MAX_ROWS=10)
+    def test_export_row_ceiling_blocks_unbounded_export(self, auth_client, many_products):
+        r = auth_client.get("/api/models/demo/Product/export/")
+        assert r.status_code == 413
+        body = r.json()
+        assert body["count"] == 30
+        assert body["max_rows"] == 10
+        assert "/api/exports/" in body["async_export_endpoint"]
+        assert "/api/exports/" in body["detail"]
+
+    @override_settings(SNAPADMIN_EXPORT_MAX_ROWS=10)
+    def test_export_row_ceiling_allows_explicit_limit(self, auth_client, many_products):
+        # A valid, explicit ?limit= is the caller opting into a bounded
+        # response themselves — it is honoured even though it's below the
+        # ceiling's trigger threshold (the ceiling only guards the
+        # "no limit passed" case).
+        r = auth_client.get("/api/models/demo/Product/export/?limit=20")
+        assert r.status_code == 200
+        assert len(_ndjson_rows(r)) == 20
+
+    @override_settings(SNAPADMIN_EXPORT_MAX_ROWS=10)
+    def test_export_row_ceiling_allows_within_bound(self, auth_client, product, product_unavailable):
+        # Only 2 rows match; well under the configured ceiling of 10.
+        r = auth_client.get("/api/models/demo/Product/export/")
+        assert r.status_code == 200
+        assert len(_ndjson_rows(r)) == 2
+
+    def test_export_row_ceiling_unset_is_unlimited(self, auth_client, many_products):
+        # SNAPADMIN_EXPORT_MAX_ROWS defaults to 0 (unlimited) — no regression
+        # for installs that never set it.
+        r = auth_client.get("/api/models/demo/Product/export/")
+        assert r.status_code == 200
+        assert len(_ndjson_rows(r)) == 30
+
+    @override_settings(SNAPADMIN_EXPORT_LIMIT_MAX=5)
+    def test_export_limit_clamped_to_hard_maximum(self, auth_client, many_products):
+        r = auth_client.get("/api/models/demo/Product/export/?limit=25")
+        assert r.status_code == 200
+        assert len(_ndjson_rows(r)) == 5
+
+    def test_export_limit_unclamped_by_default(self, auth_client, many_products):
+        # SNAPADMIN_EXPORT_LIMIT_MAX defaults to 0 (no clamp) — an explicit
+        # large ?limit= is still honoured as-is.
+        r = auth_client.get("/api/models/demo/Product/export/?limit=25")
+        assert r.status_code == 200
+        assert len(_ndjson_rows(r)) == 25
 
 
 # ── DynamicModelViewSet – deletion-veto hook (#B12) ───────────────────────────
@@ -748,3 +804,165 @@ class TestDynamicViewSetThrottling:
         with override_settings(SNAPADMIN_THROTTLE_USER=None, SNAPADMIN_THROTTLE_ANON=None):
             for _ in range(10):
                 assert auth_client.get("/api/models/demo/Product/").status_code == 200
+
+
+# ── DynamicModelViewSet – auto-generated JSON key-path filters (#FEAT1) ──────
+
+@pytest.mark.django_db
+class TestAutoFilterJsonFieldLookups:
+    """
+    demo.Showcase declares:
+        api_json_filters = {"json_field": ["a.b", "tags"]}
+    so the auto-generated filter set exposes ?json_field__a__b=<value> (nested
+    scalar match) and ?json_field__tags=<value> (list-membership match, since
+    "tags" is stored as a JSON list). SQLite — the test settings' backend — has
+    no native JSON `contains` support, so the list-membership case specifically
+    exercises the Python fallback branch end-to-end.
+    """
+
+    @pytest.fixture
+    def showcase_records(self, db):
+        from demo.models import Showcase
+
+        red = Showcase.objects.create(
+            char_field="red-tagged",
+            json_field={"a": {"b": "match-me"}, "tags": ["red", "blue"]},
+        )
+        green = Showcase.objects.create(
+            char_field="green-tagged",
+            json_field={"a": {"b": "other"}, "tags": ["green"]},
+        )
+        scalar_only = Showcase.objects.create(
+            char_field="scalar-only",
+            json_field={"a": {"b": "match-me"}, "tags": "not-a-list"},
+        )
+        return {"red": red, "green": green, "scalar_only": scalar_only}
+
+    def test_nested_scalar_key_path_filters_correctly(self, auth_client, showcase_records):
+        r = auth_client.get("/api/models/demo/Showcase/?json_field__a__b=match-me")
+        assert r.status_code == 200
+        names = {item["char_field"] for item in r.json()["results"]}
+        assert names == {
+            showcase_records["red"].char_field,
+            showcase_records["scalar_only"].char_field,
+        }
+
+    def test_list_membership_matches_records_containing_value(self, auth_client, showcase_records):
+        r = auth_client.get("/api/models/demo/Showcase/?json_field__tags=red")
+        assert r.status_code == 200
+        names = {item["char_field"] for item in r.json()["results"]}
+        assert names == {showcase_records["red"].char_field}
+
+    def test_list_membership_excludes_records_without_value(self, auth_client, showcase_records):
+        r = auth_client.get("/api/models/demo/Showcase/?json_field__tags=purple")
+        assert r.status_code == 200
+        assert r.json()["results"] == []
+
+    def test_list_membership_runs_on_sqlite_via_python_fallback(self, showcase_records):
+        # The whole point of #FEAT1: this must work on the default dev/test
+        # backend, not just on a backend with native JSON `contains` support.
+        from django.db import connection
+        from demo.models import Showcase
+        from snapadmin.api.filters import build_filterset_for_model
+
+        assert connection.vendor == "sqlite"
+        assert connection.features.supports_json_field_contains is False
+
+        FS = build_filterset_for_model(Showcase)
+        fs = FS({"json_field__tags": "green"}, queryset=Showcase.objects.all())
+        assert list(fs.qs.values_list("char_field", flat=True)) == [
+            showcase_records["green"].char_field
+        ]
+
+    def test_native_contains_branch_used_when_backend_supports_it(
+        self, monkeypatch, showcase_records
+    ):
+        # Directly exercise the branch-selection logic for a backend that DOES
+        # support native JSON `contains` (e.g. PostgreSQL/MySQL). The test
+        # suite only ever runs against SQLite, so the native SQL path can't be
+        # executed end-to-end here — instead we monkeypatch the feature flag
+        # and a fake queryset to confirm the filter takes the native-`contains`
+        # branch (rather than falling back to the Python-side check) once the
+        # backend claims support.
+        from snapadmin.api.filters import JsonKeyPathFilter
+
+        json_filter = JsonKeyPathFilter(json_field_name="json_field", key_path="tags")
+
+        calls = []
+
+        class FakePks:
+            def __init__(self, pks):
+                self._pks = pks
+
+            def values_list(self, *args, **kwargs):
+                return self._pks
+
+        class FakeQuerySet:
+            db = "default"
+
+            def filter(self, **kwargs):
+                calls.append(kwargs)
+                return FakePks([])
+
+        fake_features = type("F", (), {"supports_json_field_contains": True})()
+        fake_connection = type("C", (), {"features": fake_features})()
+        monkeypatch.setattr(
+            "snapadmin.api.filters.connections", {"default": fake_connection}
+        )
+
+        json_filter._list_membership_pks(FakeQuerySet(), "green")
+
+        assert {"json_field__tags__contains": ["green"]} in calls
+
+    def test_unknown_key_path_is_not_filterable(self, auth_client, showcase_records):
+        # A key-path that isn't declared in api_json_filters has no
+        # corresponding filter field at all — django-filter silently ignores
+        # unrecognised query params, so the request behaves exactly as if the
+        # param had not been sent (every row is returned, unfiltered).
+        r = auth_client.get("/api/models/demo/Showcase/?json_field__unknown__path=anything")
+        assert r.status_code == 200
+        names = {item["char_field"] for item in r.json()["results"]}
+        assert names == {
+            showcase_records["red"].char_field,
+            showcase_records["green"].char_field,
+            showcase_records["scalar_only"].char_field,
+        }
+
+    def test_model_without_api_json_filters_exposes_no_json_filters(self, monkeypatch):
+        # Matches today's behavior for a model that never opts in: the JSON
+        # field is simply absent from the auto-generated filter set — no
+        # crash, no accidental exposure of every key-path.
+        from demo.models import Showcase
+        from snapadmin.api.filters import _build_filters_for_model
+
+        monkeypatch.setattr(Showcase, "api_json_filters", None, raising=False)
+        filters = _build_filters_for_model(Showcase)
+        assert not any(name.startswith("json_field__") for name in filters)
+
+    def test_declared_json_filters_present_in_filter_set(self):
+        from demo.models import Showcase
+        from snapadmin.api.filters import _build_filters_for_model
+
+        filters = _build_filters_for_model(Showcase)
+        assert "json_field__a__b" in filters
+        assert "json_field__tags" in filters
+
+    def test_filterset_cache_reflects_current_model_declaration(self):
+        # api_json_filters is a plain class attribute (like api_write_fields),
+        # derived per model — the cache is keyed per model, not per attribute
+        # value, which is correct because the declaration is static for the
+        # lifetime of the process. Rebuilding after clearing the cache entry
+        # must still surface the declared JSON filters, and a second call
+        # must hit the cache (identical class).
+        from demo.models import Showcase
+        from snapadmin.api.filters import build_filterset_for_model, _filterset_cache
+
+        cache_key = f"{Showcase._meta.app_label}.{Showcase._meta.model_name}"
+        _filterset_cache.pop(cache_key, None)
+
+        fresh = build_filterset_for_model(Showcase)
+        assert "json_field__a__b" in fresh.base_filters
+        assert "json_field__tags" in fresh.base_filters
+
+        cached = build_filterset_for_model(Showcase)
+        assert cached is fresh

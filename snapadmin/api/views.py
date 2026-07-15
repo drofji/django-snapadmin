@@ -9,6 +9,7 @@ import json
 from django.apps import apps
 from django.conf import settings
 from django.http import StreamingHttpResponse
+from django.urls import reverse
 from django.utils.module_loading import import_string
 from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.filters import OrderingFilter, SearchFilter
@@ -22,6 +23,7 @@ from drf_spectacular.utils import extend_schema
 from snapadmin.api.authentication import SnapAPIAuthMixin, token_has_permission
 from snapadmin.db import route_read
 from snapadmin.api.filters import SnapAdminFilterBackend
+from snapadmin.logging_config import get_logger
 from snapadmin.models import APIToken, EsStorageMode, SnapModel
 from snapadmin.pagination import SnapDynamicPagination
 from snapadmin.api.serializers import (
@@ -29,6 +31,8 @@ from snapadmin.api.serializers import (
     APITokenSerializer,
     get_serializer_for_model,
 )
+
+logger = get_logger(__name__)
 
 # Cache for model field introspection results to avoid repeated _meta.get_fields() calls
 _model_field_cache = {}
@@ -331,8 +335,22 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         """Optional ``?limit=`` cap for the streaming export.
 
         Returns a positive int, or ``None`` (no cap) when the param is absent,
-        blank, non-numeric, or non-positive — a bad cap must never silently
-        truncate an export, so it degrades to "stream everything".
+        blank, or non-numeric — a garbled cap must never silently truncate an
+        export, so it degrades to "stream everything".
+
+        An explicit **non-positive** value (``?limit=0`` or a negative number)
+        is a different case: it isn't garbled input, it's a caller who typed a
+        real number that just doesn't make sense as a row cap — almost always
+        a mistake. Silently degrading that to "stream everything" would be the
+        most expensive possible response to what looks like a typo, so it
+        raises :class:`ValueError` instead; ``export()`` turns that into a
+        ``400 Bad Request``.
+
+        A valid, positive value is clamped down to
+        ``SNAPADMIN_EXPORT_LIMIT_MAX`` when that setting is configured
+        (> 0), so an explicit ``?limit=`` can never request more rows than
+        the configured hard maximum — the caller gets the clamped count
+        rather than an error.
         """
         raw = request.query_params.get("limit")
         if raw is None or raw == "":
@@ -341,7 +359,12 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             value = int(raw)
         except (TypeError, ValueError):
             return None
-        return value if value > 0 else None
+        if value <= 0:
+            raise ValueError(f"?limit= must be a positive integer, got {raw!r}.")
+        limit_max = int(getattr(settings, "SNAPADMIN_EXPORT_LIMIT_MAX", 0) or 0)
+        if limit_max > 0:
+            value = min(value, limit_max)
+        return value
 
     @extend_schema(summary="Count rows matching the current filters")
     def count(self, request, *args, **kwargs):
@@ -370,9 +393,17 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         The synchronous, no-Celery counterpart to the async export endpoint:
         the full filtered queryset is streamed as newline-delimited JSON
         (``application/x-ndjson``), one serialized object per line, without
-        pagination. Pass ``?limit=N`` to cap the number of rows. Rows are
-        pulled lazily (``iterator()`` where available) so arbitrarily large
-        tables never materialise in memory.
+        pagination. Pass ``?limit=N`` to cap the number of rows (clamped to
+        ``SNAPADMIN_EXPORT_LIMIT_MAX`` when configured; rejected with ``400``
+        if non-positive — see ``_parse_export_limit``). Rows are pulled
+        lazily (``iterator()`` where available) so arbitrarily large tables
+        never materialise in memory.
+
+        When no valid ``?limit=`` is passed and ``SNAPADMIN_EXPORT_MAX_ROWS``
+        is configured, the filtered match count is checked against that
+        ceiling *before* streaming starts; exceeding it responds ``413``
+        instead of opening an unfinishable stream, pointing the caller at the
+        async export endpoint (``POST /api/exports/``) instead.
         """
         model_class = self._get_model_class()
         if model_class is None:
@@ -382,9 +413,40 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             )
 
         queryset = self.filter_queryset(self.get_queryset())
-        limit = self._parse_export_limit(request)
+        try:
+            limit = self._parse_export_limit(request)
+        except ValueError as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
         if limit is not None:
             queryset = queryset[:limit]
+        else:
+            max_rows = int(getattr(settings, "SNAPADMIN_EXPORT_MAX_ROWS", 0) or 0)
+            if max_rows > 0:
+                match_count = queryset.count()
+                if match_count > max_rows:
+                    logger.warning(
+                        "export_row_ceiling_exceeded",
+                        app_label=model_class._meta.app_label,
+                        model_name=model_class._meta.model_name,
+                        match_count=match_count,
+                        max_rows=max_rows,
+                    )
+                    async_export_url = reverse("api-export-list")
+                    return Response(
+                        {
+                            "detail": (
+                                f"{match_count} rows match the current filters, exceeding the "
+                                f"SNAPADMIN_EXPORT_MAX_ROWS limit of {max_rows}. Narrow the "
+                                "filters, pass an explicit ?limit=N, or use the async export "
+                                f"endpoint (POST {async_export_url}) for large result sets."
+                            ),
+                            "count": match_count,
+                            "max_rows": max_rows,
+                            "async_export_endpoint": async_export_url,
+                        },
+                        status=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                    )
         serializer_class = self.get_serializer_class()
 
         chunk_size = max(1, int(getattr(settings, "SNAPADMIN_EXPORT_CHUNK_SIZE", 1000)))

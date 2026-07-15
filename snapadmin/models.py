@@ -326,9 +326,10 @@ class SnapExportJob(models.Model):
     Created via ``POST /api/exports/``; a Celery task
     (``snapadmin.run_export``) fills it in chunk by chunk, updating
     ``processed_rows`` so ``GET /api/exports/<id>/`` can report live progress and
-    an ETA. Fault-tolerant: the writer resumes from ``processed_rows`` if the
-    worker restarts. Cancellable: setting ``status`` to ``cancelled`` stops the
-    task between chunks. See :mod:`snapadmin.exporting`.
+    an ETA. Fault-tolerant: the writer resumes from the ``cursor_pk`` /
+    ``cursor_bytes`` checkpoint (not the ``processed_rows`` counter) so a retry
+    never duplicates or skips a row. Cancellable: setting ``status`` to
+    ``cancelled`` stops the task between chunks. See :mod:`snapadmin.exporting`.
     """
 
     class Status(models.TextChoices):
@@ -349,7 +350,14 @@ class SnapExportJob(models.Model):
     filters = models.JSONField(default=dict, blank=True, verbose_name=_("Filters"), help_text=_("ORM field=value filters applied to the export queryset."))
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True, verbose_name=_("Status"))
     total_rows = models.PositiveIntegerField(default=0, verbose_name=_("Total Rows"))
-    processed_rows = models.PositiveIntegerField(default=0, verbose_name=_("Processed Rows"))
+    processed_rows = models.PositiveIntegerField(default=0, verbose_name=_("Processed Rows"), help_text=_("Rows written so far — drives progress-percent and ETA reporting."))
+    # Crash-safe resume checkpoint (see snapadmin.exporting). cursor_pk is the
+    # primary key of the last exported row, used for pk__gt cursor pagination on
+    # resume (no OFFSET drift); cursor_bytes is the working file's byte length
+    # confirmed at that pk, used to truncate any uncheckpointed tail on resume.
+    # Stored as a string so any primary-key type (int / UUID / char) round-trips.
+    cursor_pk = models.CharField(max_length=255, blank=True, default="", verbose_name=_("Resume Cursor (PK)"), help_text=_("Primary key of the last exported row; blank means start from the beginning."))
+    cursor_bytes = models.PositiveBigIntegerField(default=0, verbose_name=_("Resume Byte Offset"), help_text=_("Byte length of the working file confirmed at cursor_pk."))
     file_name = models.CharField(max_length=255, blank=True, verbose_name=_("File Name"))
     error = models.TextField(blank=True, verbose_name=_("Error"))
     requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+", verbose_name=_("Requested By"))
@@ -781,6 +789,19 @@ class SnapModel(models.Model):
     # Left as None (the default), every text field uses the library default
     # lookup set.
     api_filter_lookups: dict[str, list[str]] | None = None
+
+    # Auto-generated REST API filters for JSON columns. JSONField gets no filter
+    # by default — declare which key-paths within which JSON field are filterable
+    # and the dynamic API exposes each as a `<json_field>__<key_path>` query param
+    # (dots in the key-path become double underscores), e.g.:
+    #   api_json_filters = {"payload": ["a.b", "a.c"]}
+    # exposes ?payload__a__b=value and ?payload__a__c=value. A match covers both a
+    # scalar value equal to `value` and, when the JSON value at that path is a
+    # list, list-membership (does the list contain `value`). JSON columns carry no
+    # index, so these filters always run as a full table scan — for filtering at
+    # scale on large tables, use SnapModel.es_search() (Elasticsearch integration)
+    # instead. Left as None (the default), no JSON key-path filters are exposed.
+    api_json_filters: dict[str, list[str]] | None = None
 
     # Optional index-level settings applied when the ES index is first created —
     # e.g. custom analyzers under "analysis", "number_of_shards", "number_of_replicas".

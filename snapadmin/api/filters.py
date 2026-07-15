@@ -14,7 +14,9 @@ the lookup set for one of its own fields via ``SnapModel.api_filter_lookups``.
 """
 
 import django_filters
-from django.db import models as django_models
+from django.db import connections, models as django_models
+from django.db.models import QuerySet
+from django_filters.constants import EMPTY_VALUES
 from django_filters.rest_framework import DjangoFilterBackend
 
 _filterset_cache: dict = {}
@@ -36,6 +38,72 @@ _TEXT_LOOKUPS_DEFAULT: list[str] = ["exact", "icontains", "startswith", "in"]
 
 class _CharInFilter(django_filters.BaseInFilter, django_filters.CharFilter):
     """CharFilter accepting a comma-separated list, for ``__in`` lookups."""
+
+
+class JsonKeyPathFilter(django_filters.CharFilter):
+    """
+    Filters on a single JSON key-path declared in a model's ``api_json_filters``,
+    e.g. ``api_json_filters = {"payload": ["a.b"]}`` exposes the query parameter
+    ``?payload__a__b=value``.
+
+    Value semantics are deliberately broader than a plain field filter, because a
+    JSON value at a given path can be either a scalar or a list from row to row:
+
+    - **Scalar match** — the JSON value at the path equals ``value`` exactly.
+      Implemented with Django's key-transform lookup (``field__key1__key2=value``),
+      which every backend — including SQLite — supports natively.
+    - **List-membership match** — the JSON value at the path is itself a list and
+      ``value`` is one of its elements. On backends that support it, this uses the
+      native ``__contains=[value]`` JSON-containment lookup. SQLite's
+      ``connection.features.supports_json_field_contains`` is ``False`` (Django's
+      ``contains`` lookup raises ``NotSupportedError`` there), so on SQLite (and any
+      other backend without native support) this falls back to a per-row Python
+      membership check on the extracted JSON value.
+
+    A row matches if either check matches (a single query parameter covers both
+    cases without the caller having to know which shape a given row's data uses).
+
+    JSON columns carry no index, so any of these filters is always a full table
+    scan — for filtering at scale on large tables, use ``SnapModel.es_search()``
+    (Elasticsearch integration) instead.
+    """
+
+    def __init__(self, json_field_name: str, key_path: str, **kwargs) -> None:
+        self.json_field_name = json_field_name
+        self.key_parts = key_path.split(".")
+        self.lookup_field = "__".join([json_field_name, *self.key_parts])
+        super().__init__(**kwargs)
+
+    def filter(self, qs: QuerySet, value: str | None) -> QuerySet:
+        if value in EMPTY_VALUES:
+            return qs
+
+        exact_pks = set(qs.filter(**{self.lookup_field: value}).values_list("pk", flat=True))
+        matching_pks = exact_pks | self._list_membership_pks(qs, value)
+        return self.get_method(qs)(pk__in=matching_pks)
+
+    def _list_membership_pks(self, qs: QuerySet, value: str) -> set:
+        db_alias = qs.db
+        if connections[db_alias].features.supports_json_field_contains:
+            return set(
+                qs.filter(**{f"{self.lookup_field}__contains": [value]}).values_list(
+                    "pk", flat=True
+                )
+            )
+        return self._python_list_membership_pks(qs, value)
+
+    def _python_list_membership_pks(self, qs: QuerySet, value: str) -> set:
+        # Backend has no native JSON `contains` support (e.g. SQLite, the default
+        # dev/test database) — the `__contains` lookup would raise NotSupportedError,
+        # so check list-membership on the extracted JSON value row by row instead.
+        pks = set()
+        for pk, data in qs.values_list("pk", self.json_field_name):
+            node = data
+            for part in self.key_parts:
+                node = node.get(part) if isinstance(node, dict) else None
+            if isinstance(node, list) and value in node:
+                pks.add(pk)
+        return pks
 
 
 def _text_filter_for_lookup(name: str, lookup: str) -> tuple[str, django_filters.Filter]:
@@ -104,6 +172,15 @@ def _build_filters_for_model(model_class: type[django_models.Model]) -> dict[str
             filters[f"{name}_id"] = django_filters.NumberFilter(
                 field_name=f"{name}_id", lookup_expr="exact"
             )
+
+        elif isinstance(field, django_models.JSONField):
+            # JSON columns get no filter by default — only the key-paths explicitly
+            # declared in the model's api_json_filters are exposed as query params,
+            # e.g. api_json_filters = {"payload": ["a.b"]} -> ?payload__a__b=value.
+            json_filters: dict[str, list[str]] = getattr(model_class, "api_json_filters", None) or {}
+            for key_path in json_filters.get(name, []):
+                param_name = f"{name}__{key_path.replace('.', '__')}"
+                filters[param_name] = JsonKeyPathFilter(json_field_name=name, key_path=key_path)
 
     return filters
 

@@ -8,15 +8,73 @@ download, cancel, permissions).
 
 import json
 import os
+import tempfile
 from decimal import Decimal
 
 import pytest
+from django.core.files.storage import FileSystemStorage, Storage
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework import serializers
 
 from snapadmin import exporting
 from snapadmin.models import SnapExportJob
+
+
+# A FileSystemStorage rooted at a *different* directory than export_dir(), used
+# to exercise the SNAPADMIN_EXPORT_STORAGE path: the worker publishes the finished
+# working file into it and the download endpoint reads back through it — the
+# split-deployment (worker-disk ≠ web-disk) scenario, emulated locally.
+_ALT_STORAGE_DIR = tempfile.mkdtemp(prefix="snap-alt-export-")
+
+
+class AltExportStorage(FileSystemStorage):
+    def __init__(self, *args, **kwargs):
+        kwargs.setdefault("location", _ALT_STORAGE_DIR)
+        super().__init__(*args, **kwargs)
+
+
+_NOPATH_STORAGE_DIR = tempfile.mkdtemp(prefix="snap-nopath-export-")
+
+
+class NoPathExportStorage(Storage):
+    """Emulates a remote backend (S3/GCS): no local ``path()``, only open/save.
+
+    Composition rather than a ``FileSystemStorage`` subclass — ``path()`` is
+    called from *within* ``FileSystemStorage``'s own ``_save``/``exists``
+    machinery, so overriding it there to raise breaks construction. Here it
+    delegates to a private inner ``FileSystemStorage`` for the actual I/O and
+    only ``path()`` itself is unimplemented, forcing ``_publish``'s
+    storage-agnostic upload branch (the one a real S3/GCS backend takes).
+    """
+
+    def __init__(self, *args, **kwargs):
+        self._inner = FileSystemStorage(location=_NOPATH_STORAGE_DIR)
+        super().__init__(*args, **kwargs)
+
+    def _open(self, name, mode="rb"):
+        return self._inner._open(name, mode)
+
+    def _save(self, name, content):
+        return self._inner._save(name, content)
+
+    def exists(self, name: str) -> bool:
+        return self._inner.exists(name)
+
+    def delete(self, name: str) -> None:
+        self._inner.delete(name)
+
+    def get_available_name(self, name: str, max_length=None) -> str:
+        return self._inner.get_available_name(name, max_length=max_length)
+
+    def size(self, name: str) -> int:
+        return self._inner.size(name)
+
+    def url(self, name: str) -> str:
+        return self._inner.url(name)
+
+    def path(self, name: str) -> str:
+        raise NotImplementedError("This backend does not support absolute paths.")
 
 
 @pytest.fixture
@@ -137,32 +195,242 @@ class TestRunExportJob:
         assert job.status == "cancelled"
         assert job.processed_rows < 5  # stopped early
 
-    def test_resume_appends_from_offset(self, products):
-        # Simulate a crash: first chunk written, processed_rows persisted, then
-        # the writer re-runs and must append the rest (not rewrite the header).
+    @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
+    def test_resume_appends_from_cursor(self, products):
+        # A clean resume: a fresh partial run is interrupted, then re-dispatched.
+        # It must continue from cursor_pk (append), not rewrite the header.
         job = _job(export_format="csv")
-        with override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2):
-            # First partial run, cancelled after one chunk.
-            SnapExportJob.objects.filter(pk=job.pk).update(status="pending")
-            job.refresh_from_db()
-        # Manually run just enough to leave a partial file:
-        path = exporting.output_path(job)
-        with open(path, "w", newline="") as fh:
-            fh.write("id,category_id,name,price,available,description\n")
-            fh.write("1,,P0,0,True,\n")
-        job.total_rows = 5
-        job.processed_rows = 1
-        job.started_at = timezone.now()
-        job.status = "processing"
-        job.save()
+        real_refresh = SnapExportJob.refresh_from_db
+        state = {"n": 0}
+
+        def refresh(self, *a, **k):
+            real_refresh(self, *a, **k)
+            state["n"] += 1
+            if state["n"] == 2:  # cancel just before the 2nd chunk
+                SnapExportJob.objects.filter(pk=self.pk).update(status="cancelled")
+                real_refresh(self, *a, **k)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(SnapExportJob, "refresh_from_db", refresh)
+            exporting.run_export_job(job.pk)   # writes chunk 1, then stops
+        job.refresh_from_db()
+        assert job.status == "cancelled" and job.processed_rows == 2
+        assert job.cursor_pk and int(job.cursor_pk) > 0
+
+        # Operator retry: reset to pending and re-run — it resumes, not restarts.
+        SnapExportJob.objects.filter(pk=job.pk).update(status="pending")
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed" and job.processed_rows == 5
+        lines = open(exporting.output_path(job)).read().strip().splitlines()
+        assert len(lines) == 6                          # header + 5 data rows
+        assert lines[0].startswith("id,")               # header written once…
+        assert not any(l.startswith("id,category") for l in lines[1:])  # …not repeated
+
+    @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
+    def test_crash_between_flush_and_checkpoint_no_duplicate(self, products):
+        # Torn write: bytes for the 2nd chunk are flushed to the file but the
+        # (cursor_pk, cursor_bytes) checkpoint save never lands. On resume the
+        # uncheckpointed tail must be discarded — no duplicated rows.
+        job = _job(export_format="csv")
+        real_save = SnapExportJob.save
+        state = {"checkpoints": 0}
+
+        def failing_save(self, *a, **k):
+            fields = k.get("update_fields") or []
+            if "cursor_pk" in fields:
+                state["checkpoints"] += 1
+                if state["checkpoints"] == 2:  # crash on the 2nd chunk's checkpoint
+                    raise RuntimeError("crash after fsync, before checkpoint")
+            return real_save(self, *a, **k)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(SnapExportJob, "save", failing_save)
+            exporting.run_export_job(job.pk)   # crashes inside _run → marked failed
+        job.refresh_from_db()
+        assert job.status == "failed"
+        # File holds header + 4 flushed rows, but cursor only reached row 2.
+        assert job.processed_rows == 2
+
+        # Operator retry (failed is claimable): resume must not duplicate.
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed" and job.processed_rows == 5
+        lines = open(exporting.output_path(job)).read().strip().splitlines()
+        data_rows = lines[1:]
+        assert len(data_rows) == 5                       # exactly 5, no dups
+        assert len(set(data_rows)) == 5
+
+    @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
+    def test_crash_before_first_checkpoint_discards_stale_partial(self, products):
+        # Crash before *any* checkpoint ever lands: the local working file has
+        # a header (and maybe a first chunk) flushed to it, but cursor_pk is
+        # still blank in the DB. On retry there is nothing to resume from, so
+        # the stale partial must be discarded and the export restarted clean.
+        job = _job(export_format="csv")
+        real_save = SnapExportJob.save
+
+        def failing_save(self, *a, **k):
+            fields = k.get("update_fields") or []
+            if "cursor_pk" in fields:
+                raise RuntimeError("crash before the very first checkpoint")
+            return real_save(self, *a, **k)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(SnapExportJob, "save", failing_save)
+            exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "failed" and job.cursor_pk == ""
+        assert os.path.exists(exporting.output_path(job))  # stale header on disk
+
+        exporting.run_export_job(job.pk)  # retry: must discard the stale file
+        job.refresh_from_db()
+        assert job.status == "completed" and job.processed_rows == 5
+        lines = open(exporting.output_path(job)).read().strip().splitlines()
+        assert len(lines) == 6 and len(set(lines[1:])) == 5
+
+    def test_resume_with_missing_local_file_restarts_clean(self, products):
+        # Cross-node / ephemeral-storage retry: cursor_pk is set in the DB from
+        # a prior attempt, but the local working file it refers to does not
+        # exist on *this* worker (different node, wiped ephemeral volume, ...).
+        # Blindly trusting the stale cursor while opening a fresh ("wb") file
+        # would silently skip every row up to that cursor — a corrupted export
+        # reported as "completed". It must instead restart from scratch.
+        job = _job(export_format="csv")
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed" and job.processed_rows == 5
+        stale_cursor = job.cursor_pk
+        assert stale_cursor and int(stale_cursor) > 0
+
+        # Simulate landing on a worker with no local copy of the working file,
+        # while the DB still remembers a cursor from the "other" worker.
+        os.remove(exporting.output_path(job))
+        SnapExportJob.objects.filter(pk=job.pk).update(status="pending")
 
         exporting.run_export_job(job.pk)
         job.refresh_from_db()
         assert job.status == "completed"
-        lines = open(path).read().strip().splitlines()
-        assert len(lines) == 6                       # header + 5 data rows
-        assert lines[0].startswith("id,category_id")  # header written once…
-        assert not any(l.startswith("id,category_id") for l in lines[1:])  # …not repeated
+        lines = open(exporting.output_path(job)).read().strip().splitlines()
+        data_rows = lines[1:]
+        # All 5 rows present exactly once — nothing skipped because of the
+        # stale cursor, nothing duplicated.
+        assert len(data_rows) == 5
+        names = sorted(r.split(",")[2] for r in data_rows)
+        assert names == ["P0", "P1", "P2", "P3", "P4"]
+
+    @override_settings(SNAPADMIN_EXPORT_STORAGE="tests.test_export.AltExportStorage")
+    def test_republish_overwrites_stale_copy_in_storage(self, products):
+        # A job re-dispatched after already completing (e.g. an operator retry
+        # racing a late redelivery) republishes into the configured storage,
+        # which already holds the file from the first run — it must overwrite
+        # the stale copy rather than erroring or leaving two versions behind.
+        job = _job(export_format="csv")
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed"
+
+        SnapExportJob.objects.filter(pk=job.pk).update(status="pending")
+        exporting.run_export_job(job.pk)  # re-publishes over the existing copy
+        job.refresh_from_db()
+        assert job.status == "completed"
+        storage = exporting.get_export_storage()
+        with storage.open(exporting.export_file_name(job), "rb") as fh:
+            assert fh.read().count(b"\n") == 6
+
+    def test_already_processing_job_is_not_double_run(self, products):
+        # Single-flight: a job another worker already holds (processing) is left
+        # untouched — no file written, no progress.
+        job = _job(status="processing")
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "processing" and job.processed_rows == 0
+        assert not os.path.exists(exporting.output_path(job))
+
+    def test_completed_job_is_not_rerun(self, products):
+        job = _job(status="completed", processed_rows=5, total_rows=5)
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed" and job.processed_rows == 5
+
+    def test_missing_job_is_a_noop(self, db):
+        import uuid
+        exporting.run_export_job(uuid.uuid4())  # no such job → returns quietly
+
+    @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
+    def test_concurrent_second_call_is_rejected(self, products):
+        # A second dispatch fires mid-run (job already processing). Its atomic
+        # claim loses, so it bails without interleaving writes into the file.
+        job = _job()
+        real_refresh = SnapExportJob.refresh_from_db
+        state = {"reentered": False}
+
+        def refresh(self, *a, **k):
+            real_refresh(self, *a, **k)
+            if not state["reentered"]:
+                state["reentered"] = True
+                exporting.run_export_job(self.pk)  # rejected: status is processing
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(SnapExportJob, "refresh_from_db", refresh)
+            exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert state["reentered"] and job.status == "completed"
+        lines = open(exporting.output_path(job)).read().strip().splitlines()
+        assert len(lines) == 6  # header + 5 rows, not corrupted/duplicated
+
+    @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
+    def test_pk_cursor_survives_concurrent_delete(self, products):
+        # Delete an already-exported row (pk below the cursor) between chunks.
+        # A pk__gt cursor must not let the OFFSET drift and skip a later row.
+        from demo.models import Product
+        job = _job()
+        exported_names: set[str] = set()
+        real_refresh = SnapExportJob.refresh_from_db
+        state = {"n": 0}
+
+        def refresh(self, *a, **k):
+            real_refresh(self, *a, **k)
+            state["n"] += 1
+            if state["n"] == 2:  # after chunk 1 (P0, P1) is written
+                Product.objects.filter(name="P0").delete()
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(SnapExportJob, "refresh_from_db", refresh)
+            exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed"
+        rows = open(exporting.output_path(job)).read().strip().splitlines()[1:]
+        names = sorted(r.split(",")[2] for r in rows)
+        # Every remaining row exported exactly once — nothing skipped by the
+        # delete of P0 (which an OFFSET slice would have dropped P2 for).
+        assert names == ["P0", "P1", "P2", "P3", "P4"]
+
+    @override_settings(SNAPADMIN_EXPORT_STORAGE="tests.test_export.AltExportStorage")
+    def test_export_publishes_to_configured_storage(self, products):
+        # The finished file is published into the configured storage, not just
+        # left on the worker's local disk.
+        job = _job(export_format="csv")
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed"
+        storage = exporting.get_export_storage()
+        name = exporting.export_file_name(job)
+        assert storage.exists(name)
+        with storage.open(name, "rb") as fh:
+            body = fh.read()
+        assert body.startswith(b"id,") and body.count(b"\n") == 6
+
+    @override_settings(SNAPADMIN_EXPORT_STORAGE="tests.test_export.NoPathExportStorage")
+    def test_export_publishes_to_pathless_storage(self, products):
+        # A backend without a local path (S3/GCS-like) still round-trips.
+        job = _job(export_format="csv")
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed"
+        storage = exporting.get_export_storage()
+        with storage.open(exporting.export_file_name(job), "rb") as fh:
+            assert fh.read().startswith(b"id,")
 
     @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
     def test_rows_deleted_mid_run_stops_cleanly(self, products, monkeypatch):
@@ -213,6 +481,19 @@ class TestConfig:
             path = exporting.export_dir()
         assert path.endswith("snapadmin_exports")
         assert os.path.isdir(path)
+
+    def test_default_storage_is_local_filesystem(self):
+        storage = exporting.get_export_storage()
+        assert isinstance(storage, FileSystemStorage)
+        assert os.path.abspath(storage.location) == os.path.abspath(exporting.export_dir())
+
+    @override_settings(SNAPADMIN_EXPORT_STORAGE="tests.test_export.AltExportStorage")
+    def test_configured_storage_class_is_used(self):
+        assert isinstance(exporting.get_export_storage(), AltExportStorage)
+
+    def test_configured_storage_accepts_a_class_object(self):
+        with override_settings(SNAPADMIN_EXPORT_STORAGE=AltExportStorage):
+            assert isinstance(exporting.get_export_storage(), AltExportStorage)
 
 
 # ── model-view permission gate ───────────────────────────────────────────────
@@ -270,6 +551,16 @@ class TestExportApi:
         assert r.status_code == 200
         body = b"".join(r.streaming_content)
         assert body.startswith(b"id,")
+
+    @override_settings(SNAPADMIN_EXPORT_STORAGE="tests.test_export.AltExportStorage")
+    def test_download_reads_through_configured_storage(self, auth_client, products):
+        # Round-trip: the worker publishes to the configured storage and the
+        # download endpoint serves it back through the same abstraction.
+        job_id = auth_client.post("/api/exports/", {"app_label": "demo", "model": "Product"},
+                                  format="json").json()["id"]
+        r = auth_client.get(f"/api/exports/{job_id}/download/")
+        assert r.status_code == 200
+        assert b"".join(r.streaming_content).startswith(b"id,")
 
     def test_download_not_ready(self, auth_client, products):
         job = _job(status="processing")

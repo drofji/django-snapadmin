@@ -14,8 +14,6 @@ Only ``SnapModel`` targets are exportable, and the caller must hold the model's
 their requester; superusers see all.
 """
 
-import os
-
 from django.apps import apps
 from django.db import models as django_models
 from django.http import FileResponse
@@ -24,7 +22,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from snapadmin.api.authentication import SnapAPIAuthMixin, token_has_permission
-from snapadmin.exporting import export_enabled, output_path
+from snapadmin.exporting import export_enabled, export_file_name, get_export_storage
 from snapadmin.models import APIToken, SnapExportJob, SnapModel
 
 #: JSON-compatible scalar/collection values a filter value may hold.
@@ -220,10 +218,11 @@ class ExportJobViewSet(
         if job.status != SnapExportJob.Status.COMPLETED:
             return Response({"detail": f"Job is '{job.status}', not ready for download."},
                             status=status.HTTP_409_CONFLICT)
-        path = output_path(job)
-        if not os.path.exists(path):
+        storage = get_export_storage()
+        name = export_file_name(job)
+        if not storage.exists(name):
             return Response({"detail": "Export file is no longer available."},
                             status=status.HTTP_410_GONE)
         content_type = "text/csv" if job.export_format == SnapExportJob.Format.CSV else "application/x-ndjson"
-        return FileResponse(open(path, "rb"), as_attachment=True,
+        return FileResponse(storage.open(name, "rb"), as_attachment=True,
                             filename=job.file_name, content_type=content_type)

@@ -301,6 +301,11 @@ class Showcase(snap_models.SnapModel):
     compressed_fields = True
     warn_unsaved_form = True
 
+    # api_json_filters → exposes ?json_field__a__b=value (nested scalar match) and
+    # ?json_field__tags=value (list-membership match, since "tags" is stored as a
+    # JSON array) through the auto-generated REST API filter set.
+    api_json_filters = {"json_field": ["a.b", "tags"]}
+
     class Meta:
         verbose_name = _("Showcase")
         verbose_name_plural = _("Showcase")

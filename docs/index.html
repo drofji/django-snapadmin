@@ -589,6 +589,9 @@ curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?page=2"
 curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?available=true&price__gte=100"
 curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?name__icontains=laptop"
 
+# JSON key-path filters (only for key-paths declared in api_json_filters)
+curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Showcase/?json_field__a__b=value"
+
 # Create, update, delete
 curl -X POST -H "Authorization: Token $TOKEN" -H "Content-Type: application/json" \
      -d '{"name": "Laptop Pro", "price": "1499.00", "available": true}' \
@@ -750,6 +753,34 @@ for row in Product.objects.all().iterator(chunk_size=2000):
   <code>lookup_expr="icontains"</code> — a leading-wildcard substring match that cannot use a
   database index. Callers relying on that now need <code>?field__icontains=value</code> instead of
   the bare key. See <code>docs/releases/Unreleased.txt</code> for the full upgrade note.</p>
+
+  <h3>Filtering JSON columns — <code>api_json_filters</code></h3>
+  <p><code>JSONField</code> gets no auto-generated filter by default. Declare which key-paths within
+  which JSON field should be filterable and the dynamic API exposes each as a query parameter — a
+  dotted key-path becomes double-underscore-separated, mirroring Django's own lookup convention:</p>
+  <pre><code>class Order(SnapModel):
+    payload = snap_fields.SnapJSONField(default=dict)
+
+    api_json_filters = {"payload": ["a.b", "a.c"]}
+    # exposes ?payload__a__b=value and ?payload__a__c=value</code></pre>
+  <p>A single query parameter covers two cases, since the same key-path can hold either shape from
+  row to row: a <strong>scalar match</strong> (the JSON value at the path equals <code>value</code>
+  exactly) and a <strong>list-membership match</strong> (the JSON value at the path is itself a list
+  and <code>value</code> is one of its elements — <code>__contains=[value]</code>, not a string
+  <code>LIKE</code>). The scalar case uses Django's JSON key-transform exact lookup, which every
+  backend supports natively, including SQLite. The list-membership case prefers the native
+  <code>__contains</code> JSON-containment lookup where the backend supports it, but <strong>SQLite
+  reports <code>supports_json_field_contains = False</code></strong> and raises
+  <code>NotSupportedError</code> for that lookup — since SQLite is the default database for local
+  development and the test suite, <code>api_json_filters</code> detects this via
+  <code>connection.features.supports_json_field_contains</code> and falls back to a row-by-row Python
+  membership check instead, so list-membership filtering works out of the box on SQLite too, not just
+  PostgreSQL/MySQL.</p>
+  <p><strong>JSON columns carry no index</strong>, so any of these filters is always a full table scan
+  on every backend. For filtering JSON data at scale on large tables, use
+  <code>SnapModel.es_search()</code> (the Elasticsearch integration) instead of the DB-backed
+  auto-filters. Leaving <code>api_json_filters</code> unset (the default) exposes no JSON filters at
+  all — matching prior behaviour.</p>
 
   <h3>Vetoing deletes — <code>api_can_delete</code> + <code>SNAPADMIN_API_DELETE_GUARD</code></h3>
   <p>Forbid deleting <strong>specific objects</strong> through the dynamic model API without
@@ -953,9 +984,21 @@ class BigModel(snap_models.SnapModel):
 
   <h3>Async background export <span class="badge">Celery</span></h3>
   <p>Large synchronous exports time out. SnapAdmin offloads them to a Celery worker that streams a
-  model's rows to CSV or JSON in <strong>resumable chunks</strong> (continues from the last persisted
-  chunk if the worker restarts) and is <strong>cancellable</strong> mid-run. Jobs are private to their
-  requester; the caller needs the target model's <code>view</code> permission.</p>
+  model's rows to CSV or JSON in <strong>resumable chunks</strong>, paged by a primary-key cursor
+  rather than <code>OFFSET</code> so a concurrent insert/delete elsewhere in the table can't shift the
+  window and skip or duplicate a row. Each chunk is written and <code>fsync</code>-ed to disk
+  <em>before</em> its checkpoint is persisted, so a worker crash between the two can only leave an
+  unconfirmed tail to discard on resume — never a duplicate. Jobs are also <strong>single-flight</strong>
+  (an atomic <code>pending</code>/<code>failed</code> → <code>processing</code> claim stops a redelivered
+  task or a manual re-trigger from running the same job on two workers at once) and
+  <strong>cancellable</strong> mid-run. A worker that crashes mid-<code>processing</code> leaves the job
+  stuck there until an operator resets it to <code>pending</code> to retry — there is no
+  heartbeat/TTL auto-recovery. Jobs are private to their requester; the caller needs the target
+  model's <code>view</code> permission. Finished files are published through Django's storage API
+  (<code>SNAPADMIN_EXPORT_STORAGE</code>, a dotted <code>Storage</code> class) rather than read off the
+  worker's local disk, so <code>download/</code> works even when the web process and the worker don't
+  share a filesystem; left unset it defaults to local <code>FileSystemStorage</code>, unchanged from
+  before.</p>
   <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/exports/</span><span class="endpoint-desc">Start an export → job id + status</span></div>
   <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/exports/&lt;id&gt;/</span><span class="endpoint-desc">Poll status, rows processed/total, %, ETA</span></div>
   <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/exports/&lt;id&gt;/cancel/</span><span class="endpoint-desc">Cancel between chunks</span></div>
@@ -1144,6 +1187,7 @@ urlpatterns = [*router.urls, path("", include("snapadmin.urls"))]</code></pre>
     <tr><td>GraphQL auth / GraphiQL exposure</td><td><code>SNAPADMIN_GRAPHQL_REQUIRE_AUTH</code> / <code>SNAPADMIN_GRAPHIQL_ENABLED</code></td></tr>
     <tr><td>Hiding fields from every API surface</td><td><code>api_exclude_fields</code> on the model</td></tr>
     <tr><td>Restricting which fields REST create/update can write</td><td><code>api_write_fields</code> on the model</td></tr>
+    <tr><td>Filtering key-paths inside a JSON column</td><td><code>api_json_filters</code> on the model</td></tr>
     <tr><td>Widening/narrowing a text field's auto-filter lookups</td><td><code>api_filter_lookups</code> on the model</td></tr>
   </table>
   <div class="callout">

@@ -268,6 +268,11 @@ SNAPADMIN_ESTIMATED_COUNT_THRESHOLD = int(os.getenv('SNAPADMIN_ESTIMATED_COUNT_T
 SNAPADMIN_EXPORT_ENABLED = os.getenv('SNAPADMIN_EXPORT_ENABLED', 'True') == 'True'
 SNAPADMIN_EXPORT_CHUNK_SIZE = int(os.getenv('SNAPADMIN_EXPORT_CHUNK_SIZE', '1000'))
 SNAPADMIN_EXPORT_DIR = os.getenv('SNAPADMIN_EXPORT_DIR', str(BASE_DIR / 'exports'))
+# Dotted path to a django.core.files.storage.Storage subclass export files are
+# published to and downloaded from. Unset (default) → local FileSystemStorage
+# rooted at SNAPADMIN_EXPORT_DIR — set this in a split deployment where the web
+# process and the Celery worker don't share a filesystem.
+SNAPADMIN_EXPORT_STORAGE = os.getenv('SNAPADMIN_EXPORT_STORAGE', '')
 
 # GraphQL security: require authentication + per-model view permission on every
 # resolver (mirrors the REST API contract). Never disable in production.

@@ -227,6 +227,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Secured GraphQL** | Every resolver enforces authentication (session or API token) + per-model Django permissions — the same contract as REST — on **every traversed relation**, not just top-level fields; `SNAPADMIN_MASKED_FIELDS` are masked in GraphQL output too. `search`/`first`/`offset` arguments included. |
 | **API Field Privacy** | `api_exclude_fields` hides sensitive columns from REST, GraphQL and schema introspection while the admin keeps showing them. |
 | **API Write Allowlist** | `api_write_fields` restricts which fields accept a client-supplied value on REST create/update — a mass-assignment guard for status flags, ownership FKs and other fields that must only change server-side. A system check (`snapadmin.W004`) flags any model that hasn't set it. |
+| **JSON Key-Path Filters** | `api_json_filters` exposes declared key-paths inside a `JSONField` as REST filter query params — scalar equality and list-membership matches, working on SQLite as well as PostgreSQL/MySQL. No index, so it's a full table scan; `es_search()` is the scale-out path. |
 | **Indexable Auto-Filters** | Text fields (`CharField`/`TextField`/`EmailField`/`URLField`/`SlugField`) default `?field=value` to an exact, index-usable match; substring search stays available via `?field__icontains=`/`__startswith`/`__in`. Override the lookup set per field with `api_filter_lookups` on the model. |
 | **GDPR Data Retention** | Per-model `data_retention_days` parameter with automatic Celery cleanup task. |
 | **Error Monitoring & Email Alerts** | Optional middleware records every unhandled exception / 5xx as a browsable `ErrorEvent`; emails a **spike alert** when N errors hit within 15 minutes and a **daily grouped digest** (Celery Beat or cron) — thresholds, window, recipients and send time all configurable. |
@@ -511,7 +512,10 @@ SNAPADMIN_ESTIMATED_COUNT_THRESHOLD = 100000  # Only estimate above this row cou
 # Async background export (needs Celery + a broker)
 SNAPADMIN_EXPORT_ENABLED = True        # POST /api/exports/ → background CSV/JSON export jobs
 SNAPADMIN_EXPORT_CHUNK_SIZE = 1000     # Rows per chunk (progress + resume granularity)
-SNAPADMIN_EXPORT_DIR = BASE_DIR / "exports"   # Where export files are written
+SNAPADMIN_EXPORT_DIR = BASE_DIR / "exports"   # Local working dir + default storage root
+SNAPADMIN_EXPORT_STORAGE = ""          # Dotted Storage class; unset = local FileSystemStorage
+SNAPADMIN_EXPORT_MAX_ROWS = 0           # Row ceiling for the synchronous .../export/ (0 = unlimited)
+SNAPADMIN_EXPORT_LIMIT_MAX = 0          # Hard cap an explicit ?limit= is clamped to (0 = no clamp)
 ```
 
 > **Configuration health checks.** SnapAdmin registers Django system checks, so `python manage.py check`
@@ -539,10 +543,24 @@ POST /api/exports/<id>/cancel/  → stop between chunks
 GET  /api/exports/<id>/download/ → the finished CSV/JSON file
 ```
 
-Exports run in **resumable chunks** — if the worker restarts, the writer continues from the last
-persisted chunk (`acks_late`) instead of starting over — and are **cancellable** mid-run. Jobs are
+Exports run in **resumable chunks**, keyed on a primary-key cursor rather than an `OFFSET` — a
+concurrent insert or delete elsewhere in the table can't shift the paging window and silently skip
+or duplicate a row. If the worker restarts (`acks_late`), the writer resumes from the last
+*durably flushed* chunk instead of starting over or re-writing rows already on disk: each chunk is
+written and `fsync`-ed before its checkpoint is persisted, so a crash between the two can only
+leave an unconfirmed tail to discard, never cause a duplicate. Exports are also **single-flight** —
+a job is claimed with an atomic `pending`/`failed` → `processing` transition, so a redelivered task
+or a manual re-trigger can never run the same job on two workers at once and corrupt the file. (A
+worker that crashes mid-`processing` leaves the job stuck there; an operator resets it to `pending`
+to retry — there's no heartbeat/TTL auto-recovery.) Jobs are also **cancellable** mid-run, and
 private to their requester (superusers see all); the caller must hold the target model's `view`
 permission. Only `SnapModel`-backed models are exportable.
+
+Finished files are published through Django's storage API (`SNAPADMIN_EXPORT_STORAGE`, a dotted
+`Storage` class), not read straight off the worker's local disk — so `download/` works even when the
+web process and the Celery worker don't share a filesystem (any horizontally-scaled or containerized
+deployment). Leaving it unset keeps today's behavior: a local `FileSystemStorage` rooted at
+`SNAPADMIN_EXPORT_DIR`, with no configuration change required.
 
 #### No-Celery path — count + synchronous streaming export
 
@@ -557,9 +575,15 @@ GET /api/models/<app>/<Model>/export/?<filters>[&limit=N]  → NDJSON stream of 
 `count/` returns just the size of the filtered queryset — handy for sizing a paginator without
 pulling data. `export/` streams the **entire** filtered queryset as newline-delimited JSON
 (`application/x-ndjson`), one serialized object per line, with **no pagination**; pass `?limit=N`
-to cap the row count. Rows are pulled lazily in chunks (tunable via `SNAPADMIN_EXPORT_CHUNK_SIZE`,
-default 1000 — shared with the async export) so arbitrarily large tables never materialise in
-memory. Both require the model's `view` permission, just like `list`.
+to cap the row count (a non-positive `?limit=` such as `0` or `-1` is rejected with `400`, and a
+valid `?limit=` is clamped down to `SNAPADMIN_EXPORT_LIMIT_MAX` when that setting is configured).
+Rows are pulled lazily in chunks (tunable via `SNAPADMIN_EXPORT_CHUNK_SIZE`, default 1000 — shared
+with the async export) so arbitrarily large tables never materialise in memory. When
+`SNAPADMIN_EXPORT_MAX_ROWS` is configured and no valid `?limit=` was passed, the filtered match
+count is checked against that ceiling before streaming starts — exceeding it responds `413` (with
+the match count and a pointer to `POST /api/exports/`) instead of opening a stream that may never
+finish; an explicit `?limit=` is always honoured, never blocked by the ceiling. Both `count/` and
+`export/` require the model's `view` permission, just like `list`.
 
 ### 🌍 Internationalization (i18n)
 
@@ -691,6 +715,43 @@ class Product(snap_models.SnapModel):
 
 Substring search is never fully removed by the new default — it's just reachable
 through the explicit `?field__icontains=value` suffix instead of the bare key.
+
+### Filtering JSON columns — `api_json_filters`
+
+`JSONField` gets no auto-generated filter by default. Declare which key-paths within
+which JSON field should be filterable and the dynamic API exposes each as a query
+parameter — a dotted key-path becomes double-underscore-separated, mirroring
+Django's own lookup convention:
+
+```python
+class Order(snap_models.SnapModel):
+    payload = snap.SnapJSONField(default=dict)
+
+    api_json_filters = {"payload": ["a.b", "a.c"]}
+    # exposes ?payload__a__b=value and ?payload__a__c=value
+```
+
+A single query parameter covers two cases, since the same key-path can hold either
+shape from row to row:
+
+- **Scalar match** — the JSON value at the path equals `value` exactly.
+- **List-membership match** — the JSON value at the path is itself a list and
+  `value` is one of its elements (`__contains=[value]`, not a string `LIKE`).
+
+The scalar case uses Django's JSON key-transform exact lookup, which every backend
+supports natively, including SQLite. The list-membership case prefers the native
+`__contains` JSON-containment lookup where the backend supports it, but **SQLite
+reports `supports_json_field_contains = False`** and raises `NotSupportedError` for
+that lookup — since SQLite is the default database for local development and the
+test suite, `api_json_filters` detects this and falls back to a row-by-row Python
+membership check instead, so list-membership filtering works out of the box on
+SQLite too, not just PostgreSQL/MySQL.
+
+**JSON columns carry no index**, so any of these filters is always a full table
+scan on every backend. For filtering JSON data at scale on large tables, use
+`SnapModel.es_search()` (the Elasticsearch integration) instead of the DB-backed
+auto-filters. Leaving `api_json_filters` unset (the default) exposes no JSON
+filters at all — matching prior behaviour.
 
 ### Vetoing deletes via the API
 
@@ -1029,6 +1090,7 @@ Several extension points need no subclassing — just settings:
 | Whether GraphQL requires auth / exposes GraphiQL | `SNAPADMIN_GRAPHQL_REQUIRE_AUTH` / `SNAPADMIN_GRAPHIQL_ENABLED` | [Feature Toggles](#-feature-toggles--advanced-settings) |
 | Hiding fields from every API surface | `api_exclude_fields` on the model | table above |
 | Restricting which fields REST create/update can write | `api_write_fields` on the model | table above |
+| Filtering key-paths inside a JSON column | `api_json_filters` on the model | table above |
 | Widening/narrowing a text field's auto-filter lookups | `api_filter_lookups` on the model | table above |
 
 > **GraphQL** is generated dynamically from your `SnapModel`s and enforces the *same* per-model
@@ -1069,6 +1131,9 @@ curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?page=2"
 # search is explicit via "__icontains" (also: "__startswith", "__in").
 curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?available=true&price__gte=100"
 curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?name=Laptop+Pro"
+
+# JSON key-path filters (only for key-paths declared in api_json_filters)
+curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Showcase/?json_field__a__b=value"
 curl -H "Authorization: Token $TOKEN" "$BASE/models/demo/Product/?name__icontains=laptop"
 
 # Full CRUD
@@ -1677,7 +1742,10 @@ Copy `dist.env` to `.env` and configure:
 | `SNAPADMIN_ESTIMATED_COUNT_THRESHOLD` | `100000` | Only estimate the count above this many rows |
 | `SNAPADMIN_EXPORT_ENABLED` | `True` | Enable the async background export API (`/api/exports/`) |
 | `SNAPADMIN_EXPORT_CHUNK_SIZE` | `1000` | Rows per export chunk (progress + resume granularity) |
-| `SNAPADMIN_EXPORT_DIR` | `BASE_DIR/exports` | Directory export files are written to |
+| `SNAPADMIN_EXPORT_DIR` | `BASE_DIR/exports` | Directory the local export working files are written to (also the default storage's root) |
+| `SNAPADMIN_EXPORT_STORAGE` | — | Dotted path to a `django.core.files.storage.Storage` subclass export files are published to and downloaded from; unset uses local `FileSystemStorage` rooted at `SNAPADMIN_EXPORT_DIR` |
+| `SNAPADMIN_EXPORT_MAX_ROWS` | `0` | Row ceiling for the synchronous `.../export/` when no valid `?limit=` is passed; `0` = unlimited. Exceeding it responds `413` and points the caller at `POST /api/exports/` instead of streaming |
+| `SNAPADMIN_EXPORT_LIMIT_MAX` | `0` | Hard cap an explicit `?limit=` on `.../export/` is clamped down to; `0` = no clamp |
 | `ELASTICSEARCH_KWARGS` | `{request_timeout: 5}` | Extra kwargs merged into the `Elasticsearch(...)` client |
 | `SNAPADMIN_ES_CLIENT_FACTORY` | — | Dotted path to a zero-arg callable returning a custom ES client |
 | `SNAPADMIN_API_PAGE_SIZE` | `25` | Default `list` page size on `DynamicModelViewSet` |
