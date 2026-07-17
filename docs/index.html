@@ -907,7 +907,13 @@ SNAPADMIN_ANALYTICS_DB_ALIAS = "read_replica"</code></pre>
   <p>Declare sensitive fields once. They are obfuscated in the admin changelist, dropped from the
   admin change form, and masked in both REST API and GraphQL responses for anyone who is not a
   superuser or a holder of the <code>snapadmin.view_raw_pii</code> permission. Emails become
-  <code>a***@domain.com</code>, other values <code>+3********78</code>.</p>
+  <code>a***@domain.com</code>, other values <code>+3********78</code>. Masking is enforced on every
+  path that could otherwise leak the raw value: a masked field can't be targeted by
+  <code>?field=</code>, <code>?ordering=field</code> or <code>?search=</code> for an unprivileged
+  caller (silently ignored, not a 400), the async export (<code>POST /api/exports/</code>) masks
+  rows unless the requester holds PII access, and the audit trail's <code>changes</code> diff is
+  masked in the admin and in <code>snapadmin_audit_export</code> (pass <code>--reveal-pii</code>
+  for the raw diff).</p>
   <pre><code># settings.py
 SNAPADMIN_MASKED_FIELDS = {
     "users.UserModel": ["email", "phone_number"],

@@ -966,3 +966,107 @@ class TestAutoFilterJsonFieldLookups:
 
         cached = build_filterset_for_model(Showcase)
         assert cached is fresh
+
+
+# ── PII masking excluded from filter/ordering/search (#SEC6) ────────────────
+
+@pytest.mark.django_db
+class TestMaskedFieldsExcludedFromApiQuerying:
+    """A masked field must not be usable as a filter/ordering/search oracle."""
+
+    @staticmethod
+    def _regular_client_with_product_view(regular_user):
+        from django.contrib.auth.models import Permission
+        from django.contrib.auth import get_user_model
+        from snapadmin.models import APIToken
+        regular_user.user_permissions.add(Permission.objects.get(codename="view_product"))
+        fresh = get_user_model().objects.get(pk=regular_user.pk)
+        token = APIToken.create_for_user(fresh, "Reg")
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.token_key}")
+        return client
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
+    def test_filter_on_masked_field_ignored_for_unprivileged(self, regular_user):
+        from demo.models import Product
+        laptop = Product.objects.create(name="Laptop", price=Decimal("10.00"))
+        desktop = Product.objects.create(name="Desktop", price=Decimal("20.00"))
+        client = self._regular_client_with_product_view(regular_user)
+
+        r = client.get("/api/models/demo/Product/?name=Laptop")
+        assert r.status_code == 200
+        # response also masks "name" (pre-existing serializer behaviour) —
+        # assert on id, not the (uniformly starred) name string.
+        ids = {row["id"] for row in r.json()["results"]}
+        assert ids == {laptop.pk, desktop.pk}  # filter silently ignored, not applied
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
+    def test_filter_on_masked_field_still_applies_for_privileged(self, auth_client):
+        from demo.models import Product
+        Product.objects.create(name="Laptop", price=Decimal("10.00"))
+        Product.objects.create(name="Desktop", price=Decimal("20.00"))
+
+        r = auth_client.get("/api/models/demo/Product/?name=Laptop")
+        assert r.status_code == 200
+        names = {row["name"] for row in r.json()["results"]}
+        assert names == {"Laptop"}
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
+    def test_ordering_by_masked_field_ignored_for_unprivileged(self, regular_user):
+        from demo.models import Product
+        alpha = Product.objects.create(name="Alpha", price=Decimal("1"))  # pk1, created first
+        bravo = Product.objects.create(name="Bravo", price=Decimal("2"))  # pk2, created second
+        client = self._regular_client_with_product_view(regular_user)
+
+        r = client.get("/api/models/demo/Product/?ordering=name")
+        assert r.status_code == 200
+        # Invalid ordering term is dropped -> falls back to the default (-pk,
+        # newest first): [bravo, alpha], not the alphabetical [alpha, bravo].
+        ids = [row["id"] for row in r.json()["results"]]
+        assert ids == [bravo.pk, alpha.pk]
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
+    def test_ordering_by_unmasked_field_still_works_for_unprivileged(self, regular_user):
+        # Masking one field must not narrow the ordering allowlist down to
+        # only concrete model columns for every other field — a field the
+        # serializer exposes (e.g. a to-many) that isn't masked stays orderable.
+        from demo.models import Product
+        cheap = Product.objects.create(name="Alpha", price=Decimal("1"))
+        pricey = Product.objects.create(name="Bravo", price=Decimal("2"))
+        client = self._regular_client_with_product_view(regular_user)
+
+        r = client.get("/api/models/demo/Product/?ordering=price")
+        assert r.status_code == 200
+        ids = [row["id"] for row in r.json()["results"]]
+        assert ids == [cheap.pk, pricey.pk]
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
+    def test_ordering_by_masked_field_applies_for_privileged(self, auth_client):
+        from demo.models import Product
+        alpha = Product.objects.create(name="Alpha", price=Decimal("1"))
+        bravo = Product.objects.create(name="Bravo", price=Decimal("2"))
+
+        r = auth_client.get("/api/models/demo/Product/?ordering=name")
+        assert r.status_code == 200
+        ids = [row["id"] for row in r.json()["results"]]
+        assert ids == [alpha.pk, bravo.pk]
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
+    def test_search_on_masked_field_ignored_for_unprivileged(self, regular_user):
+        from demo.models import Product
+        Product.objects.create(name="UniqueWidgetXYZ", price=Decimal("1"))
+        client = self._regular_client_with_product_view(regular_user)
+
+        r = client.get("/api/models/demo/Product/?search=UniqueWidgetXYZ")
+        assert r.status_code == 200
+        assert r.json()["results"] == []
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
+    def test_search_on_masked_field_applies_for_privileged(self, auth_client):
+        from demo.models import Product
+        Product.objects.create(name="UniqueWidgetXYZ", price=Decimal("1"))
+
+        r = auth_client.get("/api/models/demo/Product/?search=UniqueWidgetXYZ")
+        assert r.status_code == 200
+        names = [row["name"] for row in r.json()["results"]]
+        assert "UniqueWidgetXYZ" in names

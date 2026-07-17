@@ -13,6 +13,13 @@ Usage::
     python manage.py snapadmin_audit_export --format csv --output audit.csv
     python manage.py snapadmin_audit_export --since 2026-01-01 --action delete
     python manage.py snapadmin_audit_export --purge   # also delete rows past retention
+    python manage.py snapadmin_audit_export --reveal-pii  # include raw PII values
+
+By default, ``changes`` entries for a field listed in ``SNAPADMIN_MASKED_FIELDS``
+are masked the same way the admin and REST API mask them — a SIEM/log-shipper
+pipeline is a wider blast radius than the database itself, so PII should not
+flow into it by default. Pass ``--reveal-pii`` to export the raw diff instead,
+for an operator who explicitly needs it for an investigation.
 """
 
 import csv
@@ -47,6 +54,9 @@ class Command(BaseCommand):
         parser.add_argument("--model", default=None, help="Filter by model name")
         parser.add_argument("--purge", action="store_true",
                             help="After exporting, delete rows older than SNAPADMIN_AUDIT_RETENTION_DAYS")
+        parser.add_argument("--reveal-pii", action="store_true",
+                            help="Export raw (unmasked) changes for SNAPADMIN_MASKED_FIELDS "
+                                 "fields, instead of the default masked diff")
 
     def handle(self, *args, **options):
         from snapadmin.models import SnapadminAuditLog
@@ -63,9 +73,13 @@ class Command(BaseCommand):
         if options["model"]:
             qs = qs.filter(model=options["model"])
 
+        reveal_pii = options["reveal_pii"]
         out = sys.stdout if options["output"] == "-" else open(options["output"], "w", newline="")
         try:
-            count = self._write_csv(qs, out) if options["format"] == "csv" else self._write_json(qs, out)
+            count = (
+                self._write_csv(qs, out, reveal_pii) if options["format"] == "csv"
+                else self._write_json(qs, out, reveal_pii)
+            )
         finally:
             if out is not sys.stdout:
                 out.close()
@@ -87,7 +101,11 @@ class Command(BaseCommand):
         return dt
 
     @staticmethod
-    def _row(entry) -> dict:
+    def _row(entry, reveal_pii: bool) -> dict:
+        changes = entry.changes
+        if not reveal_pii:
+            from snapadmin.masking import mask_changes
+            changes = mask_changes(entry.app_label, entry.model, changes)
         return {
             "id": entry.id,
             "timestamp": entry.timestamp.isoformat(),
@@ -100,22 +118,22 @@ class Command(BaseCommand):
             "model": entry.model,
             "object_id": entry.object_id,
             "object_repr": entry.object_repr,
-            "changes": entry.changes,
+            "changes": changes,
         }
 
-    def _write_json(self, qs, out) -> int:
+    def _write_json(self, qs, out, reveal_pii: bool) -> int:
         count = 0
         for entry in qs.iterator():
-            out.write(json.dumps(self._row(entry), default=str) + "\n")
+            out.write(json.dumps(self._row(entry, reveal_pii), default=str) + "\n")
             count += 1
         return count
 
-    def _write_csv(self, qs, out) -> int:
+    def _write_csv(self, qs, out, reveal_pii: bool) -> int:
         writer = csv.DictWriter(out, fieldnames=FIELDS)
         writer.writeheader()
         count = 0
         for entry in qs.iterator():
-            row = self._row(entry)
+            row = self._row(entry, reveal_pii)
             row["changes"] = json.dumps(row["changes"], default=str) if row["changes"] else ""
             writer.writerow(row)
             count += 1

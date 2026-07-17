@@ -104,3 +104,29 @@ def mask_value(value):
     if isinstance(value, dict):
         return {key: mask_value(item) for key, item in value.items()}
     return _mask_string(str(value))
+
+
+def mask_changes(app_label: str, model_name: str, changes: dict | None) -> dict | None:
+    """Mask configured PII fields within an audit-trail ``changes`` diff.
+
+    ``changes`` has the shape written by :func:`snapadmin.audit.record_audit` —
+    ``{field_name: {"old": ..., "new": ...}, ...}``. Only keys naming a field
+    listed in ``SNAPADMIN_MASKED_FIELDS`` for this model are masked (both
+    sides of the diff); everything else, including a falsy ``changes``, is
+    returned unchanged. The single choke point used by both the audit-log
+    admin display and the ``snapadmin_audit_export`` command, so the two
+    surfaces can never drift out of sync on what counts as masked.
+    """
+    if not changes:
+        return changes
+    masked_names = set(get_masked_fields(app_label, model_name))
+    if not masked_names:
+        return changes
+    return {
+        field: (
+            {side: mask_value(v) for side, v in diff.items()}
+            if field in masked_names and isinstance(diff, dict)
+            else diff
+        )
+        for field, diff in changes.items()
+    }

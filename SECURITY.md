@@ -111,7 +111,15 @@ Key protections:
 ### Data protection & auditability
 - **PII masking** — `SNAPADMIN_MASKED_FIELDS` masks configured fields in the admin, the REST API and
   GraphQL for users without PII-view permission; masked fields are also dropped from the change form
-  for those users. A masked field is masked identically whether it is read over REST or GraphQL.
+  for those users. A masked field is masked identically whether it is read over REST or GraphQL, and
+  the same masking now covers every other output path a masked field could otherwise leak through: the
+  async export (`POST /api/exports/`, masked unless the requesting user holds PII access; a masked
+  field is also rejected as an export `filters` key, since a match/no-match on `job.total_rows` is
+  itself an oracle), the audit trail's `changes` diff (masked in the admin display and in
+  `snapadmin_audit_export` unless `--reveal-pii` is passed), and the auto-generated REST
+  filter/ordering/search parameters — a masked field is silently excluded from `?field=`,
+  `?ordering=field` and `?search=` for a caller without PII access, so match/no-match, sort order or
+  search hits can't be used as an oracle to recover the value a masked response body never reveals raw.
 - **Immutable audit trail** (`SNAPADMIN_AUDIT_LOG_ENABLED`) records every admin create/update/delete;
   retention via `SNAPADMIN_AUDIT_RETENTION_DAYS` and `snapadmin_audit_export` for SIEM ingestion.
 - **Backups** — 3-2-1 database backups with local/network/FTP(S)/SFTP targets; transport credentials

@@ -209,6 +209,22 @@ class SnapadminAuditLogAdmin(ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return False
 
+    def get_readonly_fields(self, request, obj=None):
+        # Swap the raw "changes" field for a masked equivalent unless the
+        # viewer holds PII access — the diff snapshot would otherwise leak a
+        # masked field's raw value to anyone who can read the audit trail.
+        from snapadmin.masking import user_can_view_pii
+
+        fields = list(super().get_readonly_fields(request, obj))
+        if user_can_view_pii(request.user):
+            return fields
+        return ["masked_changes" if f == "changes" else f for f in fields]
+
+    @display(description=_("Changes"))
+    def masked_changes(self, obj: SnapadminAuditLog):
+        from snapadmin.masking import mask_changes
+        return mask_changes(obj.app_label, obj.model, obj.changes)
+
     @display(description=_("Action"), label=True)
     def action_badge(self, obj: SnapadminAuditLog):
         colours = {"create": "success", "update": "info", "delete": "danger"}

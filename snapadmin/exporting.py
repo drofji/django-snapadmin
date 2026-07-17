@@ -39,6 +39,10 @@ Design notes
   filesystems (S3, GCS, shared network storage, …).
 * **Cancellable** — before each chunk the job's status is re-read; once it flips
   to ``cancelled`` the writer stops and leaves the partial file in place.
+* **PII-aware** — ``SNAPADMIN_MASKED_FIELDS`` values are masked (see
+  :mod:`snapadmin.masking`) unless the job's ``requested_by`` holds PII
+  access, mirroring the REST serializer so an export can't be used to bypass
+  masking a caller sees everywhere else in the API.
 """
 
 from __future__ import annotations
@@ -55,6 +59,7 @@ from django.utils import timezone
 from django.utils.module_loading import import_string
 
 from snapadmin.logging_config import get_logger
+from snapadmin.masking import get_masked_fields, mask_value, user_can_view_pii
 
 logger = get_logger(__name__)
 
@@ -182,6 +187,15 @@ def _run(job) -> None:
     model = job.target_model()
     fields = _export_fields(model)
     pk_attname = model._meta.pk.attname
+    # Fail-closed, like the REST serializer and GraphQL: an export is masked
+    # unless the requester (job.requested_by, which survives a worker process
+    # boundary better than "the current request") holds PII access. A purged
+    # requester (SET_NULL -> None) is treated as unprivileged.
+    masked_fields = (
+        set()
+        if user_can_view_pii(job.requested_by)
+        else set(get_masked_fields(model._meta.app_label, model._meta.model_name))
+    )
     qs = model.objects.all()
     if job.filters:
         qs = qs.filter(**job.filters)
@@ -240,6 +254,12 @@ def _run(job) -> None:
             batch = list(chunk_qs[:chunk].values(*fields))
             if not batch:
                 break
+
+            if masked_fields:
+                for row in batch:
+                    for name in masked_fields:
+                        if name in row:
+                            row[name] = mask_value(row[name])
 
             byte_len += _write_bytes(handle, _rows_bytes(batch, fields, is_csv))
             cursor = str(batch[-1][pk_attname])

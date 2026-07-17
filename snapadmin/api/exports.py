@@ -23,6 +23,7 @@ from rest_framework.response import Response
 
 from snapadmin.api.authentication import SnapAPIAuthMixin, token_has_permission
 from snapadmin.exporting import export_enabled, export_file_name, get_export_storage
+from snapadmin.masking import get_masked_fields, user_can_view_pii
 from snapadmin.models import APIToken, SnapExportJob, SnapModel
 
 #: JSON-compatible scalar/collection values a filter value may hold.
@@ -74,21 +75,30 @@ def _allowed_filters_for_model(model: type[django_models.Model]) -> dict[str, se
     return allowed
 
 
-def _validate_export_filters(model: type[django_models.Model], filters: dict[str, FilterValue]) -> None:
+def _validate_export_filters(
+    model: type[django_models.Model],
+    filters: dict[str, FilterValue],
+    masked_fields: set[str] = frozenset(),
+) -> None:
     """Reject any ``filters`` key that is not an allowlisted own-field + safe lookup.
 
     Guards against ``qs.filter(**job.filters)`` (see ``snapadmin.exporting._run``) being
     used as a relation-traversal oracle: a caller authorized to export model A must not
     be able to reach fields on a related model B (``fk__field``, a reverse relation, a
     many-to-many, ...) that their ``view`` permission on A never covered, nor use an
-    arbitrary Django lookup as a resource-exhaustion vector.
+    arbitrary Django lookup as a resource-exhaustion vector. ``masked_fields`` (the
+    caller's ``SNAPADMIN_MASKED_FIELDS`` for this model, empty for a PII-privileged
+    caller) is rejected the same way — a masked field's rows are starred in the
+    export output, but ``job.total_rows`` would otherwise still leak a match/no-match
+    or exact count for it, an oracle the export output itself never gives a caller
+    without PII access.
     """
     allowed = _allowed_filters_for_model(model)
     rejected: list[str] = []
     for key in filters:
         field_name, _, lookup = key.partition("__")
         lookup = lookup or "exact"
-        if field_name not in allowed or lookup not in allowed[field_name]:
+        if field_name not in allowed or lookup not in allowed[field_name] or field_name in masked_fields:
             rejected.append(key)
     if rejected:
         raise serializers.ValidationError(
@@ -143,7 +153,12 @@ class ExportJobCreateSerializer(serializers.ModelSerializer):
 
         filters = attrs.get("filters") or {}
         if filters:
-            _validate_export_filters(model, filters)
+            masked = (
+                set()
+                if user_can_view_pii(request.user)
+                else set(get_masked_fields(app_label, model_name))
+            )
+            _validate_export_filters(model, filters, masked)
         return attrs
 
 

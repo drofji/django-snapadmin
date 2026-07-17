@@ -200,6 +200,52 @@ class TestReadOnlyAdmin:
         assert r.status_code == 200
 
 
+# ── PII masking (#SEC6) ──────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestAuditMasking:
+    CUST = {"demo.Customer": ["email"]}
+
+    def _seed(self, customer, admin_user):
+        audit.record_audit(
+            _request(admin_user), audit.UPDATE, customer,
+            {
+                "email": {"old": "old@example.com", "new": "new@example.com"},
+                "last_name": {"old": "A", "new": "B"},
+            },
+        )
+        return SnapadminAuditLog.objects.get()
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS=CUST)
+    def test_masked_changes_masks_only_configured_fields(self, customer, admin_user):
+        row = self._seed(customer, admin_user)
+        model_admin = site._registry[SnapadminAuditLog]
+        masked = model_admin.masked_changes(row)
+        assert masked["email"] == {"old": "o***@example.com", "new": "n***@example.com"}
+        assert masked["last_name"] == {"old": "A", "new": "B"}  # not masked
+
+    def test_masked_changes_noop_when_unconfigured(self, customer, admin_user):
+        row = self._seed(customer, admin_user)
+        model_admin = site._registry[SnapadminAuditLog]
+        assert model_admin.masked_changes(row) == row.changes
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS=CUST)
+    def test_readonly_fields_swap_for_unprivileged(self, customer, regular_user, admin_user):
+        self._seed(customer, admin_user)
+        model_admin = site._registry[SnapadminAuditLog]
+        fields = model_admin.get_readonly_fields(_request(regular_user))
+        assert "changes" not in fields
+        assert "masked_changes" in fields
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS=CUST)
+    def test_readonly_fields_raw_for_privileged(self, customer, admin_user):
+        self._seed(customer, admin_user)
+        model_admin = site._registry[SnapadminAuditLog]
+        fields = model_admin.get_readonly_fields(_request(admin_user))
+        assert "changes" in fields
+        assert "masked_changes" not in fields
+
+
 # ── SIEM export command ──────────────────────────────────────────────────────
 
 @pytest.mark.django_db
@@ -282,3 +328,46 @@ class TestExportCommand:
         out = tmp_path / "a.jsonl"
         call_command("snapadmin_audit_export", "--purge", "--output", str(out))
         assert SnapadminAuditLog.objects.count() == 2
+
+    # ── PII masking (#SEC6) ──────────────────────────────────────────────────
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
+    def test_masked_by_default(self, tmp_path, product, admin_user):
+        audit.record_audit(
+            _request(admin_user), audit.UPDATE, product,
+            {"name": {"old": "Old Name", "new": "New Name"}},
+        )
+        out = tmp_path / "a.jsonl"
+        call_command("snapadmin_audit_export", "--output", str(out))
+        row = json.loads(out.read_text().strip())
+        assert row["changes"]["name"] == {"old": "Ol****me", "new": "Ne****me"}
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
+    def test_reveal_pii_flag_shows_raw(self, tmp_path, product, admin_user):
+        audit.record_audit(
+            _request(admin_user), audit.UPDATE, product,
+            {"name": {"old": "Old Name", "new": "New Name"}},
+        )
+        out = tmp_path / "a.jsonl"
+        call_command("snapadmin_audit_export", "--reveal-pii", "--output", str(out))
+        row = json.loads(out.read_text().strip())
+        assert row["changes"]["name"] == {"old": "Old Name", "new": "New Name"}
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
+    def test_masked_by_default_csv(self, tmp_path, product, admin_user):
+        audit.record_audit(
+            _request(admin_user), audit.UPDATE, product,
+            {"name": {"old": "Old Name", "new": "New Name"}},
+        )
+        out = tmp_path / "a.csv"
+        call_command("snapadmin_audit_export", "--format", "csv", "--output", str(out))
+        text = out.read_text()
+        assert "Old Name" not in text
+        assert "Ol****me" in text
+
+    def test_unconfigured_model_untouched(self, tmp_path, product, admin_user):
+        self._seed(product, admin_user)
+        out = tmp_path / "a.jsonl"
+        call_command("snapadmin_audit_export", "--output", str(out))
+        rows = [json.loads(l) for l in out.read_text().strip().splitlines()]
+        assert any(r["changes"] and r["changes"].get("name", {}).get("new") == "P" for r in rows)

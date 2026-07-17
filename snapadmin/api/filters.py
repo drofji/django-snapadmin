@@ -19,6 +19,8 @@ from django.db.models import QuerySet
 from django_filters.constants import EMPTY_VALUES
 from django_filters.rest_framework import DjangoFilterBackend
 
+from snapadmin.masking import get_masked_fields, user_can_view_pii
+
 _filterset_cache: dict = {}
 
 # Text-type model fields that get the exact/icontains/startswith/in lookup set below.
@@ -216,6 +218,35 @@ class SnapAdminFilterBackend(DjangoFilterBackend):
         if isinstance(queryset, EsQuerySet):
             return queryset
         return super().filter_queryset(request, queryset, view)
+
+    def get_filterset_kwargs(self, request, queryset, view):
+        """Drop any query param that targets a masked field the caller can't see.
+
+        Only reached once :meth:`get_filterset_class` has already resolved a
+        concrete model (``get_filterset`` short-circuits to a no-op otherwise),
+        so ``view._get_model_class()`` is guaranteed non-``None`` here.
+
+        A masked field must not be filterable at all: even an exact match lets
+        a caller use match/no-match (or the returned row count, for
+        ``__icontains``) as an oracle to recover a value they'd only ever see
+        starred in the response body. The masked param is silently dropped
+        (as if never sent) rather than rejected with 400 — consistent with an
+        unknown query param, and it doesn't confirm the field is masked vs.
+        simply unfiltered.
+        """
+        kwargs = super().get_filterset_kwargs(request, queryset, view)
+        model_class = view._get_model_class()
+        masked = set(get_masked_fields(model_class._meta.app_label, model_class._meta.model_name))
+        if not masked or user_can_view_pii(request.user):
+            return kwargs
+
+        data = kwargs["data"].copy()
+        for key in list(data.keys()):
+            field_name = key.split("__", 1)[0]
+            if field_name in masked:
+                del data[key]
+        kwargs["data"] = data
+        return kwargs
 
     def get_filterset_class(self, view, queryset=None):
         get_model = getattr(view, "_get_model_class", None)

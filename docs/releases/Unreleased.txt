@@ -214,6 +214,34 @@ Assorted cosmetic-vs-security and deployment-topology fixes
   to release the handle. It's now opened with ``with``, unchanged short-circuit behavior preserved
   (only opened when ``/.dockerenv`` doesn't already indicate Docker and the cgroup file exists).
 
+PII masking closed on export, audit trail and API filter/ordering/search
+  ``SNAPADMIN_MASKED_FIELDS`` was previously enforced only in the REST serializer's and GraphQL's
+  response body, leaving several other paths that could still expose or help recover a masked
+  value. Five gaps are fixed. **Async export:** ``POST /api/exports/`` serialised rows via
+  ``queryset.values(*fields)`` with no masking at all — a downloaded export contained every masked
+  field in the clear regardless of the requester's PII access. Exported rows are now masked unless
+  the job's ``requested_by`` holds PII access (fail-closed: a purged/unset requester is treated as
+  unprivileged); separately, the ``filters`` a caller may pass when creating the export job are now
+  rejected outright for a masked field (same as an unknown field), since a filter's effect on
+  ``job.total_rows`` would otherwise still leak a match/no-match or exact count for a value the
+  export output itself never reveals raw. **Audit trail:** ``SnapadminAuditLog.changes`` snapshots
+  the raw before/after value of every changed field, including masked ones, and was displayed and
+  exported verbatim. The admin's read-only detail view now shows a masked ``changes`` diff for a
+  viewer without PII access (a new ``mask_changes()`` helper in ``snapadmin.masking`` is the single
+  choke point both surfaces share), and ``snapadmin_audit_export`` masks the diff by default — pass
+  the new ``--reveal-pii`` flag for an operator who explicitly needs the raw values for an
+  investigation. The underlying row is never altered (the audit trail's append-only guarantee is
+  unaffected); only the display/export is masked. **Filter/ordering/search oracle:** the
+  auto-generated REST filter set, ``OrderingFilter`` and ``SearchFilter`` had no awareness of
+  masking at all, so a caller without PII access could still send ``?field=value``,
+  ``?field__icontains=``, ``?ordering=field`` or ``?search=`` against a masked field and infer its
+  raw value from a match/no-match, the returned row count, or sort order — even though the response
+  body itself always starred the field out. A masked field is now silently excluded from all three
+  (dropped as if the parameter were never sent, not rejected with ``400``, so the response doesn't
+  itself confirm the field is masked); ordering by every other field — including a many-to-many or
+  method field the auto-filter set never touched — is unaffected. A caller who does hold PII access
+  is unaffected by any of the above.
+
 Changed
 =======
 

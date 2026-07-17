@@ -24,6 +24,7 @@ from snapadmin.api.authentication import SnapAPIAuthMixin, token_has_permission
 from snapadmin.db import route_read
 from snapadmin.api.filters import SnapAdminFilterBackend
 from snapadmin.logging_config import get_logger
+from snapadmin.masking import get_masked_fields, user_can_view_pii
 from snapadmin.models import APIToken, EsStorageMode, SnapModel
 from snapadmin.pagination import SnapDynamicPagination
 from snapadmin.api.serializers import (
@@ -176,6 +177,18 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         _, _, search_fields, _, _ = model_class.get_admin_fields()
         return tuple(search_fields) or None
 
+    def _masked_fields_for_request(self, model_class) -> set[str]:
+        """Masked field names the current caller must not filter/order/search by.
+
+        Empty for a PII-privileged caller — masking is a display concern only
+        for them. Otherwise this is the same field set the serializer stars
+        out, so ``?field=``/``?ordering=field``/``?search=`` can't be used as
+        an oracle to recover a value the response body never reveals raw.
+        """
+        if user_can_view_pii(self.request.user):
+            return set()
+        return set(get_masked_fields(model_class._meta.app_label, model_class._meta.model_name))
+
     def get_queryset(self):
         model_class = self._get_model_class()
         if model_class is None:
@@ -215,6 +228,22 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             # database: native pagination, no ES round-trip, no row cap.
             qs = model_class.objects.all()
             self.search_fields = self._db_search_fields(model_class)
+
+        masked_fields = self._masked_fields_for_request(model_class)
+        if masked_fields:
+            if self.search_fields:
+                self.search_fields = tuple(f for f in self.search_fields if f not in masked_fields) or None
+            # A masked field must not be a valid `?ordering=` term either, or a
+            # caller could infer its raw value from the sort order. Only
+            # overridden when there's actually something to exclude — leave
+            # DRF's own default (every serializer field) alone otherwise, so
+            # ordering by e.g. a many-to-many or method field is unaffected.
+            self.ordering_fields = [
+                name for name, _label in OrderingFilter().get_default_valid_fields(
+                    qs, self, {"request": self.request}
+                )
+                if name not in masked_fields
+            ]
 
         # The base manager no longer injects a default order (it would leak into
         # GROUP BY on aggregations), so guarantee a deterministic newest-first

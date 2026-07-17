@@ -462,6 +462,72 @@ class TestRunExportJob:
         assert "disk full" in job.error
 
 
+# ── PII masking (#SEC6) ──────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestExportMasksPii:
+    CUST = {"demo.Customer": ["email", "first_name"]}
+
+    @staticmethod
+    def _seed_customer():
+        from demo.models import Customer
+        Customer.objects.create(
+            first_name="Alice", last_name="Smith", email="alice@example.com",
+            origin="status_a", active=True,
+        )
+
+    @staticmethod
+    def _first_row(job):
+        line = open(exporting.output_path(job)).read().strip().splitlines()[0]
+        return json.loads(line)
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS=CUST)
+    def test_masks_for_unprivileged_requester(self, regular_user):
+        self._seed_customer()
+        job = SnapExportJob.objects.create(
+            app_label="demo", model="Customer", export_format="json", requested_by=regular_user,
+        )
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed"
+        row = self._first_row(job)
+        assert row["email"] == "a***@example.com"
+        assert row["first_name"] == "*****"  # "Alice" (5 chars) fully starred
+        assert row["last_name"] == "Smith"  # not masked
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS=CUST)
+    def test_raw_for_privileged_requester(self, admin_user):
+        self._seed_customer()
+        job = SnapExportJob.objects.create(
+            app_label="demo", model="Customer", export_format="json", requested_by=admin_user,
+        )
+        exporting.run_export_job(job.pk)
+        row = self._first_row(job)
+        assert row["email"] == "alice@example.com"
+        assert row["first_name"] == "Alice"
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS=CUST)
+    def test_no_requester_masks_fail_closed(self):
+        # requested_by can be None (never set, or SET_NULL after the user was
+        # deleted) — must default to masked, not raw.
+        self._seed_customer()
+        job = SnapExportJob.objects.create(
+            app_label="demo", model="Customer", export_format="json", requested_by=None,
+        )
+        exporting.run_export_job(job.pk)
+        row = self._first_row(job)
+        assert row["email"] == "a***@example.com"
+
+    def test_unconfigured_model_untouched(self, regular_user):
+        self._seed_customer()
+        job = SnapExportJob.objects.create(
+            app_label="demo", model="Customer", export_format="json", requested_by=regular_user,
+        )
+        exporting.run_export_job(job.pk)
+        row = self._first_row(job)
+        assert row["email"] == "alice@example.com"  # no SNAPADMIN_MASKED_FIELDS set
+
+
 # ── config helpers ───────────────────────────────────────────────────────────
 
 class TestConfig:
@@ -687,6 +753,20 @@ class TestValidateExportFilters:
                       "category_id": 1},
         )  # must not raise
 
+    def test_masked_field_rejected(self):
+        # #SEC6: an otherwise-allowed filter on a masked field is still an
+        # oracle (job.total_rows leaks a match/no-match) — reject it too.
+        from demo.models import Product
+        from snapadmin.api.exports import _validate_export_filters
+        with pytest.raises(serializers.ValidationError) as exc:
+            _validate_export_filters(Product, {"name": "x"}, {"name"})
+        assert "name" in str(exc.value)
+
+    def test_masked_field_empty_set_is_a_noop(self):
+        from demo.models import Product
+        from snapadmin.api.exports import _validate_export_filters
+        _validate_export_filters(Product, {"name": "x"})  # default masked_fields=frozenset()
+
 
 @pytest.mark.django_db
 class TestExportFilterValidationApi:
@@ -711,6 +791,36 @@ class TestExportFilterValidationApi:
         )
         assert r.status_code == 400
         assert "tags__name" in str(r.json())
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
+    def test_masked_field_rejected_for_unprivileged(self, regular_user, products):
+        from django.contrib.auth.models import Permission
+        from django.contrib.auth import get_user_model
+        from snapadmin.models import APIToken
+        from rest_framework.test import APIClient
+        regular_user.user_permissions.add(Permission.objects.get(codename="view_product"))
+        fresh = get_user_model().objects.get(pk=regular_user.pk)
+        client = APIClient()
+        client.credentials(
+            HTTP_AUTHORIZATION=f"Token {APIToken.create_for_user(fresh, 'Reg').token_key}"
+        )
+        r = client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Product", "filters": {"name": "P1"}},
+            format="json",
+        )
+        assert r.status_code == 400
+        assert "name" in str(r.json())
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
+    def test_masked_field_still_applies_for_privileged(self, auth_client, products):
+        # auth_client's token belongs to a superuser (PII-privileged).
+        r = auth_client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Product", "filters": {"name": "P1"}},
+            format="json",
+        )
+        assert r.status_code == 201
 
     def test_unknown_field_rejected(self, auth_client, products):
         r = auth_client.post(

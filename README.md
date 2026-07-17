@@ -618,7 +618,13 @@ Four settings-driven features, each safe on stock single-database installs (iner
   (`{"users.UserModel": ["email", "phone_number"]}`). They are obfuscated in the admin changelist,
   removed from the admin change form, and masked in both the REST API and GraphQL responses for
   anyone who is not a superuser or a holder of the `snapadmin.view_raw_pii` permission. Emails
-  become `a***@domain.com`, other values `+3********78`.
+  become `a***@domain.com`, other values `+3********78`. Masking is enforced everywhere a masked
+  value could otherwise leak, not just in the response body: a masked field is excluded from
+  `?field=`/`?ordering=field`/`?search=` on the auto-generated REST API for an unprivileged caller
+  (dropped silently, like an unknown param, rather than a 400 that would confirm the field is
+  masked), the async export (`POST /api/exports/`) masks rows unless the requester holds PII
+  access, and the audit trail's `changes` diff is masked in the admin and in
+  `snapadmin_audit_export` (pass `--reveal-pii` to export the raw diff).
 - **SSO/OAuth2 login buttons** — SnapAdmin only *renders* the providers you already wired into
   `AUTHENTICATION_BACKENDS`/URLconf (django-allauth, social-auth, mozilla-django-oidc); it adds no
   auth dependency. `SNAPADMIN_SSO_PROVIDERS` drives login-page buttons (add the
