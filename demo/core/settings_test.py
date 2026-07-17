@@ -1,5 +1,5 @@
 """
-sandbox/settings_test.py
+demo/core/settings_test.py
 
 Lightweight settings override used exclusively by the pytest suite.
 
@@ -11,7 +11,7 @@ Inherits everything from the main settings but:
 - Uses a fast password hasher to speed up User.create_superuser()
 """
 
-from sandbox.settings import *  # noqa: F401, F403
+from demo.core.settings import *  # noqa: F401, F403
 
 # ── Secret Key for tests ─────────────────────────────────────────────────────
 SECRET_KEY = "test-secret-key-123"

@@ -178,7 +178,7 @@ class TestApiWriteFields:
 
 class TestIntegration:
     def test_default_config_is_clean(self):
-        # The sandbox default settings must not raise any SnapAdmin check error.
+        # The demo project's default settings must not raise any SnapAdmin check error.
         call_command("check")
 
     def test_register_is_idempotent(self):

@@ -32,7 +32,7 @@ def _grant(user, *codenames):
 class TestAuthenticationClassesSetting:
     @override_settings(SNAPADMIN_API_AUTHENTICATION_CLASSES=None)
     def test_default_is_api_token_auth(self):
-        # Package default when the setting is unset (the sandbox overrides it).
+        # Package default when the setting is unset (the demo project overrides it).
         assert get_api_authentication_classes() == [APITokenAuthentication]
 
     @override_settings(SNAPADMIN_API_AUTHENTICATION_CLASSES=SESSION_ONLY)

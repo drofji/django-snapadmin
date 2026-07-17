@@ -2,7 +2,7 @@ from pathlib import Path
 from django.utils.translation import gettext_lazy as _
 import os
 
-BASE_DIR = Path(__file__).resolve().parent.parent
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 def static_lambda(path):
     from django.templatetags.static import static
@@ -85,7 +85,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-ROOT_URLCONF = 'sandbox.urls'
+ROOT_URLCONF = 'demo.core.urls'
 
 TEMPLATES = [
     {
@@ -104,7 +104,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'sandbox.wsgi.application'
+WSGI_APPLICATION = 'demo.core.wsgi.application'
 
 DB_HOST = os.getenv('POSTGRES_HOST')
 if DB_HOST:

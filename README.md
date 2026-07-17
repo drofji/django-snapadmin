@@ -28,7 +28,7 @@ This is the only code published to PyPI (the top-level `snapadmin/` folder). It 
 → Full list in **[SnapAdmin Package Features](#-snapadmin-package-features)** · customise it in
 **[Extending & Overriding](#-extending--overriding)**.
 
-**🌟 The Demo — the rest of this repo** (`demo/`, `sandbox/`, Docker, Traefik). *Not* published to
+**🌟 The Demo — the rest of this repo** (`demo/`, Docker, Traefik). *Not* published to
 PyPI. It exists purely to let you **evaluate and develop** SnapAdmin: example domain models
 (Product/Customer/Order), a seeded database, a Docker stack with PostgreSQL/Redis/Elasticsearch,
 and a system dashboard.
@@ -592,7 +592,7 @@ locales** — English, Russian, German, **Swiss German** (`de_CH`, ß→ss), Fre
 (`fr_CH`), Spanish, Italian, Polish, Dutch. A missing string falls back to English automatically.
 
 ```python
-# settings.py  (the sandbox already wires this up)
+# settings.py  (the demo project already wires this up)
 MIDDLEWARE = [..., "django.middleware.locale.LocaleMiddleware", ...]  # after SessionMiddleware
 LANGUAGES = [("en", "English"), ("ru", "Russian"), ("de", "German"), ("de-ch", "Swiss German"), ...]
 ```
@@ -1795,7 +1795,7 @@ Copy `dist.env` to `.env` and configure:
 
 ## 🌟 Demo Application Features
 
-The repository includes a `demo/` app and a `sandbox/` project to showcase SnapAdmin's power:
+The repository includes a `demo/` project (`demo/core/` config + the `demo` app) to showcase SnapAdmin's power:
 
 - **Complete Project Setup**: Ready-to-use Docker environment with PostgreSQL, Redis, and Elasticsearch.
 - **Example Domain Models**: Product, Customer, and Order models showing complex relationships.

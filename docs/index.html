@@ -324,7 +324,7 @@
 
   <!-- ── Demo Setup ───────────────────────────────────────────────────────── -->
   <h2 id="demo-setup">🌟 Running the Demo</h2>
-  <p>The repository includes a complete sandbox project to explore all features.</p>
+  <p>The repository includes a complete demo project to explore all features.</p>
 
   <h3>Via Docker (Recommended)</h3>
   <pre><code>git clone https://github.com/drofji/django-snapadmin.git
@@ -1452,9 +1452,9 @@ CELERY_BEAT_SCHEDULE = {
   <h3>Running Celery in Docker</h3>
   <pre><code># docker-compose.yml services:
 worker:
-  command: celery -A sandbox worker -l INFO
+  command: celery -A demo.core worker -l INFO
 beat:
-  command: celery -A sandbox beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler</code></pre>
+  command: celery -A demo.core beat -l INFO --scheduler django_celery_beat.schedulers:DatabaseScheduler</code></pre>
 
   <!-- ── Structured Logging ────────────────────────────────────────────────── -->
   <h2 id="logging">🪵 Structured Logging</h2>

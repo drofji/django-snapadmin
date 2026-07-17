@@ -780,7 +780,7 @@ class TestDynamicViewSetThrottling:
         cache.clear()
 
     def test_anon_and_user_throttle_default_rates(self, monkeypatch):
-        # The test settings pin both to None (see sandbox/settings_test.py) so
+        # The test settings pin both to None (see demo/core/settings_test.py) so
         # the suite never throttles itself. Simulate a host project that never
         # set either setting at all by swapping in a bare namespace for the
         # module-level `settings` name get_rate() reads from.

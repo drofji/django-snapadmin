@@ -24,7 +24,7 @@ def admin_client(admin_user):
 @pytest.mark.django_db
 class TestUserApiRoutingToggle:
     def test_routes_present_by_default_in_demo(self):
-        # sandbox enables SNAPADMIN_USER_API_ENABLED
+        # the demo project enables SNAPADMIN_USER_API_ENABLED
         assert reverse("api-user-list")
         assert reverse("permission-list")
 
@@ -161,6 +161,6 @@ class TestUserApiDisabled:
     def test_routes_absent_when_disabled(self):
         # The URLconf reads the setting at import; reverse still works because
         # the demo mounted them. This test asserts the toggle default is False
-        # in the package (documented opt-in), not the sandbox override.
+        # in the package (documented opt-in), not the demo project override.
         from django.conf import settings as dj_settings
         assert getattr(dj_settings, "SNAPADMIN_USER_API_ENABLED") is True  # demo opts in

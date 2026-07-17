@@ -31,7 +31,7 @@ x-app-common: &app-common
     dockerfile: Dockerfile
   env_file: .env
   environment:
-    DJANGO_SETTINGS_MODULE: sandbox.settings
+    DJANGO_SETTINGS_MODULE: demo.core.settings
     POSTGRES_HOST: db
     REDIS_URL: redis://redis:6379/0
     # ELASTICSEARCH_URL is set here so app can reach ES when profile is active.
@@ -85,7 +85,7 @@ services:
       sh -c "python manage.py migrate --noinput &&
              python manage.py collectstatic --noinput &&
              python manage.py seed_demo --no-index &&
-             gunicorn sandbox.wsgi:application --bind 0.0.0.0:8000 --workers 4 --worker-class sync --timeout 120 --access-logfile - --error-logfile -"
+             gunicorn demo.core.wsgi:application --bind 0.0.0.0:8000 --workers 4 --worker-class sync --timeout 120 --access-logfile - --error-logfile -"
     ports:
       - "8000:8000"
     volumes:
@@ -101,7 +101,7 @@ services:
   # ── Celery Worker ───────────────────────────────────────────────────────────
   worker:
     <<: *app-common
-    command: celery -A sandbox worker --loglevel=info --concurrency=4 -Q celery
+    command: celery -A demo.core worker --loglevel=info --concurrency=4 -Q celery
     restart: unless-stopped
     depends_on:
       - app
@@ -111,7 +111,7 @@ services:
   # and modify the schedule from the Django admin UI.
   beat:
     <<: *app-common
-    command: celery -A sandbox beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    command: celery -A demo.core beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     restart: unless-stopped
     depends_on:
       - app
