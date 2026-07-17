@@ -4,12 +4,12 @@
 # Default stack (no flags):
 #   docker compose up --build
 #   Starts: db, redis, app, worker, beat
-#   ELASTICSEARCH_ENABLED defaults to False in .env (no ES overhead)
+#   ELASTICSEARCH_ENABLED defaults to False in demo/.env (no ES overhead)
 #
 # With Elasticsearch (full search features):
 #   docker compose --profile es up --build
 #   Starts: everything above + elasticsearch
-#   Set ELASTICSEARCH_ENABLED=True in your .env before running
+#   Set ELASTICSEARCH_ENABLED=True in your demo/.env before running
 #
 # With Kibana (ES visualisation, dev only):
 #   docker compose --profile es --profile dev up --build
@@ -29,13 +29,13 @@ x-app-common: &app-common
   build:
     context: .
     dockerfile: Dockerfile
-  env_file: .env
+  env_file: demo/.env
   environment:
     DJANGO_SETTINGS_MODULE: demo.core.settings
     POSTGRES_HOST: db
     REDIS_URL: redis://redis:6379/0
     # ELASTICSEARCH_URL is set here so app can reach ES when profile is active.
-    # ELASTICSEARCH_ENABLED comes from .env — set to True only when running --profile es.
+    # ELASTICSEARCH_ENABLED comes from demo/.env — set to True only when running --profile es.
     ELASTICSEARCH_URL: http://elasticsearch:9200
     JSON_LOGS: "True"
   depends_on:
@@ -82,9 +82,9 @@ services:
   app:
     <<: *app-common
     command: >
-      sh -c "python manage.py migrate --noinput &&
-             python manage.py collectstatic --noinput &&
-             python manage.py seed_demo --no-index &&
+      sh -c "python demo/manage.py migrate --noinput &&
+             python demo/manage.py collectstatic --noinput &&
+             python demo/manage.py seed_demo --no-index &&
              gunicorn demo.core.wsgi:application --bind 0.0.0.0:8000 --workers 4 --worker-class sync --timeout 120 --access-logfile - --error-logfile -"
     ports:
       - "8000:8000"
@@ -118,7 +118,7 @@ services:
 
   # ── Elasticsearch ───────────────────────────────────────────────────────────
   # Optional — only starts when running: docker compose --profile es up
-  # Also set ELASTICSEARCH_ENABLED=True in your .env file.
+  # Also set ELASTICSEARCH_ENABLED=True in your demo/.env file.
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
     restart: unless-stopped

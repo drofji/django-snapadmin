@@ -1709,7 +1709,7 @@ in the full documentation.
 
 ## 🔧 Environment Variables Reference
 
-Copy `dist.env` to `.env` and configure:
+Copy `demo/dist.env` to `demo/.env` and configure:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -1810,7 +1810,7 @@ The repository includes a `demo/` project (`demo/core/` config + the `demo` app)
 ```bash
 git clone https://github.com/drofji/django-snapadmin.git
 cd django-snapadmin
-cp dist.env .env
+cp demo/dist.env demo/.env
 docker compose up --build
 ```
 - **Admin**: http://localhost:8000/admin/ (admin / admin)
@@ -1819,8 +1819,8 @@ docker compose up --build
 
 **With Elasticsearch** (optional, adds ~512 MB RAM):
 ```bash
-# 1. Enable in .env
-echo "ELASTICSEARCH_ENABLED=True" >> .env
+# 1. Enable in demo/.env
+echo "ELASTICSEARCH_ENABLED=True" >> demo/.env
 
 # 2. Start with ES profile
 docker compose --profile es up --build
@@ -1887,12 +1887,12 @@ On Windows, add to `C:\Windows\System32\drivers\etc\hosts`:
 
 ### Production (HTTPS + Let's Encrypt)
 
-For production with automatic TLS certificates, set these values in `.env`:
+For production with automatic TLS certificates, set these values in `demo/.env`:
 
 ```env
 TRAEFIK_DOMAIN=admin.mycompany.com
 TRAEFIK_ACME_EMAIL=your@email.com
-TRAEFIK_DASHBOARD_CREDENTIALS=admin:$$apr1$$...   # see dist.env for generation instructions
+TRAEFIK_DASHBOARD_CREDENTIALS=admin:$$apr1$$...   # see demo/dist.env for generation instructions
 ALLOWED_HOSTS=admin.mycompany.com
 DEBUG=False
 ```
@@ -1912,12 +1912,12 @@ All HTTP traffic is automatically redirected to HTTPS.
 
 ### Dashboard credentials
 
-The default credentials in `dist.env` are `admin` / `changeme`. To change them:
+The default credentials in `demo/dist.env` are `admin` / `changeme`. To change them:
 
 ```bash
 # Generate htpasswd string and escape $ for Docker Compose
 echo $(htpasswd -nb newuser newpassword) | sed -e 's/\$/\$\$/g'
-# Paste result into TRAEFIK_DASHBOARD_CREDENTIALS in .env
+# Paste result into TRAEFIK_DASHBOARD_CREDENTIALS in demo/.env
 ```
 
 ---
@@ -1932,13 +1932,13 @@ python -m venv .venv
 source .venv/bin/activate
 
 # Install in editable mode
-pip install -r requirements.txt
+pip install -r demo/requirements.txt
 pip install -e .
 
 # Initialize DB and run
-python manage.py migrate
-python manage.py seed_demo
-python manage.py runserver
+python demo/manage.py migrate
+python demo/manage.py seed_demo
+python demo/manage.py runserver
 ```
 
 ---

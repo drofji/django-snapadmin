@@ -1,7 +1,7 @@
 """
 Showcase the generic ETL helper: refresh currency rates from an "external" feed.
 
-    python manage.py sync_exchange_rates
+    python demo/manage.py sync_exchange_rates
 
 Re-running is idempotent — rows match on `code`, so a second run updates the
 rates in place instead of duplicating (demonstrating

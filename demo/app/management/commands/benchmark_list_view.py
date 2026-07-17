@@ -4,12 +4,12 @@ demo/management/commands/benchmark_list_view.py
 Benchmark an admin changelist queryset with vs without SnapAdmin's auto
 ``list_select_related`` optimization, printing query count and wall time for
 each. This is the "before/after" instrument for roadmap task #0 — run it after
-``python manage.py seed_large`` to capture real numbers on a populated table.
+``python demo/manage.py seed_large`` to capture real numbers on a populated table.
 
 Usage:
-    python manage.py benchmark_list_view                  # Order model, all rows
-    python manage.py benchmark_list_view --limit 1000     # cap rows scanned
-    python manage.py benchmark_list_view --model order    # pick the model
+    python demo/manage.py benchmark_list_view                  # Order model, all rows
+    python demo/manage.py benchmark_list_view --limit 1000     # cap rows scanned
+    python demo/manage.py benchmark_list_view --model order    # pick the model
 
 The benchmark iterates the queryset and touches each row's FK (``order.customer``)
 to surface the N+1 storm in the unoptimized case.

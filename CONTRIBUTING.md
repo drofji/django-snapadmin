@@ -6,8 +6,8 @@ that aren't obvious from the code.
 - **Package source:** the published package lives in [`snapadmin/`](snapadmin/). Everything
   else (`demo/`, `tests/`, `docs/`) supports development and is **not** shipped to PyPI.
 - **Tests:** `pytest` — the `snapadmin/` package is kept at 100% line coverage.
-- **Migrations:** after any model change, run `python manage.py makemigrations` and commit the
-  generated migration; never edit an existing migration.
+- **Migrations:** after any model change, run `python demo/manage.py makemigrations` and commit
+  the generated migration; never edit an existing migration.
 
 ## Releasing to PyPI
 

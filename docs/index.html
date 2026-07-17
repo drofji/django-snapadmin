@@ -329,7 +329,7 @@
   <h3>Via Docker (Recommended)</h3>
   <pre><code>git clone https://github.com/drofji/django-snapadmin.git
 cd django-snapadmin
-cp dist.env .env
+cp demo/dist.env demo/.env
 docker compose up --build</code></pre>
 
   <h3>With Traefik — Local Development (HTTP)</h3>
@@ -343,10 +343,10 @@ docker compose up --build</code></pre>
   <pre><code>127.0.0.1 snapadmin.localhost traefik.localhost</code></pre>
 
   <h3>With Traefik — Production (HTTPS + Let's Encrypt)</h3>
-  <p>Automatic TLS certificates for your custom domain. Set in <code>.env</code>:</p>
+  <p>Automatic TLS certificates for your custom domain. Set in <code>demo/.env</code>:</p>
   <pre><code>TRAEFIK_DOMAIN=admin.mycompany.com
 TRAEFIK_ACME_EMAIL=your@email.com
-TRAEFIK_DASHBOARD_CREDENTIALS=admin:$$apr1$$...   # see dist.env for generation
+TRAEFIK_DASHBOARD_CREDENTIALS=admin:$$apr1$$...   # see demo/dist.env for generation
 ALLOWED_HOSTS=admin.mycompany.com
 DEBUG=False</code></pre>
 
@@ -360,18 +360,18 @@ DEBUG=False</code></pre>
   <h4>Generating Dashboard Credentials</h4>
   <pre><code># Requires apache2-utils (apt) or httpd-tools (yum)
 echo $(htpasswd -nb admin yourpassword) | sed -e 's/\$/\$\$/g'
-# Paste result into TRAEFIK_DASHBOARD_CREDENTIALS in .env</code></pre>
+# Paste result into TRAEFIK_DASHBOARD_CREDENTIALS in demo/.env</code></pre>
 
   <h3>Manual / Local Setup</h3>
   <pre><code>git clone https://github.com/drofji/django-snapadmin.git
 cd django-snapadmin
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r demo/requirements.txt
 pip install -e .
 
-python manage.py migrate
-python manage.py seed_demo
-python manage.py runserver</code></pre>
+python demo/manage.py migrate
+python demo/manage.py seed_demo
+python demo/manage.py runserver</code></pre>
 
   <h3>Building images with automatic retention</h3>
   <p>For the test/demo image, <code>scripts/docker_build.sh</code> builds, tags by build-day, and self-prunes so old images never pile up:</p>
@@ -1226,7 +1226,7 @@ ELASTICSEARCH_URL = "http://localhost:9200"  # local dev or external cluster</co
 
   <h3>Running with Docker</h3>
   <p>The default <code>docker compose up</code> does <strong>not</strong> start Elasticsearch (saves ~512 MB RAM). To enable it:</p>
-  <pre><code># Enable ES in your .env
+  <pre><code># Enable ES in your demo/.env
 ELASTICSEARCH_ENABLED=True
 
 # Then start the full stack including ES
@@ -1237,7 +1237,7 @@ docker compose --profile es --profile dev up --build</code></pre>
 
   <h3>External Elasticsearch (production / staging)</h3>
   <p>Point to any external ES cluster via env vars — no code change needed:</p>
-  <pre><code># .env (production)
+  <pre><code># demo/.env (production)
 ELASTICSEARCH_ENABLED=True
 ELASTICSEARCH_URL=https://my-cluster.example.com:9200</code></pre>
 

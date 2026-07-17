@@ -174,7 +174,7 @@ class AuditLog(snap_models.SnapModel):
     """
     Demonstrates GDPR data retention.
     Records older than data_retention_days are auto-deleted by the purge_expired_data
-    Celery task. Run manually: python manage.py purge_expired_data --dry-run
+    Celery task. Run manually: python demo/manage.py purge_expired_data --dry-run
     """
     action = snap_fields.SnapCharField(max_length=100, verbose_name=_("Action"), searchable=True, show_in_list=True, show_in_form=True)
     user_email = snap_fields.SnapEmailField(verbose_name=_("User Email"), show_in_list=True, show_in_form=True)

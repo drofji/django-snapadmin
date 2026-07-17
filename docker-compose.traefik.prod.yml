@@ -11,7 +11,7 @@
 # Requirements:
 #   - Ports 80 and 443 open and reachable from the internet
 #   - DNS: ${TRAEFIK_DOMAIN} and traefik.${TRAEFIK_DOMAIN} must resolve to this server
-#   - Set in .env:
+#   - Set in demo/.env:
 #       TRAEFIK_DOMAIN=admin.mycompany.com
 #       TRAEFIK_ACME_EMAIL=your@email.com
 #       TRAEFIK_DASHBOARD_CREDENTIALS=admin:$$hashed_password$$...
@@ -51,7 +51,7 @@ services:
       - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
       - "traefik.http.routers.dashboard.service=api@internal"
       - "traefik.http.routers.dashboard.middlewares=dashboard-auth"
-      # BasicAuth — set TRAEFIK_DASHBOARD_CREDENTIALS in .env
+      # BasicAuth — set TRAEFIK_DASHBOARD_CREDENTIALS in demo/.env
       - "traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_CREDENTIALS}"
       # Global HTTP → HTTPS redirect
       - "traefik.http.routers.http-catchall.rule=HostRegexp(`{host:.+}`)"

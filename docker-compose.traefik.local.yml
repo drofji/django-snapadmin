@@ -11,7 +11,7 @@
 #   - No other process listening on port 80
 #   - *.localhost resolves natively on macOS/Linux; on Windows add to hosts file:
 #       127.0.0.1 snapadmin.localhost traefik.localhost
-#   - TRAEFIK_DASHBOARD_CREDENTIALS set in .env (htpasswd format)
+#   - TRAEFIK_DASHBOARD_CREDENTIALS set in demo/.env (htpasswd format)
 #     Generate: echo $(htpasswd -nb admin yourpassword) | sed -e 's/\$/\$\$/g'
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -37,7 +37,7 @@ services:
       - "traefik.http.routers.dashboard.entrypoints=web"
       - "traefik.http.routers.dashboard.service=api@internal"
       - "traefik.http.routers.dashboard.middlewares=dashboard-auth"
-      # BasicAuth — set TRAEFIK_DASHBOARD_CREDENTIALS in .env
+      # BasicAuth — set TRAEFIK_DASHBOARD_CREDENTIALS in demo/.env
       - "traefik.http.middlewares.dashboard-auth.basicauth.users=${TRAEFIK_DASHBOARD_CREDENTIALS}"
 
   # ── App — routed through Traefik ────────────────────────────────────────────

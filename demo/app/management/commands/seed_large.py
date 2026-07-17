@@ -5,15 +5,15 @@ Bulk-seed a large number of rows so the list-view optimizations from roadmap
 task #0 can be benchmarked with real before/after timings.
 
 Usage:
-    python manage.py seed_large                       # 100,000 customers + orders
-    python manage.py seed_large --count 250000        # custom row count
-    python manage.py seed_large --batch-size 10000    # tune bulk_create batches
-    python manage.py seed_large --flush               # wipe large-seed data first
-    python manage.py seed_large --no-index            # skip Elasticsearch indexing
+    python demo/manage.py seed_large                       # 100,000 customers + orders
+    python demo/manage.py seed_large --count 250000        # custom row count
+    python demo/manage.py seed_large --batch-size 10000    # tune bulk_create batches
+    python demo/manage.py seed_large --flush               # wipe large-seed data first
+    python demo/manage.py seed_large --no-index            # skip Elasticsearch indexing
 
 Seeds Customers and Orders (Order → Customer FK) specifically to exercise the
 auto-derived ``list_select_related`` path on the Order admin list view. Pair it
-with ``python manage.py benchmark_list_view`` to capture before/after numbers.
+with ``python demo/manage.py benchmark_list_view`` to capture before/after numbers.
 
 All inserts use ``bulk_create`` in batches so memory stays flat regardless of
 ``--count``.
@@ -100,7 +100,7 @@ class Command(BaseCommand):
         self.stdout.write(f"   Customers : {Customer.objects.count():,}")
         self.stdout.write(f"   Orders    : {Order.objects.count():,}")
         self.stdout.write("")
-        self.stdout.write("   Benchmark : python manage.py benchmark_list_view")
+        self.stdout.write("   Benchmark : python demo/manage.py benchmark_list_view")
 
     # ── Private helpers ───────────────────────────────────────────────────────
 

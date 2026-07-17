@@ -4,10 +4,10 @@ demo/management/commands/seed_demo.py
 Management command to populate the database with demo data.
 
 Usage:
-    python manage.py seed_demo              # Seed with default 50 objects each
-    python manage.py seed_demo --count 20   # Custom count
-    python manage.py seed_demo --flush      # Wipe existing demo data first
-    python manage.py seed_demo --no-index   # Skip Elasticsearch indexing
+    python demo/manage.py seed_demo              # Seed with default 50 objects each
+    python demo/manage.py seed_demo --count 20   # Custom count
+    python demo/manage.py seed_demo --flush      # Wipe existing demo data first
+    python demo/manage.py seed_demo --no-index   # Skip Elasticsearch indexing
 
 This command is also invoked automatically after the first ``migrate`` run
 when SNAPADMIN_AUTO_SEED=True is set in the environment.
