@@ -1,12 +1,17 @@
 from django.contrib import admin
+from django.contrib.auth import views as auth_views
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from snapadmin.views import DashboardView
-from demo.app.views import product_search, trigger_error
+from demo.app.views import LandingView, product_search, trigger_error
 
 urlpatterns = [
-    path('', DashboardView.as_view(), name='dashboard'),
+    # Public landing page (login form for anonymous, session + demo facts for
+    # authenticated). The staff-only system dashboard lives at /dashboard/.
+    path('', LandingView.as_view(), name='landing'),
+    path('dashboard/', DashboardView.as_view(), name='dashboard'),
+    path('logout/', auth_views.LogoutView.as_view(next_page='landing'), name='logout'),
     path('admin/', admin.site.urls),
     # i18n: set_language view backing the SnapAdmin language switcher (issue #9).
     path('i18n/', include('django.conf.urls.i18n')),

@@ -76,23 +76,23 @@ class TestSettings:
 class TestDashboardLocalised:
     # The dashboard is staff-gated, so render it through an authenticated admin.
     def test_default_english(self, admin_client):
-        html = admin_client.get("/").content.decode()
+        html = admin_client.get("/dashboard/").content.decode()
         assert "System Health" in html
         assert '<html lang="en">' in html
 
     def test_russian_via_language_header(self, admin_client):
         # Accept-Language drives LocaleMiddleware; the dashboard renders in ru.
-        html = admin_client.get("/", HTTP_ACCEPT_LANGUAGE="ru").content.decode()
+        html = admin_client.get("/dashboard/", HTTP_ACCEPT_LANGUAGE="ru").content.decode()
         assert "Состояние системы" in html
         assert '<html lang="ru">' in html
 
     def test_language_switcher_present(self, admin_client):
-        html = admin_client.get("/").content.decode()
+        html = admin_client.get("/dashboard/").content.decode()
         assert 'name="language"' in html          # the switcher <select>
         assert '/i18n/setlang/' in html            # posts to set_language
 
     def test_set_language_switches_locale(self, admin_client):
-        resp = admin_client.post("/i18n/setlang/", {"language": "de", "next": "/"})
+        resp = admin_client.post("/i18n/setlang/", {"language": "de", "next": "/dashboard/"})
         assert resp.status_code in (302, 200)
-        html = admin_client.get("/").content.decode()
+        html = admin_client.get("/dashboard/").content.decode()
         assert "Verwaltete Modelle" in html        # "Managed Models" in German

@@ -1,0 +1,308 @@
+{% load i18n %}<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SnapAdmin Demo</title>
+  <style>
+    /* Design tokens — a neutral slate/indigo palette in the spirit of the
+       Unfold admin this page links to, kept self-contained (no external CSS,
+       fonts or scripts) so the page renders air-gapped and works for an
+       anonymous visitor with no admin context. Dark mode follows the OS. */
+    :root {
+      --bg: #f1f5f9;
+      --panel: #ffffff;
+      --panel-2: #f8fafc;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #4f46e5;
+      --accent-fg: #ffffff;
+      --ok-bg: #dcfce7; --ok-fg: #166534;
+      --off-bg: #f1f5f9; --off-fg: #94a3b8;
+      --shadow: 0 1px 3px rgba(15, 23, 42, .08), 0 1px 2px rgba(15, 23, 42, .04);
+      --radius: 14px;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b1120;
+        --panel: #111827;
+        --panel-2: #0f172a;
+        --border: #1f2937;
+        --text: #e5e7eb;
+        --muted: #94a3b8;
+        --accent: #6366f1;
+        --ok-bg: #052e1a; --ok-fg: #4ade80;
+        --off-bg: #1f2937; --off-fg: #64748b;
+        --shadow: 0 1px 3px rgba(0, 0, 0, .4);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      min-height: 100%;
+    }
+
+    /* ── Anonymous: centered login card ─────────────────────────────────── */
+    .auth-wrap {
+      margin: auto;
+      width: 100%;
+      max-width: 380px;
+      padding: 24px;
+    }
+    .brand { text-align: center; margin-bottom: 22px; }
+    .brand .logo {
+      width: 46px; height: 46px; border-radius: 12px;
+      background: var(--accent); color: var(--accent-fg);
+      display: inline-flex; align-items: center; justify-content: center;
+      font-weight: 700; font-size: 22px;
+    }
+    .brand h1 { font-size: 20px; margin: 12px 0 2px; }
+    .brand p { color: var(--muted); font-size: 13px; margin: 0; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px;
+    }
+    .card label { display: block; font-size: 13px; font-weight: 600; margin: 0 0 6px; }
+    .card input[type=text], .card input[type=password] {
+      width: 100%; padding: 10px 12px; margin-bottom: 16px;
+      border: 1px solid var(--border); border-radius: 10px;
+      background: var(--panel-2); color: var(--text); font-size: 14px;
+    }
+    .card input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      width: 100%; padding: 11px 14px; border: 0; border-radius: 10px; cursor: pointer;
+      background: var(--accent); color: var(--accent-fg); font-size: 14px; font-weight: 600;
+      text-decoration: none;
+    }
+    .btn.secondary {
+      background: var(--panel-2); color: var(--text); border: 1px solid var(--border);
+    }
+    .btn:hover { filter: brightness(1.06); }
+    .errors { color: #dc2626; font-size: 13px; margin: 0 0 14px; }
+    .hint { color: var(--muted); font-size: 12px; text-align: center; margin-top: 16px; }
+
+    /* ── Authenticated: app shell (single viewport, no page scroll) ─────── */
+    .shell {
+      margin: auto;
+      width: 100%;
+      max-width: 960px;
+      height: 100%;
+      max-height: 640px;
+      padding: 20px;
+      display: flex;
+    }
+    .shell-inner {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .topbar {
+      display: flex; align-items: center; gap: 14px;
+      padding: 14px 18px; border-bottom: 1px solid var(--border);
+    }
+    .topbar .logo {
+      width: 34px; height: 34px; border-radius: 9px;
+      background: var(--accent); color: var(--accent-fg);
+      display: inline-flex; align-items: center; justify-content: center; font-weight: 700;
+    }
+    .topbar .title { font-weight: 700; font-size: 15px; }
+    .topbar .who { margin-left: auto; color: var(--muted); font-size: 13px; }
+    .topbar .who b { color: var(--text); }
+    .logout-btn {
+      padding: 7px 12px; border-radius: 9px; border: 1px solid var(--border);
+      background: var(--panel-2); color: var(--text); font-size: 13px; font-weight: 600;
+      cursor: pointer;
+    }
+    .tabs { display: flex; gap: 4px; padding: 10px 14px 0; border-bottom: 1px solid var(--border); }
+    .tab {
+      appearance: none; border: 0; background: transparent; cursor: pointer;
+      padding: 9px 14px; border-radius: 9px 9px 0 0; font-size: 13px; font-weight: 600;
+      color: var(--muted); border-bottom: 2px solid transparent;
+    }
+    .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+    .tab:hover { color: var(--text); }
+    .content { flex: 1; padding: 20px; overflow: auto; }
+    .panel-title { font-size: 13px; text-transform: uppercase; letter-spacing: .04em;
+      color: var(--muted); margin: 0 0 14px; }
+
+    .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 12px; }
+    .tile {
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px; text-decoration: none; color: inherit; display: block;
+    }
+    .tile:hover { border-color: var(--accent); }
+    .tile .num { font-size: 26px; font-weight: 700; line-height: 1; }
+    .tile .lbl { color: var(--muted); font-size: 12px; margin-top: 6px; }
+
+    .svc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+    .svc {
+      display: flex; align-items: center; justify-content: space-between;
+      background: var(--panel-2); border: 1px solid var(--border); border-radius: 11px;
+      padding: 12px 14px; font-size: 14px;
+    }
+    .pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; }
+    .pill.on { background: var(--ok-bg); color: var(--ok-fg); }
+    .pill.off { background: var(--off-bg); color: var(--off-fg); }
+
+    .actions { display: flex; flex-direction: column; gap: 10px; max-width: 320px; }
+    .note { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; margin-bottom: 18px; }
+    [role="tabpanel"][hidden] { display: none; }
+  </style>
+</head>
+<body>
+{% if not user.is_authenticated %}
+  {# ── Anonymous → login ─────────────────────────────────────────────── #}
+  <main class="auth-wrap">
+    <div class="brand">
+      <span class="logo">S</span>
+      <h1>SnapAdmin Demo</h1>
+      <p>{% trans "Sign in to explore the demo" %}</p>
+    </div>
+    <form class="card" method="post" action="{% url 'landing' %}">
+      {% csrf_token %}
+      {% if login_form.non_field_errors %}
+        <div class="errors">{{ login_form.non_field_errors }}</div>
+      {% endif %}
+      <label for="{{ login_form.username.id_for_label }}">{% trans "Username" %}</label>
+      <input type="text" name="{{ login_form.username.html_name }}"
+             id="{{ login_form.username.id_for_label }}" autocomplete="username" autofocus required>
+      <label for="{{ login_form.password.id_for_label }}">{% trans "Password" %}</label>
+      <input type="password" name="{{ login_form.password.html_name }}"
+             id="{{ login_form.password.id_for_label }}" autocomplete="current-password" required>
+      <button class="btn" type="submit">{% trans "Sign in" %}</button>
+      <p class="hint">{% trans "This is a demo environment for django-snapadmin." %}</p>
+    </form>
+  </main>
+{% else %}
+  {# ── Authenticated → app-shell ─────────────────────────────────────── #}
+  <div class="shell">
+    <div class="shell-inner">
+      <div class="topbar">
+        <span class="logo">S</span>
+        <span class="title">SnapAdmin Demo</span>
+        <span class="who">{% trans "Signed in as" %} <b>{{ user.get_username }}</b></span>
+        <form method="post" action="{% url 'logout' %}" style="margin:0">
+          {% csrf_token %}
+          <button class="logout-btn" type="submit">{% trans "Log out" %}</button>
+        </form>
+      </div>
+
+      <div class="tabs" role="tablist">
+        <button class="tab" role="tab" aria-selected="true"  aria-controls="p-overview" id="t-overview">{% trans "Overview" %}</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="p-stats"    id="t-stats">{% trans "Stats" %}</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="p-services" id="t-services">{% trans "API &amp; Services" %}</button>
+        <button class="tab" role="tab" aria-selected="false" aria-controls="p-admin"    id="t-admin">{% trans "Admin" %}</button>
+      </div>
+
+      <div class="content">
+        {# Overview #}
+        <section role="tabpanel" id="p-overview" aria-labelledby="t-overview">
+          <p class="panel-title">{% trans "Overview" %}</p>
+          <div class="overview-grid">
+            <div class="tile">
+              <div class="num">{{ stats|length }}</div>
+              <div class="lbl">{% trans "Demo models" %}</div>
+            </div>
+            <div class="tile">
+              <div class="num">{{ services_enabled_count }}</div>
+              <div class="lbl">{% trans "Services enabled" %}</div>
+            </div>
+            {% if user.is_staff %}
+            <div class="tile">
+              <div class="num">✓</div>
+              <div class="lbl">{% trans "Staff access" %}</div>
+            </div>
+            {% endif %}
+          </div>
+          <p class="note">
+            {% blocktrans %}Welcome. Use the tabs above to see demo record counts, which
+            optional SnapAdmin surfaces are enabled, and — for staff — links into the
+            admin and the full system dashboard.{% endblocktrans %}
+          </p>
+        </section>
+
+        {# Stats #}
+        <section role="tabpanel" id="p-stats" aria-labelledby="t-stats" hidden>
+          <p class="panel-title">{% trans "Record counts" %}</p>
+          <div class="tiles">
+            {% for s in stats %}
+              {% if s.url %}<a class="tile" href="{{ s.url }}">{% else %}<div class="tile">{% endif %}
+                <div class="num">{% if s.count is None %}—{% else %}{{ s.count }}{% endif %}</div>
+                <div class="lbl">{{ s.name }}</div>
+              {% if s.url %}</a>{% else %}</div>{% endif %}
+            {% empty %}
+              <p class="note">{% trans "No demo models found." %}</p>
+            {% endfor %}
+          </div>
+        </section>
+
+        {# API & Services #}
+        <section role="tabpanel" id="p-services" aria-labelledby="t-services" hidden>
+          <p class="panel-title">{% trans "Optional surfaces" %}</p>
+          <div class="svc-grid">
+            {% for svc in services %}
+              <div class="svc">
+                <span>{{ svc.label }}</span>
+                {% if svc.enabled %}
+                  <span class="pill on">{% trans "ON" %}</span>
+                {% else %}
+                  <span class="pill off">{% trans "OFF" %}</span>
+                {% endif %}
+              </div>
+            {% endfor %}
+          </div>
+        </section>
+
+        {# Admin #}
+        <section role="tabpanel" id="p-admin" aria-labelledby="t-admin" hidden>
+          <p class="panel-title">{% trans "Admin & tools" %}</p>
+          {% if user.is_staff %}
+            <div class="actions">
+              <a class="btn" href="{{ admin_url }}">{% trans "Open Admin" %}</a>
+              {% if dashboard_url %}<a class="btn secondary" href="{{ dashboard_url }}">{% trans "System dashboard" %}</a>{% endif %}
+              {% if swagger_url %}<a class="btn secondary" href="{{ swagger_url }}">{% trans "API docs (Swagger)" %}</a>{% endif %}
+            </div>
+          {% else %}
+            <p class="note">
+              {% blocktrans %}Your account does not have staff access, so the Django admin
+              and the system dashboard aren't available. Ask an administrator to grant
+              staff status.{% endblocktrans %}
+            </p>
+          {% endif %}
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+      function select(tab) {
+        tabs.forEach(function (t) {
+          var selected = t === tab;
+          t.setAttribute('aria-selected', selected ? 'true' : 'false');
+          document.getElementById(t.getAttribute('aria-controls')).hidden = !selected;
+        });
+      }
+      tabs.forEach(function (t) { t.addEventListener('click', function () { select(t); }); });
+    })();
+  </script>
+{% endif %}
+</body>
+</html>

@@ -17,7 +17,7 @@ class TestDashboardAccessibility:
     @pytest.fixture
     def html(self, admin_client):
         # The dashboard is staff-gated; render it as an authenticated admin.
-        return admin_client.get("/").content.decode()
+        return admin_client.get("/dashboard/").content.decode()
 
     def test_document_language(self, html):
         assert '<html lang="en">' in html
@@ -57,7 +57,7 @@ class TestCronTableScope:
         settings.CELERY_BEAT_SCHEDULE = {
             "demo": {"task": "x", "schedule": "*/5", "description": "d"}
         }
-        html = admin_client.get("/").content.decode()
+        html = admin_client.get("/dashboard/").content.decode()
         assert '<th scope="col">Name</th>' in html
 
 

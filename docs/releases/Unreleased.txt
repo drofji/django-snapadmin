@@ -260,7 +260,11 @@ Demo project restructured into a self-contained ``demo/`` folder
   the repo root) and ``docker compose -f demo/docker-compose.yml up --build``. The example app kept
   its ``demo`` app-label (via an explicit ``AppConfig.label``), so its migration history and every
   ``demo.<Model>`` reference are unchanged. See the new ``demo/README.md``. The pytest suite still
-  runs from the repo root with ``pytest`` exactly as before.
+  runs from the repo root with ``pytest`` exactly as before. As part of the same work the demo's
+  root URL (``/``) is now a compact, public landing page (a login form for anonymous visitors; a
+  single-viewport app-shell with demo record counts and enabled-service facts once signed in, with
+  admin/dashboard links shown only to staff), and the staff-only system dashboard moved from ``/``
+  to ``/dashboard/``. This is all demo-only and, again, changes nothing for installers.
 
 **Breaking:** auto-generated REST API filters now default text fields to exact match, not
 substring

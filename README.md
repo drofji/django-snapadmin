@@ -1817,7 +1817,9 @@ cd django-snapadmin
 cp demo/dist.env demo/.env
 docker compose -f demo/docker-compose.yml up --build
 ```
+- **Landing page**: http://localhost:8000/ (public — login form for anonymous visitors, a compact app-shell with demo stats and enabled services once signed in)
 - **Admin**: http://localhost:8000/admin/ (admin / admin)
+- **System dashboard**: http://localhost:8000/dashboard/ (staff-only)
 - **REST API Docs**: http://localhost:8000/api/docs/
 - **GraphQL API**: http://localhost:8000/api/graphql/
 
