@@ -87,12 +87,12 @@ class TestPurgeExpiredTokens:
 @pytest.mark.django_db
 class TestGenerateDailyStats:
     def test_returns_dict(self, product, customer, order):
-        from demo.tasks import generate_daily_stats
+        from demo.app.tasks import generate_daily_stats
         result = generate_daily_stats()
         assert isinstance(result, dict)
 
     def test_has_required_keys(self, product, customer, order):
-        from demo.tasks import generate_daily_stats
+        from demo.app.tasks import generate_daily_stats
         result = generate_daily_stats()
         for key in ("date", "total_products", "active_products",
                     "total_customers", "active_customers",
@@ -100,50 +100,50 @@ class TestGenerateDailyStats:
             assert key in result, f"Missing key: {key}"
 
     def test_counts_products(self, product, product_unavailable):
-        from demo.tasks import generate_daily_stats
+        from demo.app.tasks import generate_daily_stats
         result = generate_daily_stats()
         assert result["total_products"] >= 2
 
     def test_counts_only_available_products(self, product, product_unavailable):
-        from demo.tasks import generate_daily_stats
+        from demo.app.tasks import generate_daily_stats
         result = generate_daily_stats()
         assert result["active_products"] >= 1
         assert result["active_products"] < result["total_products"]
 
     def test_counts_customers(self, customer, customer_inactive):
-        from demo.tasks import generate_daily_stats
+        from demo.app.tasks import generate_daily_stats
         result = generate_daily_stats()
         assert result["total_customers"] >= 2
 
     def test_counts_only_active_customers(self, customer, customer_inactive):
-        from demo.tasks import generate_daily_stats
+        from demo.app.tasks import generate_daily_stats
         result = generate_daily_stats()
         assert result["active_customers"] < result["total_customers"]
 
     def test_revenue_is_float(self, order):
-        from demo.tasks import generate_daily_stats
+        from demo.app.tasks import generate_daily_stats
         result = generate_daily_stats()
         assert isinstance(result["total_revenue"], float)
 
     def test_revenue_sums_orders(self, order):
-        from demo.tasks import generate_daily_stats
+        from demo.app.tasks import generate_daily_stats
         result = generate_daily_stats()
         assert result["total_revenue"] >= float(order.total)
 
     def test_avg_order_value_is_float(self, order):
-        from demo.tasks import generate_daily_stats
+        from demo.app.tasks import generate_daily_stats
         result = generate_daily_stats()
         assert isinstance(result["avg_order_value"], float)
 
     def test_date_is_today(self):
         from datetime import date
-        from demo.tasks import generate_daily_stats
+        from demo.app.tasks import generate_daily_stats
         result = generate_daily_stats()
         assert result["date"] == date.today().isoformat()
 
     def test_works_with_empty_db(self, db):
         """Task should not crash on an empty database."""
-        from demo.tasks import generate_daily_stats
+        from demo.app.tasks import generate_daily_stats
         result = generate_daily_stats()
         assert result["total_products"] == 0
         assert result["total_revenue"] == 0.0
@@ -156,23 +156,23 @@ class TestGenerateDailyStats:
 @pytest.mark.django_db
 class TestReindexProductsToElasticsearch:
     def test_skips_when_es_unavailable(self, product):
-        with patch("demo.search.is_es_available", return_value=False):
-            from demo.tasks import reindex_products_to_elasticsearch
+        with patch("demo.app.search.is_es_available", return_value=False):
+            from demo.app.tasks import reindex_products_to_elasticsearch
             result = reindex_products_to_elasticsearch()
         assert result["skipped"] is True
 
     def test_skip_reason_in_result(self, product):
-        with patch("demo.search.is_es_available", return_value=False):
-            from demo.tasks import reindex_products_to_elasticsearch
+        with patch("demo.app.search.is_es_available", return_value=False):
+            from demo.app.tasks import reindex_products_to_elasticsearch
             result = reindex_products_to_elasticsearch()
         assert "reason" in result
 
     def test_indexes_products_when_es_available(self, product):
         from unittest.mock import MagicMock
         mock_es = MagicMock()
-        with patch("demo.search.is_es_available", return_value=True), \
-             patch("demo.search.get_es_client", return_value=mock_es):
-            from demo.tasks import reindex_products_to_elasticsearch
+        with patch("demo.app.search.is_es_available", return_value=True), \
+             patch("demo.app.search.get_es_client", return_value=mock_es):
+            from demo.app.tasks import reindex_products_to_elasticsearch
             result = reindex_products_to_elasticsearch()
         assert result["indexed"] >= 1
         mock_es.index.assert_called()
@@ -180,8 +180,8 @@ class TestReindexProductsToElasticsearch:
     def test_returns_indexed_count(self, many_products):
         from unittest.mock import MagicMock
         mock_es = MagicMock()
-        with patch("demo.search.is_es_available", return_value=True), \
-             patch("demo.search.get_es_client", return_value=mock_es):
-            from demo.tasks import reindex_products_to_elasticsearch
+        with patch("demo.app.search.is_es_available", return_value=True), \
+             patch("demo.app.search.get_es_client", return_value=mock_es):
+            from demo.app.tasks import reindex_products_to_elasticsearch
             result = reindex_products_to_elasticsearch()
         assert result["indexed"] == 30  # many_products creates 30

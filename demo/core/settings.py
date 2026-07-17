@@ -66,7 +66,7 @@ INSTALLED_APPS = [
     'extra_settings',               # Optional extra: pip install django-snapadmin[extra-settings]
 
     # Local Apps
-    'demo',                          # Testing
+    'demo.app',                       # label stays "demo" (DemoConfig.label) — Testing
 ]
 
 MIDDLEWARE = [
@@ -497,11 +497,11 @@ CELERY_BEAT_SCHEDULE = {
 # ------------------------------------------------------------------------------
 # EXTRA SETTINGS (optional — django-snapadmin[extra-settings]; used by the demo only)
 # ------------------------------------------------------------------------------
-# EXTRA_SETTINGS_ADMIN_APP must match an INSTALLED_APPS entry. This project lists
-# apps by their bare label ('demo'), so the bare label works here; a project that
-# lists apps by their AppConfig dotted path ('demo.apps.DemoConfig') must pass that
-# dotted path instead — a bare 'demo' would not be found in INSTALLED_APPS.
-EXTRA_SETTINGS_ADMIN_APP = "demo"
+# EXTRA_SETTINGS_ADMIN_APP must match an INSTALLED_APPS entry *literally* (extra_settings
+# checks membership in settings.INSTALLED_APPS, not the app's label) — this project lists
+# the demo app as 'demo.app' (DemoConfig.name), even though its app_label is the shorter
+# 'demo' (DemoConfig.label), so this must be the dotted path, not the bare label.
+EXTRA_SETTINGS_ADMIN_APP = "demo.app"
 EXTRA_SETTINGS_CACHE_NAME = "extra_settings"
 EXTRA_SETTINGS_VERBOSE_NAME = _("Settings")
 

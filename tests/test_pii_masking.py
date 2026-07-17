@@ -186,7 +186,7 @@ class TestApiSerializerMasking:
 @pytest.mark.django_db
 class TestAdminMasking:
     def _admin_and_request(self, user):
-        from demo.models import Customer
+        from demo.app.models import Customer
         model_admin = site._registry[Customer]
         request = RequestFactory().get("/admin/demo/customer/")
         request.user = user
@@ -235,7 +235,7 @@ class TestAdminMasking:
     def test_change_form_drops_scalar_pii_field(self, regular_user):
         # Product.name is a plain (non-row) form field — exercises the scalar
         # branch of the fieldset filter, distinct from Customer's row tuples.
-        from demo.models import Product
+        from demo.app.models import Product
         model_admin = site._registry[Product]
         request = RequestFactory().get("/admin/demo/product/")
         request.user = regular_user

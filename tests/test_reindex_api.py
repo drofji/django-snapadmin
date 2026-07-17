@@ -118,7 +118,7 @@ def test_run_reindex_helper_skips_when_es_disabled():
 
 @pytest.mark.django_db
 def test_run_reindex_counts_indexed_and_errored(monkeypatch):
-    from demo.models import Product, SearchLog
+    from demo.app.models import Product, SearchLog
     from snapadmin.models import run_reindex
 
     monkeypatch.setattr(

@@ -3,7 +3,7 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from snapadmin.views import DashboardView
-from demo.views import product_search, trigger_error
+from demo.app.views import product_search, trigger_error
 
 urlpatterns = [
     path('', DashboardView.as_view(), name='dashboard'),

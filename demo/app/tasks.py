@@ -20,10 +20,10 @@ logger = get_logger("snapadmin.demo.tasks")
 @shared_task(bind=True, name="demo.tasks.reindex_products_to_elasticsearch")
 def reindex_products_to_elasticsearch(self):
     """
-    Synchronise all Product records to the Elasticsearch index via demo.search.
+    Synchronise all Product records to the Elasticsearch index via demo.app.search.
     """
-    from demo.models import Product
-    from demo.search import is_es_available, index_product
+    from demo.app.models import Product
+    from demo.app.search import is_es_available, index_product
 
     if not is_es_available():
         logger.warning("elasticsearch_unavailable_skip_reindex")
@@ -49,7 +49,7 @@ def generate_daily_stats(self):
     Returns:
         dict: Snapshot of today's key metrics.
     """
-    from demo.models import Customer, Order, Product
+    from demo.app.models import Customer, Order, Product
     from django.db.models import Sum, Avg, Count
 
     today = date.today()

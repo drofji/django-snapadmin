@@ -30,7 +30,7 @@ from snapadmin.models import (
 class TestGetEsDocumentEdgeCases:
     def test_fk_value_is_converted_to_pk(self):
         """When a field value has .pk, get_es_document stores the pk integer."""
-        from demo.models import Product, Category
+        from demo.app.models import Product, Category
         cat = Category.objects.create(name="Tech", slug="tech")
         product = Product.objects.create(name="Widget", price=Decimal("9.99"), category=cat)
         # Override es_mapping to include the FK field
@@ -44,7 +44,7 @@ class TestGetEsDocumentEdgeCases:
 
     def test_timedelta_value_is_converted_to_str(self):
         """When a field value is a timedelta, get_es_document converts it to str."""
-        from demo.models import Product
+        from demo.app.models import Product
         product = Product.objects.create(name="Duration Test", price=Decimal("1.00"))
         original_mapping = Product.es_mapping
         Product.es_mapping = {"name": {"type": "text"}}
@@ -74,7 +74,7 @@ class TestEsOperationsMocked:
         return mock
 
     def test_ensure_es_index_and_mapping_creates_index(self):
-        from demo.models import Product
+        from demo.app.models import Product
         mock_es = self._mock_es()
         with patch("django.conf.settings.ELASTICSEARCH_ENABLED", True):
             with patch.object(Product, "get_es_client", return_value=mock_es):
@@ -82,7 +82,7 @@ class TestEsOperationsMocked:
         mock_es.indices.create.assert_called_once()
 
     def test_ensure_es_index_existing_calls_put_mapping(self):
-        from demo.models import Product
+        from demo.app.models import Product
         mock_es = self._mock_es()
         mock_es.indices.exists.return_value = True
         with patch("django.conf.settings.ELASTICSEARCH_ENABLED", True):
@@ -91,7 +91,7 @@ class TestEsOperationsMocked:
         mock_es.indices.put_mapping.assert_called_once()
 
     def test_ensure_es_index_skipped_when_es_disabled(self):
-        from demo.models import Product
+        from demo.app.models import Product
         mock_es = self._mock_es()
         with patch("django.conf.settings.ELASTICSEARCH_ENABLED", False):
             with patch.object(Product, "get_es_client", return_value=mock_es):
@@ -99,7 +99,7 @@ class TestEsOperationsMocked:
         mock_es.indices.create.assert_not_called()
 
     def test_index_in_es_calls_es_index(self):
-        from demo.models import Product
+        from demo.app.models import Product
         product = Product.objects.create(name="ES Test", price=Decimal("5.00"))
         mock_es = self._mock_es()
         with patch("django.conf.settings.ELASTICSEARCH_ENABLED", True):
@@ -109,7 +109,7 @@ class TestEsOperationsMocked:
         mock_es.index.assert_called_once()
 
     def test_index_in_es_skipped_when_es_disabled(self):
-        from demo.models import Product
+        from demo.app.models import Product
         product = Product.objects.create(name="No ES", price=Decimal("5.00"))
         mock_es = self._mock_es()
         with patch("django.conf.settings.ELASTICSEARCH_ENABLED", False):
@@ -118,7 +118,7 @@ class TestEsOperationsMocked:
         mock_es.index.assert_not_called()
 
     def test_delete_from_es_calls_es_delete(self):
-        from demo.models import Product
+        from demo.app.models import Product
         product = Product.objects.create(name="Delete Me", price=Decimal("5.00"))
         mock_es = self._mock_es()
         with patch("django.conf.settings.ELASTICSEARCH_ENABLED", True):
@@ -127,7 +127,7 @@ class TestEsOperationsMocked:
         mock_es.delete.assert_called_once()
 
     def test_delete_from_es_skipped_when_disabled(self):
-        from demo.models import Product
+        from demo.app.models import Product
         product = Product.objects.create(name="No Delete", price=Decimal("5.00"))
         mock_es = self._mock_es()
         with patch("django.conf.settings.ELASTICSEARCH_ENABLED", False):
@@ -136,7 +136,7 @@ class TestEsOperationsMocked:
         mock_es.delete.assert_not_called()
 
     def test_es_reindex_all_when_enabled(self):
-        from demo.models import Product
+        from demo.app.models import Product
         Product.objects.all().delete()
         Product.objects.create(name="Reindex Test", price=Decimal("1.00"))
         mock_es = self._mock_es()
@@ -152,13 +152,13 @@ class TestEsOperationsMocked:
         assert actions[0]["_source"]["name"] == "Reindex Test"
 
     def test_es_reindex_all_skipped_when_disabled(self):
-        from demo.models import Product
+        from demo.app.models import Product
         with patch("django.conf.settings.ELASTICSEARCH_ENABLED", False):
             result = Product.es_reindex_all()
         assert result["skipped"] is True
 
     def test_es_search_with_es_enabled_dual_mode(self):
-        from demo.models import Product
+        from demo.app.models import Product
         mock_es = MagicMock()
         mock_es.search.return_value = {
             "hits": {"hits": [{"_source": {"id": 1}}]}
@@ -170,7 +170,7 @@ class TestEsOperationsMocked:
         assert hasattr(results, "__iter__")
 
     def test_es_search_with_es_enabled_es_only(self):
-        from demo.models import SearchLog
+        from demo.app.models import SearchLog
         mock_es = MagicMock()
         mock_es.search.return_value = {
             "hits": {"hits": [{"_source": {"id": 10, "query": "test", "results_count": 5}}]}
@@ -181,7 +181,7 @@ class TestEsOperationsMocked:
         assert isinstance(results, EsQuerySet)
 
     def test_es_search_with_es_enabled_exception_falls_back(self):
-        from demo.models import Product
+        from demo.app.models import Product
         mock_es = MagicMock()
         mock_es.search.side_effect = Exception("ES offline")
         with patch("django.conf.settings.ELASTICSEARCH_ENABLED", True):
@@ -190,7 +190,7 @@ class TestEsOperationsMocked:
         assert hasattr(results, "__iter__")
 
     def test_es_search_es_only_exception_returns_empty_esqueryset(self):
-        from demo.models import SearchLog
+        from demo.app.models import SearchLog
         mock_es = MagicMock()
         mock_es.search.side_effect = Exception("ES offline")
         with patch("django.conf.settings.ELASTICSEARCH_ENABLED", True):
@@ -207,7 +207,7 @@ class TestEsOperationsMocked:
 @pytest.mark.django_db
 class TestEsSearchFallback:
     def test_es_search_empty_query_returns_all(self):
-        from demo.models import Product
+        from demo.app.models import Product
         Product.objects.all().delete()
         Product.objects.create(name="Alpha", price=Decimal("1.00"))
         results = Product.es_search(query_string="")
@@ -215,7 +215,7 @@ class TestEsSearchFallback:
 
     def test_es_search_no_search_fields_returns_all(self):
         """Model with no searchable fields and no query_string → returns all."""
-        from demo.models import Order, Customer
+        from demo.app.models import Order, Customer
         Customer.objects.all().delete()
         Order.objects.all().delete()
         customer = Customer.objects.create(first_name="X", last_name="Y", email="x@y.com", origin="status_a")
@@ -232,7 +232,7 @@ class TestEsSearchFallback:
 @pytest.mark.django_db
 class TestEsOnlyDelete:
     def test_delete_es_only_calls_delete_from_es(self):
-        from demo.models import SearchLog
+        from demo.app.models import SearchLog
         log = SearchLog(query="test", results_count=5)
         log.pk = 777
         with patch.object(SearchLog, "delete_from_es") as mock_del:
@@ -258,7 +258,7 @@ class TestSnapSaveMixinChange:
         return instance
 
     def test_save_model_change_true_logs_changes(self):
-        from demo.models import Product
+        from demo.app.models import Product
         from django.contrib.admin.models import LogEntry
         from django.contrib.auth.models import User
 
@@ -280,7 +280,7 @@ class TestSnapSaveMixinChange:
         assert LogEntry.objects.count() >= log_count_before
 
     def test_save_model_change_true_no_actual_diff_no_log(self):
-        from demo.models import Product
+        from demo.app.models import Product
         from django.contrib.admin.models import LogEntry
         from django.contrib.auth.models import User
 
@@ -320,7 +320,7 @@ class TestSnapSaveMixinLogChange:
 
     def test_save_model_then_log_change_writes_single_entry(self):
         """A real field change logs exactly one (detailed) entry, not two."""
-        from demo.models import Product
+        from demo.app.models import Product
         from django.contrib.admin.models import LogEntry
         from django.contrib.auth.models import User
 
@@ -349,7 +349,7 @@ class TestSnapSaveMixinLogChange:
 
     def test_log_change_falls_back_when_nothing_logged(self):
         """With no detailed entry (e.g. M2M-only edit), keep Django's default."""
-        from demo.models import Product
+        from demo.app.models import Product
         from django.contrib.admin.models import LogEntry
         from django.contrib.auth.models import User
 
@@ -394,7 +394,7 @@ class TestGetAdminFieldsEdgeCases:
 
     def test_wysiwyg_field_in_list_display_gets_display_method(self):
         """A wysiwyg field that appears in list_display should be wrapped."""
-        from demo.models import Product
+        from demo.app.models import Product
         # Product.description is wysiwyg but show_in_list defaults to True
         # run get_admin_fields and ensure no crash
         form_fields, list_display, *_ = Product.get_admin_fields()
@@ -411,7 +411,7 @@ class TestRegisterAllAdmins:
         """register_all_admins with app_label only registers matching models."""
         from snapadmin.models import SnapModel
         SnapModel.register_all_admins(app_label="demo")
-        from demo.models import Product
+        from demo.app.models import Product
         assert Product in admin.site._registry
 
     def test_register_all_admins_handles_already_registered(self):

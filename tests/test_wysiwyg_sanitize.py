@@ -66,7 +66,7 @@ class TestWysiwygChangelistRender:
         return model.admin_overrides[f"safe_html_{field_name}"]
 
     def test_changelist_sanitizes_by_default(self):
-        from demo.models import Product
+        from demo.app.models import Product
 
         display = self._display_for(Product, "description")
         html = display(None, Product(description=XSS))
@@ -77,7 +77,7 @@ class TestWysiwygChangelistRender:
         assert "<b>ok</b>" in html
 
     def test_changelist_renders_raw_when_safe_html_opt_in(self):
-        from demo.models import Product
+        from demo.app.models import Product
 
         field = Product._meta.get_field("description")
         original = field.safe_html

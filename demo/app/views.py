@@ -1,7 +1,7 @@
 from django.conf import settings
 from django.http import Http404
 from django.shortcuts import render
-from demo.models import Product
+from demo.app.models import Product
 
 
 def trigger_error(request):

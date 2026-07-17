@@ -60,7 +60,7 @@ class TestGraphqlResolvers:
 
     def test_list_resolver_returns_objects(self, admin_user):
         from types import SimpleNamespace
-        from demo.models import Product
+        from demo.app.models import Product
         from snapadmin.api.graphql import schema
 
         Product.objects.create(name="GQL List", price=Decimal("3.50"))
@@ -73,7 +73,7 @@ class TestGraphqlResolvers:
 
     def test_single_resolver_returns_object(self, admin_user):
         from types import SimpleNamespace
-        from demo.models import Product
+        from demo.app.models import Product
         from snapadmin.api.graphql import schema
 
         product = Product.objects.create(name="GQL Single", price=Decimal("4.50"))
@@ -113,7 +113,7 @@ class TestGraphqlResolvers:
 class TestPurgeTaskEsOnly:
     def test_task_purges_es_only_model_with_retention(self):
         from snapadmin.tasks import purge_expired_data
-        from demo.models import SearchLog
+        from demo.app.models import SearchLog
 
         # SearchLog is ES_ONLY but normally has no retention; give it one so the
         # task reaches the ES_ONLY purge path. ES is disabled in tests, so the
@@ -133,7 +133,7 @@ class TestPurgeCommandEsOnly:
     def test_command_reports_es_only_model(self):
         from io import StringIO
         from django.core.management import call_command
-        from demo.models import SearchLog
+        from demo.app.models import SearchLog
 
         out = StringIO()
         with patch.object(SearchLog, "data_retention_days", 30, create=True):
@@ -225,7 +225,7 @@ class TestSnapSaveMixinPaths:
         return instance
 
     def test_save_model_new_object_returns_early(self):
-        from demo.models import Product
+        from demo.app.models import Product
         from django.contrib.auth.models import User
 
         user = User.objects.create_superuser("savemixin_new", password="pass")
@@ -245,7 +245,7 @@ class TestSnapSaveMixinPaths:
         assert product.pk is not None
 
     def test_save_related_logs_changes_and_swallows_errors(self):
-        from demo.models import Product
+        from demo.app.models import Product
         from django.contrib.admin.models import LogEntry
         from django.contrib.auth.models import User
 
@@ -293,7 +293,7 @@ class TestSnapSaveMixinPaths:
 @pytest.mark.django_db
 class TestEsErrorPaths:
     def test_es_operations_swallow_client_errors(self):
-        from demo.models import Product
+        from demo.app.models import Product
 
         product = Product(name="ES Err", price=Decimal("1.00"))
         product.pk = 1234
@@ -342,7 +342,7 @@ class TestFunctionFieldDisplayNoUnfold:
 @pytest.mark.django_db
 class TestRegisterAdminFieldDoesNotExist:
     def test_register_admin_with_unknown_field_names(self):
-        from demo.models import Product
+        from demo.app.models import Product
 
         # Feed register_admin a form_fields list containing a name that is not a
         # real model field so both FieldDoesNotExist branches (row grouping and

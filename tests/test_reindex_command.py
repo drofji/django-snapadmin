@@ -19,7 +19,7 @@ def stub_reindex(monkeypatch):
             return result
         return classmethod(_reindex)
 
-    from demo.models import Product, SearchLog
+    from demo.app.models import Product, SearchLog
 
     monkeypatch.setattr(Product, "es_reindex_all", make({"indexed": 3}))
     monkeypatch.setattr(SearchLog, "es_reindex_all", make({"indexed": 1}))
@@ -57,7 +57,7 @@ class TestReindexCommand:
             call_command("snapadmin_reindex", "--model", "auth.User")
 
     def test_skipped_reported(self, monkeypatch):
-        from demo.models import Product
+        from demo.app.models import Product
 
         monkeypatch.setattr(
             Product, "es_reindex_all",
@@ -76,7 +76,7 @@ class TestReindexCommand:
         assert "No ES-enabled SnapModels" in out.getvalue()
 
     def test_errors_raise_commanderror(self, monkeypatch):
-        from demo.models import Product
+        from demo.app.models import Product
 
         monkeypatch.setattr(
             Product, "es_reindex_all",

@@ -8,7 +8,7 @@ Tests for configurable Elasticsearch client construction (v0.1.0a6):
 import pytest
 from django.test import override_settings
 
-from demo.models import Product
+from demo.app.models import Product
 
 
 class _RecordingES:

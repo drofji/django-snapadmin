@@ -34,11 +34,11 @@ class TestRetentionDefaults:
 
 class TestAuditLogRetentionConfig:
     def test_audit_log_has_retention_days(self):
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         assert AuditLog.data_retention_days == 90
 
     def test_audit_log_retention_field(self):
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         assert AuditLog.data_retention_field == "created_at"
 
 
@@ -49,7 +49,7 @@ class TestAuditLogRetentionConfig:
 @pytest.mark.django_db
 class TestPurgeExpiredDataTask:
     def _create_old_log(self, days_old: int):
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         obj = AuditLog.objects.create(action="login", user_email="test@example.com")
         stale_ts = timezone.now() - timedelta(days=days_old)
         AuditLog.objects.filter(pk=obj.pk).update(created_at=stale_ts)
@@ -59,13 +59,13 @@ class TestPurgeExpiredDataTask:
         from snapadmin.tasks import purge_expired_data
         old = self._create_old_log(days_old=91)
         result = purge_expired_data()
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         assert not AuditLog.objects.filter(pk=old.pk).exists()
         assert result["total"] >= 1
 
     def test_keeps_records_within_retention(self):
         from snapadmin.tasks import purge_expired_data
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         recent = AuditLog.objects.create(action="logout", user_email="user@example.com")
         purge_expired_data()
         assert AuditLog.objects.filter(pk=recent.pk).exists()
@@ -86,7 +86,7 @@ class TestPurgeExpiredDataTask:
 
     def test_no_retention_model_not_in_summary(self):
         from snapadmin.tasks import purge_expired_data
-        from demo.models import Product
+        from demo.app.models import Product
         Product.objects.create(name="Safe Product", price=10)
         result = purge_expired_data()
         assert "demo.Product" not in result["purged"]
@@ -104,7 +104,7 @@ class TestPurgeExpiredDataTask:
 @pytest.mark.django_db
 class TestPurgeExpiredDataCommand:
     def _create_old_log(self, days_old: int):
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         obj = AuditLog.objects.create(action="cmd_test", user_email="cmd@example.com")
         stale_ts = timezone.now() - timedelta(days=days_old)
         AuditLog.objects.filter(pk=obj.pk).update(created_at=stale_ts)
@@ -122,7 +122,7 @@ class TestPurgeExpiredDataCommand:
         assert "Total deleted" in output
 
     def test_dry_run_does_not_delete(self):
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         old = self._create_old_log(days_old=91)
         self._call_command("--dry-run")
         assert AuditLog.objects.filter(pk=old.pk).exists()
@@ -133,7 +133,7 @@ class TestPurgeExpiredDataCommand:
         assert "DRY RUN" in output or "dry run" in output.lower()
 
     def test_live_run_deletes_old_records(self):
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         old = self._create_old_log(days_old=91)
         self._call_command()
         assert not AuditLog.objects.filter(pk=old.pk).exists()
@@ -148,31 +148,31 @@ class TestPurgeExpiredDbOnly:
     """DB_ONLY models (e.g. AuditLog) purge straight from the database."""
 
     def _old_log(self, days_old: int):
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         obj = AuditLog.objects.create(action="x", user_email="a@b.c")
         AuditLog.objects.filter(pk=obj.pk).update(created_at=timezone.now() - timedelta(days=days_old))
         return obj
 
     def test_deletes_expired(self):
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         old = self._old_log(91)
         assert AuditLog.purge_expired() == 1
         assert not AuditLog.objects.filter(pk=old.pk).exists()
 
     def test_keeps_recent(self):
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         recent = AuditLog.objects.create(action="y", user_email="r@b.c")
         AuditLog.purge_expired()
         assert AuditLog.objects.filter(pk=recent.pk).exists()
 
     def test_dry_run_counts_without_deleting(self):
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         old = self._old_log(91)
         assert AuditLog.purge_expired(dry_run=True) == 1
         assert AuditLog.objects.filter(pk=old.pk).exists()
 
     def test_no_retention_returns_zero(self):
-        from demo.models import Category
+        from demo.app.models import Category
         assert Category.purge_expired() == 0
 
 
@@ -185,13 +185,13 @@ class TestPurgeExpiredDual:
     """
 
     def _old_log(self, days_old: int):
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         obj = AuditLog.objects.create(action="x", user_email="a@b.c")
         AuditLog.objects.filter(pk=obj.pk).update(created_at=timezone.now() - timedelta(days=days_old))
         return obj
 
     def test_deletes_db_and_es(self):
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         from snapadmin.models import EsStorageMode
         from unittest.mock import MagicMock, patch
         from django.test import override_settings
@@ -211,7 +211,7 @@ class TestPurgeExpiredDual:
         assert kwargs["body"]["query"]["ids"]["values"] == [old.pk]
 
     def test_dry_run_skips_db_and_es(self):
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         from snapadmin.models import EsStorageMode
         from unittest.mock import MagicMock, patch
         from django.test import override_settings
@@ -232,7 +232,7 @@ class TestPurgeExpiredDual:
         clean success — the DB rows are already gone, but the caller (the Celery
         task / management command) needs to know this model's purge is partial.
         """
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         from snapadmin.models import EsStorageMode, SnapPurgeError
         from unittest.mock import MagicMock, patch
         from django.test import override_settings
@@ -254,7 +254,7 @@ class TestPurgeExpiredDual:
         """The Celery task must surface a partial DUAL purge as an error, not
         silently count the model as fully purged.
         """
-        from demo.models import AuditLog
+        from demo.app.models import AuditLog
         from snapadmin.models import EsStorageMode
         from snapadmin.tasks import purge_expired_data
         from unittest.mock import MagicMock, patch
@@ -278,14 +278,14 @@ class TestDeletePksFromEs:
     """
 
     def test_no_pks_is_noop(self):
-        from demo.models import Product
+        from demo.app.models import Product
         from unittest.mock import patch
         with patch.object(Product, "get_es_client") as client:
             assert Product._delete_pks_from_es([]) is True
             client.assert_not_called()
 
     def test_es_disabled_is_noop(self):
-        from demo.models import Product
+        from demo.app.models import Product
         from unittest.mock import patch
         from django.test import override_settings
         with override_settings(ELASTICSEARCH_ENABLED=False), \
@@ -294,7 +294,7 @@ class TestDeletePksFromEs:
             client.assert_not_called()
 
     def test_bulk_deletes_all_pks_in_one_call(self):
-        from demo.models import Product
+        from demo.app.models import Product
         from unittest.mock import MagicMock, patch
         from django.test import override_settings
         mock_es = MagicMock()
@@ -309,7 +309,7 @@ class TestDeletePksFromEs:
         assert kwargs["ignore"] == [404]
 
     def test_reports_failure_without_raising(self):
-        from demo.models import Product
+        from demo.app.models import Product
         from unittest.mock import patch
         from django.test import override_settings
         with override_settings(ELASTICSEARCH_ENABLED=True), \
@@ -321,7 +321,7 @@ class TestPurgeExpiredEsOnly:
     """ES_ONLY models purge via a range delete_by_query against the index."""
 
     def test_es_disabled_returns_zero(self):
-        from demo.models import SearchLog
+        from demo.app.models import SearchLog
         from unittest.mock import patch
         from django.test import override_settings
         with override_settings(ELASTICSEARCH_ENABLED=False), \
@@ -329,7 +329,7 @@ class TestPurgeExpiredEsOnly:
             assert SearchLog.purge_expired() == 0
 
     def test_delete_by_query(self):
-        from demo.models import SearchLog
+        from demo.app.models import SearchLog
         from unittest.mock import MagicMock, patch
         from django.test import override_settings
         mock_es = MagicMock()
@@ -344,7 +344,7 @@ class TestPurgeExpiredEsOnly:
         assert "timestamp" in kwargs["body"]["query"]["range"]
 
     def test_dry_run_uses_count(self):
-        from demo.models import SearchLog
+        from demo.app.models import SearchLog
         from unittest.mock import MagicMock, patch
         from django.test import override_settings
         mock_es = MagicMock()
@@ -356,7 +356,7 @@ class TestPurgeExpiredEsOnly:
         mock_es.delete_by_query.assert_not_called()
 
     def test_swallows_exceptions(self):
-        from demo.models import SearchLog
+        from demo.app.models import SearchLog
         from unittest.mock import patch
         from django.test import override_settings
         with override_settings(ELASTICSEARCH_ENABLED=True), \
@@ -380,7 +380,7 @@ class TestPurgeExpiredCountNotCascadeInflated:
 
     def _old_order_with_items(self, days_old: int, item_count: int = 3):
         from decimal import Decimal
-        from demo.models import Customer, Order, OrderItem, Product
+        from demo.app.models import Customer, Order, OrderItem, Product
 
         customer = Customer.objects.create(
             first_name="Cascade", last_name="Test", email="cascade@example.com",
@@ -396,7 +396,7 @@ class TestPurgeExpiredCountNotCascadeInflated:
         return order
 
     def test_purge_count_matches_dry_run_despite_cascade(self):
-        from demo.models import Order, OrderItem
+        from demo.app.models import Order, OrderItem
 
         with patch.object(Order, "data_retention_days", 30, create=True):
             old_order = self._old_order_with_items(days_old=45, item_count=3)

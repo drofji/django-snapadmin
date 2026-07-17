@@ -23,15 +23,15 @@ from django.urls import reverse
 @pytest.mark.django_db
 class TestAdminRegistration:
     def test_product_in_registry(self):
-        from demo.models import Product
+        from demo.app.models import Product
         assert Product in admin.site._registry
 
     def test_customer_in_registry(self):
-        from demo.models import Customer
+        from demo.app.models import Customer
         assert Customer in admin.site._registry
 
     def test_order_in_registry(self):
-        from demo.models import Order
+        from demo.app.models import Order
         assert Order in admin.site._registry
 
     def test_api_token_in_registry(self):
@@ -40,27 +40,27 @@ class TestAdminRegistration:
 
     def test_register_admin_idempotent(self):
         """Calling register_admin twice must not raise."""
-        from demo.models import Product
+        from demo.app.models import Product
         Product.register_admin()  # already registered – must be silent
 
     def test_product_admin_has_list_display(self):
-        from demo.models import Product
+        from demo.app.models import Product
         model_admin = admin.site._registry[Product]
         assert len(model_admin.list_display) > 0
 
     def test_product_admin_has_search_fields(self):
-        from demo.models import Product
+        from demo.app.models import Product
         model_admin = admin.site._registry[Product]
         assert len(model_admin.search_fields) > 0
 
     def test_customer_admin_has_list_filter(self):
         """Customer.origin is filterable=True, must appear in list_filter."""
-        from demo.models import Customer
+        from demo.app.models import Customer
         model_admin = admin.site._registry[Customer]
         assert len(model_admin.list_filter) > 0
 
     def test_order_admin_has_autocomplete_fields(self):
-        from demo.models import Order
+        from demo.app.models import Order
         model_admin = admin.site._registry[Order]
         assert "customer" in model_admin.autocomplete_fields
 

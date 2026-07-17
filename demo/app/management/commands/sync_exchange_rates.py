@@ -12,7 +12,7 @@ import random
 
 from django.core.management.base import BaseCommand
 
-from demo.models import ExchangeRate
+from demo.app.models import ExchangeRate
 from snapadmin.etl import upsert_from_source
 
 # Stand-in for a response streamed from an external rates provider.

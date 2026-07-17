@@ -120,14 +120,14 @@ class TestEsQuerySetFilter:
 class TestEsQuerySetGet:
     @pytest.mark.django_db
     def test_get_without_pk_raises_does_not_exist(self):
-        from demo.models import Product
+        from demo.app.models import Product
         qs = EsQuerySet(Product, [])
         with pytest.raises(Product.DoesNotExist):
             qs.get()
 
     @pytest.mark.django_db
     def test_get_with_pk_queries_elasticsearch(self):
-        from demo.models import Product
+        from demo.app.models import Product
         mock_es = MagicMock()
         mock_es.get.return_value = {"_source": {"id": 99, "name": "Mock Product"}}
         qs = EsQuerySet(Product, [])
@@ -137,7 +137,7 @@ class TestEsQuerySetGet:
 
     @pytest.mark.django_db
     def test_get_with_pk_es_error_raises_does_not_exist(self):
-        from demo.models import Product
+        from demo.app.models import Product
         mock_es = MagicMock()
         mock_es.get.side_effect = Exception("ES unavailable")
         qs = EsQuerySet(Product, [])
@@ -149,7 +149,7 @@ class TestEsQuerySetGet:
 class TestEsQuerySetDelete:
     @pytest.mark.django_db
     def test_delete_es_only_calls_es_client(self):
-        from demo.models import SearchLog
+        from demo.app.models import SearchLog
         hit = SimpleNamespace(pk=42)
         qs = EsQuerySet(SearchLog, [hit])
         mock_es = MagicMock()
@@ -160,7 +160,7 @@ class TestEsQuerySetDelete:
 
     @pytest.mark.django_db
     def test_delete_es_only_es_error_is_swallowed(self):
-        from demo.models import SearchLog
+        from demo.app.models import SearchLog
         hit = SimpleNamespace(pk=42)
         qs = EsQuerySet(SearchLog, [hit])
         mock_es = MagicMock()
@@ -177,7 +177,7 @@ class TestEsManagerGetQueryset:
         # ordering on the manager leaks into GROUP BY on .values().annotate()
         # aggregations and silently returns wrong grouped results. The newest-
         # first default lives in the admin changelist and API list layers.
-        from demo.models import Customer
+        from demo.app.models import Customer
         qs = Customer.objects.get_queryset()
         assert not qs.ordered
 
@@ -186,7 +186,7 @@ class TestEsManagerGetQueryset:
         # Regression: with a manager-level default -pk order, this returned one
         # row per pk instead of one row per group. Now it groups correctly.
         from django.db.models import Count
-        from demo.models import Customer
+        from demo.app.models import Customer
 
         Customer.objects.create(first_name="Alice", email="a@example.com", active=True)
         Customer.objects.create(first_name="Bob", email="b@example.com", active=True)
@@ -208,13 +208,13 @@ class TestEsManagerGetQueryset:
         # The newest-first default the manager used to provide now lives on the
         # admin class so the changelist order is unchanged.
         from django.contrib import admin
-        from demo.models import Customer
+        from demo.app.models import Customer
 
         assert admin.site._registry[Customer].ordering == ["-pk"]
 
     @pytest.mark.django_db
     def test_es_only_model_non_esqueryset_returns_empty_esqueryset(self):
-        from demo.models import SearchLog
+        from demo.app.models import SearchLog
         with patch.object(SearchLog, "es_search", return_value=MagicMock(spec=[])):
             qs = SearchLog.objects.get_queryset()
         assert isinstance(qs, EsQuerySet)

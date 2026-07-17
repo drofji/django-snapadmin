@@ -41,13 +41,13 @@ class TestAnalyticsDbAlias:
 @pytest.mark.django_db
 class TestRouteRead:
     def test_noop_when_default(self):
-        from demo.models import Product
+        from demo.app.models import Product
         qs = Product.objects.all()
         assert route_read(qs).db == "default"
 
     @override_settings(SNAPADMIN_ANALYTICS_DB_ALIAS="replica")
     def test_pins_to_replica(self):
-        from demo.models import Product
+        from demo.app.models import Product
         qs = Product.objects.all()
         assert route_read(qs).db == "replica"
 

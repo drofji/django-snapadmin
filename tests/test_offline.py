@@ -38,11 +38,11 @@ class TestOfflineModeAttribute:
         assert SnapModel.offline_mode is False
 
     def test_customer_enables_offline_mode(self):
-        from demo.models import Customer
+        from demo.app.models import Customer
         assert Customer.offline_mode is True
 
     def test_product_keeps_offline_mode_disabled(self):
-        from demo.models import Product
+        from demo.app.models import Product
         assert Product.offline_mode is False
 
 
@@ -51,26 +51,26 @@ class TestOfflineCacheLimit:
         assert SnapModel.offline_cache_limit == 100
 
     def test_customer_overrides_limit(self):
-        from demo.models import Customer
+        from demo.app.models import Customer
         assert Customer.offline_cache_limit == 50
 
     def test_non_offline_model_keeps_default(self):
-        from demo.models import Product
+        from demo.app.models import Product
         assert Product.offline_cache_limit == 100
 
 
 class TestOfflineJsInjection:
     def test_offline_model_includes_offline_js(self):
-        from demo.models import Customer
+        from demo.app.models import Customer
         assert OFFLINE_JS in _media_js(Customer)
 
     def test_non_offline_model_excludes_offline_js(self):
-        from demo.models import Product
+        from demo.app.models import Product
         assert OFFLINE_JS not in _media_js(Product)
 
     def test_register_admin_appends_offline_js_for_offline_model(self):
         """A model toggled to offline_mode gets offline.js without touching other JS."""
-        from demo.models import Order
+        from demo.app.models import Order
 
         original = Order.offline_mode
         try:
@@ -87,7 +87,7 @@ class TestOfflineJsInjection:
             Order.register_admin()
 
     def test_offline_js_listed_once(self):
-        from demo.models import Customer
+        from demo.app.models import Customer
         js = _media_js(Customer)
         assert js.count(OFFLINE_JS) == 1
 
@@ -141,16 +141,16 @@ class TestOfflineJsAsset:
 
 class TestConnectivityJsInjection:
     def test_connectivity_js_loaded_on_offline_model(self):
-        from demo.models import Customer
+        from demo.app.models import Customer
         assert CONNECTIVITY_JS in _media_js(Customer)
 
     def test_connectivity_js_loaded_on_non_offline_model(self):
-        from demo.models import Product
+        from demo.app.models import Product
         assert CONNECTIVITY_JS in _media_js(Product)
 
     def test_connectivity_loads_before_offline_js(self):
         """offline.js sets the capability flag connectivity.js reads, so it must follow."""
-        from demo.models import Customer
+        from demo.app.models import Customer
         js = _media_js(Customer)
         assert js.index(CONNECTIVITY_JS) < js.index(OFFLINE_JS)
 
@@ -251,7 +251,7 @@ class TestOfflineModelDataEndpoint:
 
     @pytest.fixture
     def customers(self, db):
-        from demo.models import Customer
+        from demo.app.models import Customer
         return [
             Customer.objects.create(
                 first_name=f"User{i}", last_name="Test",
@@ -311,7 +311,7 @@ class TestOfflineModelDataEndpoint:
 
     def test_serves_related_fields_with_join_and_prefetch(self, auth_client, product):
         """A model with FK + M2M exercises the select_related / prefetch_related path."""
-        from demo.models import Product
+        from demo.app.models import Product
 
         original = Product.offline_mode
         try:

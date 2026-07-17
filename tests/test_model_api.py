@@ -50,7 +50,7 @@ class TestProductCRUD:
         assert r.json()["name"] == "New Item"
 
     def test_create_product_persisted(self, auth_client):
-        from demo.models import Product
+        from demo.app.models import Product
         auth_client.post(
             "/api/models/demo/Product/",
             {"name": "Persisted Item", "price": "5.00", "available": False},
@@ -68,7 +68,7 @@ class TestProductCRUD:
         assert r.json()["available"] is False
 
     def test_update_persisted(self, auth_client, product):
-        from demo.models import Product
+        from demo.app.models import Product
         auth_client.patch(
             f"/api/models/demo/Product/{product.pk}/",
             {"name": "Updated Name"},
@@ -81,7 +81,7 @@ class TestProductCRUD:
         assert auth_client.delete(f"/api/models/demo/Product/{product.pk}/").status_code == 204
 
     def test_delete_removes_from_db(self, auth_client, product):
-        from demo.models import Product
+        from demo.app.models import Product
         auth_client.delete(f"/api/models/demo/Product/{product.pk}/")
         assert not Product.objects.filter(pk=product.pk).exists()
 
@@ -134,7 +134,7 @@ class TestNonSnapModelRejected:
 
     def test_get_model_class_returns_model_for_real_snapmodel(self):
         from snapadmin.api.views import DynamicModelViewSet
-        from demo.models import Product
+        from demo.app.models import Product
         view = DynamicModelViewSet()
         view.kwargs = {"app_label": "demo", "model_name": "Product"}
         assert view._get_model_class() is Product
@@ -432,20 +432,20 @@ def _veto_unavailable_products(request, obj):
 class TestDeletionVeto:
     def test_delete_allowed_by_default(self, auth_client, product):
         # No hook override, no guard setting → the default path deletes (204).
-        from demo.models import Product
+        from demo.app.models import Product
         r = auth_client.delete(f"/api/models/demo/Product/{product.pk}/")
         assert r.status_code == 204
         assert not Product.objects.filter(pk=product.pk).exists()
 
     def test_model_hook_veto_returns_403(self, auth_client, product, monkeypatch):
-        from demo.models import Product
+        from demo.app.models import Product
         monkeypatch.setattr(Product, "api_can_delete", lambda self, request: False)
         r = auth_client.delete(f"/api/models/demo/Product/{product.pk}/")
         assert r.status_code == 403
         assert Product.objects.filter(pk=product.pk).exists()  # not deleted
 
     def test_setting_guard_veto_returns_403(self, auth_client, product):
-        from demo.models import Product
+        from demo.app.models import Product
         with override_settings(
             SNAPADMIN_API_DELETE_GUARD="tests.test_model_api._veto_all_deletes"
         ):
@@ -454,7 +454,7 @@ class TestDeletionVeto:
         assert Product.objects.filter(pk=product.pk).exists()
 
     def test_setting_guard_receives_object(self, auth_client, product, product_unavailable):
-        from demo.models import Product
+        from demo.app.models import Product
         guard = "tests.test_model_api._veto_unavailable_products"
         with override_settings(SNAPADMIN_API_DELETE_GUARD=guard):
             # Unavailable product is vetoed by the object-aware guard …
@@ -467,7 +467,7 @@ class TestDeletionVeto:
         assert not Product.objects.filter(pk=product.pk).exists()
 
     def test_setting_guard_accepts_direct_callable(self, auth_client, product):
-        from demo.models import Product
+        from demo.app.models import Product
         with override_settings(SNAPADMIN_API_DELETE_GUARD=_veto_all_deletes):
             r = auth_client.delete(f"/api/models/demo/Product/{product.pk}/")
         assert r.status_code == 403
@@ -488,7 +488,7 @@ def restricted_product_serializer(monkeypatch):
     attribute instead of an already-built, unrestricted serializer class.
     """
     from snapadmin.api import serializers as serializers_module
-    from demo.models import Product
+    from demo.app.models import Product
 
     monkeypatch.setattr(Product, "api_write_fields", ["available"], raising=False)
     serializers_module._serializer_cache.pop("demo.Product", None)
@@ -500,7 +500,7 @@ def restricted_product_serializer(monkeypatch):
 class TestApiWriteFieldsAllowlist:
     def test_default_unset_leaves_every_field_writable(self):
         from snapadmin.api.serializers import build_model_serializer
-        from demo.models import Product
+        from demo.app.models import Product
         fields = build_model_serializer(Product)().fields
         assert fields["name"].read_only is False
         assert fields["price"].read_only is False
@@ -508,7 +508,7 @@ class TestApiWriteFieldsAllowlist:
 
     def test_explicit_list_forces_other_fields_read_only(self, monkeypatch):
         from snapadmin.api.serializers import build_model_serializer
-        from demo.models import Product
+        from demo.app.models import Product
         monkeypatch.setattr(Product, "api_write_fields", ["available"], raising=False)
         fields = build_model_serializer(Product)().fields
         assert fields["available"].read_only is False
@@ -518,7 +518,7 @@ class TestApiWriteFieldsAllowlist:
     def test_non_writable_field_still_readable(self, monkeypatch):
         # Restricting writes must not narrow what api_exclude_fields controls.
         from snapadmin.api.serializers import build_model_serializer
-        from demo.models import Product
+        from demo.app.models import Product
         monkeypatch.setattr(Product, "api_write_fields", ["available"], raising=False)
         fields = build_model_serializer(Product)().fields
         assert "name" in fields
@@ -526,7 +526,7 @@ class TestApiWriteFieldsAllowlist:
 
     def test_pk_stays_read_only_even_if_listed(self, monkeypatch):
         from snapadmin.api.serializers import build_model_serializer
-        from demo.models import Product
+        from demo.app.models import Product
         monkeypatch.setattr(Product, "api_write_fields", ["id"], raising=False)
         fields = build_model_serializer(Product)().fields
         assert fields["id"].read_only is True
@@ -548,7 +548,7 @@ class TestApiWriteFieldsAllowlist:
     def test_update_still_persists_allowlisted_field(
         self, auth_client, product, restricted_product_serializer
     ):
-        from demo.models import Product
+        from demo.app.models import Product
         auth_client.patch(
             f"/api/models/demo/Product/{product.pk}/",
             {"available": False},
@@ -576,7 +576,7 @@ def product_filterset_override(monkeypatch):
     instead of an already-built, library-default FilterSet class.
     """
     from snapadmin.api import filters as filters_module
-    from demo.models import Product
+    from demo.app.models import Product
 
     monkeypatch.setattr(
         Product, "api_filter_lookups", {"name": ["exact", "icontains"]}, raising=False
@@ -589,7 +589,7 @@ def product_filterset_override(monkeypatch):
 @pytest.mark.django_db
 class TestAutoFilterTextFieldLookups:
     def test_bare_field_filter_is_exact_match(self, auth_client):
-        from demo.models import Product
+        from demo.app.models import Product
         Product.objects.create(name="Laptop", price=Decimal("10.00"))
         Product.objects.create(name="Laptop Pro", price=Decimal("20.00"))
 
@@ -600,7 +600,7 @@ class TestAutoFilterTextFieldLookups:
 
     def test_bare_field_filter_no_longer_matches_superstring(self, auth_client):
         # Old behaviour: icontains meant "?name=Laptop" also matched "Laptop Pro".
-        from demo.models import Product
+        from demo.app.models import Product
         Product.objects.create(name="Laptop Pro", price=Decimal("20.00"))
 
         r = auth_client.get("/api/models/demo/Product/?name=Laptop")
@@ -608,7 +608,7 @@ class TestAutoFilterTextFieldLookups:
         assert r.json()["results"] == []
 
     def test_icontains_suffix_performs_substring_match(self, auth_client):
-        from demo.models import Product
+        from demo.app.models import Product
         Product.objects.create(name="Laptop", price=Decimal("10.00"))
         Product.objects.create(name="Laptop Pro", price=Decimal("20.00"))
 
@@ -618,7 +618,7 @@ class TestAutoFilterTextFieldLookups:
         assert names == {"Laptop", "Laptop Pro"}
 
     def test_startswith_suffix_available(self, auth_client):
-        from demo.models import Product
+        from demo.app.models import Product
         Product.objects.create(name="Laptop", price=Decimal("10.00"))
         Product.objects.create(name="Desktop", price=Decimal("20.00"))
 
@@ -628,7 +628,7 @@ class TestAutoFilterTextFieldLookups:
         assert names == ["Laptop"]
 
     def test_in_suffix_accepts_comma_separated_values(self, auth_client):
-        from demo.models import Product
+        from demo.app.models import Product
         Product.objects.create(name="Laptop", price=Decimal("10.00"))
         Product.objects.create(name="Desktop", price=Decimal("20.00"))
         Product.objects.create(name="Tablet", price=Decimal("30.00"))
@@ -642,7 +642,7 @@ class TestAutoFilterTextFieldLookups:
         self, product_filterset_override
     ):
         from snapadmin.api.filters import build_filterset_for_model
-        from demo.models import Product
+        from demo.app.models import Product
 
         filterset_cls = build_filterset_for_model(Product)
         name_keys = {
@@ -661,7 +661,7 @@ class TestAutoFilterTextFieldLookups:
 
     def test_model_without_override_uses_library_default_for_every_text_field(self):
         from snapadmin.api.filters import build_filterset_for_model
-        from demo.models import Product
+        from demo.app.models import Product
 
         filterset_cls = build_filterset_for_model(Product)
         name_keys = {
@@ -673,7 +673,7 @@ class TestAutoFilterTextFieldLookups:
         self, product_filterset_override
     ):
         from snapadmin.api.filters import build_filterset_for_model
-        from demo.models import Product, Customer
+        from demo.app.models import Product, Customer
 
         product_fs = build_filterset_for_model(Product)
         customer_fs = build_filterset_for_model(Customer)
@@ -822,7 +822,7 @@ class TestAutoFilterJsonFieldLookups:
 
     @pytest.fixture
     def showcase_records(self, db):
-        from demo.models import Showcase
+        from demo.app.models import Showcase
 
         red = Showcase.objects.create(
             char_field="red-tagged",
@@ -862,7 +862,7 @@ class TestAutoFilterJsonFieldLookups:
         # The whole point of #FEAT1: this must work on the default dev/test
         # backend, not just on a backend with native JSON `contains` support.
         from django.db import connection
-        from demo.models import Showcase
+        from demo.app.models import Showcase
         from snapadmin.api.filters import build_filterset_for_model
 
         assert connection.vendor == "sqlite"
@@ -932,7 +932,7 @@ class TestAutoFilterJsonFieldLookups:
         # Matches today's behavior for a model that never opts in: the JSON
         # field is simply absent from the auto-generated filter set — no
         # crash, no accidental exposure of every key-path.
-        from demo.models import Showcase
+        from demo.app.models import Showcase
         from snapadmin.api.filters import _build_filters_for_model
 
         monkeypatch.setattr(Showcase, "api_json_filters", None, raising=False)
@@ -940,7 +940,7 @@ class TestAutoFilterJsonFieldLookups:
         assert not any(name.startswith("json_field__") for name in filters)
 
     def test_declared_json_filters_present_in_filter_set(self):
-        from demo.models import Showcase
+        from demo.app.models import Showcase
         from snapadmin.api.filters import _build_filters_for_model
 
         filters = _build_filters_for_model(Showcase)
@@ -954,7 +954,7 @@ class TestAutoFilterJsonFieldLookups:
         # lifetime of the process. Rebuilding after clearing the cache entry
         # must still surface the declared JSON filters, and a second call
         # must hit the cache (identical class).
-        from demo.models import Showcase
+        from demo.app.models import Showcase
         from snapadmin.api.filters import build_filterset_for_model, _filterset_cache
 
         cache_key = f"{Showcase._meta.app_label}.{Showcase._meta.model_name}"
@@ -988,7 +988,7 @@ class TestMaskedFieldsExcludedFromApiQuerying:
 
     @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
     def test_filter_on_masked_field_ignored_for_unprivileged(self, regular_user):
-        from demo.models import Product
+        from demo.app.models import Product
         laptop = Product.objects.create(name="Laptop", price=Decimal("10.00"))
         desktop = Product.objects.create(name="Desktop", price=Decimal("20.00"))
         client = self._regular_client_with_product_view(regular_user)
@@ -1002,7 +1002,7 @@ class TestMaskedFieldsExcludedFromApiQuerying:
 
     @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
     def test_filter_on_masked_field_still_applies_for_privileged(self, auth_client):
-        from demo.models import Product
+        from demo.app.models import Product
         Product.objects.create(name="Laptop", price=Decimal("10.00"))
         Product.objects.create(name="Desktop", price=Decimal("20.00"))
 
@@ -1013,7 +1013,7 @@ class TestMaskedFieldsExcludedFromApiQuerying:
 
     @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
     def test_ordering_by_masked_field_ignored_for_unprivileged(self, regular_user):
-        from demo.models import Product
+        from demo.app.models import Product
         alpha = Product.objects.create(name="Alpha", price=Decimal("1"))  # pk1, created first
         bravo = Product.objects.create(name="Bravo", price=Decimal("2"))  # pk2, created second
         client = self._regular_client_with_product_view(regular_user)
@@ -1030,7 +1030,7 @@ class TestMaskedFieldsExcludedFromApiQuerying:
         # Masking one field must not narrow the ordering allowlist down to
         # only concrete model columns for every other field — a field the
         # serializer exposes (e.g. a to-many) that isn't masked stays orderable.
-        from demo.models import Product
+        from demo.app.models import Product
         cheap = Product.objects.create(name="Alpha", price=Decimal("1"))
         pricey = Product.objects.create(name="Bravo", price=Decimal("2"))
         client = self._regular_client_with_product_view(regular_user)
@@ -1042,7 +1042,7 @@ class TestMaskedFieldsExcludedFromApiQuerying:
 
     @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
     def test_ordering_by_masked_field_applies_for_privileged(self, auth_client):
-        from demo.models import Product
+        from demo.app.models import Product
         alpha = Product.objects.create(name="Alpha", price=Decimal("1"))
         bravo = Product.objects.create(name="Bravo", price=Decimal("2"))
 
@@ -1053,7 +1053,7 @@ class TestMaskedFieldsExcludedFromApiQuerying:
 
     @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
     def test_search_on_masked_field_ignored_for_unprivileged(self, regular_user):
-        from demo.models import Product
+        from demo.app.models import Product
         Product.objects.create(name="UniqueWidgetXYZ", price=Decimal("1"))
         client = self._regular_client_with_product_view(regular_user)
 
@@ -1063,7 +1063,7 @@ class TestMaskedFieldsExcludedFromApiQuerying:
 
     @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
     def test_search_on_masked_field_applies_for_privileged(self, auth_client):
-        from demo.models import Product
+        from demo.app.models import Product
         Product.objects.create(name="UniqueWidgetXYZ", price=Decimal("1"))
 
         r = auth_client.get("/api/models/demo/Product/?search=UniqueWidgetXYZ")

@@ -12,7 +12,7 @@ import pytest
 from django.core.management import call_command
 from django.test import override_settings
 
-from demo.models import ExchangeRate
+from demo.app.models import ExchangeRate
 from snapadmin.etl import upsert_from_source
 
 
@@ -66,7 +66,7 @@ class TestUpsertFromSource:
             upsert_from_source(ExchangeRate, _rows(1), unique_fields=[])
 
     def test_es_only_model_rejected(self):
-        from demo.models import SearchLog
+        from demo.app.models import SearchLog
 
         with pytest.raises(ValueError, match="ES_ONLY"):
             upsert_from_source(SearchLog, _rows(1), unique_fields=["code"])
