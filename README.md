@@ -143,7 +143,7 @@ class SearchLog(snap_models.SnapModel):
 > 🌟 **Demo screens.** The models below (Product, Customer, Order, AuditLog) ship in the bundled
 > **demo**, not the package — they illustrate what SnapAdmin generates for *your* models.
 
-After running `docker compose up --build` and visiting `http://localhost:8000/admin/`:
+After running `docker compose -f demo/docker-compose.yml up --build` and visiting `http://localhost:8000/admin/`:
 
 **Django Admin (powered by Unfold)**
 ```
@@ -1785,7 +1785,7 @@ Copy `demo/dist.env` to `demo/.env` and configure:
 | `SNAPADMIN_BACKUP_FTP_TLS` | `False` | Use FTPS (recommended for offsite) |
 | `SNAPADMIN_BACKUP_REMOTE_EVERY_HOURS` | `168` | How often the offsite copy refreshes (weekly) |
 | `SNAPADMIN_AUTO_SEED` | `False` | Auto-run `seed_demo` on startup (demo only) |
-| `TRAEFIK_DOMAIN` | `yourdomain.com` | Production domain for `docker-compose.traefik.prod.yml` |
+| `TRAEFIK_DOMAIN` | `yourdomain.com` | Production domain for `demo/docker-compose.traefik.prod.yml` |
 | `TRAEFIK_ACME_EMAIL` | — | Email for Let's Encrypt certificate registration |
 | `TRAEFIK_DASHBOARD_USER` | `admin` | Reference username (see `TRAEFIK_DASHBOARD_CREDENTIALS`) |
 | `TRAEFIK_DASHBOARD_PASSWORD` | `changeme` | Reference password (see `TRAEFIK_DASHBOARD_CREDENTIALS`) |
@@ -1795,12 +1795,16 @@ Copy `demo/dist.env` to `demo/.env` and configure:
 
 ## 🌟 Demo Application Features
 
-The repository includes a `demo/` project (`demo/core/` config + the `demo` app) to showcase SnapAdmin's power:
+The runnable demo lives entirely under [`demo/`](demo/) — `demo/core/` is the project
+config, `demo/app/` is the example app (additional demo apps go alongside it), and every
+demo-only file (`manage.py`, `requirements.txt`, the Docker/Traefik compose files, the
+`dist.env` template) sits there too. See [`demo/README.md`](demo/README.md) for a focused
+guide. It showcases SnapAdmin's power:
 
 - **Complete Project Setup**: Ready-to-use Docker environment with PostgreSQL, Redis, and Elasticsearch.
 - **Example Domain Models**: Product, Customer, and Order models showing complex relationships.
 - **Interactive Dashboard**: A custom system dashboard with health checks and environment stats.
-- **Seeder Command**: `python manage.py seed_demo` to instantly populate your environment.
+- **Seeder Command**: `python demo/manage.py seed_demo` to instantly populate your environment.
 - **Celery Integration**: Example background tasks for data indexing and stats generation.
 
 ---
@@ -1811,7 +1815,7 @@ The repository includes a `demo/` project (`demo/core/` config + the `demo` app)
 git clone https://github.com/drofji/django-snapadmin.git
 cd django-snapadmin
 cp demo/dist.env demo/.env
-docker compose up --build
+docker compose -f demo/docker-compose.yml up --build
 ```
 - **Admin**: http://localhost:8000/admin/ (admin / admin)
 - **REST API Docs**: http://localhost:8000/api/docs/
@@ -1823,10 +1827,10 @@ docker compose up --build
 echo "ELASTICSEARCH_ENABLED=True" >> demo/.env
 
 # 2. Start with ES profile
-docker compose --profile es up --build
+docker compose -f demo/docker-compose.yml --profile es up --build
 
 # 3. Also add Kibana for visualisation
-docker compose --profile es --profile dev up --build
+docker compose -f demo/docker-compose.yml --profile es --profile dev up --build
 ```
 
 ### Building images with automatic retention
@@ -1872,7 +1876,7 @@ Two Traefik overlay files are provided for routing requests through a reverse pr
 Access the app at `http://snapadmin.localhost/` without a port number:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.traefik.local.yml up --build
+docker compose -f demo/docker-compose.yml -f demo/docker-compose.traefik.local.yml up --build
 ```
 
 | URL | Service |
@@ -1900,7 +1904,7 @@ DEBUG=False
 Then start the production overlay:
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.traefik.prod.yml up -d
+docker compose -f demo/docker-compose.yml -f demo/docker-compose.traefik.prod.yml up -d
 ```
 
 | URL | Service |

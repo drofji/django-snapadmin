@@ -27,7 +27,9 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_ROOT"
 
 echo "🛠   Building ${IMAGE}:${DAY_TAG} (keep last ${KEEP_DAYS} build-days)…"
-docker build -t "${IMAGE}:${DAY_TAG}" -t "${IMAGE}:latest" .
+# Build context is the repo root (contains both snapadmin/ and demo/); the
+# Dockerfile lives under demo/ after the demo restructure.
+docker build -f demo/Dockerfile -t "${IMAGE}:${DAY_TAG}" -t "${IMAGE}:latest" .
 
 echo "🧹  Pruning old day-tagged images…"
 SNAPADMIN_IMAGE_KEEP_DAYS="${KEEP_DAYS}" \

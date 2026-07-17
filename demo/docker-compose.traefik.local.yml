@@ -5,7 +5,7 @@
 # Traefik dashboard at http://traefik.localhost/ (BasicAuth protected)
 #
 # Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.traefik.local.yml up --build
+#   docker compose -f demo/docker-compose.yml -f demo/docker-compose.traefik.local.yml up --build
 #
 # Requirements:
 #   - No other process listening on port 80

@@ -1,18 +1,22 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # SnapAdmin — Docker Compose Stack
 #
-# Default stack (no flags):
-#   docker compose up --build
+# This file lives inside demo/. Run it either from here (`cd demo`) or from the
+# repo root with `-f demo/docker-compose.yml`; both resolve identically, since
+# the build context (`..`) and env_file (`.env`) are relative to this file.
+#
+# Default stack (no flags), from the repo root:
+#   docker compose -f demo/docker-compose.yml up --build
 #   Starts: db, redis, app, worker, beat
 #   ELASTICSEARCH_ENABLED defaults to False in demo/.env (no ES overhead)
 #
 # With Elasticsearch (full search features):
-#   docker compose --profile es up --build
+#   docker compose -f demo/docker-compose.yml --profile es up --build
 #   Starts: everything above + elasticsearch
 #   Set ELASTICSEARCH_ENABLED=True in your demo/.env before running
 #
 # With Kibana (ES visualisation, dev only):
-#   docker compose --profile es --profile dev up --build
+#   docker compose -f demo/docker-compose.yml --profile es --profile dev up --build
 #   Starts: everything above + kibana
 #
 # Services:
@@ -27,9 +31,11 @@
 
 x-app-common: &app-common
   build:
-    context: .
-    dockerfile: Dockerfile
-  env_file: demo/.env
+    # Context is the repo root (one level up) so the image contains both the
+    # snapadmin package and the demo project; the Dockerfile lives in demo/.
+    context: ..
+    dockerfile: demo/Dockerfile
+  env_file: .env
   environment:
     DJANGO_SETTINGS_MODULE: demo.core.settings
     POSTGRES_HOST: db

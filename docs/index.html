@@ -330,11 +330,11 @@
   <pre><code>git clone https://github.com/drofji/django-snapadmin.git
 cd django-snapadmin
 cp demo/dist.env demo/.env
-docker compose up --build</code></pre>
+docker compose -f demo/docker-compose.yml up --build</code></pre>
 
   <h3>With Traefik — Local Development (HTTP)</h3>
   <p>Access the app at <code>http://snapadmin.localhost/</code> with a BasicAuth-protected dashboard:</p>
-  <pre><code>docker compose -f docker-compose.yml -f docker-compose.traefik.local.yml up --build
+  <pre><code>docker compose -f demo/docker-compose.yml -f demo/docker-compose.traefik.local.yml up --build
 
 # App:              http://snapadmin.localhost/admin/
 # Traefik dashboard: http://traefik.localhost/  (admin / changeme)</code></pre>
@@ -351,7 +351,7 @@ ALLOWED_HOSTS=admin.mycompany.com
 DEBUG=False</code></pre>
 
   <p>Then start:</p>
-  <pre><code>docker compose -f docker-compose.yml -f docker-compose.traefik.prod.yml up -d
+  <pre><code>docker compose -f demo/docker-compose.yml -f demo/docker-compose.traefik.prod.yml up -d
 
 # App:               https://admin.mycompany.com/admin/
 # Traefik dashboard:  https://traefik.admin.mycompany.com/  (BasicAuth)
@@ -1225,15 +1225,15 @@ ELASTICSEARCH_URL = "http://localhost:9200"  # local dev or external cluster</co
   </div>
 
   <h3>Running with Docker</h3>
-  <p>The default <code>docker compose up</code> does <strong>not</strong> start Elasticsearch (saves ~512 MB RAM). To enable it:</p>
+  <p>The default <code>docker compose -f demo/docker-compose.yml up</code> does <strong>not</strong> start Elasticsearch (saves ~512 MB RAM). To enable it:</p>
   <pre><code># Enable ES in your demo/.env
 ELASTICSEARCH_ENABLED=True
 
 # Then start the full stack including ES
-docker compose --profile es up --build
+docker compose -f demo/docker-compose.yml --profile es up --build
 
 # Add Kibana for visualisation (dev only)
-docker compose --profile es --profile dev up --build</code></pre>
+docker compose -f demo/docker-compose.yml --profile es --profile dev up --build</code></pre>
 
   <h3>External Elasticsearch (production / staging)</h3>
   <p>Point to any external ES cluster via env vars — no code change needed:</p>
@@ -1450,7 +1450,7 @@ CELERY_BEAT_SCHEDULE = {
   </div>
 
   <h3>Running Celery in Docker</h3>
-  <pre><code># docker-compose.yml services:
+  <pre><code># demo/docker-compose.yml services:
 worker:
   command: celery -A demo.core worker -l INFO
 beat:

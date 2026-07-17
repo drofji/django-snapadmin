@@ -4,8 +4,14 @@ Thanks for helping improve **django-snapadmin**! This guide covers the parts of 
 that aren't obvious from the code.
 
 - **Package source:** the published package lives in [`snapadmin/`](snapadmin/). Everything
-  else (`demo/`, `tests/`, `docs/`) supports development and is **not** shipped to PyPI.
-- **Tests:** `pytest` — the `snapadmin/` package is kept at 100% line coverage.
+  else supports development and is **not** shipped to PyPI: the runnable demo project lives
+  entirely under [`demo/`](demo/) (`demo/core/` = project config, `demo/app/` = example app,
+  plus its own `manage.py`, `requirements.txt`, Docker/Traefik compose files and `dist.env`),
+  and `tests/` + `docs/` sit at the repo root.
+- **Running things:** the demo's `manage.py` lives in `demo/`; run it from the repo root as
+  `python demo/manage.py <command>` (it puts the repo root on `sys.path` itself). Docker runs
+  via `docker compose -f demo/docker-compose.yml up --build`. See [`demo/README.md`](demo/README.md).
+- **Tests:** `pytest` from the repo root — the `snapadmin/` package is kept at 100% line coverage.
 - **Migrations:** after any model change, run `python demo/manage.py makemigrations` and commit
   the generated migration; never edit an existing migration.
 

@@ -6,7 +6,7 @@
 #   docker-compose.traefik.prod.yml  — production with HTTPS + Let's Encrypt
 #
 # Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up --build
+#   docker compose -f demo/docker-compose.yml -f demo/docker-compose.traefik.yml up --build
 #
 # After startup:
 #   http://snapadmin.localhost/       → Django admin / app

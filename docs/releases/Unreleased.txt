@@ -245,6 +245,23 @@ PII masking closed on export, audit trail and API filter/ordering/search
 Changed
 =======
 
+Demo project restructured into a self-contained ``demo/`` folder
+  The repository's runnable demo/development project — previously scattered across a
+  root-level ``sandbox/`` Django project, a flat ``demo/`` app, and a pile of root files
+  (``manage.py``, ``requirements.txt``, the Docker/Traefik compose files, the ``dist.env``
+  template, an ``admin/index.html`` override) — now lives entirely under one top-level ``demo/``
+  folder: ``demo/core/`` (project config, formerly ``sandbox/``), ``demo/app/`` (the example app,
+  so more demo apps can be added alongside it later), and ``demo/manage.py`` /
+  ``demo/requirements.txt`` / ``demo/docker-compose*.yml`` / ``demo/Dockerfile`` / ``demo/dist.env``.
+  **This does not affect anyone who installs django-snapadmin** — ``pyproject.toml`` packages only
+  ``snapadmin/``, so none of the moved files were ever part of the distribution; there is no import
+  change, no settings change, and no migration for installed projects. It only changes how you run
+  the in-repo demo when developing against a checkout: use ``python demo/manage.py <command>`` (from
+  the repo root) and ``docker compose -f demo/docker-compose.yml up --build``. The example app kept
+  its ``demo`` app-label (via an explicit ``AppConfig.label``), so its migration history and every
+  ``demo.<Model>`` reference are unchanged. See the new ``demo/README.md``. The pytest suite still
+  runs from the repo root with ``pytest`` exactly as before.
+
 **Breaking:** auto-generated REST API filters now default text fields to exact match, not
 substring
   Every ``CharField``/``TextField``/``EmailField``/``URLField``/``SlugField`` on a ``SnapModel``

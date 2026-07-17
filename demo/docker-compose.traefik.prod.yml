@@ -6,7 +6,7 @@
 # All HTTP traffic redirected to HTTPS automatically.
 #
 # Usage:
-#   docker compose -f docker-compose.yml -f docker-compose.traefik.prod.yml up -d
+#   docker compose -f demo/docker-compose.yml -f demo/docker-compose.traefik.prod.yml up -d
 #
 # Requirements:
 #   - Ports 80 and 443 open and reachable from the internet
