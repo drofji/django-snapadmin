@@ -266,6 +266,16 @@ Demo project restructured into a self-contained ``demo/`` folder
   admin/dashboard links shown only to staff), and the staff-only system dashboard moved from ``/``
   to ``/dashboard/``. This is all demo-only and, again, changes nothing for installers.
 
+  The demo now also showcases the ``[extra-settings]`` extra as a runtime-editable, DB-backed
+  configuration store: a curated set of *runtime-editable* ``SNAPADMIN_*`` settings (the ones the
+  package re-reads per request — masked fields, API page sizes, throttle rates, audit/error
+  retention, export ceilings, ``SNAPADMIN_DASHBOARD_PUBLIC``) appears under "Settings" in the admin,
+  each described, and edits take effect live with no restart. The bridge is demo-only
+  (``demo/app/managed_settings.py``) — the ``snapadmin`` package still reads plain
+  ``django.conf.settings`` and never depends on ``django-extra-settings``; the demo simply syncs the
+  DB value back onto ``settings``. Boot-time-only settings (routing toggles, admin nesting) and all
+  secrets are deliberately excluded.
+
 **Breaking:** auto-generated REST API filters now default text fields to exact match, not
 substring
   Every ``CharField``/``TextField``/``EmailField``/``URLField``/``SlugField`` on a ``SnapModel``

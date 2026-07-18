@@ -51,6 +51,15 @@ REST_FRAMEWORK.pop("DEFAULT_THROTTLE_RATES", None)
 SNAPADMIN_THROTTLE_ANON = None
 SNAPADMIN_THROTTLE_USER = None
 
+# ── extra_settings: seed no managed rows in the test DB ──────────────────────
+# The demo bridges a curated set of SNAPADMIN_* settings through
+# django-extra-settings (demo/app/managed_settings.py). Seeding those rows here
+# would let the first-request sync overwrite the test overrides above (e.g. the
+# throttle=None pins) with the seeded package defaults. The suite doesn't
+# exercise that bridge except in test_extra_settings_sync.py (which creates its
+# own rows in isolation), so start empty.
+EXTRA_SETTINGS_DEFAULTS = []
+
 # ── Celery: run tasks synchronously, no broker ───────────────────────────────
 CELERY_TASK_ALWAYS_EAGER = True
 CELERY_TASK_EAGER_PROPAGATES = True

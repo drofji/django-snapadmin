@@ -72,6 +72,26 @@ annotated [`dist.env`](dist.env) template to create it. Notably:
   `SNAPADMIN_AUDIT_LOG_ENABLED`, and more — disable one and its routes/behavior
   disappear.
 
+### Runtime-editable settings (DB-backed, via `django-extra-settings`)
+
+The demo also shows the `[extra-settings]` extra storing configuration in the
+**database** instead of only in `settings.py`. A curated set of *runtime-editable*
+`SNAPADMIN_*` settings — the ones the package re-reads per request, e.g.
+`SNAPADMIN_MASKED_FIELDS`, `SNAPADMIN_API_PAGE_SIZE`, the throttle rates, audit /
+error retention days, the export ceilings, `SNAPADMIN_DASHBOARD_PUBLIC` — appears
+under **Settings** in the admin (already Unfold-styled), each with a description.
+Edit one there and it takes effect immediately, no restart: e.g. set
+`SNAPADMIN_MASKED_FIELDS` to `{"demo.Customer": ["email"]}` and the Customer API
+starts masking emails on the next request.
+
+How it works (and why it's demo-only) lives in
+[`app/managed_settings.py`](app/managed_settings.py): the `snapadmin` package
+never depends on `django-extra-settings`, so the demo *syncs* each DB value back
+onto `django.conf.settings`, leaving the package to read its config exactly as it
+always does. Settings that are read once at boot (URL-routing toggles, admin
+nesting) are intentionally **not** surfaced — editing them at runtime wouldn't
+take effect — and no secret or credential is ever exposed this way.
+
 ## Security controls on display
 
 This project deliberately exercises SnapAdmin's security posture — the same

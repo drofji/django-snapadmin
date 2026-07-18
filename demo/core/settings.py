@@ -505,6 +505,24 @@ EXTRA_SETTINGS_ADMIN_APP = "demo.app"
 EXTRA_SETTINGS_CACHE_NAME = "extra_settings"
 EXTRA_SETTINGS_VERBOSE_NAME = _("Settings")
 
+# Surface a curated set of *runtime-editable* SNAPADMIN_* settings as DB-backed,
+# admin-editable extra_settings rows (demo-only bridge; see
+# demo/app/managed_settings.py for the how/why and the exclusion rules). The
+# seed value for each row is the demo's own configured value when settings.py
+# already defines one, otherwise the package default carried in the spec.
+from demo.app.managed_settings import (  # noqa: E402
+    MANAGED_SETTING_NAMES,
+    build_extra_settings_defaults,
+)
+
+EXTRA_SETTINGS_DEFAULTS = build_extra_settings_defaults(
+    overrides={
+        name: globals()[name]
+        for name in MANAGED_SETTING_NAMES
+        if name in globals()
+    }
+)
+
 # ------------------------------------------------------------------------------
 # CKEDITOR 5 CONFIGURATION
 # ------------------------------------------------------------------------------

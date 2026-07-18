@@ -9,3 +9,14 @@ class DemoConfig(AppConfig):
     # examples, seed_demo/seed_large/benchmark_list_view commands) unchanged —
     # only the Python package moved, not the app identity.
     label = 'demo'
+
+    def ready(self):
+        # Demo-only: bridge the curated runtime-editable SNAPADMIN_* settings
+        # from django-extra-settings (DB) onto django.conf.settings. Only signal
+        # wiring happens here (DB-free, no "database access during app init"
+        # warning); the actual first sync runs one-shot on the first request,
+        # and each admin edit re-applies live via post_save. See
+        # demo/app/managed_settings.py.
+        from demo.app.managed_settings import connect_managed_settings_signals
+
+        connect_managed_settings_signals()
