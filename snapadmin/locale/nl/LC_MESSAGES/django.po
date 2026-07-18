@@ -2,13 +2,286 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-18 12:45+0000\n"
+"Language: nl\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Language: nl\n"
+
+msgid "Access Control"
+msgstr "Toegangsbeheer"
+
+msgid "Audit"
+msgstr "Audit"
+
+#, python-format
+msgid "API token created. Copy it now — it will not be shown again: %(key)s"
+msgstr "API-token aangemaakt. Kopieer het nu — het wordt niet opnieuw getoond: %(key)s"
+
+msgid "Token Key"
+msgstr "Tokensleutel"
+
+msgid "hidden — shown only once at creation"
+msgstr "verborgen — slechts eenmaal getoond bij aanmaken"
+
+msgid "Status"
+msgstr "Status"
+
+msgid "Disabled"
+msgstr "Uitgeschakeld"
+
+msgid "Expired"
+msgstr "Verlopen"
+
+msgid "Active"
+msgstr "Actief"
+
+msgid "Message"
+msgstr "Bericht"
+
+msgid "Changes"
+msgstr "Wijzigingen"
+
+msgid "Action"
+msgstr "Actie"
+
+msgid "Allowed models must be a list."
+msgstr "Toegestane modellen moeten een lijst zijn."
+
+#, python-format
+msgid "Invalid model format: '%(item)s'."
+msgstr "Ongeldig modelformaat: '%(item)s'."
+
+#, python-format
+msgid "Model '%(item)s' does not exist."
+msgstr "Model '%(item)s' bestaat niet."
+
+msgid "Token Name"
+msgstr "Tokennaam"
+
+msgid ""
+"A descriptive name for this token (e.g. 'CI Pipeline', 'Read-only "
+"dashboard')."
+msgstr "Een beschrijvende naam voor dit token (bijv. 'CI-pipeline', 'Alleen-lezen dashboard')."
+
+msgid "Token Prefix"
+msgstr "Tokenprefix"
+
+msgid "First 8 characters of the key, for identification. Not secret."
+msgstr "De eerste 8 tekens van de sleutel, ter identificatie. Niet geheim."
+
+msgid "Token Digest"
+msgstr "Token-digest"
+
+msgid ""
+"SHA-256 hash of the secret key. The raw key is never stored — it is shown "
+"only once, at creation."
+msgstr "SHA-256-hash van de geheime sleutel. De ruwe sleutel wordt nooit opgeslagen — hij wordt slechts eenmaal getoond, bij aanmaken."
+
+msgid "Owner"
+msgstr "Eigenaar"
+
+msgid "Expiration Date"
+msgstr "Vervaldatum"
+
+msgid "Leave blank for a token that never expires."
+msgstr "Laat leeg voor een token dat nooit verloopt."
+
+#, fuzzy
+#| msgid "Managed Models"
+msgid "Allowed Models"
+msgstr "Beheerde modellen"
+
+msgid "List of 'app_label.ModelName' strings this token can access."
+msgstr "Lijst met 'app_label.ModelName'-tekenreeksen waartoe dit token toegang heeft."
+
+msgid "Is Active"
+msgstr "Is actief"
+
+msgid "Inactive tokens are rejected without being deleted."
+msgstr "Inactieve tokens worden geweigerd zonder te worden verwijderd."
+
+msgid "Created At"
+msgstr "Aangemaakt op"
+
+msgid "Last Used At"
+msgstr "Laatst gebruikt op"
+
+msgid "API Token"
+msgstr "API-token"
+
+msgid "API Tokens"
+msgstr "API-tokens"
+
+msgid "Can view unmasked PII data"
+msgstr "Kan niet-gemaskeerde PII-gegevens bekijken"
+
+#, fuzzy
+#| msgid "Description"
+msgid "Exception"
+msgstr "Beschrijving"
+
+msgid ""
+"Exception class name, or HTTP<code> for a 5xx response without an exception."
+msgstr "Naam van de uitzonderingsklasse, of HTTP<code> voor een 5xx-antwoord zonder uitzondering."
+
+msgid "Path"
+msgstr "Pad"
+
+msgid "Method"
+msgstr "Methode"
+
+msgid "Status Code"
+msgstr "Statuscode"
+
+msgid "Fingerprint"
+msgstr "Vingerafdruk"
+
+msgid "SHA-256 of exception class + path — groups repeats of the same error."
+msgstr "SHA-256 van uitzonderingsklasse + pad — groepeert herhalingen van dezelfde fout."
+
+msgid "Traceback"
+msgstr "Traceback"
+
+msgid "Occurred At"
+msgstr "Opgetreden op"
+
+msgid "Error Event"
+msgstr "Foutgebeurtenis"
+
+msgid "Error Events"
+msgstr "Foutgebeurtenissen"
+
+msgid "Created"
+msgstr "Aangemaakt"
+
+msgid "Updated"
+msgstr "Bijgewerkt"
+
+msgid "Deleted"
+msgstr "Verwijderd"
+
+msgid "Actor"
+msgstr "Actor"
+
+msgid "Actor (snapshot)"
+msgstr "Actor (momentopname)"
+
+msgid "IP Address"
+msgstr "IP-adres"
+
+msgid "User Agent"
+msgstr "User-agent"
+
+msgid "Content Type"
+msgstr "Inhoudstype"
+
+msgid "App Label"
+msgstr "App-label"
+
+#, fuzzy
+#| msgid "Mode"
+msgid "Model"
+msgstr "Modus"
+
+msgid "Object ID"
+msgstr "Object-ID"
+
+msgid "Object"
+msgstr "Object"
+
+msgid "Before/after field diff, if any."
+msgstr "Veldverschil voor/na, indien aanwezig."
+
+msgid "Timestamp"
+msgstr "Tijdstempel"
+
+msgid "Audit Log"
+msgstr "Auditlogboek"
+
+msgid "Audit Logs"
+msgstr "Auditlogboeken"
+
+msgid "Audit log entries are immutable and cannot be modified."
+msgstr "Auditlogboekvermeldingen zijn onveranderlijk en kunnen niet worden gewijzigd."
+
+msgid "Audit log entries are immutable and cannot be deleted."
+msgstr "Auditlogboekvermeldingen zijn onveranderlijk en kunnen niet worden verwijderd."
+
+msgid "Pending"
+msgstr "In behandeling"
+
+msgid "Processing"
+msgstr "Wordt verwerkt"
+
+msgid "Completed"
+msgstr "Voltooid"
+
+msgid "Failed"
+msgstr "Mislukt"
+
+msgid "Cancelled"
+msgstr "Geannuleerd"
+
+msgid "Format"
+msgstr "Formaat"
+
+msgid "Filters"
+msgstr "Filters"
+
+msgid "ORM field=value filters applied to the export queryset."
+msgstr "ORM-filters veld=waarde toegepast op de export-queryset."
+
+msgid "Total Rows"
+msgstr "Totaal aantal rijen"
+
+msgid "Processed Rows"
+msgstr "Verwerkte rijen"
+
+msgid "Rows written so far — drives progress-percent and ETA reporting."
+msgstr "Tot nu toe geschreven rijen — bepaalt voortgangspercentage en ETA-rapportage."
+
+msgid "Resume Cursor (PK)"
+msgstr "Hervattingscursor (PK)"
+
+msgid ""
+"Primary key of the last exported row; blank means start from the beginning."
+msgstr "Primaire sleutel van de laatst geëxporteerde rij; leeg betekent vanaf het begin beginnen."
+
+msgid "Resume Byte Offset"
+msgstr "Hervattings-byteoffset"
+
+msgid "Byte length of the working file confirmed at cursor_pk."
+msgstr "Bytelengte van het werkbestand bevestigd bij cursor_pk."
+
+#, fuzzy
+#| msgid "Name"
+msgid "File Name"
+msgstr "Naam"
+
+msgid "Error"
+msgstr "Fout"
+
+msgid "Requested By"
+msgstr "Aangevraagd door"
+
+msgid "Started At"
+msgstr "Gestart op"
+
+msgid "Finished At"
+msgstr "Voltooid op"
+
+msgid "Export Job"
+msgstr "Exporttaak"
+
+msgid "Export Jobs"
+msgstr "Exporttaken"
 
 msgid "Skip to main content"
 msgstr "Ga naar hoofdinhoud"
+
+msgid "SnapAdmin on GitHub (opens in a new tab)"
+msgstr "SnapAdmin op GitHub (opent in een nieuw tabblad)"
 
 msgid "System entry points"
 msgstr "Systeemtoegangspunten"
@@ -37,6 +310,9 @@ msgstr "Beschrijving"
 msgid "Data Distribution"
 msgstr "Gegevensverdeling"
 
+msgid "Bar chart of record counts per managed model"
+msgstr "Staafdiagram van het aantal records per beheerd model"
+
 msgid "System Health"
 msgstr "Systeemstatus"
 
@@ -52,36 +328,74 @@ msgstr "Hostnaam"
 msgid "API Capabilities"
 msgstr "API-mogelijkheden"
 
+msgid ""
+"Automatic CRUD endpoints for all models. Supports filtering, pagination, and "
+"token authentication."
+msgstr "Automatische CRUD-eindpunten voor alle modellen. Ondersteunt filteren, paginering en tokenauthenticatie."
+
+msgid "Dynamic schema generation powered by Graphene."
+msgstr "Dynamische schemagenerering mogelijk gemaakt door Graphene."
+
+#, python-format
+msgid "Built with <strong>SnapAdmin</strong> v%(version)s"
+msgstr "Gemaakt met <strong>SnapAdmin</strong> v%(version)s"
+
 msgid "Language"
 msgstr "Taal"
 
-msgid "English"
-msgstr "Engels"
+msgid "Single sign-on providers"
+msgstr "Single sign-on-providers"
 
-msgid "Russian"
-msgstr "Russisch"
+msgid "Or sign in with"
+msgstr "Of meld u aan met"
 
-msgid "German"
-msgstr "Duits"
+msgid "Enter a valid phone number (e.g. +49151234567 or 089-123456)."
+msgstr "Voer een geldig telefoonnummer in (bijv. +49151234567 of 089-123456)."
 
-msgid "Swiss German"
-msgstr "Zwitsers Duits"
+msgid "Enter a valid hex color code (e.g. #FF5733 or #F53)."
+msgstr "Voer een geldige hex-kleurcode in (bijv. #FF5733 of #F53)."
 
-msgid "French"
-msgstr "Frans"
+#, python-format
+msgid "File extension '%(ext)s' is not allowed. Allowed: %(allowed)s"
+msgstr "Bestandsextensie '%(ext)s' is niet toegestaan. Toegestaan: %(allowed)s"
 
-msgid "Swiss French"
-msgstr "Zwitsers Frans"
+#, python-format
+msgid "File size is %(size)s bytes. Max allowed is %(max_size)s bytes."
+msgstr "De bestandsgrootte is %(size)s bytes. Maximaal toegestaan is %(max_size)s bytes."
 
-msgid "Spanish"
-msgstr "Spaans"
+msgid "Could not verify file encoding."
+msgstr "Kon de bestandscodering niet verifiëren."
 
-msgid "Italian"
-msgstr "Italiaans"
+#, python-format
+msgid "Invalid encoding. Allowed: %(encodings)s"
+msgstr "Ongeldige codering. Toegestaan: %(encodings)s"
 
-msgid "Polish"
-msgstr "Pools"
+#~ msgid "English"
+#~ msgstr "Engels"
 
-msgid "Dutch"
-msgstr "Nederlands"
+#~ msgid "Russian"
+#~ msgstr "Russisch"
 
+#~ msgid "German"
+#~ msgstr "Duits"
+
+#~ msgid "Swiss German"
+#~ msgstr "Zwitsers Duits"
+
+#~ msgid "French"
+#~ msgstr "Frans"
+
+#~ msgid "Swiss French"
+#~ msgstr "Zwitsers Frans"
+
+#~ msgid "Spanish"
+#~ msgstr "Spaans"
+
+#~ msgid "Italian"
+#~ msgstr "Italiaans"
+
+#~ msgid "Polish"
+#~ msgstr "Pools"
+
+#~ msgid "Dutch"
+#~ msgstr "Nederlands"

@@ -2,13 +2,286 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-07-18 12:45+0000\n"
+"Language: it\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Language: it\n"
+
+msgid "Access Control"
+msgstr "Controllo degli accessi"
+
+msgid "Audit"
+msgstr "Audit"
+
+#, python-format
+msgid "API token created. Copy it now — it will not be shown again: %(key)s"
+msgstr "Token API creato. Copialo ora — non verrà mostrato di nuovo: %(key)s"
+
+msgid "Token Key"
+msgstr "Chiave del token"
+
+msgid "hidden — shown only once at creation"
+msgstr "nascosto — mostrato solo una volta alla creazione"
+
+msgid "Status"
+msgstr "Stato"
+
+msgid "Disabled"
+msgstr "Disattivato"
+
+msgid "Expired"
+msgstr "Scaduto"
+
+msgid "Active"
+msgstr "Attivo"
+
+msgid "Message"
+msgstr "Messaggio"
+
+msgid "Changes"
+msgstr "Modifiche"
+
+msgid "Action"
+msgstr "Azione"
+
+msgid "Allowed models must be a list."
+msgstr "I modelli consentiti devono essere un elenco."
+
+#, python-format
+msgid "Invalid model format: '%(item)s'."
+msgstr "Formato del modello non valido: '%(item)s'."
+
+#, python-format
+msgid "Model '%(item)s' does not exist."
+msgstr "Il modello '%(item)s' non esiste."
+
+msgid "Token Name"
+msgstr "Nome del token"
+
+msgid ""
+"A descriptive name for this token (e.g. 'CI Pipeline', 'Read-only "
+"dashboard')."
+msgstr "Un nome descrittivo per questo token (es. 'CI Pipeline', 'Dashboard di sola lettura')."
+
+msgid "Token Prefix"
+msgstr "Prefisso del token"
+
+msgid "First 8 characters of the key, for identification. Not secret."
+msgstr "I primi 8 caratteri della chiave, per l'identificazione. Non è segreto."
+
+msgid "Token Digest"
+msgstr "Digest del token"
+
+msgid ""
+"SHA-256 hash of the secret key. The raw key is never stored — it is shown "
+"only once, at creation."
+msgstr "Hash SHA-256 della chiave segreta. La chiave grezza non viene mai memorizzata — viene mostrata solo una volta, alla creazione."
+
+msgid "Owner"
+msgstr "Proprietario"
+
+msgid "Expiration Date"
+msgstr "Data di scadenza"
+
+msgid "Leave blank for a token that never expires."
+msgstr "Lasciare vuoto per un token che non scade mai."
+
+#, fuzzy
+#| msgid "Managed Models"
+msgid "Allowed Models"
+msgstr "Modelli gestiti"
+
+msgid "List of 'app_label.ModelName' strings this token can access."
+msgstr "Elenco di stringhe 'app_label.ModelName' a cui questo token può accedere."
+
+msgid "Is Active"
+msgstr "È attivo"
+
+msgid "Inactive tokens are rejected without being deleted."
+msgstr "I token inattivi vengono rifiutati senza essere eliminati."
+
+msgid "Created At"
+msgstr "Creato il"
+
+msgid "Last Used At"
+msgstr "Ultimo utilizzo il"
+
+msgid "API Token"
+msgstr "Token API"
+
+msgid "API Tokens"
+msgstr "Token API"
+
+msgid "Can view unmasked PII data"
+msgstr "Può visualizzare i dati PII non mascherati"
+
+#, fuzzy
+#| msgid "Description"
+msgid "Exception"
+msgstr "Descrizione"
+
+msgid ""
+"Exception class name, or HTTP<code> for a 5xx response without an exception."
+msgstr "Nome della classe di eccezione, o HTTP<code> per una risposta 5xx senza eccezione."
+
+msgid "Path"
+msgstr "Percorso"
+
+msgid "Method"
+msgstr "Metodo"
+
+msgid "Status Code"
+msgstr "Codice di stato"
+
+msgid "Fingerprint"
+msgstr "Impronta"
+
+msgid "SHA-256 of exception class + path — groups repeats of the same error."
+msgstr "SHA-256 della classe di eccezione + percorso — raggruppa le ripetizioni dello stesso errore."
+
+msgid "Traceback"
+msgstr "Traceback"
+
+msgid "Occurred At"
+msgstr "Verificato il"
+
+msgid "Error Event"
+msgstr "Evento di errore"
+
+msgid "Error Events"
+msgstr "Eventi di errore"
+
+msgid "Created"
+msgstr "Creato"
+
+msgid "Updated"
+msgstr "Aggiornato"
+
+msgid "Deleted"
+msgstr "Eliminato"
+
+msgid "Actor"
+msgstr "Autore"
+
+msgid "Actor (snapshot)"
+msgstr "Autore (istantanea)"
+
+msgid "IP Address"
+msgstr "Indirizzo IP"
+
+msgid "User Agent"
+msgstr "User agent"
+
+msgid "Content Type"
+msgstr "Tipo di contenuto"
+
+msgid "App Label"
+msgstr "Etichetta dell'app"
+
+#, fuzzy
+#| msgid "Mode"
+msgid "Model"
+msgstr "Modalità"
+
+msgid "Object ID"
+msgstr "ID dell'oggetto"
+
+msgid "Object"
+msgstr "Oggetto"
+
+msgid "Before/after field diff, if any."
+msgstr "Differenza dei campi prima/dopo, se presente."
+
+msgid "Timestamp"
+msgstr "Marca temporale"
+
+msgid "Audit Log"
+msgstr "Registro di audit"
+
+msgid "Audit Logs"
+msgstr "Registri di audit"
+
+msgid "Audit log entries are immutable and cannot be modified."
+msgstr "Le voci del registro di audit sono immutabili e non possono essere modificate."
+
+msgid "Audit log entries are immutable and cannot be deleted."
+msgstr "Le voci del registro di audit sono immutabili e non possono essere eliminate."
+
+msgid "Pending"
+msgstr "In attesa"
+
+msgid "Processing"
+msgstr "In elaborazione"
+
+msgid "Completed"
+msgstr "Completato"
+
+msgid "Failed"
+msgstr "Non riuscito"
+
+msgid "Cancelled"
+msgstr "Annullato"
+
+msgid "Format"
+msgstr "Formato"
+
+msgid "Filters"
+msgstr "Filtri"
+
+msgid "ORM field=value filters applied to the export queryset."
+msgstr "Filtri ORM campo=valore applicati al queryset di esportazione."
+
+msgid "Total Rows"
+msgstr "Righe totali"
+
+msgid "Processed Rows"
+msgstr "Righe elaborate"
+
+msgid "Rows written so far — drives progress-percent and ETA reporting."
+msgstr "Righe scritte finora — determina la percentuale di avanzamento e la stima del tempo rimanente."
+
+msgid "Resume Cursor (PK)"
+msgstr "Cursore di ripresa (PK)"
+
+msgid ""
+"Primary key of the last exported row; blank means start from the beginning."
+msgstr "Chiave primaria dell'ultima riga esportata; vuoto significa iniziare dall'inizio."
+
+msgid "Resume Byte Offset"
+msgstr "Offset di byte di ripresa"
+
+msgid "Byte length of the working file confirmed at cursor_pk."
+msgstr "Lunghezza in byte del file di lavoro confermata a cursor_pk."
+
+#, fuzzy
+#| msgid "Name"
+msgid "File Name"
+msgstr "Nome"
+
+msgid "Error"
+msgstr "Errore"
+
+msgid "Requested By"
+msgstr "Richiesto da"
+
+msgid "Started At"
+msgstr "Avviato il"
+
+msgid "Finished At"
+msgstr "Terminato il"
+
+msgid "Export Job"
+msgstr "Attività di esportazione"
+
+msgid "Export Jobs"
+msgstr "Attività di esportazione"
 
 msgid "Skip to main content"
 msgstr "Vai al contenuto principale"
+
+msgid "SnapAdmin on GitHub (opens in a new tab)"
+msgstr "SnapAdmin su GitHub (si apre in una nuova scheda)"
 
 msgid "System entry points"
 msgstr "Punti di accesso al sistema"
@@ -37,6 +310,9 @@ msgstr "Descrizione"
 msgid "Data Distribution"
 msgstr "Distribuzione dei dati"
 
+msgid "Bar chart of record counts per managed model"
+msgstr "Grafico a barre del numero di record per modello gestito"
+
 msgid "System Health"
 msgstr "Stato del sistema"
 
@@ -52,36 +328,74 @@ msgstr "Nome host"
 msgid "API Capabilities"
 msgstr "Funzionalità API"
 
+msgid ""
+"Automatic CRUD endpoints for all models. Supports filtering, pagination, and "
+"token authentication."
+msgstr "Endpoint CRUD automatici per tutti i modelli. Supporta filtri, paginazione e autenticazione tramite token."
+
+msgid "Dynamic schema generation powered by Graphene."
+msgstr "Generazione dinamica dello schema basata su Graphene."
+
+#, python-format
+msgid "Built with <strong>SnapAdmin</strong> v%(version)s"
+msgstr "Realizzato con <strong>SnapAdmin</strong> v%(version)s"
+
 msgid "Language"
 msgstr "Lingua"
 
-msgid "English"
-msgstr "Inglese"
+msgid "Single sign-on providers"
+msgstr "Provider di single sign-on"
 
-msgid "Russian"
-msgstr "Russo"
+msgid "Or sign in with"
+msgstr "Oppure accedi con"
 
-msgid "German"
-msgstr "Tedesco"
+msgid "Enter a valid phone number (e.g. +49151234567 or 089-123456)."
+msgstr "Inserisci un numero di telefono valido (es. +49151234567 o 089-123456)."
 
-msgid "Swiss German"
-msgstr "Tedesco svizzero"
+msgid "Enter a valid hex color code (e.g. #FF5733 or #F53)."
+msgstr "Inserisci un codice colore esadecimale valido (es. #FF5733 o #F53)."
 
-msgid "French"
-msgstr "Francese"
+#, python-format
+msgid "File extension '%(ext)s' is not allowed. Allowed: %(allowed)s"
+msgstr "L'estensione del file '%(ext)s' non è consentita. Consentite: %(allowed)s"
 
-msgid "Swiss French"
-msgstr "Francese svizzero"
+#, python-format
+msgid "File size is %(size)s bytes. Max allowed is %(max_size)s bytes."
+msgstr "La dimensione del file è di %(size)s byte. Il massimo consentito è di %(max_size)s byte."
 
-msgid "Spanish"
-msgstr "Spagnolo"
+msgid "Could not verify file encoding."
+msgstr "Impossibile verificare la codifica del file."
 
-msgid "Italian"
-msgstr "Italiano"
+#, python-format
+msgid "Invalid encoding. Allowed: %(encodings)s"
+msgstr "Codifica non valida. Consentite: %(encodings)s"
 
-msgid "Polish"
-msgstr "Polacco"
+#~ msgid "English"
+#~ msgstr "Inglese"
 
-msgid "Dutch"
-msgstr "Olandese"
+#~ msgid "Russian"
+#~ msgstr "Russo"
 
+#~ msgid "German"
+#~ msgstr "Tedesco"
+
+#~ msgid "Swiss German"
+#~ msgstr "Tedesco svizzero"
+
+#~ msgid "French"
+#~ msgstr "Francese"
+
+#~ msgid "Swiss French"
+#~ msgstr "Francese svizzero"
+
+#~ msgid "Spanish"
+#~ msgstr "Spagnolo"
+
+#~ msgid "Italian"
+#~ msgstr "Italiano"
+
+#~ msgid "Polish"
+#~ msgstr "Polacco"
+
+#~ msgid "Dutch"
+#~ msgstr "Olandese"

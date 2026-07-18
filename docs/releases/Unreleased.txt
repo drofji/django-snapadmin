@@ -304,6 +304,19 @@ substring
 Fixed
 =====
 
+Translation catalogs refreshed — the admin UI is fully localised again in all 10 shipped locales
+  The bundled ``snapadmin/locale`` catalogs had drifted out of date: they still only covered the
+  dashboard/entry-point strings and had not been regenerated as newer ``gettext``-wrapped strings
+  landed (the API-token, error-event, audit-log and async-export model labels and help texts, the
+  file/phone/colour validator messages, the SSO login prompts, and more). Non-English admins saw
+  those newer strings fall back to English. The catalogs are now regenerated and translated in full
+  for every shipped locale — German (de), Swiss German (de_CH), Spanish (es), French (fr), Swiss
+  French (fr_CH), Italian (it), Dutch (nl), Polish (pl) and Russian (ru) — so the whole admin
+  surface renders in the active language again. English remains the source language (rendered via
+  ``gettext`` fallback, no catalog needed). A new regression test asserts every shipped string has a
+  translation in every locale, so a future ``_()`` string added without regenerating the catalogs
+  fails the suite instead of silently shipping untranslated.
+
 - The auto-injected validator on ``SnapFileField``, ``SnapImageField``, ``SnapPhoneField`` and
   ``SnapColorField`` is now stripped from ``deconstruct()`` by identity rather than by class. A
   caller-supplied validator of the same class passed via ``validators=[...]`` is no longer wrongly

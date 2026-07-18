@@ -57,6 +57,85 @@ class TestCatalogs:
             assert os.path.exists(mo), f"missing compiled catalog for {loc}"
 
 
+# ── catalogs stay complete (guards against re-staling) ───────────────────────
+
+def _parse_po(path):
+    """Return a list of (msgid, msgstr) pairs, concatenating multi-line values."""
+    with open(path, encoding="utf-8") as fh:
+        lines = fh.read().split("\n")
+    entries, i = [], 0
+    while i < len(lines):
+        if lines[i].startswith("msgid "):
+            mid = eval(lines[i][6:].strip())
+            i += 1
+            while i < len(lines) and lines[i].startswith('"'):
+                mid += eval(lines[i].strip())
+                i += 1
+            mstr = ""
+            if i < len(lines) and lines[i].startswith("msgstr "):
+                mstr = eval(lines[i][7:].strip())
+                i += 1
+                while i < len(lines) and lines[i].startswith('"'):
+                    mstr += eval(lines[i].strip())
+                    i += 1
+            entries.append((mid, mstr))
+        else:
+            i += 1
+    return entries
+
+
+class TestCatalogCompleteness:
+    """Every shipped translatable string must carry a translation in every
+    locale (en is the source and stays header-only). This is the regression
+    guard for #I18N1 — a new ``_()`` string added without regenerating the
+    catalogs will leave an empty ``msgstr`` and fail here."""
+
+    def _po_path(self, loc):
+        import os
+        import snapadmin
+        return os.path.join(
+            os.path.dirname(snapadmin.__file__), "locale", loc, "LC_MESSAGES", "django.po"
+        )
+
+    @pytest.mark.parametrize("locale", [l for l in TARGET_LOCALES if l != "en"])
+    def test_no_empty_msgstr(self, locale):
+        entries = _parse_po(self._po_path(locale))
+        missing = [mid for mid, mstr in entries if mid and not mstr]
+        assert not missing, f"{locale} has untranslated strings: {missing}"
+
+    def test_locales_cover_the_same_msgids(self):
+        # Every non-en catalog must expose the same set of source strings, so a
+        # string translated in one locale is never silently absent from another.
+        ref = {mid for mid, _ in _parse_po(self._po_path("ru")) if mid}
+        for loc in TARGET_LOCALES:
+            if loc in ("en", "ru"):
+                continue
+            ids = {mid for mid, _ in _parse_po(self._po_path(loc)) if mid}
+            assert ids == ref, f"{loc} msgid set diverges from ru"
+
+    @pytest.mark.parametrize("locale,source,expected", [
+        ("ru", "Audit Log", "Журнал аудита"),
+        ("de", "Export Job", "Exportauftrag"),
+        ("fr", "Resume Cursor (PK)", "Curseur de reprise (PK)"),
+        ("es", "Error Event", "Evento de error"),
+        ("it", "API Token", "Token API"),
+        ("nl", "Owner", "Eigenaar"),
+        ("pl", "Traceback", "Ślad stosu"),
+    ])
+    def test_new_model_strings_translated(self, locale, source, expected):
+        with translation.override(locale):
+            assert translation.gettext(source) == expected
+
+    def test_format_placeholders_preserved(self):
+        # A translated format string must keep its named %(...)s placeholders,
+        # or interpolation raises at render time.
+        with translation.override("ru"):
+            msg = translation.gettext(
+                "File extension '%(ext)s' is not allowed. Allowed: %(allowed)s"
+            )
+        assert "%(ext)s" in msg and "%(allowed)s" in msg
+
+
 # ── settings wiring ──────────────────────────────────────────────────────────
 
 class TestSettings:
