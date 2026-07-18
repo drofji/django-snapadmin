@@ -72,6 +72,29 @@ JSON key-path filtering for the auto-generated REST API (``api_json_filters``)
   for filtering JSON data at scale on large tables, use ``SnapModel.es_search()`` (the Elasticsearch
   integration) instead of the DB-backed auto-filters.
 
+Structured Elasticsearch term filters (``SnapModel.es_filter()``)
+  ``es_search()`` builds exactly one kind of query — a fuzzy ``multi_match`` over text fields — so
+  there was no way to run a *structured* term filter against Elasticsearch (e.g. "every document
+  whose keyword-mapped field is one of these values"), which matters most for fields a relational
+  database can't index at all, such as a JSON column. The new ``es_filter()`` classmethod fills that
+  gap: ``Product.es_filter(available=True, price=[999, 1299])`` runs the constraints in ES *filter*
+  context (no relevance scoring, cacheable), with a scalar building a ``term`` clause and a
+  list/tuple/set a ``terms`` clause. Field names resolve through the model's effective ES mapping —
+  an exact-typed field (keyword/boolean/numeric/date/ip) filters directly, an analysed ``text`` field
+  automatically targets its keyword sub-field, and a ``__`` path descends into an ``object`` mapping's
+  properties so a JSON column mapped in ES can be filtered by nested key path
+  (``es_filter(payload__status="paid")`` → the ES field ``payload.status``); an unknown or
+  analysed-text-only field raises ``ValueError`` rather than silently matching nothing. An optional
+  ``query_string`` is added alongside as a scored full-text ``must`` clause, so structured filtering
+  and fuzzy search compose in one call. Results mirror ``es_search()``: a primary-key-ordered database
+  queryset for ``DUAL`` models (relevance order preserved), an ``EsQuerySet`` of reconstructed objects
+  for ``ES_ONLY``. When Elasticsearch is disabled or the query errors, a ``DUAL`` model falls back to
+  the equivalent database filter — failing closed to an empty result if a term field has no backing
+  column — while an ``ES_ONLY`` model returns empty; the result carries the same
+  ``X-Snap-Query-Backend`` marker (``elasticsearch``/``database``) as ``es_search()``. Like
+  ``es_search()`` this is a model-level query method; if you expose its results through your own view,
+  apply your own permission and PII-masking checks as the built-in REST/GraphQL layers already do.
+
 Changed
 =======
 

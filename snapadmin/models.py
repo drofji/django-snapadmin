@@ -11,7 +11,7 @@ from datetime import timedelta
 from enum import Enum
 
 from django.apps import apps
-from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured, ValidationError
+from django.core.exceptions import FieldDoesNotExist, FieldError, ImproperlyConfigured, ValidationError
 from django.contrib import admin
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.contrib.admin.models import ADDITION, CHANGE, DELETION, LogEntry
@@ -499,6 +499,22 @@ class EsStorageMode(str, Enum):
     DB_ONLY = "db_only"  # Standard Django behavior
     DUAL = "dual"        # Save to both DB and ES, search via ES
     ES_ONLY = "es_only"  # Save/retrieve only via ES, no DB table needed
+
+
+# ES field types that support exact (term/terms) matching directly. Analysed
+# ``text`` is deliberately excluded — a term query against it matches individual
+# analysed tokens, not the stored value, which is almost never what a caller of
+# es_filter() intends; text fields are routed to their keyword sub-field instead.
+_ES_EXACT_FILTER_TYPES = frozenset({
+    "keyword", "constant_keyword", "wildcard",
+    "boolean",
+    "long", "integer", "short", "byte",
+    "double", "float", "half_float", "scaled_float", "unsigned_long",
+    "date", "date_nanos",
+    "ip", "version",
+})
+# Sub-field types under a ``text`` field's ``fields`` that a term filter can use.
+_ES_KEYWORD_SUBFIELD_TYPES = frozenset({"keyword", "constant_keyword", "wildcard"})
 
 
 class EsQuerySet:
@@ -1291,6 +1307,161 @@ class SnapModel(models.Model):
     def snap_search(cls, query_string=None, limit=None):
         """Public alias for es_search — preferred entry point for external callers."""
         return cls.es_search(query_string=query_string, limit=limit)
+
+    @classmethod
+    def _resolve_es_term_field(cls, key: str) -> str:
+        """Resolve an ``es_filter`` term key to its ES field path.
+
+        Walks the effective ES mapping (:meth:`get_es_mapping`): a ``__`` in the
+        key descends into an ``object``/``nested`` field's ``properties`` (so a
+        JSON-mapped column can be filtered by key path, e.g. ``payload__status``),
+        an exact-type leaf (keyword/boolean/numeric/date/ip) filters directly,
+        and a ``text`` leaf is redirected to its keyword sub-field. Raises
+        ``ValueError`` for an unknown field, a container without the requested
+        sub-field, or an analysed ``text`` field that has no keyword sub-field.
+        """
+        node = cls.get_es_mapping() or {}
+        parts = key.split("__")
+        path: list[str] = []
+        for i, part in enumerate(parts):
+            if not isinstance(node, dict) or part not in node:
+                resolved = ".".join(path + [part])
+                raise ValueError(
+                    f"{cls.__name__}.es_filter: unknown ES field {key!r} "
+                    f"(no mapping for {resolved!r})"
+                )
+            field_def = node[part]
+            path.append(part)
+            if i < len(parts) - 1:
+                node = field_def.get("properties")
+                if node is None:
+                    raise ValueError(
+                        f"{cls.__name__}.es_filter: {'.'.join(path)!r} has no "
+                        f"sub-fields to resolve {key!r}"
+                    )
+                continue
+            ftype = field_def.get("type")
+            if ftype in _ES_EXACT_FILTER_TYPES:
+                return ".".join(path)
+            if ftype == "text":
+                subfields = field_def.get("fields") or {}
+                for sub_name, sub_def in subfields.items():
+                    if isinstance(sub_def, dict) and sub_def.get("type") in _ES_KEYWORD_SUBFIELD_TYPES:
+                        return ".".join(path + [sub_name])
+                raise ValueError(
+                    f"{cls.__name__}.es_filter: field {key!r} is an analysed text "
+                    f"field with no keyword sub-field; term filters need a keyword "
+                    f"mapping (add fields={{'raw': {{'type': 'keyword'}}}} to its es_mapping)"
+                )
+            raise ValueError(
+                f"{cls.__name__}.es_filter: field {key!r} of ES type {ftype!r} "
+                f"is not term-filterable"
+            )
+
+    @classmethod
+    def es_filter(cls, *, query_string: str | None = None, limit: int | None = None, **terms):
+        """Structured Elasticsearch term filter — the counterpart to es_search().
+
+        Each keyword argument is a term constraint on an ES-mapped field: a
+        scalar builds a ``term`` clause, a list/tuple/set a ``terms`` clause, and
+        every constraint runs in ES *filter* context (no relevance scoring,
+        cacheable). Field names resolve through :meth:`_resolve_es_term_field`,
+        so a ``text`` field targets its keyword sub-field automatically and a
+        ``__`` path reaches into a JSON/``object`` mapping. An optional
+        ``query_string`` is added as a scored ``must`` full-text ``multi_match``.
+
+        Results mirror :meth:`es_search`: a pk-ordered database queryset for
+        DUAL models, an :class:`EsQuerySet` of reconstructed objects for
+        ES_ONLY. When Elasticsearch is disabled or the query fails, a DUAL model
+        falls back to the equivalent database filter (failing closed to an empty
+        result if a term field has no backing column); an ES_ONLY model returns
+        an empty result.
+
+        Raises ``ValueError`` for an unknown or non-term-filterable field.
+        """
+        # Resolve/validate every term up-front so a bad field raises regardless
+        # of which backend ends up answering the query.
+        resolved = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
+
+        limit = limit or getattr(settings, "SNAPADMIN_ES_SEARCH_LIMIT", 1000)
+        use_es = (cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY) and getattr(
+            settings, "ELASTICSEARCH_ENABLED", False
+        )
+
+        if use_es:
+            try:
+                clauses = [
+                    ({"terms": {field: list(value)}}
+                     if isinstance(value, (list, tuple, set))
+                     else {"term": {field: value}})
+                    for field, value in resolved.items()
+                ]
+                if query_string:
+                    query = {"bool": {
+                        "filter": clauses,
+                        "must": [{
+                            "multi_match": {
+                                "query": query_string,
+                                "fields": cls._es_search_fields(),
+                                "fuzziness": "AUTO",
+                                "lenient": True,
+                            }
+                        }],
+                    }}
+                elif clauses:
+                    query = {"bool": {"filter": clauses}}
+                else:
+                    query = {"match_all": {}}
+
+                es = cls.get_es_client()
+                response = es.search(
+                    index=cls.get_es_index_name(),
+                    body={"query": query, "size": limit},
+                )
+                hits = response.get("hits", {}).get("hits", [])
+
+                if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+                    results = []
+                    for hit in hits:
+                        data = hit["_source"]
+                        obj = cls(**{k: v for k, v in data.items() if k != "id"})
+                        obj.pk = data.get("id")
+                        results.append(obj)
+                    return cls._tag_search_backend(EsQuerySet(cls, results), "elasticsearch")
+
+                pks = [hit["_source"]["id"] for hit in hits]
+                preserved = models.Case(*[models.When(pk=pk, then=pos) for pos, pk in enumerate(pks)])
+                return cls._tag_search_backend(
+                    cls.objects.filter(pk__in=pks).order_by(preserved), "elasticsearch"
+                )
+            except Exception as exc:
+                logger.warning(
+                    "es_filter_failed",
+                    model=cls.__name__,
+                    terms=list(terms),
+                    fallback="empty" if cls.es_storage_mode == EsStorageMode.ES_ONLY else "db",
+                    error=str(exc),
+                )
+                if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+                    return cls._tag_search_backend(EsQuerySet(cls, []), "elasticsearch")
+
+        # Database fallback — only meaningful for models with a table.
+        if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+            return cls._tag_search_backend(EsQuerySet(cls, []), "elasticsearch")
+
+        orm_terms = {
+            (f"{key}__in" if isinstance(value, (list, tuple, set)) else key):
+                (list(value) if isinstance(value, (list, tuple, set)) else value)
+            for key, value in terms.items()
+        }
+        try:
+            qs = cls.objects.filter(**orm_terms)
+            # Force field resolution now so an ES-only field (no DB column) fails
+            # closed here rather than surprising the caller on later evaluation.
+            str(qs.query)
+        except FieldError:
+            qs = cls.objects.none()
+        return cls._tag_search_backend(qs, "database")
 
     @classmethod
     def es_reindex_all(cls, *, chunk_size: int = 500) -> dict:

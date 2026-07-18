@@ -95,6 +95,27 @@ Article.es_search("django")   # works even with ELASTICSEARCH_ENABLED=False
 For `DB_ONLY`/`DUAL` it returns a Django `QuerySet`; for `ES_ONLY` a lightweight
 `EsQuerySet` of instances built from the index.
 
+For a **structured** term filter (rather than fuzzy full-text), use `es_filter()` — it
+runs in ES *filter* context (no scoring, cacheable) and returns the same shapes as
+`es_search()`:
+
+```python
+# Scalar → `term`, list → `terms`; combine with a full-text query_string
+Product.es_filter(available=True, price=[999, 1299])
+Product.es_filter(query_string="laptop", available=True)
+
+# A `text` field auto-targets its keyword sub-field; a `__` path reaches into a
+# JSON/object mapping — the case a plain DB column can't index:
+Order.es_filter(payload__status="paid")     # → ES field payload.status
+```
+
+Field names are validated against the model's ES mapping (an unknown or analysed-text-only
+field raises `ValueError`). When ES is off or errors, `DUAL` models fall back to the
+equivalent DB filter (failing closed to an empty result if a term field has no column);
+`ES_ONLY` models return empty. Like `es_search()`, this is a model-level query method —
+if you surface its results through your own view, apply your own permission / PII-masking
+checks (the built-in REST and GraphQL layers already do).
+
 Full-text queries target only the **text-capable fields** of `es_mapping` (with
 `lenient: true`), so mixed mappings with numeric/date fields never break a search.
 Index-level settings — custom analyzers, shards — go into `es_index_settings`
@@ -223,6 +244,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Configurable** | Easily enable/disable REST API, GraphQL, Swagger docs, and search modes via settings. |
 | **Elasticsearch Ready** | Multi-mode storage (`DB_ONLY`, `DUAL`, `ES_ONLY`) for blazing fast search. |
 | **Smart ES Query Routing** | `?search=` REST queries on `DUAL` models run on Elasticsearch automatically (fuzzy, relevance-ranked); plain listings stay on the DB. Toggle globally (`SNAPADMIN_ES_QUERY_ROUTING`) or per model (`es_query_routing`). |
+| **Structured ES Filters** | `es_filter(field=value, other=[...])` runs `term`/`terms` filters in ES filter context (no scoring, cacheable) — the structured counterpart to fuzzy `es_search()`. `text` fields auto-target their keyword sub-field; a `__` path filters a JSON/object mapping by nested key. Falls back to the equivalent DB filter when ES is off. |
 | **Auto ES Mapping** | `es_auto_mapping = True` derives the index mapping from your model fields (text + `.raw` keyword subfields, dates, numerics); `es_mapping` entries override per field, `es_index_settings` adds analyzers/shards. |
 | **Secured GraphQL** | Every resolver enforces authentication (session or API token) + per-model Django permissions — the same contract as REST — on **every traversed relation**, not just top-level fields; `SNAPADMIN_MASKED_FIELDS` are masked in GraphQL output too. `search`/`first`/`offset` arguments included. |
 | **API Field Privacy** | `api_exclude_fields` hides sensitive columns from REST, GraphQL and schema introspection while the admin keeps showing them. |

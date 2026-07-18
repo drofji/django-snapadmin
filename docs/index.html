@@ -644,6 +644,33 @@ class Product(SnapModel):
     es_storage_mode  = EsStorageMode.DUAL
     es_query_routing = False   # this model's API searches always run on the DB</code></pre>
 
+  <h3 id="es-filter">Structured ES term filters — <code>es_filter()</code></h3>
+  <p><code>es_search()</code> is fuzzy full-text; <code>es_filter()</code> is its
+  <strong>structured</strong> counterpart — exact <code>term</code>/<code>terms</code> constraints
+  run in Elasticsearch <em>filter</em> context (no relevance scoring, cacheable). It matters most
+  for fields a relational database can't index at all, such as a JSON column mapped in ES:</p>
+  <pre><code># Scalar → a `term` clause, list/tuple/set → a `terms` clause
+Product.es_filter(available=True, price=[999, 1299])
+
+# Compose with fuzzy full-text: query_string is added as a scored `must`
+Product.es_filter(query_string="laptop", available=True)
+
+# A `text` field auto-targets its keyword sub-field; a `__` path reaches into a
+# JSON/object mapping the DB can't index — filtered here by nested key path:
+Order.es_filter(payload__status="paid")    # → ES field payload.status</code></pre>
+  <p>Field names are resolved and validated against the model's effective ES mapping: exact types
+  (keyword/boolean/numeric/date/ip) filter directly, an analysed <code>text</code> field is
+  redirected to its keyword sub-field, and an unknown or analysed-text-only field raises
+  <code>ValueError</code> instead of silently matching nothing. Results mirror
+  <code>es_search()</code> — a primary-key-ordered <code>QuerySet</code> for <code>DUAL</code>
+  models, an <code>EsQuerySet</code> for <code>ES_ONLY</code> — and carry the same
+  <code>X-Snap-Query-Backend</code> marker. When Elasticsearch is disabled or a query errors, a
+  <code>DUAL</code> model falls back to the equivalent database filter (failing closed to an empty
+  result if a term field has no backing column); an <code>ES_ONLY</code> model returns empty. Like
+  <code>es_search()</code>, this is a model-level query method — if you surface its results through
+  your own view, apply your own permission and PII-masking checks (the built-in REST and GraphQL
+  layers already do).</p>
+
   <h3>Counting objects — with &amp; without filters</h3>
   <p>Every list response is paginated and already reports the <strong>total matching count</strong>
   in <code>count</code> — no need to page through everything. Request the smallest page to read

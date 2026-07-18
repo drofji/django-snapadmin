@@ -69,6 +69,14 @@ class Product(snap_models.SnapModel):
     #   GET /api/models/demo/Product/?search=laptop
     # and check the X-Snap-Query-Backend response header. Set False to opt out.
     es_query_routing = True
+    # es_search() is fuzzy full-text; for a *structured* term filter use es_filter(),
+    # which runs in ES filter context (no scoring, cacheable) and mirrors es_search's
+    # return shape. A scalar builds a `term` clause, a list a `terms` clause:
+    #   Product.es_filter(available=True, price=[999, 1299])
+    # Term keys resolve through the ES mapping — a `text` field automatically targets
+    # its keyword sub-field, and a `payload__status` path reaches into a JSON/object
+    # mapping (the case a plain DB column can't index). When ES is disabled or errors,
+    # DUAL models fall back to the equivalent database filter.
     es_mapping = {
         "name": {"type": "text", "analyzer": "standard"},
         "price": {"type": "float"},
