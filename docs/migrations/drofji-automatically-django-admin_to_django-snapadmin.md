@@ -133,7 +133,7 @@ SNAPADMIN_GRAPHIQL_ENABLED = DEBUG     # GraphiQL playground — dev only
 > `path("snapadmin/", include("snapadmin.urls"))`. When you can't change the mount point (an
 > intermediate URLconf already pins SnapAdmin under, say, `/api/`, which your own API also uses), set
 > **`SNAPADMIN_URL_PREFIX = "snapadmin/"`** in settings to relocate the entire surface under that extra
-> segment without touching your URLconf. Route names are unchanged, so `reverse()`/`{% url %}` keep
+> segment without touching your URLconf. Route names are unchanged, so `reverse()`/`{% raw %}{% url %}{% endraw %}` keep
 > resolving. After wiring, run `python manage.py check` to catch obvious problems and inspect your URL
 > map (e.g. `manage.py show_urls` from django-extensions) for duplicate paths.
 
