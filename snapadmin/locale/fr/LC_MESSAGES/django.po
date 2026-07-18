@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-07-18 12:45+0000\n"
+"POT-Creation-Date: 2026-07-18 14:12+0000\n"
 "Language: fr\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -16,7 +16,8 @@ msgstr "Audit"
 
 #, python-format
 msgid "API token created. Copy it now — it will not be shown again: %(key)s"
-msgstr "Jeton d'API créé. Copiez-le maintenant — il ne sera plus affiché : %(key)s"
+msgstr ""
+"Jeton d'API créé. Copiez-le maintenant — il ne sera plus affiché : %(key)s"
 
 msgid "Token Key"
 msgstr "Clé du jeton"
@@ -62,13 +63,16 @@ msgstr "Nom du jeton"
 msgid ""
 "A descriptive name for this token (e.g. 'CI Pipeline', 'Read-only "
 "dashboard')."
-msgstr "Un nom descriptif pour ce jeton (par ex. 'Pipeline CI', 'Tableau de bord en lecture seule')."
+msgstr ""
+"Un nom descriptif pour ce jeton (par ex. 'Pipeline CI', 'Tableau de bord en "
+"lecture seule')."
 
 msgid "Token Prefix"
 msgstr "Préfixe du jeton"
 
 msgid "First 8 characters of the key, for identification. Not secret."
-msgstr "Les 8 premiers caractères de la clé, à des fins d'identification. Non secret."
+msgstr ""
+"Les 8 premiers caractères de la clé, à des fins d'identification. Non secret."
 
 msgid "Token Digest"
 msgstr "Empreinte du jeton"
@@ -76,7 +80,9 @@ msgstr "Empreinte du jeton"
 msgid ""
 "SHA-256 hash of the secret key. The raw key is never stored — it is shown "
 "only once, at creation."
-msgstr "Empreinte SHA-256 de la clé secrète. La clé brute n'est jamais stockée — elle n'est affichée qu'une seule fois, à la création."
+msgstr ""
+"Empreinte SHA-256 de la clé secrète. La clé brute n'est jamais stockée — "
+"elle n'est affichée qu'une seule fois, à la création."
 
 msgid "Owner"
 msgstr "Propriétaire"
@@ -87,13 +93,12 @@ msgstr "Date d'expiration"
 msgid "Leave blank for a token that never expires."
 msgstr "Laisser vide pour un jeton qui n'expire jamais."
 
-#, fuzzy
-#| msgid "Managed Models"
 msgid "Allowed Models"
-msgstr "Modèles gérés"
+msgstr "Modèles autorisés"
 
 msgid "List of 'app_label.ModelName' strings this token can access."
-msgstr "Liste des chaînes 'app_label.ModelName' auxquelles ce jeton peut accéder."
+msgstr ""
+"Liste des chaînes 'app_label.ModelName' auxquelles ce jeton peut accéder."
 
 msgid "Is Active"
 msgstr "Est actif"
@@ -116,14 +121,14 @@ msgstr "Jetons d'API"
 msgid "Can view unmasked PII data"
 msgstr "Peut voir les données PII non masquées"
 
-#, fuzzy
-#| msgid "Description"
 msgid "Exception"
-msgstr "Description"
+msgstr "Exception"
 
 msgid ""
 "Exception class name, or HTTP<code> for a 5xx response without an exception."
-msgstr "Nom de la classe d'exception, ou HTTP<code> pour une réponse 5xx sans exception."
+msgstr ""
+"Nom de la classe d'exception, ou HTTP<code> pour une réponse 5xx sans "
+"exception."
 
 msgid "Path"
 msgstr "Chemin"
@@ -138,7 +143,9 @@ msgid "Fingerprint"
 msgstr "Empreinte"
 
 msgid "SHA-256 of exception class + path — groups repeats of the same error."
-msgstr "SHA-256 de la classe d'exception + chemin — regroupe les répétitions de la même erreur."
+msgstr ""
+"SHA-256 de la classe d'exception + chemin — regroupe les répétitions de la "
+"même erreur."
 
 msgid "Traceback"
 msgstr "Trace"
@@ -179,10 +186,8 @@ msgstr "Type de contenu"
 msgid "App Label"
 msgstr "Étiquette de l'application"
 
-#, fuzzy
-#| msgid "Mode"
 msgid "Model"
-msgstr "Mode"
+msgstr "Modèle"
 
 msgid "Object ID"
 msgstr "ID de l'objet"
@@ -203,10 +208,14 @@ msgid "Audit Logs"
 msgstr "Journaux d'audit"
 
 msgid "Audit log entries are immutable and cannot be modified."
-msgstr "Les entrées du journal d'audit sont immuables et ne peuvent pas être modifiées."
+msgstr ""
+"Les entrées du journal d'audit sont immuables et ne peuvent pas être "
+"modifiées."
 
 msgid "Audit log entries are immutable and cannot be deleted."
-msgstr "Les entrées du journal d'audit sont immuables et ne peuvent pas être supprimées."
+msgstr ""
+"Les entrées du journal d'audit sont immuables et ne peuvent pas être "
+"supprimées."
 
 msgid "Pending"
 msgstr "En attente"
@@ -239,14 +248,18 @@ msgid "Processed Rows"
 msgstr "Lignes traitées"
 
 msgid "Rows written so far — drives progress-percent and ETA reporting."
-msgstr "Lignes écrites jusqu'à présent — pilote le pourcentage de progression et l'estimation du temps restant."
+msgstr ""
+"Lignes écrites jusqu'à présent — pilote le pourcentage de progression et "
+"l'estimation du temps restant."
 
 msgid "Resume Cursor (PK)"
 msgstr "Curseur de reprise (PK)"
 
 msgid ""
 "Primary key of the last exported row; blank means start from the beginning."
-msgstr "Clé primaire de la dernière ligne exportée ; vide signifie recommencer depuis le début."
+msgstr ""
+"Clé primaire de la dernière ligne exportée ; vide signifie recommencer "
+"depuis le début."
 
 msgid "Resume Byte Offset"
 msgstr "Décalage d'octets de reprise"
@@ -254,10 +267,8 @@ msgstr "Décalage d'octets de reprise"
 msgid "Byte length of the working file confirmed at cursor_pk."
 msgstr "Longueur en octets du fichier de travail confirmée à cursor_pk."
 
-#, fuzzy
-#| msgid "Name"
 msgid "File Name"
-msgstr "Nom"
+msgstr "Nom du fichier"
 
 msgid "Error"
 msgstr "Erreur"
@@ -276,6 +287,16 @@ msgstr "Tâche d'exportation"
 
 msgid "Export Jobs"
 msgstr "Tâches d'exportation"
+
+msgid ""
+"Primary key of the last indexed row; blank means start from the beginning."
+msgstr "Clé primaire de la dernière ligne indexée ; vide signifie recommencer depuis le début."
+
+msgid "Reindex Job"
+msgstr "Tâche de réindexation"
+
+msgid "Reindex Jobs"
+msgstr "Tâches de réindexation"
 
 msgid "Skip to main content"
 msgstr "Aller au contenu principal"
@@ -331,7 +352,9 @@ msgstr "Capacités de l'API"
 msgid ""
 "Automatic CRUD endpoints for all models. Supports filtering, pagination, and "
 "token authentication."
-msgstr "Points de terminaison CRUD automatiques pour tous les modèles. Prend en charge le filtrage, la pagination et l'authentification par jeton."
+msgstr ""
+"Points de terminaison CRUD automatiques pour tous les modèles. Prend en "
+"charge le filtrage, la pagination et l'authentification par jeton."
 
 msgid "Dynamic schema generation powered by Graphene."
 msgstr "Génération dynamique de schéma propulsée par Graphene."
@@ -350,18 +373,24 @@ msgid "Or sign in with"
 msgstr "Ou connectez-vous avec"
 
 msgid "Enter a valid phone number (e.g. +49151234567 or 089-123456)."
-msgstr "Saisissez un numéro de téléphone valide (par ex. +49151234567 ou 089-123456)."
+msgstr ""
+"Saisissez un numéro de téléphone valide (par ex. +49151234567 ou 089-123456)."
 
 msgid "Enter a valid hex color code (e.g. #FF5733 or #F53)."
-msgstr "Saisissez un code couleur hexadécimal valide (par ex. #FF5733 ou #F53)."
+msgstr ""
+"Saisissez un code couleur hexadécimal valide (par ex. #FF5733 ou #F53)."
 
 #, python-format
 msgid "File extension '%(ext)s' is not allowed. Allowed: %(allowed)s"
-msgstr "L'extension de fichier '%(ext)s' n'est pas autorisée. Autorisées : %(allowed)s"
+msgstr ""
+"L'extension de fichier '%(ext)s' n'est pas autorisée. Autorisées : "
+"%(allowed)s"
 
 #, python-format
 msgid "File size is %(size)s bytes. Max allowed is %(max_size)s bytes."
-msgstr "La taille du fichier est de %(size)s octets. Le maximum autorisé est de %(max_size)s octets."
+msgstr ""
+"La taille du fichier est de %(size)s octets. Le maximum autorisé est de "
+"%(max_size)s octets."
 
 msgid "Could not verify file encoding."
 msgstr "Impossible de vérifier l'encodage du fichier."

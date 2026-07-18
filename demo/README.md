@@ -58,6 +58,18 @@ Add Elasticsearch with `docker compose --profile es up --build`. See the
 top-of-file comments in [`../docker-compose.yml`](../docker-compose.yml) for the
 full profile matrix and the Traefik overlays.
 
+With Elasticsearch running, the demo's `Product` (DUAL) and `SearchLog` (ES_ONLY)
+models exercise the resumable bulk reindex — run it against the seeded data to
+watch live progress, then try the flags:
+
+```bash
+python demo/manage.py snapadmin_reindex --model demo.Product --tune
+python demo/manage.py snapadmin_reindex --parallel 4        # fan out with parallel_bulk
+python demo/manage.py snapadmin_reindex --resume            # continue a crashed run
+```
+
+Each run is tracked on a `SnapReindexJob` row (progress, resume cursor, cancel).
+
 ## Configuration
 
 All settings are environment-variable driven with safe local-development

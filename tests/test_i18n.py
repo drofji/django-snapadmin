@@ -121,6 +121,8 @@ class TestCatalogCompleteness:
         ("it", "API Token", "Token API"),
         ("nl", "Owner", "Eigenaar"),
         ("pl", "Traceback", "Ślad stosu"),
+        ("ru", "Reindex Job", "Задание переиндексации"),
+        ("de", "Reindex Jobs", "Reindex-Aufträge"),
     ])
     def test_new_model_strings_translated(self, locale, source, expected):
         with translation.override(locale):

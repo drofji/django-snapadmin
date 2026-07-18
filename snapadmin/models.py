@@ -401,6 +401,81 @@ class SnapExportJob(models.Model):
         return round(max(0, self.total_rows - self.processed_rows) / rate)
 
 
+class SnapReindexJob(models.Model):
+    """A background Elasticsearch reindex of a model's rows.
+
+    Created by the ``snapadmin_reindex`` management command; the runner in
+    :mod:`snapadmin.reindexing` fills it in chunk by chunk, updating
+    ``processed_rows`` so the command can report live progress and an ETA.
+    Fault-tolerant: the runner resumes from the ``cursor_pk`` checkpoint
+    (``pk__gt`` cursor pagination, no OFFSET drift) so a retry with ``--resume``
+    picks up where a crash left off rather than restarting the whole table.
+    Reindexing is idempotent — each document is written under ``_id = pk``, so a
+    resumed (or fully restarted) run only ever overwrites, never duplicates.
+    Cancellable: setting ``status`` to ``cancelled`` stops the runner between
+    chunks. See :mod:`snapadmin.reindexing`.
+    """
+
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        PROCESSING = "processing", _("Processing")
+        COMPLETED = "completed", _("Completed")
+        FAILED = "failed", _("Failed")
+        CANCELLED = "cancelled", _("Cancelled")
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    app_label = models.CharField(max_length=100, verbose_name=_("App Label"))
+    model = models.CharField(max_length=100, verbose_name=_("Model"))
+    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True, verbose_name=_("Status"))
+    total_rows = models.PositiveIntegerField(default=0, verbose_name=_("Total Rows"))
+    processed_rows = models.PositiveIntegerField(default=0, verbose_name=_("Processed Rows"), help_text=_("Rows written so far — drives progress-percent and ETA reporting."))
+    # Crash-safe resume checkpoint (see snapadmin.reindexing): cursor_pk is the
+    # primary key of the last indexed row, used for pk__gt cursor pagination on
+    # resume (no OFFSET drift). Stored as a string so any primary-key type
+    # (int / UUID / char) round-trips. ES_ONLY models have no DB pk cursor and
+    # always reindex in a single pass, so this stays blank for them.
+    cursor_pk = models.CharField(max_length=255, blank=True, default="", verbose_name=_("Resume Cursor (PK)"), help_text=_("Primary key of the last indexed row; blank means start from the beginning."))
+    error = models.TextField(blank=True, verbose_name=_("Error"))
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("Created At"))
+    started_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Started At"))
+    finished_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Finished At"))
+
+    class Meta:
+        verbose_name = _("Reindex Job")
+        verbose_name_plural = _("Reindex Jobs")
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"Reindex {self.app_label}.{self.model} [{self.status}] {self.processed_rows}/{self.total_rows}"
+
+    def target_model(self):
+        """Resolve the model being reindexed (raises LookupError if unknown)."""
+        return apps.get_model(self.app_label, self.model)
+
+    @property
+    def is_finished(self) -> bool:
+        return self.status in (self.Status.COMPLETED, self.Status.FAILED, self.Status.CANCELLED)
+
+    @property
+    def progress_percent(self) -> int:
+        if not self.total_rows:
+            return 100 if self.status == self.Status.COMPLETED else 0
+        return min(100, round(self.processed_rows * 100 / self.total_rows))
+
+    @property
+    def eta_seconds(self):
+        """Estimated seconds remaining, or ``None`` when not computable yet."""
+        if self.status == self.Status.COMPLETED:
+            return 0
+        if self.status != self.Status.PROCESSING or not self.started_at or not self.processed_rows:
+            return None
+        elapsed = (timezone.now() - self.started_at).total_seconds()
+        rate = self.processed_rows / elapsed if elapsed > 0 else 0
+        if rate <= 0:
+            return None
+        return round(max(0, self.total_rows - self.processed_rows) / rate)
+
+
 # ===========================================================================
 # Enums & Helpers
 # ===========================================================================

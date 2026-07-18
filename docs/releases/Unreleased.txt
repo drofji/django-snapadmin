@@ -10,6 +10,27 @@ Each notable change should be a paragraph or bullet, explaining what changed and
 Added
 =====
 
+Resumable, progress-tracking bulk reindex (``snapadmin_reindex``)
+  ``SnapModel.es_reindex_all`` is a single ``helpers.bulk`` over the whole table: no feedback, no
+  resume, no load tuning. On a multi-million-row table that means you can't tell "running" from
+  "hung", a crash restarts from zero, and the index refreshes on every write. The
+  ``snapadmin_reindex`` management command now drives a resumable, observable job instead, reusing
+  the async-export pattern — each run is tracked on a new ``SnapReindexJob`` row. It prints
+  ``processed/total (percent%) ETA Ns`` per chunk; DB-backed models are paged by a ``pk__gt`` cursor
+  checkpointed on the job after each chunk, so ``--resume`` continues the most recent
+  unfinished/failed run for a model from that checkpoint rather than restarting the table
+  (reindexing writes each document under ``_id = pk``, so a resumed — or fully restarted — run only
+  ever overwrites, never duplicates). ``--tune`` sets the index's ``refresh_interval`` to ``-1`` and
+  ``number_of_replicas`` to ``0`` for the duration of the load and restores both (to their captured
+  values) in a ``finally`` when the run ends or crashes; ``--parallel N`` indexes each chunk with
+  ``helpers.parallel_bulk`` (``thread_count=N``), with the pk cursor only advancing once a chunk
+  fully completes so out-of-order completions never corrupt the checkpoint; and setting a job's
+  status to ``cancelled`` stops the run between chunks, leaving partial progress in place. ES_ONLY
+  models have no DB pk to cursor over and reindex in a single pass (no resume). The existing
+  ``es_reindex_all`` method, the ``POST /api/es/reindex/`` endpoint and the ``run_es_reindex`` Celery
+  task are unchanged — this adds a new, richer command path alongside them. A ``SnapReindexJob``
+  model migration (``0003``) ships with this change.
+
 ``SNAPADMIN_EXPORT_MAX_ROWS`` — row ceiling on the synchronous streaming export
   ``GET .../export/`` (the synchronous, no-Celery counterpart to ``POST /api/exports/``) previously
   had no upper bound: an unbounded or accidentally-ineffective filter with no explicit ``?limit=``

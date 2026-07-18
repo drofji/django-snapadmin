@@ -860,7 +860,30 @@ writing a script:
 python manage.py snapadmin_reindex                       # all DUAL / ES_ONLY / es_index_enabled models
 python manage.py snapadmin_reindex --model demo.Product  # one model
 python manage.py snapadmin_reindex --chunk-size 1000     # tune the bulk batch size
+python manage.py snapadmin_reindex --tune                # relax refresh/replicas for the load
+python manage.py snapadmin_reindex --parallel 4          # fan out with helpers.parallel_bulk
+python manage.py snapadmin_reindex --resume              # continue a crashed run from its checkpoint
 ```
+
+Every run is tracked on a `SnapReindexJob` row, mirroring the async-export job pattern, so a
+large reindex is **observable, resumable, and cancellable**:
+
+- **Live progress** — the command prints `processed/total (percent%) ETA Ns` per chunk, so you
+  can tell "running" from "hung" and see an estimate.
+- **Crash-safe resume** — DB-backed models are paged by a `pk__gt` cursor checkpointed on the job
+  after each chunk. `--resume` continues the most recent unfinished/failed job for the model from
+  that cursor instead of restarting the whole table. Reindexing writes each document under
+  `_id = pk`, so a resumed (or fully restarted) run only ever overwrites, never duplicates.
+- **Load tuning** — `--tune` sets the index's `refresh_interval` to `-1` and `number_of_replicas`
+  to `0` for the duration of the load, restoring both (to their captured values) in a `finally`
+  when the run ends or crashes.
+- **Parallelism** — `--parallel N` indexes each chunk with `helpers.parallel_bulk` (`thread_count=N`)
+  instead of `helpers.bulk`. The pk cursor only advances once a chunk fully completes, so
+  out-of-order completions never corrupt the checkpoint.
+- **Cancellable** — the job's status is re-read before each chunk; setting it to `cancelled`
+  (e.g. from a shell) stops the run and leaves the partial progress in place.
+
+ES_ONLY models have no DB pk to cursor over, so they always reindex in a single pass (no resume).
 
 #### Reindex over HTTP (admin only)
 
