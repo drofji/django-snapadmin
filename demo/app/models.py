@@ -85,6 +85,13 @@ class Product(snap_models.SnapModel):
     #   # {"available": [{"key": True, "count": 42}, ...]}
     # When ES is down, DUAL models recompute the facets over the DB
     # (values(field).annotate(Count)); ES_ONLY models return empty buckets.
+    #
+    # es_scan() streams *every* match past ES's 10k max_result_window — a lazy
+    # search_after iterator with the same filter args as es_filter():
+    #   for product in Product.es_scan(available=True):  # no 10k ceiling
+    #       ...
+    # DUAL models yield DB objects in cursor order; when ES is down they fall
+    # back to a .iterator() over the equivalent DB filter.
     es_mapping = {
         "name": {"type": "text", "analyzer": "standard"},
         "price": {"type": "float"},

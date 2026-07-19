@@ -693,6 +693,29 @@ Product.es_aggregate("category", query_string="laptop")</code></pre>
   every requested field. An unknown or analysed-text-only field raises <code>ValueError</code>, same
   as <code>es_filter()</code>.</p>
 
+  <h3 id="es-scan">Deep scan past 10k — <code>es_scan()</code></h3>
+  <p>Elasticsearch refuses a <code>from + size</code> deeper than
+  <code>index.max_result_window</code> (10&nbsp;000), so <code>es_search()</code> and
+  <code>es_filter()</code> can never return more than 10k hits. <code>es_scan()</code> walks the
+  <strong>entire</strong> result set instead — a lazy iterator that pages with
+  <code>search_after</code> over a stable <code>id</code> sort, one <code>page_size</code> batch per
+  round-trip, so memory stays bounded no matter how large the match:</p>
+  <pre><code># Stream every matching document — no 10k ceiling, memory-bounded
+for product in Product.es_scan(available=True):
+    ...
+
+# Same filter context as es_filter(); tune the batch size per round-trip
+for log in SearchLog.es_scan(query_string="error 404", page_size=5000):
+    ...</code></pre>
+  <p>Filtering is identical to <code>es_filter()</code> — scalar/list <code>**terms</code> in filter
+  context plus an optional scored <code>query_string</code>. <code>DUAL</code> models yield database
+  instances in cursor (<code>id</code>-ascending) order; <code>ES_ONLY</code> models yield objects
+  rebuilt from the index. It fails safe the same way: a <code>DUAL</code> model whose Elasticsearch
+  is disabled — or unreachable <em>before</em> any document is streamed — walks the equivalent
+  database filter with <code>.iterator()</code> (failing closed to nothing if a term has no backing
+  column); an <code>ES_ONLY</code> model yields nothing. If ES fails <em>after</em> streaming has
+  begun, the scan stops where it was rather than restarting on the database and double-emitting.</p>
+
   <h3>Counting objects — with &amp; without filters</h3>
   <p>Every list response is paginated and already reports the <strong>total matching count</strong>
   in <code>count</code> — no need to page through everything. Request the smallest page to read

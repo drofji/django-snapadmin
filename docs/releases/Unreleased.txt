@@ -111,6 +111,24 @@ Elasticsearch facets / aggregations (``SnapModel.es_aggregate()``)
   ``values(field).annotate(Count(...))`` — failing closed to empty buckets for a field or filter term
   with no backing column — while an ``ES_ONLY`` model returns empty buckets for every requested field.
 
+Deep-scan iterator past ``max_result_window`` (``SnapModel.es_scan()``)
+  Elasticsearch refuses a ``from + size`` deeper than ``index.max_result_window`` (10,000), so
+  ``es_search()`` and ``es_filter()`` could never return more than 10k hits — a hard ceiling on any
+  "walk every matching document" job. The new ``es_scan()`` classmethod removes it: it is a lazy
+  iterator that pages the whole result set with ``search_after`` over a stable ``id`` sort, one
+  ``page_size`` batch per round-trip (default ``SNAPADMIN_ES_SEARCH_LIMIT``), so memory stays bounded
+  no matter how large the match. Filtering is identical to ``es_filter()`` — scalar/list ``**terms``
+  run in ES filter context and an optional ``query_string`` adds a scored full-text constraint —
+  making it the natural way to stream a large filtered export. ``DUAL`` models yield database
+  instances in cursor (``id``-ascending) order; ``ES_ONLY`` models yield objects reconstructed from
+  the index. It fails safe like the other ES query methods: a ``DUAL`` model whose Elasticsearch is
+  disabled, or unreachable before it streams anything, walks the equivalent database filter with
+  ``.iterator()`` (failing closed to nothing if a term has no backing column), and an ``ES_ONLY``
+  model yields nothing. Once streaming has begun a mid-scan ES failure stops the iterator where it was
+  rather than restarting on the database and double-emitting. A non-positive ``page_size`` or an
+  unknown / non-term-filterable field raises ``ValueError`` eagerly, on the call rather than on the
+  first iteration.
+
 Changed
 =======
 

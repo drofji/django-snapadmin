@@ -7,6 +7,7 @@ import hashlib
 import secrets
 import string
 import uuid
+from collections.abc import Iterator
 from datetime import timedelta
 from enum import Enum
 
@@ -1432,13 +1433,8 @@ class SnapModel(models.Model):
         if cls.es_storage_mode == EsStorageMode.ES_ONLY:
             return cls._tag_search_backend(EsQuerySet(cls, []), "elasticsearch")
 
-        orm_terms = {
-            (f"{key}__in" if isinstance(value, (list, tuple, set)) else key):
-                (list(value) if isinstance(value, (list, tuple, set)) else value)
-            for key, value in terms.items()
-        }
         try:
-            qs = cls.objects.filter(**orm_terms)
+            qs = cls.objects.filter(**cls._es_orm_terms(terms))
             # Force field resolution now so an ES-only field (no DB column) fails
             # closed here rather than surprising the caller on later evaluation.
             str(qs.query)
@@ -1564,13 +1560,8 @@ class SnapModel(models.Model):
         if cls.es_storage_mode == EsStorageMode.ES_ONLY:
             return {name: [] for name in resolved_fields}
 
-        orm_terms = {
-            (f"{key}__in" if isinstance(value, (list, tuple, set)) else key):
-                (list(value) if isinstance(value, (list, tuple, set)) else value)
-            for key, value in terms.items()
-        }
         try:
-            base_qs = cls.objects.filter(**orm_terms)
+            base_qs = cls.objects.filter(**cls._es_orm_terms(terms))
             # Force field resolution now so an ES-only filter field (no DB
             # column) fails closed to empty facets rather than raising later.
             str(base_qs.query)
@@ -1591,6 +1582,140 @@ class SnapModel(models.Model):
             except FieldError:
                 result[name] = []
         return result
+
+    @classmethod
+    def _es_orm_terms(cls, terms: dict) -> dict:
+        """Translate es_filter/es_scan ``**terms`` to ORM filter kwargs.
+
+        A list/tuple/set value becomes an ``__in`` lookup; a scalar stays an
+        exact match. Shared by the database fallbacks of the ES query methods.
+        """
+        return {
+            (f"{key}__in" if isinstance(value, (list, tuple, set)) else key):
+                (list(value) if isinstance(value, (list, tuple, set)) else value)
+            for key, value in terms.items()
+        }
+
+    @classmethod
+    def es_scan(
+        cls,
+        *,
+        query_string: str | None = None,
+        page_size: int | None = None,
+        **terms,
+    ) -> Iterator["SnapModel"]:
+        """Deep-scan iterator — yield every matching document, no ``from`` paging.
+
+        Elasticsearch refuses a ``from + size`` deeper than
+        ``index.max_result_window`` (10,000), so :meth:`es_search` /
+        :meth:`es_filter` can never return more than that many hits. ``es_scan``
+        walks the whole result set instead by paging with ``search_after`` over a
+        stable ``id`` sort — one request of ``page_size`` documents per
+        round-trip (default ``SNAPADMIN_ES_SEARCH_LIMIT``), lazily, so memory
+        stays bounded no matter how large the match is.
+
+        Filtering is identical to :meth:`es_filter`: scalar/list ``**terms`` run
+        in ES filter context (resolved through :meth:`_resolve_es_term_field`),
+        and an optional ``query_string`` adds a scored full-text constraint.
+        DUAL models yield database instances in cursor (``id``-ascending) order;
+        ES_ONLY models yield objects reconstructed from the index.
+
+        Fails safe: a DUAL model whose Elasticsearch is disabled — or unreachable
+        *before* any document is streamed — walks the equivalent database filter
+        with ``.iterator()`` instead (failing closed to nothing if a term has no
+        backing column); an ES_ONLY model yields nothing. If ES fails *after*
+        streaming has begun, the scan stops where it was rather than restarting
+        on the database and double-emitting.
+
+        Raises ``ValueError`` (eagerly, before iteration) for a non-positive
+        ``page_size`` or an unknown / non-term-filterable field.
+        """
+        if page_size is not None and page_size < 1:
+            raise ValueError(
+                f"{cls.__name__}.es_scan: page_size must be a positive integer, got {page_size!r}"
+            )
+        # Resolve/validate every term up-front so a bad field raises on the call,
+        # not lazily on the first `next()` of the returned generator.
+        resolved = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
+        page_size = page_size or getattr(settings, "SNAPADMIN_ES_SEARCH_LIMIT", 1000)
+        return cls._es_scan_iter(resolved, terms, query_string, page_size)
+
+    @classmethod
+    def _es_scan_iter(
+        cls, resolved: dict, terms: dict, query_string: str | None, page_size: int,
+    ) -> Iterator["SnapModel"]:
+        use_es = (cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY) and getattr(
+            settings, "ELASTICSEARCH_ENABLED", False
+        )
+        if use_es:
+            produced = False
+            try:
+                for obj in cls._es_scan_via_es(resolved, query_string, page_size):
+                    produced = True
+                    yield obj
+                return
+            except Exception as exc:
+                logger.warning(
+                    "es_scan_failed",
+                    model=cls.__name__,
+                    terms=list(terms),
+                    produced=produced,
+                    fallback="none" if (produced or cls.es_storage_mode == EsStorageMode.ES_ONLY)
+                    else "db",
+                    error=str(exc),
+                )
+                # Once any document has been streamed the search_after position
+                # is gone, so a DB restart would double-emit — stop instead.
+                if produced or cls.es_storage_mode == EsStorageMode.ES_ONLY:
+                    return
+
+        # Database fallback — only meaningful for models with a table.
+        if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+            return
+        try:
+            qs = cls.objects.filter(**cls._es_orm_terms(terms)).order_by("pk")
+            # Force field resolution now so an ES-only term (no DB column) fails
+            # closed to an empty scan rather than raising during iteration.
+            str(qs.query)
+        except FieldError:
+            return
+        yield from qs.iterator()
+
+    @classmethod
+    def _es_scan_via_es(
+        cls, resolved: dict, query_string: str | None, page_size: int,
+    ) -> Iterator["SnapModel"]:
+        es = cls.get_es_client()
+        index_name = cls.get_es_index_name()
+        query = cls._build_es_term_query(resolved, query_string)
+        search_after: list | None = None
+        while True:
+            body: dict = {"query": query, "size": page_size, "sort": [{"id": "asc"}]}
+            if search_after is not None:
+                body["search_after"] = search_after
+            response = es.search(index=index_name, body=body)
+            hits = response.get("hits", {}).get("hits", [])
+            if not hits:
+                return
+
+            if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+                for hit in hits:
+                    data = hit["_source"]
+                    obj = cls(**{k: v for k, v in data.items() if k != "id"})
+                    obj.pk = data.get("id")
+                    yield obj
+            else:
+                pks = [hit["_source"]["id"] for hit in hits]
+                by_pk = cls.objects.in_bulk(pks)
+                for pk in pks:
+                    if pk in by_pk:
+                        yield by_pk[pk]
+
+            search_after = hits[-1].get("sort")
+            # A short page (fewer than requested) means the index is exhausted;
+            # a missing cursor would make the next request restart from the top.
+            if search_after is None or len(hits) < page_size:
+                return
 
     @classmethod
     def es_reindex_all(cls, *, chunk_size: int = 500) -> dict:

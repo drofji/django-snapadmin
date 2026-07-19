@@ -133,6 +133,26 @@ full-text constraint. When ES is off or errors, `DUAL` models recompute each fac
 over the database (`values(field).annotate(Count)`, failing closed to empty buckets
 for a field or filter term with no column); `ES_ONLY` models return empty buckets.
 
+Elasticsearch caps `from + size` at `index.max_result_window` (10 000), so
+`es_search()`/`es_filter()` can never return more than that. To walk a **larger**
+result set, use `es_scan()` — a lazy iterator that pages with `search_after` over a
+stable `id` sort, one `page_size` batch per round-trip, with the same filtering as
+`es_filter()`:
+
+```python
+# Stream every matching document, memory-bounded — no 10k ceiling
+for product in Product.es_scan(available=True):
+    ...
+
+for log in SearchLog.es_scan(query_string="error 404", page_size=5000):
+    ...
+```
+
+`DUAL` models yield DB instances in cursor order; `ES_ONLY` models yield objects
+rebuilt from the index. If ES is off (or unreachable before it streams anything), a
+`DUAL` model falls back to a `.iterator()` over the equivalent DB filter; an
+`ES_ONLY` model yields nothing.
+
 Full-text queries target only the **text-capable fields** of `es_mapping` (with
 `lenient: true`), so mixed mappings with numeric/date fields never break a search.
 Index-level settings — custom analyzers, shards — go into `es_index_settings`
@@ -263,6 +283,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Smart ES Query Routing** | `?search=` REST queries on `DUAL` models run on Elasticsearch automatically (fuzzy, relevance-ranked); plain listings stay on the DB. Toggle globally (`SNAPADMIN_ES_QUERY_ROUTING`) or per model (`es_query_routing`). |
 | **Structured ES Filters** | `es_filter(field=value, other=[...])` runs `term`/`terms` filters in ES filter context (no scoring, cacheable) — the structured counterpart to fuzzy `es_search()`. `text` fields auto-target their keyword sub-field; a `__` path filters a JSON/object mapping by nested key. Falls back to the equivalent DB filter when ES is off. |
 | **ES Facets / Aggregations** | `es_aggregate("field", …)` runs a `terms` aggregation per field, returning `{field: [{"key":…, "count":…}]}` bucket dicts — same field resolution and optional filter context as `es_filter()`. Falls back to a DB `values().annotate(Count)` group-by when ES is off. |
+| **ES Deep Scan** | `es_scan(**terms)` is a lazy `search_after` iterator that streams *every* matching document past ES's 10k `max_result_window`, one `page_size` batch per round-trip. Same filtering as `es_filter()`; falls back to a DB `.iterator()` when ES is off. |
 | **Auto ES Mapping** | `es_auto_mapping = True` derives the index mapping from your model fields (text + `.raw` keyword subfields, dates, numerics); `es_mapping` entries override per field, `es_index_settings` adds analyzers/shards. |
 | **Secured GraphQL** | Every resolver enforces authentication (session or API token) + per-model Django permissions — the same contract as REST — on **every traversed relation**, not just top-level fields; `SNAPADMIN_MASKED_FIELDS` are masked in GraphQL output too. `search`/`first`/`offset` arguments included. |
 | **API Field Privacy** | `api_exclude_fields` hides sensitive columns from REST, GraphQL and schema introspection while the admin keeps showing them. |
@@ -1431,11 +1452,37 @@ class AuditLog(snap_models.SnapModel):
     data_retention_field = "created_at"  # default; can point to any DateTimeField
 ```
 
-Records are removed by the `purge_expired_data` Celery task (schedule it with Celery Beat) or manually:
+Records are removed by the `purge_expired_data` Celery task or the identically-named management
+command. **Nothing runs on its own** — SnapAdmin has no background daemon of its own, so you point
+a scheduler you already run (Celery Beat *or* system cron) at it. Both call the same storage-aware
+purge; pick whichever your deployment has.
+
+**Manual / preview:**
 
 ```bash
-python manage.py purge_expired_data         # live run
-python manage.py purge_expired_data --dry-run  # preview only
+python manage.py purge_expired_data            # live run
+python manage.py purge_expired_data --dry-run  # preview only, deletes nothing
+```
+
+**Scheduled with Celery Beat** (needs the `[celery]` extra + a broker):
+
+```python
+# settings.py
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    "snapadmin-gdpr-purge": {
+        "task": "snapadmin.purge_expired_data",   # note the snapadmin.* namespace
+        "schedule": crontab(hour=3, minute=0),    # every day at 03:00
+    },
+}
+```
+
+**Scheduled with system cron** (no Celery required) — `cd` to wherever *your* project's
+`manage.py` lives:
+
+```cron
+0 3 * * *  cd /path/to/your/project && python manage.py purge_expired_data
 ```
 
 Or programmatically, per model — returns the number of records purged:

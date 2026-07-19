@@ -157,6 +157,7 @@ def test_search_method_signatures():
     assert _params(SnapModel.snap_search) == ["query_string", "limit"]
     assert _params(SnapModel.es_filter) == ["query_string", "limit", "terms"]
     assert _params(SnapModel.es_aggregate) == ["fields", "size", "query_string", "terms"]
+    assert _params(SnapModel.es_scan) == ["query_string", "page_size", "terms"]
     assert _params(SnapModel.es_reindex_all) == ["chunk_size"]
     assert _params(SnapModel.purge_expired) == ["now", "dry_run"]
 
