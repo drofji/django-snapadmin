@@ -163,8 +163,10 @@ LANGUAGES = [
     ('nl', _i18n('Dutch')),
 ]
 # SnapAdmin's own catalogs live inside the package; Django also reads each app's
-# locale/ dir, so this is mainly for a project-level override directory.
-LOCALE_PATHS = [BASE_DIR / 'locale']
+# locale/ dir, so this is mainly for a project-level override directory. Kept under
+# demo/ (not the repo root) so the demo project stays self-contained and a stray
+# `makemessages` doesn't drop an empty catalog dir at the top level.
+LOCALE_PATHS = [BASE_DIR / 'demo' / 'locale']
 
 STATIC_URL = 'static/'
 STATICFILES_DIRS = []

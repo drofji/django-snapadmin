@@ -1972,13 +1972,13 @@ docker compose -f demo/docker-compose.yml --profile es --profile dev up --build
 
 ### Building images with automatic retention
 
-For the test/demo image, `scripts/docker_build.sh` builds, tags by build-day, and
+For the test/demo image, `demo/scripts/docker_build.sh` builds, tags by build-day, and
 self-prunes so old images never pile up:
 
 ```bash
-scripts/docker_build.sh                          # image=snapadmin-test, keep 3 build-days
-IMAGE=myimg scripts/docker_build.sh              # custom image name
-SNAPADMIN_IMAGE_KEEP_DAYS=5 scripts/docker_build.sh   # widen the window
+demo/scripts/docker_build.sh                          # image=snapadmin-test, keep 3 build-days
+IMAGE=myimg demo/scripts/docker_build.sh              # custom image name
+SNAPADMIN_IMAGE_KEEP_DAYS=5 demo/scripts/docker_build.sh   # widen the window
 ```
 
 **Retention policy** — *one build per day, keep the last N build-days* (N defaults to 3,
@@ -1999,7 +1999,7 @@ override via `SNAPADMIN_IMAGE_KEEP_DAYS`):
 The pruner can also run standalone (e.g. in CI), with a dry-run mode:
 
 ```bash
-python -m scripts.docker_retention prune --image snapadmin-test --dry-run
+python -m demo.scripts.docker_retention prune --image snapadmin-test --dry-run
 ```
 
 ---

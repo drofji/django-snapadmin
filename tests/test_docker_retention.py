@@ -7,7 +7,7 @@ pure policy logic over a list of tags — no Docker daemon required.
 
 import pytest
 
-from scripts.docker_retention import (
+from demo.scripts.docker_retention import (
     DEFAULT_KEEP_DAYS,
     parse_day_tags,
     resolve_keep_days,

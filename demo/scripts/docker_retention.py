@@ -1,5 +1,5 @@
 """
-scripts/docker_retention.py
+demo/scripts/docker_retention.py
 
 Docker image retention for the test/demo image (roadmap task #P).
 
@@ -19,9 +19,9 @@ tags so it can be unit-tested without a Docker daemon. The daemon-facing helpers
 the bottom are thin wrappers around the ``docker`` CLI.
 
 Usage:
-    python -m scripts.docker_retention prune --image snapadmin-test
-    python -m scripts.docker_retention prune --image snapadmin-test --keep-days 5
-    SNAPADMIN_IMAGE_KEEP_DAYS=5 python -m scripts.docker_retention prune --image snapadmin-test
+    python -m demo.scripts.docker_retention prune --image snapadmin-test
+    python -m demo.scripts.docker_retention prune --image snapadmin-test --keep-days 5
+    SNAPADMIN_IMAGE_KEEP_DAYS=5 python -m demo.scripts.docker_retention prune --image snapadmin-test
 """
 
 from __future__ import annotations
