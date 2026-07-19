@@ -76,7 +76,9 @@
   .sidebar::-webkit-scrollbar { width: 8px; }
   .sidebar::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
   .sidebar-logo { padding: 22px 22px 14px; }
-  .sidebar-logo h2 { font-size: 19px; font-weight: 800; letter-spacing: -.02em; background: linear-gradient(120deg, var(--primary), var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+  /* Reset the section-heading h2 rule below (56px margin + 32px padding + border-top),
+     which would otherwise push the sidebar logo far down and draw a stray rule above it. */
+  .sidebar-logo h2 { margin: 0; padding-top: 0; border-top: none; font-size: 19px; font-weight: 800; letter-spacing: -.02em; background: linear-gradient(120deg, var(--primary), var(--accent)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
   .sidebar-logo span { font-size: 12px; color: var(--muted); font-weight: 500; }
   .nav-search { padding: 4px 18px 12px; }
   .nav-search input {
