@@ -10,6 +10,22 @@ Each notable change should be a paragraph or bullet, explaining what changed and
 Added
 =====
 
+Stale-row pruning for recurring imports (``snapadmin.etl.stale_sync()``)
+  ``upsert_from_source()`` writes the rows a source reports, but a recurring full-table sync also
+  needs to delete the rows the source *stopped* reporting — and doing that by hand is where imports
+  go wrong: a truncated or half-downloaded feed deletes almost the whole table. The new
+  ``stale_sync(model, seen_keys, key_field=..., max_fraction=0.1)`` helper handles the delete half
+  safely. It removes every local row whose natural key is absent from ``seen_keys`` (the keys present
+  in the latest sync), but refuses — deleting nothing and raising ``StaleSyncAbort`` — if that would
+  remove more than ``max_fraction`` of the candidate rows, so a bad fetch can't silently wipe the
+  table. It returns a summary (``total``/``stale``/``deleted``/``fraction``), accepts ``dry_run=True``
+  to preview counts and a ``queryset=`` to scope the sync to one source's slice of a shared table, and
+  for a ``DUAL``/ES-mirrored model clears the deleted documents from Elasticsearch in the same bulk
+  call (raising ``SnapPurgeError`` if the DB delete lands but the ES mirror can't be cleared — the same
+  no-two-phase-commit contract as ``purge_expired()``). ``stale_sync`` and ``StaleSyncAbort`` are
+  importable from ``snapadmin.etl``; the demo ``sync_exchange_rates`` command grows ``--only N`` and
+  ``--prune`` flags to show it end to end.
+
 Resumable, progress-tracking bulk reindex (``snapadmin_reindex``)
   ``SnapModel.es_reindex_all`` is a single ``helpers.bulk`` over the whole table: no feedback, no
   resume, no load tuning. On a multi-million-row table that means you can't tell "running" from

@@ -964,6 +964,31 @@ summary = upsert_from_source(
   <code>ON DUPLICATE KEY UPDATE</code>) it is inferred from the matching unique index rather than
   passed explicitly — SnapAdmin branches on the backend so the same call runs everywhere.</p>
 
+  <h3>Pruning rows the source dropped — <code>stale_sync()</code></h3>
+  <p>The upsert only writes rows the source <em>reports</em>. A recurring full-table sync usually
+  also needs to delete the rows it <em>stopped</em> reporting. <code>stale_sync()</code> is that
+  delete half — with a guard against the footgun where a truncated or half-downloaded feed wipes
+  almost the whole table:</p>
+  <pre><code>from snapadmin.etl import upsert_from_source, stale_sync
+
+seen = {r.code for r in remote_cursor}      # natural keys present in THIS sync
+upsert_from_source(ExchangeRate, rows_from_remote(), unique_fields=["code"])
+stale_sync(
+    ExchangeRate, seen,
+    key_field="code",                       # the same unique natural key
+    max_fraction=0.1,                       # refuse if &gt;10% would be deleted
+)
+# {"total": 5231, "stale": 4, "deleted": 4, "fraction": 0.0008, "dry_run": False}</code></pre>
+  <p>If the stale rows exceed <code>max_fraction</code> of the candidate rows, <strong>nothing is
+  deleted</strong> and <code>StaleSyncAbort</code> is raised (its <code>.stale</code>/<code>.total</code>/
+  <code>.fraction</code> let you alert, retry the fetch, or deliberately override). Pass
+  <code>dry_run=True</code> to preview the counts, or <code>queryset=</code> to scope the sync to one
+  source's slice of a shared table so rows owned by others are never treated as stale. For a
+  <code>DUAL</code>/ES-mirrored model the deleted rows are cleared from Elasticsearch in the same
+  bulk call (no two-phase commit — the database delete lands first, mirroring
+  <code>purge_expired()</code>). Demo:
+  <code>python manage.py sync_exchange_rates --only 7 --prune</code>.</p>
+
   <h3>Optional user-management API (admin-only)</h3>
   <p>Set <code>SNAPADMIN_USER_API_ENABLED = True</code> for admin-only user/permission endpoints —
   useful when building a frontend admin panel. Every endpoint requires a <strong>staff</strong> user:</p>

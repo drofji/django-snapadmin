@@ -277,6 +277,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Token Auth** | Expirable API tokens with granular model-level access control. Keys are **hashed at rest** (SHA-256) and shown only once, at creation. |
 | **Pluggable API Auth** | `SNAPADMIN_API_AUTHENTICATION_CLASSES` swaps in any DRF authenticators (JWT, session, custom); non-token auth falls back to plain Django model permissions. Works with a **custom `AUTH_USER_MODEL`**. |
 | **Generic ETL Upsert** | `snapadmin.etl.upsert_from_source` streams an external source into a model via `bulk_create(update_conflicts=True)` — idempotent, no per-row ES writes, one bulk reindex at the end. |
+| **Stale-Sync Prune** | `snapadmin.etl.stale_sync` deletes rows whose natural key vanished from the latest source sync — with a `max_fraction` guard that refuses (raising `StaleSyncAbort`) if a truncated feed would wipe too much of the table. Clears the ES mirror too. |
 | **User Management API** | Optional admin-only endpoints (`SNAPADMIN_USER_API_ENABLED`) to CRUD users, set passwords and assign permissions — for building frontend admin panels. |
 | **Configurable** | Easily enable/disable REST API, GraphQL, Swagger docs, and search modes via settings. |
 | **Elasticsearch Ready** | Multi-mode storage (`DB_ONLY`, `DUAL`, `ES_ONLY`) for blazing fast search. |
@@ -995,6 +996,30 @@ Runs on **PostgreSQL, SQLite and MySQL/MariaDB**. `unique_fields` is always the 
 target; on MySQL/MariaDB (which upsert via `ON DUPLICATE KEY UPDATE`) it is inferred from the
 matching unique index instead of being passed explicitly, so the same call works on every
 backend without a `NotSupportedError`.
+
+**Removing rows the source dropped — `stale_sync()`.** A recurring full-table sync has a
+second half: rows that disappeared from the source should be deleted locally. `stale_sync()`
+does that, guarded against the classic footgun where a truncated or half-downloaded feed
+wipes almost everything:
+
+```python
+from snapadmin.etl import upsert_from_source, stale_sync
+
+seen = {r.code for r in remote_cursor}          # natural keys in THIS sync
+upsert_from_source(ExchangeRate, rows_from_remote(), unique_fields=["code"])
+stale_sync(
+    ExchangeRate, seen,
+    key_field="code",                           # the same unique key
+    max_fraction=0.1,                           # refuse if >10% would be deleted
+)
+# {"total": 5231, "stale": 4, "deleted": 4, "fraction": 0.0008, "dry_run": False}
+```
+
+If the stale rows exceed `max_fraction` of the table, **nothing is deleted** and
+`StaleSyncAbort` is raised (inspect `.stale`/`.total`/`.fraction` to alert or override).
+Pass `dry_run=True` to preview counts, or a `queryset=` to scope the sync to one source's
+slice of a shared table. For a `DUAL`/ES-mirrored model the deleted rows are cleared from
+Elasticsearch too. Demo: `python manage.py sync_exchange_rates --only 7 --prune`.
 
 ### Optional user-management API (admin-only)
 

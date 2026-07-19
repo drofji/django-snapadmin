@@ -87,6 +87,8 @@ PUBLIC_IMPORTS = [
     "snapadmin.api.authentication.get_api_authentication_classes",
     "snapadmin.api.authentication.SnapAPIAuthMixin",
     "snapadmin.etl.upsert_from_source",
+    "snapadmin.etl.stale_sync",
+    "snapadmin.etl.StaleSyncAbort",
 ]
 
 
@@ -212,6 +214,12 @@ def test_etl_and_auth_signatures():
         "model", "rows", "unique_fields", "update_fields", "batch_size", "reindex",
     ]
     assert _params(get_api_authentication_classes) == []
+
+    from snapadmin.etl import stale_sync
+
+    assert _params(stale_sync) == [
+        "model", "seen_keys", "key_field", "max_fraction", "queryset", "dry_run",
+    ]
 
 
 def test_charfield_required_null_parity():
