@@ -95,6 +95,22 @@ Structured Elasticsearch term filters (``SnapModel.es_filter()``)
   ``es_search()`` this is a model-level query method; if you expose its results through your own view,
   apply your own permission and PII-masking checks as the built-in REST/GraphQL layers already do.
 
+Elasticsearch facets / aggregations (``SnapModel.es_aggregate()``)
+  The faceting counterpart to ``es_filter()``: where a term filter *selects* documents,
+  ``es_aggregate()`` *counts* them per value. Each positional field runs one Elasticsearch ``terms``
+  aggregation and the buckets come back as plain dicts keyed by the original field name —
+  ``Product.es_aggregate("category", "available")`` →
+  ``{"category": [{"key": "Laptops", "count": 42}, …], "available": [{"key": True, "count": 87}, …]}``.
+  This answers "how many documents fall into each value of field X" without paging every hit, and it
+  works on the same fields ``es_filter()`` does, including a keyword sub-field of a ``text`` field or a
+  JSON/object key path a relational ``GROUP BY`` can't index. Field names resolve and validate through
+  the same machinery (an unknown or analysed-text-only field raises ``ValueError``); ``size=`` caps the
+  number of buckets per field (default 10), any ``**terms`` narrow the counted set in ES *filter*
+  context, and an optional ``query_string`` adds a scored full-text constraint. When Elasticsearch is
+  disabled or the query errors, a ``DUAL`` model recomputes each facet over the database with
+  ``values(field).annotate(Count(...))`` — failing closed to empty buckets for a field or filter term
+  with no backing column — while an ``ES_ONLY`` model returns empty buckets for every requested field.
+
 Changed
 =======
 

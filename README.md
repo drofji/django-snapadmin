@@ -116,6 +116,23 @@ equivalent DB filter (failing closed to an empty result if a term field has no c
 if you surface its results through your own view, apply your own permission / PII-masking
 checks (the built-in REST and GraphQL layers already do).
 
+For **faceting** (how many documents fall into each value of a field), use
+`es_aggregate()` — one ES `terms` aggregation per field, returned as plain bucket
+dicts. Fields and any filter terms resolve exactly as in `es_filter()`:
+
+```python
+Product.es_aggregate("available")
+# {"available": [{"key": True, "count": 42}, {"key": False, "count": 3}]}
+
+# Multiple facets, narrowed by a filter context, capped at N buckets each:
+Product.es_aggregate("category", "available", size=20, available=True)
+```
+
+`size` caps the buckets per field (default 10); `query_string=` adds a scored
+full-text constraint. When ES is off or errors, `DUAL` models recompute each facet
+over the database (`values(field).annotate(Count)`, failing closed to empty buckets
+for a field or filter term with no column); `ES_ONLY` models return empty buckets.
+
 Full-text queries target only the **text-capable fields** of `es_mapping` (with
 `lenient: true`), so mixed mappings with numeric/date fields never break a search.
 Index-level settings — custom analyzers, shards — go into `es_index_settings`
@@ -245,6 +262,7 @@ The core `snapadmin` package provides everything you need to bootstrap your proj
 | **Elasticsearch Ready** | Multi-mode storage (`DB_ONLY`, `DUAL`, `ES_ONLY`) for blazing fast search. |
 | **Smart ES Query Routing** | `?search=` REST queries on `DUAL` models run on Elasticsearch automatically (fuzzy, relevance-ranked); plain listings stay on the DB. Toggle globally (`SNAPADMIN_ES_QUERY_ROUTING`) or per model (`es_query_routing`). |
 | **Structured ES Filters** | `es_filter(field=value, other=[...])` runs `term`/`terms` filters in ES filter context (no scoring, cacheable) — the structured counterpart to fuzzy `es_search()`. `text` fields auto-target their keyword sub-field; a `__` path filters a JSON/object mapping by nested key. Falls back to the equivalent DB filter when ES is off. |
+| **ES Facets / Aggregations** | `es_aggregate("field", …)` runs a `terms` aggregation per field, returning `{field: [{"key":…, "count":…}]}` bucket dicts — same field resolution and optional filter context as `es_filter()`. Falls back to a DB `values().annotate(Count)` group-by when ES is off. |
 | **Auto ES Mapping** | `es_auto_mapping = True` derives the index mapping from your model fields (text + `.raw` keyword subfields, dates, numerics); `es_mapping` entries override per field, `es_index_settings` adds analyzers/shards. |
 | **Secured GraphQL** | Every resolver enforces authentication (session or API token) + per-model Django permissions — the same contract as REST — on **every traversed relation**, not just top-level fields; `SNAPADMIN_MASKED_FIELDS` are masked in GraphQL output too. `search`/`first`/`offset` arguments included. |
 | **API Field Privacy** | `api_exclude_fields` hides sensitive columns from REST, GraphQL and schema introspection while the admin keeps showing them. |

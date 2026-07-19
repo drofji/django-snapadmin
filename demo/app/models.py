@@ -77,6 +77,14 @@ class Product(snap_models.SnapModel):
     # its keyword sub-field, and a `payload__status` path reaches into a JSON/object
     # mapping (the case a plain DB column can't index). When ES is disabled or errors,
     # DUAL models fall back to the equivalent database filter.
+    #
+    # es_aggregate() is the faceting counterpart — one ES `terms` aggregation per
+    # field, returned as bucket dicts, with the same field resolution and optional
+    # filter context as es_filter():
+    #   Product.es_aggregate("available", available=True)
+    #   # {"available": [{"key": True, "count": 42}, ...]}
+    # When ES is down, DUAL models recompute the facets over the DB
+    # (values(field).annotate(Count)); ES_ONLY models return empty buckets.
     es_mapping = {
         "name": {"type": "text", "analyzer": "standard"},
         "price": {"type": "float"},

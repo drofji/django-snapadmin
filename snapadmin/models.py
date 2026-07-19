@@ -515,6 +515,9 @@ _ES_EXACT_FILTER_TYPES = frozenset({
 })
 # Sub-field types under a ``text`` field's ``fields`` that a term filter can use.
 _ES_KEYWORD_SUBFIELD_TYPES = frozenset({"keyword", "constant_keyword", "wildcard"})
+# Default number of buckets returned per ``es_aggregate`` facet (ES's own
+# ``terms`` aggregation default), overridable per call via ``size=``.
+_ES_DEFAULT_AGG_SIZE = 10
 
 
 class EsQuerySet:
@@ -1390,33 +1393,13 @@ class SnapModel(models.Model):
 
         if use_es:
             try:
-                clauses = [
-                    ({"terms": {field: list(value)}}
-                     if isinstance(value, (list, tuple, set))
-                     else {"term": {field: value}})
-                    for field, value in resolved.items()
-                ]
-                if query_string:
-                    query = {"bool": {
-                        "filter": clauses,
-                        "must": [{
-                            "multi_match": {
-                                "query": query_string,
-                                "fields": cls._es_search_fields(),
-                                "fuzziness": "AUTO",
-                                "lenient": True,
-                            }
-                        }],
-                    }}
-                elif clauses:
-                    query = {"bool": {"filter": clauses}}
-                else:
-                    query = {"match_all": {}}
-
                 es = cls.get_es_client()
                 response = es.search(
                     index=cls.get_es_index_name(),
-                    body={"query": query, "size": limit},
+                    body={
+                        "query": cls._build_es_term_query(resolved, query_string),
+                        "size": limit,
+                    },
                 )
                 hits = response.get("hits", {}).get("hits", [])
 
@@ -1462,6 +1445,152 @@ class SnapModel(models.Model):
         except FieldError:
             qs = cls.objects.none()
         return cls._tag_search_backend(qs, "database")
+
+    @classmethod
+    def _build_es_term_query(cls, resolved_terms: dict, query_string: str | None) -> dict:
+        """Assemble the ES query body shared by es_filter/es_aggregate.
+
+        ``resolved_terms`` maps already-resolved ES field paths to scalar (→
+        ``term``) or list/tuple/set (→ ``terms``) values, run in filter context.
+        A non-empty ``query_string`` is added as a scored ``must`` multi_match.
+        """
+        clauses = [
+            ({"terms": {field: list(value)}}
+             if isinstance(value, (list, tuple, set))
+             else {"term": {field: value}})
+            for field, value in resolved_terms.items()
+        ]
+        if query_string:
+            return {"bool": {
+                "filter": clauses,
+                "must": [{
+                    "multi_match": {
+                        "query": query_string,
+                        "fields": cls._es_search_fields(),
+                        "fuzziness": "AUTO",
+                        "lenient": True,
+                    }
+                }],
+            }}
+        if clauses:
+            return {"bool": {"filter": clauses}}
+        return {"match_all": {}}
+
+    @classmethod
+    def es_aggregate(
+        cls,
+        *fields: str,
+        size: int | None = None,
+        query_string: str | None = None,
+        **terms,
+    ) -> dict[str, list[dict[str, object]]]:
+        """Faceted ``terms`` aggregations — the counterpart to es_filter().
+
+        For each positional ``fields`` name, run one Elasticsearch ``terms``
+        aggregation and return its buckets as ``[{"key": …, "count": …}, …]``,
+        keyed in the result by the original field name::
+
+            Product.es_aggregate("status", "region", available=True)
+            # {"status": [{"key": "paid", "count": 12}, …],
+            #  "region": [{"key": "eu", "count": 30}, …]}
+
+        Aggregation fields (and any ``**terms`` used to narrow the document set
+        in filter context) resolve through :meth:`_resolve_es_term_field`, so a
+        ``text`` field aggregates on its keyword sub-field and a ``__`` path
+        reaches into a JSON/``object`` mapping. ``size`` caps the number of
+        buckets per field (default :data:`_ES_DEFAULT_AGG_SIZE`); an optional
+        ``query_string`` adds a scored full-text constraint.
+
+        When Elasticsearch is disabled or the query fails, a DUAL model
+        recomputes each facet over the database
+        (``values(field).annotate(Count)``), failing closed to empty buckets for
+        a field (or filter term) with no backing column; an ES_ONLY model
+        returns empty buckets for every requested field.
+
+        Raises ``ValueError`` if no field is given, if ``size`` is not positive,
+        or for an unknown / non-term-filterable field.
+        """
+        if not fields:
+            raise ValueError(f"{cls.__name__}.es_aggregate: at least one field is required")
+        size = _ES_DEFAULT_AGG_SIZE if size is None else size
+        if size < 1:
+            raise ValueError(
+                f"{cls.__name__}.es_aggregate: size must be a positive integer, got {size!r}"
+            )
+        # Resolve/validate every field and term up-front so a bad field raises
+        # regardless of which backend ends up answering the query.
+        resolved_fields = {name: cls._resolve_es_term_field(name) for name in fields}
+        resolved_terms = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
+
+        use_es = (cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY) and getattr(
+            settings, "ELASTICSEARCH_ENABLED", False
+        )
+
+        if use_es:
+            try:
+                aggs = {
+                    name: {"terms": {"field": path, "size": size}}
+                    for name, path in resolved_fields.items()
+                }
+                es = cls.get_es_client()
+                response = es.search(
+                    index=cls.get_es_index_name(),
+                    body={
+                        "query": cls._build_es_term_query(resolved_terms, query_string),
+                        "size": 0,
+                        "aggs": aggs,
+                    },
+                )
+                aggregations = response.get("aggregations", {})
+                return {
+                    name: [
+                        {"key": bucket["key"], "count": bucket["doc_count"]}
+                        for bucket in aggregations.get(name, {}).get("buckets", [])
+                    ]
+                    for name in resolved_fields
+                }
+            except Exception as exc:
+                logger.warning(
+                    "es_aggregate_failed",
+                    model=cls.__name__,
+                    fields=list(fields),
+                    fallback="empty" if cls.es_storage_mode == EsStorageMode.ES_ONLY else "db",
+                    error=str(exc),
+                )
+                if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+                    return {name: [] for name in resolved_fields}
+
+        # Database fallback — only meaningful for models with a table.
+        if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+            return {name: [] for name in resolved_fields}
+
+        orm_terms = {
+            (f"{key}__in" if isinstance(value, (list, tuple, set)) else key):
+                (list(value) if isinstance(value, (list, tuple, set)) else value)
+            for key, value in terms.items()
+        }
+        try:
+            base_qs = cls.objects.filter(**orm_terms)
+            # Force field resolution now so an ES-only filter field (no DB
+            # column) fails closed to empty facets rather than raising later.
+            str(base_qs.query)
+        except FieldError:
+            return {name: [] for name in resolved_fields}
+
+        result: dict[str, list[dict[str, object]]] = {}
+        for name in resolved_fields:
+            try:
+                rows = (
+                    base_qs.values(name)
+                    .annotate(_snap_count=models.Count("pk"))
+                    .order_by("-_snap_count", name)[:size]
+                )
+                result[name] = [
+                    {"key": row[name], "count": row["_snap_count"]} for row in rows
+                ]
+            except FieldError:
+                result[name] = []
+        return result
 
     @classmethod
     def es_reindex_all(cls, *, chunk_size: int = 500) -> dict:

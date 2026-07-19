@@ -671,6 +671,28 @@ Order.es_filter(payload__status="paid")    # → ES field payload.status</code><
   your own view, apply your own permission and PII-masking checks (the built-in REST and GraphQL
   layers already do).</p>
 
+  <h3 id="es-aggregate">ES facets / aggregations — <code>es_aggregate()</code></h3>
+  <p>Where <code>es_filter()</code> selects documents, <code>es_aggregate()</code> <strong>counts
+  them per value</strong> — one Elasticsearch <code>terms</code> aggregation per requested field,
+  returned as plain bucket dicts. It uses the same field resolution and optional filter context as
+  <code>es_filter()</code>, so it works on the same fields (including a keyword sub-field of a
+  <code>text</code> field or a JSON/object key path the database can't group by efficiently):</p>
+  <pre><code># One facet → {field: [{"key": …, "count": …}, …]}
+Product.es_aggregate("available")
+# {"available": [{"key": True, "count": 42}, {"key": False, "count": 3}]}
+
+# Multiple facets, narrowed by a filter context, capped at N buckets each
+Product.es_aggregate("category", "available", size=20, available=True)
+
+# query_string= adds a scored full-text constraint before counting
+Product.es_aggregate("category", query_string="laptop")</code></pre>
+  <p><code>size</code> caps the number of buckets per field (default 10). When Elasticsearch is
+  disabled or a query errors, a <code>DUAL</code> model recomputes each facet over the database with
+  <code>values(field).annotate(Count)</code> — failing closed to empty buckets for a field or filter
+  term that has no backing column — while an <code>ES_ONLY</code> model returns empty buckets for
+  every requested field. An unknown or analysed-text-only field raises <code>ValueError</code>, same
+  as <code>es_filter()</code>.</p>
+
   <h3>Counting objects — with &amp; without filters</h3>
   <p>Every list response is paginated and already reports the <strong>total matching count</strong>
   in <code>count</code> — no need to page through everything. Request the smallest page to read
