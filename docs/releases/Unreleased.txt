@@ -45,3 +45,13 @@ Added
   environment, and the same choices are available as non-interactive flags (``--mode``, ``--database``,
   ``--db-host`` …) for CI. It is stdlib-only (no new dependency) and never imports Django in-process —
   it drives ``manage.py`` as a subprocess.
+
+``snapadmin-init`` console script — integrate into an existing project
+  A new read-only ``snapadmin-init`` command (also ``python -m snapadmin.integrate``) inspects an
+  existing Django project and reports what SnapAdmin wiring is already present and what is missing,
+  printing the exact block to paste for each gap: ``INSTALLED_APPS`` (with the required ``unfold``
+  ordering), the ``urls.py`` include, a ``SNAPADMIN_*`` settings block, optional REST/GraphQL config
+  (``--api`` / ``--graphql``), the ``pip install`` line (``--extras``), and advisory model-conversion
+  hints. It **never edits your files** — it only prints snippets you review before pasting, so there is
+  no risk of a bad automatic edit. ``--json`` feeds tooling and ``--settings`` / ``--urls`` point it at
+  a non-standard layout. Stdlib-only, no Django import at import time.

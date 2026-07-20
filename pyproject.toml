@@ -52,6 +52,7 @@ Changelog = "https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md"
 # Console scripts installed on the PATH by `pip install django-snapadmin`.
 [tool.poetry.scripts]
 snapadmin-demo = "snapadmin.quickstart.cli:main"
+snapadmin-init = "snapadmin.integrate.cli:main"
 
 [tool.poetry.dependencies]
 python = ">=3.10"
