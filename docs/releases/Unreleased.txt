@@ -148,6 +148,22 @@ Deep-scan iterator past ``max_result_window`` (``SnapModel.es_scan()``)
 Changed
 =======
 
+README trimmed to an overview; the reference material now lives on the docs site
+  The README had grown to 2,210 lines — a reader had to scroll past roughly 200 before seeing what
+  SnapAdmin looks like and past 300 before the install instructions, and most of the body duplicated
+  the docs site. It is now 252 lines covering what the package is, the three-step example, install
+  and extras, a grouped feature list that deep-links into the documentation, and how to run the demo.
+  Nothing was dropped: every section that moved was checked against ``docs/index.html`` first, and the
+  parts that had no equivalent there were ported before removal. The docs site accordingly gains an
+  **Internationalization** section (the ten shipped locales, the ``LocaleMiddleware``/``LANGUAGES``
+  wiring and the ``language_switcher.html`` include) and an **Environment Variables Reference**
+  section (every ``SNAPADMIN_*`` setting with its default, split into grouped tables by area), while
+  its Installation section absorbs the compatibility matrix, the ``INSTALLED_APPS`` ordering block,
+  the optional-extras table with the ``extra-settings`` gotchas, the ``[wysiwyg]``/CKEditor and MySQL
+  driver licensing notes, and the package layout. Since the README ships to PyPI as the package's
+  long description, the project page changes with it. The version badges are now generated from live
+  PyPI metadata rather than hand-written, so they stop drifting from the released version.
+
 Docs are explicit about what actually triggers each background task
   Several features were described as running "automatically" or "on a schedule" without saying that
   SnapAdmin ships no daemon and installs no schedule — so a reader could reasonably configure GDPR

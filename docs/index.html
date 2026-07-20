@@ -243,6 +243,7 @@
       <li><a href="#error-monitoring">Error Monitoring</a></li>
       <li><a href="#backups">3-2-1 Backups</a></li>
       <li><a href="#offline">Offline Mode</a></li>
+      <li><a href="#i18n">Internationalization</a></li>
       <li><a href="#theming">Theming &amp; Styles</a></li>
       <li><a href="#performance">Large-Dataset Performance</a></li>
       <li><a href="#optimizations">Optimizations Guide</a></li>
@@ -261,6 +262,7 @@
       <li><a href="#elasticsearch">Elasticsearch (ES)</a></li>
       <li><a href="#celery">Celery &amp; Periodic Tasks</a></li>
       <li><a href="#logging">Structured Logging</a></li>
+      <li><a href="#env-vars">Environment Variables</a></li>
     </ul>
     <div class="section-label">🌟 Sandbox / Demo</div>
     <ul>
@@ -324,6 +326,95 @@
   <h3>From GitHub</h3>
   <pre><code>pip install git+https://github.com/drofji/django-snapadmin.git</code></pre>
 
+  <h3>Compatibility</h3>
+  <p>SnapAdmin requires <strong>Python ≥ 3.10</strong> and <strong>Django ≥ 5.2</strong> (no upper bound pinned). The package is <strong>beta</strong> (<code>Development Status :: 4 - Beta</code>) — the public API is stabilising but may still change before <code>0.1.0</code> stable, so pin an exact version in production.</p>
+  <table>
+    <tr><th></th><th>Versions</th><th>Status</th></tr>
+    <tr><td><strong>Python</strong></td><td>3.10 · 3.11 · 3.12 · 3.13</td><td>Supported (declared floor 3.10). The test suite is currently exercised on <strong>3.12</strong>.</td></tr>
+    <tr><td><strong>Django</strong></td><td>5.2 (LTS) · 6.0</td><td>Supported. The suite currently runs green on <strong>Django 6.0</strong>; <strong>5.2</strong> is the declared floor.</td></tr>
+  </table>
+  <div class="callout callout-warn">
+    <strong>No multi-version CI yet</strong>
+    There is no automated Python×Django test matrix in CI. The numbers above reflect the declared support range and the versions the suite is actively run against during development — not a CI-enforced grid. Treat combinations outside the "currently exercised" cells as supported-but-untested, and report any incompatibility you hit.
+  </div>
+
+  <h3>Configuring <code>INSTALLED_APPS</code></h3>
+  <p><strong>Order matters</strong> — <code>unfold</code> and its contrib apps must come <em>before</em> <code>django.contrib.admin</code>.</p>
+  <pre><code>INSTALLED_APPS = [
+    # Theme — must precede django.contrib.admin
+    "unfold",
+    "unfold.contrib.filters",
+    "unfold.contrib.forms",
+    "unfold.contrib.inlines",
+
+    # WYSIWYG — only with the [wysiwyg] extra (SnapRichTextField / wysiwyg=True)
+    # "django_ckeditor_5",
+
+    # Django core
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+
+    # SnapAdmin stack (all required)
+    "rest_framework",
+    "drf_spectacular",
+    "django_filters",
+    "graphene_django",
+    "snapadmin",
+
+    # Optional — only with the [celery] extra
+    # "django_celery_beat",
+    # "django_celery_results",
+
+    # Your apps …
+]</code></pre>
+  <p>Installing <code>django-snapadmin</code> pulls in <code>django-unfold</code>, <code>djangorestframework</code>, <code>drf-spectacular</code>, <code>django-filter</code> and <code>graphene-django</code> automatically — you only need to list them in <code>INSTALLED_APPS</code>. <code>django-ckeditor-5</code> is <strong>not</strong> installed by default (it bundles CKEditor 5, a GPL/commercial editor) — add it via the <code>[wysiwyg]</code> extra only if you use rich-text fields.</p>
+
+  <h3 id="extras">Optional extras</h3>
+  <p>The base install is self-contained. Opt into extra integrations with pip extras:</p>
+  <table>
+    <tr><th>Extra</th><th><code>pip install</code></th><th>Pulls in</th><th>For</th></tr>
+    <tr><td><code>elasticsearch</code></td><td><code>django-snapadmin[elasticsearch]</code></td><td><code>elasticsearch</code></td><td>Full-text search / <code>ES_ONLY</code> / <code>DUAL</code> models</td></tr>
+    <tr><td><code>celery</code></td><td><code>django-snapadmin[celery]</code></td><td><code>celery</code>, <code>django-celery-beat</code>, <code>django-celery-results</code></td><td>Background tasks (async export, GDPR purge, digests, backups)</td></tr>
+    <tr><td><code>backup</code></td><td><code>django-snapadmin[backup]</code></td><td><code>paramiko</code></td><td>SFTP offsite database backups</td></tr>
+    <tr><td><code>extra-settings</code></td><td><code>django-snapadmin[extra-settings]</code></td><td><code>django-extra-settings</code></td><td>An in-admin dynamic key/value <code>Setting</code> model (as the demo shows)</td></tr>
+    <tr><td><code>wysiwyg</code></td><td><code>django-snapadmin[wysiwyg]</code></td><td><code>django-ckeditor-5</code></td><td>Rich-text fields (<code>SnapRichTextField</code> / <code>wysiwyg=True</code>)</td></tr>
+    <tr><td><code>autocomplete-filter</code></td><td><code>django-snapadmin[autocomplete-filter]</code></td><td><code>django-admin-autocomplete-filter</code></td><td><code>AutocompleteFilter</code> list filters in your own admin (LGPL)</td></tr>
+    <tr><td><code>all</code></td><td><code>django-snapadmin[all]</code></td><td>everything above</td><td>—</td></tr>
+  </table>
+
+  <h4><code>extra-settings</code> gotchas</h4>
+  <p><code>extra-settings</code> is optional and <strong>not used by SnapAdmin's core</strong> (it was a required dependency before — now it isn't). Install the extra only if you want the dynamic <code>Setting</code> model. Two things to know:</p>
+  <ul>
+    <li><strong><code>EXTRA_SETTINGS_ADMIN_APP</code> must match an <code>INSTALLED_APPS</code> entry.</strong> If you register apps by their <code>AppConfig</code> dotted path (<code>"shop.apps.ShopConfig"</code>, or an app nested under a package like <code>"myproject.apps.billing"</code>), pass that dotted string — a bare label (<code>"shop"</code>, <code>"billing"</code>) won't be found. If you list bare labels, use the bare label. <code>django-extra-settings</code>'s own error message here names the label you passed, not the dotted path it actually expects, which makes this easy to misdiagnose. This is an upstream limitation of <code>django-extra-settings</code>, not a SnapAdmin bug.</li>
+    <li><strong>The <code>Setting</code> admin is Unfold-styled automatically.</strong> <code>django-extra-settings</code> registers its own plain <code>ModelAdmin</code>, which would render unstyled next to the rest of the themed site. SnapAdmin fixes this from <code>SnapAdminConfig.ready()</code> by re-registering the <code>Setting</code> admin (or its proxy, when <code>EXTRA_SETTINGS_ADMIN_APP</code> re-homes it) with a class inheriting <code>unfold.admin.ModelAdmin</code> on top of extra_settings' own configuration — <code>list_display</code>, <code>search_fields</code>, fieldsets and media are all preserved. This works regardless of whether <code>extra_settings</code> is listed before or after <code>snapadmin</code>; the only requirement is that <strong><code>django.contrib.admin</code> precede <code>snapadmin</code></strong> (Django's project template already does this). Without Unfold installed, the styling step is a no-op.</li>
+  </ul>
+
+  <h4>Licensing notes for commercial use</h4>
+  <div class="callout callout-warn">
+    <strong><code>wysiwyg</code> bundles CKEditor 5 (GPL-or-commercial)</strong>
+    The rich-text editor (<code>django-ckeditor-5</code>) bundles <strong>CKEditor 5</strong>, which is dual-licensed <strong>GPL-2.0+ or commercial</strong>. It is kept out of the base install so the core package carries no GPL/commercial code — the base is permissive (MIT/BSD/Apache) and safe for commercial and proprietary use. Opt into <code>[wysiwyg]</code> only if you want rich-text fields, and for a commercial product obtain a CKEditor licence (they offer a free tier) or supply your own widget. Without the extra, using a <code>wysiwyg=True</code> field raises a clear <code>ImproperlyConfigured</code> telling you to install it.
+  </div>
+  <div class="callout callout-warn">
+    <strong>MySQL drivers</strong>
+    SnapAdmin itself carries no MySQL driver dependency. If you configure Django to use MySQL (<code>DATABASES[...]['ENGINE'] = 'django.db.backends.mysql'</code>), you must separately install <code>mysqlclient</code> (GPL-2.0-or-later). That is fine for internal or non-redistributed applications, but check your licence posture before shipping a closed-source product. Django also supports the pure-Python <code>PyMySQL</code> — install it and call <code>pymysql.install_as_MySQLdb()</code> in your project's <code>__init__.py</code> or early in <code>settings.py</code> before Django loads. PyMySQL is MIT-licensed but pure-Python and slower than the C-extension <code>mysqlclient</code>, so production deployments typically prefer the latter.
+  </div>
+  <p>Neither note is legal advice — review dependency licences with counsel for commercial use. The full dependency/licence inventory lives in <code>THIRD_PARTY_NOTICES.md</code>.</p>
+
+  <h3>Package layout</h3>
+  <pre><code>snapadmin/
+├── api/             # REST &amp; GraphQL API core: views, serializers, auth
+├── management/      # Custom management commands
+├── migrations/      # Core package migrations (e.g. APIToken)
+├── static/          # UI assets (CSS, JS, SVG logos)
+├── templates/       # Custom admin templates &amp; dashboard
+├── fields.py        # SnapField definitions with admin introspection
+├── models.py        # SnapModel base, EsManager, and core logic
+└── urls.py          # Auto-configurable API and documentation routes</code></pre>
+
   <!-- ── Demo Setup ───────────────────────────────────────────────────────── -->
   <h2 id="demo-setup">🌟 Running the Demo</h2>
   <p>The repository includes a complete demo project to explore all features.</p>
@@ -376,10 +467,10 @@ python demo/manage.py seed_demo
 python demo/manage.py runserver</code></pre>
 
   <h3>Building images with automatic retention</h3>
-  <p>For the test/demo image, <code>scripts/docker_build.sh</code> builds, tags by build-day, and self-prunes so old images never pile up:</p>
-  <pre><code>scripts/docker_build.sh                              # image=snapadmin-test, keep 3 build-days
-IMAGE=myimg scripts/docker_build.sh                  # custom image name
-SNAPADMIN_IMAGE_KEEP_DAYS=5 scripts/docker_build.sh  # widen the window</code></pre>
+  <p>For the test/demo image, <code>demo/scripts/docker_build.sh</code> builds, tags by build-day, and self-prunes so old images never pile up:</p>
+  <pre><code>demo/scripts/docker_build.sh                              # image=snapadmin-test, keep 3 build-days
+IMAGE=myimg demo/scripts/docker_build.sh                  # custom image name
+SNAPADMIN_IMAGE_KEEP_DAYS=5 demo/scripts/docker_build.sh  # widen the window</code></pre>
   <p><strong>Retention policy</strong> — <em>one build per day, keep the last N build-days</em> (N defaults to 3, override via <code>SNAPADMIN_IMAGE_KEEP_DAYS</code>):</p>
   <ul>
     <li><strong>Collapse within a day</strong> — images are tagged <code>snapadmin-test:YYYY-MM-DD</code> plus a moving <code>:latest</code>. Rebuilding the same calendar day re-points that day's tag at the new image; the superseded build becomes a dangling layer and is reclaimed.</li>
@@ -390,7 +481,7 @@ SNAPADMIN_IMAGE_KEEP_DAYS=5 scripts/docker_build.sh  # widen the window</code></
     <strong>Worked example.</strong> Builds a month ago, a week ago, yesterday, and today leave exactly <strong>three</strong> images after today's build — one each for <em>a week ago</em>, <em>yesterday</em>, and <em>today</em>; the month-ago image and all superseded same-day builds are gone.
   </div>
   <p>The pruner can also run standalone (e.g. in CI), with a dry-run mode:</p>
-  <pre><code>python -m scripts.docker_retention prune --image snapadmin-test --dry-run</code></pre>
+  <pre><code>python -m demo.scripts.docker_retention prune --image snapadmin-test --dry-run</code></pre>
 
   <!-- ── SnapModel ─────────────────────────────────────────────────────────── -->
   <h2 id="snap-model">🏗 SnapModel</h2>
@@ -1855,6 +1946,28 @@ python manage.py db_backup --destination remote   # one destination, now</code><
     No settings, migrations, or extra dependencies. The <code>offline_mode</code> flag is purely client-side and gated per model; non-offline models still get the connectivity warnings but ship no caching JS.
   </div>
 
+  <!-- ── Internationalization ───────────────────────────────────────────────── -->
+  <h2 id="i18n">🌍 Internationalization (i18n)</h2>
+  <p>SnapAdmin's UI strings are wrapped in <code>gettext</code> and ship compiled translation catalogs for <strong>10 locales</strong> — English, Russian, German, <strong>Swiss German</strong> (<code>de_CH</code>, ß→ss), French, <strong>Swiss French</strong> (<code>fr_CH</code>), Spanish, Italian, Polish, Dutch. A missing string falls back to English automatically.</p>
+
+  <p>Wire up Django's locale machinery in your project (the demo project already does this):</p>
+  <pre><code># settings.py
+MIDDLEWARE = [..., "django.middleware.locale.LocaleMiddleware", ...]  # after SessionMiddleware
+LANGUAGES = [("en", "English"), ("ru", "Russian"), ("de", "German"), ("de-ch", "Swiss German"), ...]</code></pre>
+
+  <pre><code># urls.py — backs the language switcher
+path("i18n/", include("django.conf.urls.i18n")),</code></pre>
+
+  <p>Drop the accessible language selector into any page (for example an admin login or base template override):</p>
+  <pre><code>{% include "snapadmin/language_switcher.html" %}</code></pre>
+
+  <p>It posts to Django's <code>set_language</code> view and renders nothing when only one language is configured. The switcher builds its option list from Django's own <code>get_available_languages</code>, so it follows your <code>LANGUAGES</code> setting rather than a catalog shipped by SnapAdmin.</p>
+
+  <div class="callout callout-info">
+    <strong>Only the package UI is translated</strong>
+    The catalogs cover SnapAdmin's own strings — model labels, help texts, validator messages, dashboard copy. Your models' <code>verbose_name</code>s and field labels are yours to translate in your project's catalogs.
+  </div>
+
   <!-- ── Theming & Styles ───────────────────────────────────────────────────── -->
   <h2 id="theming">🎨 Theming &amp; Styles</h2>
   <p>SnapAdmin ships its admin styling as two layers, so an install that doesn't use Unfold is never forced to adopt Unfold's assumptions.</p>
@@ -2058,6 +2171,142 @@ for order in Order.objects.select_related("customer"):   # 1 query, total
     <li>❌ Touching a <code>defer()</code>red column in a loop — it re-queries per row.</li>
   </ul>
   <p>Related reading: <a href="#performance">Large-Dataset Performance</a> (SnapAdmin's knobs) and <a href="#elasticsearch">Elasticsearch Storage Modes</a> (the SQL/NoSQL split).</p>
+
+  <!-- ── Environment Variables Reference ────────────────────────────────────── -->
+  <h2 id="env-vars">🔧 Environment Variables Reference</h2>
+  <p>Every <code>SNAPADMIN_*</code> knob is a plain Django setting — you can set it directly in <code>settings.py</code>. The demo project additionally reads them from an env file: copy <code>demo/dist.env</code> to <code>demo/.env</code> and edit it there.</p>
+
+  <div class="callout callout-info">
+    <strong>Package vs demo</strong>
+    The <code>SNAPADMIN_*</code> rows apply to any project that installs the package. The infrastructure rows (<code>POSTGRES_*</code>, <code>REDIS_URL</code>, <code>TRAEFIK_*</code>, <code>SNAPADMIN_AUTO_SEED</code>) belong to the bundled demo's Docker stack, not to the installable package.
+  </div>
+
+  <h3>Django &amp; infrastructure (demo stack)</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>SECRET_KEY</code></td><td>insecure placeholder</td><td>Django secret key — <strong>must be changed in production</strong></td></tr>
+    <tr><td><code>DEBUG</code></td><td><code>True</code></td><td>Enable Django debug mode — set <code>False</code> in production</td></tr>
+    <tr><td><code>ALLOWED_HOSTS</code></td><td><code>localhost,…</code></td><td>Comma-separated allowed hostnames</td></tr>
+    <tr><td><code>LOG_LEVEL</code></td><td><code>INFO</code></td><td>Log verbosity: <code>DEBUG</code>, <code>INFO</code>, <code>WARNING</code>, <code>ERROR</code></td></tr>
+    <tr><td><code>JSON_LOGS</code></td><td><code>False</code></td><td>Structured JSON log output for production log aggregation</td></tr>
+    <tr><td><code>POSTGRES_DB</code></td><td><code>snapadmin</code></td><td>PostgreSQL database name</td></tr>
+    <tr><td><code>POSTGRES_USER</code></td><td><code>snapadmin</code></td><td>PostgreSQL username</td></tr>
+    <tr><td><code>POSTGRES_PASSWORD</code></td><td><code>snapadmin</code></td><td>PostgreSQL password</td></tr>
+    <tr><td><code>POSTGRES_HOST</code></td><td><code>db</code></td><td>PostgreSQL host (Docker service name or IP)</td></tr>
+    <tr><td><code>POSTGRES_PORT</code></td><td><code>5432</code></td><td>PostgreSQL port</td></tr>
+    <tr><td><code>REDIS_URL</code></td><td><code>redis://redis:6379/0</code></td><td>Redis URL for the Celery broker and result backend</td></tr>
+    <tr><td><code>SNAPADMIN_AUTO_SEED</code></td><td><code>False</code></td><td>Auto-run <code>seed_demo</code> on startup (demo only)</td></tr>
+    <tr><td><code>SNAPADMIN_SEED_ADMIN_PASSWORD</code></td><td>—</td><td>Password for the seeded superuser; the <code>admin/admin</code> default is allowed only with <code>DEBUG=True</code></td></tr>
+  </table>
+
+  <h3>Feature toggles</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>SNAPADMIN_REST_API_ENABLED</code></td><td><code>True</code></td><td>Serve the REST CRUD endpoints (<code>False</code> removes the routes)</td></tr>
+    <tr><td><code>SNAPADMIN_SWAGGER_ENABLED</code></td><td><code>True</code></td><td>Serve Swagger UI + ReDoc</td></tr>
+    <tr><td><code>SNAPADMIN_GRAPHQL_ENABLED</code></td><td><code>True</code></td><td>Serve the GraphQL endpoint</td></tr>
+    <tr><td><code>SNAPADMIN_GRAPHIQL_ENABLED</code></td><td><code>DEBUG</code></td><td>GraphiQL playground — keep it out of production</td></tr>
+    <tr><td><code>SNAPADMIN_GRAPHQL_REQUIRE_AUTH</code></td><td><code>True</code></td><td>Require auth + per-model permissions on every GraphQL resolver</td></tr>
+    <tr><td><code>SNAPADMIN_URL_PREFIX</code></td><td><code>""</code></td><td>Extra path segment prepended to every SnapAdmin route (relocates the whole API/GraphQL/Swagger surface)</td></tr>
+    <tr><td><code>SNAPADMIN_DASHBOARD_PUBLIC</code></td><td><code>False</code></td><td>Serve the system dashboard without the default staff gate</td></tr>
+    <tr><td><code>SNAPADMIN_USER_API_ENABLED</code></td><td><code>False</code></td><td>Serve the admin-only user-management API (<code>/api/users/</code>, <code>/api/permissions/</code>)</td></tr>
+  </table>
+
+  <h3>API behaviour, auth &amp; limits</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>SNAPADMIN_API_AUTHENTICATION_CLASSES</code></td><td>token auth</td><td>API authenticator dotted paths (add session / JWT) — see <a href="#integrating">Integrating</a></td></tr>
+    <tr><td><code>SNAPADMIN_API_PAGE_SIZE</code></td><td><code>25</code></td><td>Default <code>list</code> page size on <code>DynamicModelViewSet</code></td></tr>
+    <tr><td><code>SNAPADMIN_API_MAX_PAGE_SIZE</code></td><td><code>500</code></td><td>Hard ceiling on client-requested <code>?page_size=</code></td></tr>
+    <tr><td><code>SNAPADMIN_THROTTLE_ANON</code></td><td><code>60/min</code></td><td>Rate limit for anonymous callers, enforced by the viewset itself regardless of the host project's <code>REST_FRAMEWORK</code> config; <code>None</code> disables it</td></tr>
+    <tr><td><code>SNAPADMIN_THROTTLE_USER</code></td><td><code>600/min</code></td><td>Rate limit for authenticated callers, same enforcement; <code>None</code> disables it</td></tr>
+    <tr><td><code>SNAPADMIN_API_DELETE_GUARD</code></td><td>—</td><td>Dotted path to a <code>Callable[[request, obj], bool]</code> vetoing API deletes (403); AND-ed with each model's <code>api_can_delete</code> hook</td></tr>
+    <tr><td><code>SNAPADMIN_QUERY_BACKEND_HEADER</code></td><td><code>True</code></td><td>Expose the <code>X-Snap-Query-Backend</code> header on list responses</td></tr>
+    <tr><td><code>SNAPADMIN_ANALYTICS_DB_ALIAS</code></td><td>—</td><td><code>DATABASES</code> alias for read-only list/retrieve routing; empty = no routing</td></tr>
+  </table>
+
+  <h3>Elasticsearch</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>ELASTICSEARCH_ENABLED</code></td><td><code>False</code></td><td>Enable ES integration; when <code>False</code> all models fall back to <code>DB_ONLY</code></td></tr>
+    <tr><td><code>ELASTICSEARCH_URL</code></td><td><code>http://elasticsearch:9200</code></td><td>Elasticsearch cluster URL</td></tr>
+    <tr><td><code>ELASTICSEARCH_KWARGS</code></td><td><code>{request_timeout: 5}</code></td><td>Extra kwargs merged into the <code>Elasticsearch(...)</code> client</td></tr>
+    <tr><td><code>SNAPADMIN_ES_CLIENT_FACTORY</code></td><td>—</td><td>Dotted path to a zero-arg callable returning a custom ES client</td></tr>
+    <tr><td><code>SNAPADMIN_ES_QUERY_ROUTING</code></td><td><code>True</code></td><td>Route <code>?search=</code> on <code>DUAL</code> models to Elasticsearch</td></tr>
+    <tr><td><code>SNAPADMIN_ES_SEARCH_LIMIT</code></td><td><code>1000</code></td><td>Max hits fetched from ES per routed search</td></tr>
+    <tr><td><code>SNAPADMIN_REINDEX_API_ENABLED</code></td><td><code>False</code></td><td>Serve the admin-only bulk ES reindex endpoint (<code>POST /api/es/reindex/</code>)</td></tr>
+    <tr><td><code>SNAPADMIN_REINDEX_API_ASYNC</code></td><td><code>False</code></td><td>Offload the reindex endpoint to the <code>snapadmin.run_es_reindex</code> Celery task</td></tr>
+  </table>
+
+  <h3>Export</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>SNAPADMIN_EXPORT_ENABLED</code></td><td><code>True</code></td><td>Enable the async background export API (<code>/api/exports/</code>)</td></tr>
+    <tr><td><code>SNAPADMIN_EXPORT_CHUNK_SIZE</code></td><td><code>1000</code></td><td>Rows per export chunk (progress + resume granularity)</td></tr>
+    <tr><td><code>SNAPADMIN_EXPORT_DIR</code></td><td><code>BASE_DIR/exports</code></td><td>Directory the local export working files are written to (also the default storage's root)</td></tr>
+    <tr><td><code>SNAPADMIN_EXPORT_STORAGE</code></td><td>—</td><td>Dotted path to a <code>Storage</code> subclass export files are published to and downloaded from; unset uses local <code>FileSystemStorage</code> rooted at <code>SNAPADMIN_EXPORT_DIR</code></td></tr>
+    <tr><td><code>SNAPADMIN_EXPORT_MAX_ROWS</code></td><td><code>0</code></td><td>Row ceiling for the synchronous <code>.../export/</code> when no valid <code>?limit=</code> is passed; <code>0</code> = unlimited. Exceeding it responds <code>413</code> and points the caller at <code>POST /api/exports/</code></td></tr>
+    <tr><td><code>SNAPADMIN_EXPORT_LIMIT_MAX</code></td><td><code>0</code></td><td>Hard cap an explicit <code>?limit=</code> on <code>.../export/</code> is clamped down to; <code>0</code> = no clamp</td></tr>
+  </table>
+
+  <h3>Audit trail, GDPR &amp; large tables</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>SNAPADMIN_AUDIT_LOG_ENABLED</code></td><td><code>True</code></td><td>Record admin create/update/delete as an immutable audit trail</td></tr>
+    <tr><td><code>SNAPADMIN_AUDIT_RETENTION_DAYS</code></td><td><code>365</code></td><td>Retention window for <code>snapadmin_audit_export --purge</code></td></tr>
+    <tr><td><code>SNAPADMIN_ESTIMATED_COUNT</code></td><td><code>True</code></td><td>Use PostgreSQL's fast row estimate for huge, unfiltered changelists</td></tr>
+    <tr><td><code>SNAPADMIN_ESTIMATED_COUNT_THRESHOLD</code></td><td><code>100000</code></td><td>Only estimate the count above this many rows</td></tr>
+  </table>
+
+  <h3>Email, error monitoring &amp; alerts</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>EMAIL_HOST</code> / <code>EMAIL_PORT</code></td><td><code>localhost</code> / <code>587</code></td><td>SMTP server for notification emails</td></tr>
+    <tr><td><code>EMAIL_HOST_USER</code> / <code>EMAIL_HOST_PASSWORD</code></td><td>—</td><td>SMTP credentials</td></tr>
+    <tr><td><code>EMAIL_USE_TLS</code></td><td><code>True</code></td><td>Use STARTTLS for SMTP</td></tr>
+    <tr><td><code>DEFAULT_FROM_EMAIL</code></td><td><code>snapadmin@localhost</code></td><td>From address of alert/digest emails</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_MONITOR_ENABLED</code></td><td><code>True</code></td><td>Record unhandled exceptions / 5xx as <code>ErrorEvent</code>s</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_ALERT_ENABLED</code></td><td><code>True</code></td><td>Enable the error spike alert email</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_ALERT_THRESHOLD</code></td><td><code>20</code></td><td>Errors within the window that trigger the alert</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES</code></td><td><code>15</code></td><td>Rolling window for the spike alert</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_ALERT_EMAILS</code></td><td>—</td><td>Comma-separated alert recipients (empty = no alerts)</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_DIGEST_ENABLED</code></td><td><code>True</code></td><td>Enable the daily grouped error digest</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_DIGEST_EMAILS</code></td><td>—</td><td>Digest recipients; falls back to the alert emails</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_DIGEST_MAX_GROUPS</code></td><td><code>20</code></td><td>Max distinct error groups per digest email</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_DIGEST_HOUR</code> / <code>_MINUTE</code></td><td><code>8</code> / <code>0</code></td><td>Daily send time of the digest (Celery Beat)</td></tr>
+    <tr><td><code>SNAPADMIN_ERROR_RETENTION_DAYS</code></td><td><code>30</code></td><td>Purge <code>ErrorEvent</code>s older than this</td></tr>
+  </table>
+
+  <h3>3-2-1 database backups</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_ENABLED</code></td><td><code>False</code></td><td>Enable scheduled 3-2-1 database backups</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_KEEP</code></td><td><code>7</code></td><td>Dumps kept per destination (oldest pruned)</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_LOCAL_DIR</code></td><td><code>./backups</code></td><td>Copy 1: directory on the same server</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS</code></td><td><code>24</code></td><td>How often the local copy becomes due</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_NETWORK_DIR</code></td><td>—</td><td>Copy 2: mounted share of a server on your network (empty = off)</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_NETWORK_EVERY_HOURS</code></td><td><code>24</code></td><td>How often the network copy becomes due</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_FTP_HOST</code> / <code>_PORT</code></td><td>— / <code>21</code></td><td>Copy 3: offsite FTP/FTPS server (empty host = off)</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_FTP_USER</code> / <code>_PASSWORD</code></td><td>—</td><td>FTP credentials</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_FTP_DIR</code></td><td><code>/</code></td><td>Target directory on the FTP server</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_FTP_TLS</code></td><td><code>False</code></td><td>Use FTPS (recommended for offsite)</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_REMOTE_EVERY_HOURS</code></td><td><code>168</code></td><td>How often the offsite copy becomes due (weekly)</td></tr>
+  </table>
+
+  <div class="callout callout-warn">
+    <strong>"Every hours" marks a copy due — it does not schedule it</strong>
+    These intervals only decide whether a destination is stale when the backup task runs. Nothing fires on its own; point Celery Beat or system cron at <code>snapadmin.run_db_backups</code>. See <a href="#celery">Celery &amp; Periodic Tasks</a>.
+  </div>
+
+  <h3>Traefik (demo deployment)</h3>
+  <table>
+    <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>TRAEFIK_DOMAIN</code></td><td><code>yourdomain.com</code></td><td>Production domain for <code>demo/docker-compose.traefik.prod.yml</code></td></tr>
+    <tr><td><code>TRAEFIK_ACME_EMAIL</code></td><td>—</td><td>Email for Let's Encrypt certificate registration</td></tr>
+    <tr><td><code>TRAEFIK_DASHBOARD_USER</code></td><td><code>admin</code></td><td>Reference username (see <code>TRAEFIK_DASHBOARD_CREDENTIALS</code>)</td></tr>
+    <tr><td><code>TRAEFIK_DASHBOARD_PASSWORD</code></td><td><code>changeme</code></td><td>Reference password (see <code>TRAEFIK_DASHBOARD_CREDENTIALS</code>)</td></tr>
+    <tr><td><code>TRAEFIK_DASHBOARD_CREDENTIALS</code></td><td><code>admin:$$apr1$$…</code></td><td>Dashboard BasicAuth in htpasswd format</td></tr>
+  </table>
 
   <!-- ── Sandbox / Demo ─────────────────────────────────────────────────────── -->
   <h2 id="demo-models">📦 Demo App — Model Overview</h2>
