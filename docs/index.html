@@ -1501,22 +1501,35 @@ Product.es_reindex_all()      # {"indexed": N} — or {"skipped": True} if ES is
 product.index_in_es()
 product.delete_from_es()      # remove just this object's ES document
 
-# Via Celery task (recommended for large datasets):
-from demo.tasks import reindex_products_to_elasticsearch
+# Via Celery task (recommended for large datasets) — needs a running worker:
+from demo.apps.shop.tasks import reindex_products_to_elasticsearch
 reindex_products_to_elasticsearch.delay()</code></pre>
 
   <!-- ── Celery ────────────────────────────────────────────────────────────── -->
   <h2 id="celery">⚙️ Celery &amp; Periodic Tasks</h2>
-  <p>SnapAdmin ships built-in Celery tasks for background indexing, token cleanup, and GDPR data retention. Wire them up with Celery Beat to get a fully automated backend in minutes.</p>
+  <p>SnapAdmin ships built-in Celery tasks for background export, indexing, token cleanup, error
+  digests, backups and GDPR retention.</p>
+  <p><strong>Nothing here runs on its own.</strong> SnapAdmin has no daemon and installs no schedule.
+  Each task stays idle until you either point a scheduler at it (Celery Beat <em>or</em> system cron)
+  or — for the event-triggered ones — keep a Celery <strong>worker</strong> running to pick the job
+  up. Where this site calls a feature "automatic", it means <em>automatic once wired</em>; the table
+  below is what wiring it means.</p>
 
-  <h3>Built-in Tasks</h3>
+  <h3>Built-in tasks and what triggers each</h3>
   <table>
-    <tr><th>Task</th><th>Default Schedule</th><th>Description</th></tr>
-    <tr><td><code>snapadmin.purge_expired_tokens</code></td><td>Daily 3am</td><td>Delete all <code>APIToken</code> records past their expiration date</td></tr>
-    <tr><td><code>snapadmin.purge_expired_data</code></td><td>Daily 1am</td><td>GDPR — auto-delete records older than <code>data_retention_days</code> on each SnapModel</td></tr>
-    <tr><td><code>demo.tasks.reindex_products_to_elasticsearch</code></td><td>Daily midnight</td><td>Re-index all products to Elasticsearch (DUAL mode demo)</td></tr>
-    <tr><td><code>demo.tasks.generate_daily_stats</code></td><td>Daily 2am</td><td>Compute and log daily business metrics (demo app)</td></tr>
+    <tr><th>Task</th><th>Trigger</th><th>Purpose</th></tr>
+    <tr><td><code>snapadmin.purge_expired_data</code></td><td><strong>You schedule it</strong></td><td>GDPR — delete rows past each model's <code>data_retention_days</code></td></tr>
+    <tr><td><code>snapadmin.purge_expired_tokens</code></td><td><strong>You schedule it</strong></td><td>Delete <code>APIToken</code> rows past their expiry (an expired token stops authenticating immediately either way — this only reclaims the rows)</td></tr>
+    <tr><td><code>snapadmin.send_error_digest</code></td><td><strong>You schedule it</strong></td><td>Daily grouped digest of captured error events</td></tr>
+    <tr><td><code>snapadmin.run_db_backups</code></td><td><strong>You schedule it</strong> (hourly due-check)</td><td>3-2-1 database dumps to each destination that is due</td></tr>
+    <tr><td><code>snapadmin.run_export</code></td><td><strong>Event</strong> — enqueued when an async export job is created</td><td>Streams a large export in the background. No Beat entry; needs a running worker</td></tr>
+    <tr><td><code>snapadmin.run_es_reindex</code></td><td><strong>Event</strong> — enqueued by <code>POST /api/es/reindex/</code> when <code>SNAPADMIN_REINDEX_API_ASYNC=True</code></td><td>Bulk-reindex a model into Elasticsearch. Needs a running worker; schedule it as well if you want periodic reindexing</td></tr>
   </table>
+  <p>The demo project adds two of its own for illustration —
+  <code>demo.tasks.reindex_products_to_elasticsearch</code> and
+  <code>demo.tasks.generate_daily_stats</code> (defined in
+  <code>demo/apps/shop/tasks.py</code>; the dotted names are explicit task names, not import paths).
+  They are <em>demo</em> tasks, not part of the package.</p>
 
   <h3>Celery Setup</h3>
   <pre><code># myproject/celery.py
@@ -1526,39 +1539,44 @@ app = Celery("myproject")
 app.config_from_object("django.conf:settings", namespace="CELERY")
 app.autodiscover_tasks()</code></pre>
 
-  <h3>Schedule All Tasks (Celery Beat)</h3>
-  <p>Add the following to <code>settings.py</code> to activate all background tasks. The dashboard will display them automatically.</p>
+  <h3>Schedule the scheduled tasks (Celery Beat)</h3>
+  <p>This activates every "you schedule it" task from the table above. The two event-triggered ones
+  (<code>run_export</code>, <code>run_es_reindex</code>) are deliberately absent — they need a worker,
+  not a Beat entry.</p>
   <pre><code>from celery.schedules import crontab
 
 CELERY_BROKER_URL = "redis://localhost:6379/0"
 CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
 
 CELERY_BEAT_SCHEDULE = {
-    "reindex-products-to-es": {
-        "task": "demo.tasks.reindex_products_to_elasticsearch",
-        "schedule": crontab(hour=0, minute=0),   # daily midnight
-        "description": "Sync Product records (DUAL mode) to Elasticsearch",
-    },
     "purge-expired-data": {
         "task": "snapadmin.purge_expired_data",
         "schedule": crontab(hour=1, minute=0),   # daily 1am
         "description": "GDPR — delete records older than data_retention_days",
-    },
-    "generate-daily-stats": {
-        "task": "demo.tasks.generate_daily_stats",
-        "schedule": crontab(hour=2, minute=0),   # daily 2am
-        "description": "Daily business stats",
     },
     "purge-expired-tokens": {
         "task": "snapadmin.purge_expired_tokens",
         "schedule": crontab(hour=3, minute=0),   # daily 3am
         "description": "Remove expired API tokens",
     },
+    "send-error-digest": {
+        "task": "snapadmin.send_error_digest",
+        "schedule": crontab(hour=8, minute=0),   # daily 8am
+        "description": "Grouped digest of captured error events",
+    },
+    "run-db-backups": {
+        "task": "snapadmin.run_db_backups",
+        "schedule": crontab(minute=30),          # hourly due-check
+        "description": "3-2-1 database backups (each destination when due)",
+    },
 }</code></pre>
+  <p>No Celery? Every scheduled task above can be driven from system <code>cron</code> instead —
+  see the per-feature sections (GDPR retention, error monitoring, backups) for the equivalent
+  <code>cron</code> lines.</p>
 
   <div class="callout callout-success">
     <strong>Dashboard integration</strong>
-    Every entry in <code>CELERY_BEAT_SCHEDULE</code> that includes a <code>"description"</code> key is automatically shown in the SnapAdmin Dashboard under <em>Scheduled Cron Jobs</em>.
+    Every entry in <code>CELERY_BEAT_SCHEDULE</code> that includes a <code>"description"</code> key is automatically shown in the SnapAdmin Dashboard under <em>Scheduled Cron Jobs</em>. Note this reflects your Beat <em>configuration</em> — it is not proof that a Beat or worker process is actually running.
   </div>
 
   <h3>Running Celery in Docker</h3>
@@ -1598,13 +1616,22 @@ logger.error("payment_failed", reason="card_declined")</code></pre>
 
   <!-- ── GDPR / Data Retention ───────────────────────────────────────────── -->
   <h2 id="gdpr">🔒 GDPR Data Retention</h2>
-  <p>SnapAdmin provides one-line automatic record cleanup to help comply with EU data retention laws (GDPR). Add two class attributes to any <code>SnapModel</code>:</p>
+  <p>SnapAdmin gives you a one-line retention window on any <code>SnapModel</code> to help comply with
+  EU data retention laws (GDPR). The two attributes below declare <em>what counts as expired</em>; a
+  scheduled task you wire up is what actually deletes it.</p>
+  <div class="callout callout-warn">
+    <strong>Nothing purges on its own.</strong>
+    SnapAdmin runs no background daemon, so setting <code>data_retention_days</code> deletes nothing
+    by itself. Point Celery Beat <em>or</em> system cron at
+    <code>snapadmin.purge_expired_data</code> (see <em>Running the cleanup</em> below) — until then
+    expired rows simply accumulate.
+  </div>
 
   <pre><code>class AuditLog(SnapModel):
     action     = SnapCharField(max_length=100)
     created_at = SnapDateTimeField(auto_now_add=True)
 
-    # Auto-delete records older than 90 days
+    # Rows older than 90 days count as expired (deleted when the purge runs)
     data_retention_days  = 90
     data_retention_field = "created_at"  # default — any DateTimeField works</code></pre>
 
@@ -1718,13 +1745,20 @@ python manage.py send_error_digest --hours 12   # custom window</code></pre>
 
   <!-- ── 3-2-1 Backups ─────────────────────────────────────────────────────── -->
   <h2 id="backups">💾 3-2-1 Database Backups</h2>
-  <p>Built-in scheduled backups following the classic <strong>3-2-1 rule</strong> — <strong>3</strong> copies
+  <p>Built-in database backups following the classic <strong>3-2-1 rule</strong> — <strong>3</strong> copies
   of your data, on <strong>2</strong> different machines, <strong>1</strong> of them offsite. Dumps are
   gzip-compressed (file copy for SQLite, <code>pg_dump</code> for PostgreSQL) and shipped to up to four
-  destinations, <strong>each on its own schedule</strong>:</p>
+  destinations, <strong>each on its own interval</strong>:</p>
+
+  <div class="callout callout-warn">
+    <strong>These do not run until you schedule them.</strong>
+    The intervals below are how often each destination becomes <em>due</em> — nothing becomes due
+    unless the <code>snapadmin.run_db_backups</code> task actually runs. Wire it to Celery Beat or
+    system cron (see below); until then no dump is ever written.
+  </div>
 
   <table>
-    <tr><th>Copy</th><th>Destination</th><th>Where it lives</th><th>Default frequency</th></tr>
+    <tr><th>Copy</th><th>Destination</th><th>Where it lives</th><th>Due every</th></tr>
     <tr><td>1</td><td><code>local</code></td><td>Directory on the <strong>same server</strong> (<code>SNAPADMIN_BACKUP_LOCAL_DIR</code>)</td><td>every 24 h</td></tr>
     <tr><td>2</td><td><code>network</code></td><td>Directory on <strong>another server on your network</strong> — a mounted NFS/SMB share (<code>SNAPADMIN_BACKUP_NETWORK_DIR</code>; empty = off)</td><td>every 24 h</td></tr>
     <tr><td>3</td><td><code>remote</code></td><td><strong>Offsite server</strong> anywhere in the world, via FTP/FTPS (<code>SNAPADMIN_BACKUP_FTP_*</code>; empty host = off)</td><td>every 168 h (weekly)</td></tr>

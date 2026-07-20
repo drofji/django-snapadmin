@@ -1463,16 +1463,71 @@ print(token.token_key)  # raw key — available ONLY here, right after creation
   already has Django permissions for"; the token scope is always AND-ed with `user.has_perm`. A
   non-empty list *narrows* access to exactly those `"app_label.ModelName"` entries.
 
+### Expired tokens are not deleted on their own
+
+An expired token stops authenticating immediately — expiry is checked on every request, so
+security does not depend on any cleanup running. But the **rows stay in the table** until
+something removes them. SnapAdmin ships the task; **you** have to schedule it (see
+[Background tasks](#-background-tasks--scheduling)):
+
+```python
+# settings.py — Celery Beat
+CELERY_BEAT_SCHEDULE = {
+    "purge-expired-tokens": {
+        "task": "snapadmin.purge_expired_tokens",
+        "schedule": crontab(hour=3, minute=0),          # daily 03:00
+        "description": "Remove expired API tokens",     # shown on the dashboard
+    },
+}
+```
+
+…or without Celery, from system cron — `cd` to wherever *your* project's `manage.py` lives:
+
+```cron
+0 3 * * * cd /path/to/your/project && python manage.py shell -c "from snapadmin.tasks import purge_expired_tokens; purge_expired_tokens()"
+```
+
+## ⏱ Background Tasks & Scheduling
+
+**SnapAdmin runs no daemon and schedules nothing for you.** Every task below is shipped ready to
+run, but stays idle until you point a scheduler at it (Celery Beat *or* system cron) or, for the
+event-triggered ones, until a Celery **worker** is running to pick the job up. A feature described
+elsewhere in this README as "automatic" means *automatic once wired* — this table is what wiring it
+means.
+
+| Task | What triggers it | Purpose | Wiring |
+|---|---|---|---|
+| `snapadmin.purge_expired_data` | **You schedule it** | GDPR — delete rows past each model's `data_retention_days` | [GDPR Data Retention](#gdpr-data-retention) |
+| `snapadmin.purge_expired_tokens` | **You schedule it** | Delete `APIToken` rows past their expiry | [above](#expired-tokens-are-not-deleted-on-their-own) |
+| `snapadmin.send_error_digest` | **You schedule it** | Daily grouped digest of captured errors | [Error Monitoring](#-error-monitoring--email-alerts) |
+| `snapadmin.run_db_backups` | **You schedule it** (hourly due-check) | 3-2-1 database dumps to each due destination | [3-2-1 Backups](#-3-2-1-database-backups) |
+| `snapadmin.run_export` | **Event** — enqueued when an async export job is created | Streams a large export in the background | needs a running worker, no schedule |
+| `snapadmin.run_es_reindex` | **Event** — enqueued by `POST /api/es/reindex/` when `SNAPADMIN_REINDEX_API_ASYNC=True` | Bulk-reindex a model into Elasticsearch | needs a running worker; schedule it too if you want periodic reindexing |
+
+The two event-triggered tasks need **no Beat entry** — but they do need a worker process, or the
+job is created and never picked up:
+
+```bash
+celery -A yourproject worker -l INFO      # required for run_export / run_es_reindex
+celery -A yourproject beat   -l INFO      # required for every "you schedule it" task
+```
+
+> **Dashboard tip.** Any `CELERY_BEAT_SCHEDULE` entry carrying a `"description"` key is listed on
+> the SnapAdmin dashboard under *Scheduled Cron Jobs*. The dashboard reads your Beat config — it
+> does **not** prove a worker or Beat process is actually running.
+
 ## GDPR Data Retention
 
-Add automatic record cleanup to any model with two class attributes:
+Declare a retention window on any model with two class attributes. The attributes say *what*
+is expired; a scheduled task you wire up is what actually deletes it — see
+[scheduling](#scheduling-the-purge) below.
 
 ```python
 class AuditLog(snap_models.SnapModel):
     action = snap.SnapCharField(max_length=100)
     created_at = snap.SnapDateTimeField(auto_now_add=True)
 
-    # Auto-delete records older than 90 days
+    # Rows older than 90 days count as expired (deleted when the purge runs)
     data_retention_days = 90
     data_retention_field = "created_at"  # default; can point to any DateTimeField
 ```
@@ -1488,6 +1543,8 @@ purge; pick whichever your deployment has.
 python manage.py purge_expired_data            # live run
 python manage.py purge_expired_data --dry-run  # preview only, deletes nothing
 ```
+
+### Scheduling the purge
 
 **Scheduled with Celery Beat** (needs the `[celery]` extra + a broker):
 
@@ -1540,9 +1597,13 @@ exception and 5xx response as an `ErrorEvent` (browsable in the admin under
 - **Spike alert** — when `SNAPADMIN_ERROR_ALERT_THRESHOLD` errors occur within
   `SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES` (default: 20 errors / 15 min), one email goes
   out immediately. A cooldown guarantees at most one alert per window — no inbox floods.
+  This one **needs no scheduler**: the middleware sends it inline, on the request that
+  crosses the threshold.
 - **Daily digest** — a grouped 24-hour report (identical errors are merged by
   exception class + endpoint, most frequent first). The digest is capped at
   `SNAPADMIN_ERROR_DIGEST_MAX_GROUPS` groups so it stays readable even on a bad day.
+  Unlike the spike alert, **the digest never sends itself** — it is a task you schedule
+  (step 3 below).
 
 > **Prerequisite:** working Django email settings (`EMAIL_BACKEND`, `EMAIL_HOST`, … —
 > i.e. a configured SMTP server) and `DEFAULT_FROM_EMAIL`. No emails are sent while the
@@ -1605,11 +1666,16 @@ console with the default DEBUG email backend.
 
 ## 💾 3-2-1 Database Backups
 
-Built-in scheduled backups following the classic **3-2-1 rule** — keep **3** copies of
-your data, on **2** different machines, **1** of them offsite:
+Built-in database backups following the classic **3-2-1 rule** — keep **3** copies of
+your data, on **2** different machines, **1** of them offsite.
 
-| Copy | Destination | Where it lives | Default frequency |
-|------|-------------|----------------|-------------------|
+> **These do not run until you schedule them.** The intervals below are how often each
+> destination becomes *due*; nothing becomes due unless the `snapadmin.run_db_backups`
+> task actually runs. [Wire it to Beat or cron](#scheduling-the-backups) — until then no
+> dump is ever written.
+
+| Copy | Destination | Where it lives | Due every |
+|------|-------------|----------------|-----------|
 | 1 | `local` | A directory on the **same server** (`SNAPADMIN_BACKUP_LOCAL_DIR`) | every 24 h |
 | 2 | `network` | A directory on **another server on your network**, reachable as a mounted NFS/SMB share (`SNAPADMIN_BACKUP_NETWORK_DIR`) | every 24 h |
 | 3 | `remote` | An **offsite server anywhere in the world** via FTP/FTPS (`SNAPADMIN_BACKUP_FTP_*`) | every 168 h (weekly) |
@@ -1663,9 +1729,12 @@ SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = 168       # weekly
 > with `ssh` and accept the key. Enable `sftp` and `remote` together for two independent offsite
 > copies.
 
-**Running** — the scheduler is a separate process from your web workers. Add the
-`snapadmin.run_db_backups` task to Celery Beat (an hourly check; each destination only
-fires when its own interval has elapsed — last-run times persist across restarts):
+### Scheduling the backups
+
+**Nothing is backed up until this is wired.** The scheduler is a separate process from your
+web workers. Add the `snapadmin.run_db_backups` task to Celery Beat (an hourly check; each
+destination only fires when its own interval has elapsed — last-run times persist across
+restarts):
 
 ```python
 CELERY_BEAT_SCHEDULE = {

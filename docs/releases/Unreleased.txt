@@ -148,6 +148,25 @@ Deep-scan iterator past ``max_result_window`` (``SnapModel.es_scan()``)
 Changed
 =======
 
+Docs are explicit about what actually triggers each background task
+  Several features were described as running "automatically" or "on a schedule" without saying that
+  SnapAdmin ships no daemon and installs no schedule — so a reader could reasonably configure GDPR
+  retention, 3-2-1 backups or the error digest and believe they were live when nothing was ever going
+  to run. The README gains a "Background Tasks & Scheduling" section listing all six shipped Celery
+  tasks with what triggers each: four you must schedule yourself (``purge_expired_data``,
+  ``purge_expired_tokens``, ``send_error_digest``, ``run_db_backups``) and two that are event-driven
+  and need only a running worker (``run_export``, ``run_es_reindex``). ``purge_expired_tokens`` was
+  previously not documented in the README at all and now carries its own Beat and cron examples.
+  The GDPR, backup and error-digest sections now state plainly that nothing runs until wired — the
+  backup table's "Default frequency" column is relabelled "Due every", since those intervals only
+  describe when a destination becomes *due* and never fire on their own — and the error-monitoring
+  section distinguishes the spike alert (sent inline by the middleware, no scheduler needed) from the
+  digest (never sends itself). ``docs/index.html`` mirrors all of it: its task table now lists every
+  real task with a "Trigger" column instead of a misleading "Default Schedule", separates the two
+  demo-only example tasks from the package's own, and its Beat snippet covers every scheduled task
+  rather than a partial set. Also fixes a stale import in that page's reindex example, which still
+  pointed at the demo app's pre-restructure module path.
+
 Non-positive ``?limit=`` on the streaming export now rejects with ``400`` instead of silently streaming everything
   **Behavior change.** ``_parse_export_limit()`` previously treated every invalid ``?limit=`` —
   missing, blank, non-numeric, zero, or negative — the same way: fall back to unlimited (stream
