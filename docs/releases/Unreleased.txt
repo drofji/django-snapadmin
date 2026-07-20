@@ -19,3 +19,15 @@ Added
   probes for the configured services and exits non-zero if any fails (usable as a readiness check).
   Secrets — passwords, keys, token values — are never printed. Report sections are pluggable, so
   database, Elasticsearch, Redis/Celery and model detail extend the command without changing it.
+
+``snapadmin_license_check`` management command
+  The runtime counterpart of ``THIRD_PARTY_NOTICES.md``: it audits the licences of the SnapAdmin
+  dependencies actually installed and tells you whether your install is safe for commercial /
+  proprietary use. It lists each core dependency and optional extra with its SPDX licence and a
+  🟢 permissive / 🟡 weak-copyleft / 🔴 copyleft-or-commercial tier, marks what is installed, and
+  gives an overall commercial-compatibility verdict (the base install is fully permissive; the
+  ``[wysiwyg]`` CKEditor extra is the one flagged). ``--json`` feeds CI, ``--critical-only`` shows
+  just the 🟡/🔴 licences, ``--compatible-with <SPDX>`` reports per-package compatibility with a
+  chosen project licence, and ``--verbose`` adds any uncurated declared dependency. It bundles no
+  vulnerability database — it points at ``pip-audit`` for a CVE scan and never claims "no known
+  vulnerabilities". Informational, not legal advice.
