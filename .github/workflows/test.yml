@@ -59,4 +59,7 @@ jobs:
           python -c "import django; print('Django', django.get_version())"
 
       - name: Run tests with 100% coverage gate
-        run: pytest --cov=snapadmin --cov-report=term-missing --cov-fail-under=100
+        # `python -m pytest` (not the bare `pytest` console script) so the repository root lands on
+        # sys.path — the suite imports `snapadmin` and `demo` straight from the source tree, exactly
+        # as it runs locally. A bare `pytest` would fail to import `demo.core.settings_test`.
+        run: python -m pytest --cov=snapadmin --cov-report=term-missing --cov-fail-under=100
