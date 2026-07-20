@@ -31,3 +31,13 @@ Added
   chosen project licence, and ``--verbose`` adds any uncurated declared dependency. It bundles no
   vulnerability database — it points at ``pip-audit`` for a CVE scan and never claims "no known
   vulnerabilities". Informational, not legal advice.
+
+``snapadmin-demo`` console script — 30-second demo bootstrapper
+  A new ``snapadmin-demo`` command (also ``python -m snapadmin.quickstart``), installed on the PATH by
+  ``pip install django-snapadmin``, brings up the SnapAdmin demo with **no existing project**. It
+  downloads the ``demo/`` directory from the GitHub source tarball of the matching release tag (the
+  wheel doesn't ship it), caches it under ``~/.cache/snapadmin-demo/`` and checksums it so re-runs work
+  offline, extracts only ``demo/`` (with a zip-slip guard and an overwrite confirmation), then installs
+  its requirements, migrates, seeds and serves. Flags: ``--version``, ``--path``, ``--skip-install``,
+  ``--no-serve``, ``--clear-cache`` and ``-y/--yes``. It is stdlib-only (no new dependency) and never
+  imports Django in-process — it drives ``manage.py`` as a subprocess.
