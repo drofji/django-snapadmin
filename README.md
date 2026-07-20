@@ -154,8 +154,9 @@ compatibility matrix, extras gotchas, and the licensing notes for `[wysiwyg]` an
 - [Generic ETL](https://drofji.github.io/django-snapadmin/#integrating) — `upsert_from_source()` and `stale_sync()` with a `max_fraction` wipe guard
 - [Structured logging](https://drofji.github.io/django-snapadmin/#logging) via `structlog`; [i18n](https://drofji.github.io/django-snapadmin/#i18n) in 10 locales
 - [One-command diagnostics](https://drofji.github.io/django-snapadmin/#snapadmin-info) — `snapadmin_info` reports the version, connected services (DB / Elasticsearch / Celery), registered models and health as text or `--json`, with a `--health-check` readiness probe
+- [Licence audit](https://drofji.github.io/django-snapadmin/#license-check) — `snapadmin_license_check` reports the licence and 🟢/🟡/🔴 commercial-usability tier of every installed dependency, so you know your install is proprietary-safe
 
-Management commands: `snapadmin_info` (diagnostics & health), `snapadmin_reindex`, `db_backup`, `send_error_digest`, `purge_expired_data`.
+Management commands: `snapadmin_info` (diagnostics & health), `snapadmin_license_check` (licence audit), `snapadmin_reindex`, `db_backup`, `send_error_digest`, `purge_expired_data`.
 
 > ⏱ **Nothing runs on its own.** SnapAdmin ships no daemon — the retention purge, digests and backups
 > need a Celery Beat entry or a cron line. See
@@ -222,7 +223,7 @@ HTTPS, the Elasticsearch profile, manual setup without Docker, and the seed comm
 | Getting started | [Installation](https://drofji.github.io/django-snapadmin/#installation) · [SnapModel](https://drofji.github.io/django-snapadmin/#snap-model) · [Field types](https://drofji.github.io/django-snapadmin/#snap-fields) · [Admin registration](https://drofji.github.io/django-snapadmin/#admin-registration) |
 | APIs | [REST](https://drofji.github.io/django-snapadmin/#api-rest) · [GraphQL](https://drofji.github.io/django-snapadmin/#api-graphql) · [Tokens](https://drofji.github.io/django-snapadmin/#api-tokens) · [Integrating auth / JWT / ETL](https://drofji.github.io/django-snapadmin/#integrating) |
 | Search | [Elasticsearch modes](https://drofji.github.io/django-snapadmin/#elasticsearch) · [Query routing](https://drofji.github.io/django-snapadmin/#es-routing) · [Filters](https://drofji.github.io/django-snapadmin/#es-filter) · [Facets](https://drofji.github.io/django-snapadmin/#es-aggregate) · [Deep scan](https://drofji.github.io/django-snapadmin/#es-scan) |
-| Operations | [Diagnostics (`snapadmin_info`)](https://drofji.github.io/django-snapadmin/#snapadmin-info) · [Celery & scheduling](https://drofji.github.io/django-snapadmin/#celery) · [GDPR](https://drofji.github.io/django-snapadmin/#gdpr) · [Backups](https://drofji.github.io/django-snapadmin/#backups) · [Error monitoring](https://drofji.github.io/django-snapadmin/#error-monitoring) · [Performance](https://drofji.github.io/django-snapadmin/#performance) |
+| Operations | [Diagnostics (`snapadmin_info`)](https://drofji.github.io/django-snapadmin/#snapadmin-info) · [Licence audit](https://drofji.github.io/django-snapadmin/#license-check) · [Celery & scheduling](https://drofji.github.io/django-snapadmin/#celery) · [GDPR](https://drofji.github.io/django-snapadmin/#gdpr) · [Backups](https://drofji.github.io/django-snapadmin/#backups) · [Error monitoring](https://drofji.github.io/django-snapadmin/#error-monitoring) · [Performance](https://drofji.github.io/django-snapadmin/#performance) |
 | Reference | [All settings](https://drofji.github.io/django-snapadmin/#env-vars) · [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) · [Extending](https://drofji.github.io/django-snapadmin/#extending) · [Migration guides](https://drofji.github.io/django-snapadmin/#migration-guides) |
 
 Upgrading from `drofji-automatically-django-admin`? See the
@@ -238,7 +239,9 @@ vulnerabilities privately — see [SECURITY.md](SECURITY.md) for the policy, the
 row, and the production-hardening checklist.
 
 Third-party dependency licences are inventoried in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — or run
+`python manage.py snapadmin_license_check` for the same inventory computed from what you actually
+installed, with a commercial-usability verdict.
 
 ## 🤝 Contributing
 

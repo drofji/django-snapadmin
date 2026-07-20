@@ -263,6 +263,7 @@
       <li><a href="#celery">Celery &amp; Periodic Tasks</a></li>
       <li><a href="#logging">Structured Logging</a></li>
       <li><a href="#snapadmin-info">Diagnostics (snapadmin_info)</a></li>
+      <li><a href="#license-check">Licence Audit</a></li>
       <li><a href="#env-vars">Environment Variables</a></li>
     </ul>
     <div class="section-label">🌟 Sandbox / Demo</div>
@@ -1785,6 +1786,73 @@ python manage.py snapadmin_info --health-check    # probes only; non-zero exit o
     <code>snapadmin_info --json | curl -d @- https://monitoring.example.com/health</code> pushes a
     structured snapshot to a dashboard; a cron running <code>snapadmin_info --health-check</code> turns
     the non-zero exit into an alert when the database or an enabled Elasticsearch cluster goes down.
+  </div>
+
+  <!-- ── Licence Audit (snapadmin_license_check) ─────────────────────────── -->
+  <h2 id="license-check">⚖️ Licence Audit — <code>snapadmin_license_check</code></h2>
+  <p>The runtime counterpart of <a href="https://github.com/drofji/django-snapadmin/blob/main/THIRD_PARTY_NOTICES.md">THIRD_PARTY_NOTICES.md</a>:
+  it audits the licences of the SnapAdmin dependencies <em>actually installed</em> in your environment
+  and tells you whether your install is safe for commercial/proprietary use. A curated map of every
+  declared dependency (SPDX licence, tier, core-vs-extra, bundled-licence caveats) is overlaid on what
+  <code>pip</code> resolved.</p>
+
+  <div class="callout callout-warn">
+    <strong>Informational, not legal advice.</strong>
+    Licences change between versions — verify against what you install and consult counsel for
+    commercial use. The command bundles <strong>no vulnerability database</strong>: it points you at
+    <code>pip-audit</code> for a CVE scan and never claims "no known vulnerabilities".
+  </div>
+
+  <pre><code>python manage.py snapadmin_license_check                   # full report
+python manage.py snapadmin_license_check --json            # machine-readable (CI)
+python manage.py snapadmin_license_check --critical-only   # only 🟡/🔴 licences
+python manage.py snapadmin_license_check --compatible-with MIT   # per-package compatibility
+python manage.py snapadmin_license_check --verbose         # + uncurated deps + notes</code></pre>
+
+  <h3>Tiers</h3>
+  <table>
+    <thead><tr><th>Tier</th><th>Meaning</th></tr></thead>
+    <tbody>
+      <tr><td>🟢 permissive</td><td>MIT / BSD / Apache-2.0 / ISC — use freely, including closed-source and commercial products.</td></tr>
+      <tr><td>🟡 weak copyleft</td><td>LGPL / MPL — fine for proprietary use as an unmodified, dynamically-imported dependency.</td></tr>
+      <tr><td>🔴 copyleft / commercial</td><td>GPL / AGPL / SSPL / "GPL-or-commercial" — distribution obligations; kept out of the base install, opt-in only.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Flags</h3>
+  <table>
+    <thead><tr><th>Flag</th><th>Effect</th></tr></thead>
+    <tbody>
+      <tr><td><code>--json</code></td><td>Emit the report as JSON — packages, the commercial-compatibility verdict and the vulnerability-scan note — for a CI gate.</td></tr>
+      <tr><td><code>--critical-only</code></td><td>Show only the non-permissive (🟡 / 🔴) licences — the ones worth a second look.</td></tr>
+      <tr><td><code>--compatible-with SPDX</code></td><td>Advisory per-package compatibility with a project licensed <code>SPDX</code> (e.g. <code>MIT</code>): ✓ yes, ✗ no, ? review.</td></tr>
+      <tr><td><code>--verbose</code></td><td>Also list any dependency SnapAdmin declares that isn't in the curated map, classified best-effort from its own metadata.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Sample output</h3>
+  <pre><code>📋 SnapAdmin licence audit
+Core dependencies
+  🟢 Django                 BSD-3-Clause        installed 6.0
+  🟢 djangorestframework    BSD-3-Clause        installed 3.16
+  …
+Optional extras
+  🟢 [elasticsearch] elasticsearch   Apache-2.0   installed 8.19
+  🟡 [backup] paramiko               LGPL-2.1     installed 3.5
+       Weak copyleft — fine for proprietary use as an unmodified, dynamically-imported dependency.
+  🔴 [wysiwyg] django-ckeditor-5     GPL-2.0-or-later OR Commercial   not installed
+       bundles: The BSD Python wrapper ships CKEditor 5, which is GPL/commercial.
+
+Commercial compatibility: ✓ OK — installed licences are proprietary-safe
+
+Vulnerability scan: no vulnerability scanner installed — `pip install pip-audit` then run `pip-audit`.</code></pre>
+
+  <div class="callout callout-info">
+    <strong>Base install is fully permissive.</strong>
+    A plain <code>pip install django-snapadmin</code> pulls only MIT/BSD/Apache-2.0 code. The one
+    dependency to watch for commercial use is the <code>[wysiwyg]</code> extra (CKEditor 5,
+    GPL-or-commercial); the LGPL helpers (<code>[backup]</code>, <code>[autocomplete-filter]</code>)
+    are weak copyleft and opt-in. See <a href="#installation">Optional extras</a>.
   </div>
 
   <!-- ── GDPR / Data Retention ───────────────────────────────────────────── -->
