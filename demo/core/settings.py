@@ -200,6 +200,25 @@ SNAPADMIN_URL_PREFIX = os.getenv('SNAPADMIN_URL_PREFIX', '')
 # Dashboard is staff-gated by default (it exposes infra details). True = public.
 SNAPADMIN_DASHBOARD_PUBLIC = os.getenv('SNAPADMIN_DASHBOARD_PUBLIC', 'False') == 'True'
 
+# --- API capacity & abuse protection -----------------------------------------
+# These bound how much work one request can cost and how fast callers may issue
+# them. Deliberately deployment-owned (.env / this file) rather than runtime-
+# editable through the admin: they are operational controls, so relaxing one
+# should go through the same review and rollout as the rest of the infra config.
+# See demo/apps/shop/managed_settings.py for why they are excluded there.
+# Default page size for the auto-generated REST API list endpoints.
+SNAPADMIN_API_PAGE_SIZE = int(os.getenv('SNAPADMIN_API_PAGE_SIZE', '25'))
+# Hard ceiling on a client-requested ?page_size= on the REST API.
+SNAPADMIN_API_MAX_PAGE_SIZE = int(os.getenv('SNAPADMIN_API_MAX_PAGE_SIZE', '500'))
+# DRF rate limits (e.g. '60/min'). Empty value disables that throttle.
+SNAPADMIN_THROTTLE_ANON = os.getenv('SNAPADMIN_THROTTLE_ANON', '60/min') or None
+SNAPADMIN_THROTTLE_USER = os.getenv('SNAPADMIN_THROTTLE_USER', '600/min') or None
+# Row ceiling on the synchronous streaming export before it answers 413 and
+# steers the caller to the async export API (0 = unlimited).
+SNAPADMIN_EXPORT_MAX_ROWS = int(os.getenv('SNAPADMIN_EXPORT_MAX_ROWS', '0'))
+# Hard cap clamped onto an explicit ?limit= on the streaming export (0 = no clamp).
+SNAPADMIN_EXPORT_LIMIT_MAX = int(os.getenv('SNAPADMIN_EXPORT_LIMIT_MAX', '0'))
+
 # Smart ES query routing: `?search=` API requests on DUAL models run on
 # Elasticsearch (fuzzy, relevance-ranked) instead of DB icontains. Global
 # kill-switch; per-model opt-out via `es_query_routing = False`.

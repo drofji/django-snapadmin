@@ -88,21 +88,35 @@ annotated [`dist.env`](dist.env) template to create it. Notably:
 
 The demo also shows the `[extra-settings]` extra storing configuration in the
 **database** instead of only in `settings.py`. A curated set of *runtime-editable*
-`SNAPADMIN_*` settings — the ones the package re-reads per request, e.g.
-`SNAPADMIN_MASKED_FIELDS`, `SNAPADMIN_API_PAGE_SIZE`, the throttle rates, audit /
-error retention days, the export ceilings, `SNAPADMIN_DASHBOARD_PUBLIC` — appears
-under **Settings** in the admin (already Unfold-styled), each with a description.
+`SNAPADMIN_*` settings — the ones the package re-reads per request:
+`SNAPADMIN_MASKED_FIELDS`, `SNAPADMIN_AUDIT_LOG_ENABLED`, the audit / error
+retention days, `SNAPADMIN_ES_SEARCH_LIMIT` and `SNAPADMIN_DASHBOARD_PUBLIC` —
+appears under **Settings** in the admin (already Unfold-styled), each with a description.
 Edit one there and it takes effect immediately, no restart: e.g. set
 `SNAPADMIN_MASKED_FIELDS` to `{"demo.Customer": ["email"]}` and the Customer API
 starts masking emails on the next request.
 
 How it works (and why it's demo-only) lives in
-[`app/managed_settings.py`](app/managed_settings.py): the `snapadmin` package
-never depends on `django-extra-settings`, so the demo *syncs* each DB value back
-onto `django.conf.settings`, leaving the package to read its config exactly as it
+[`apps/shop/managed_settings.py`](apps/shop/managed_settings.py): the `snapadmin`
+package never depends on `django-extra-settings`, so the demo *syncs* each DB value
+back onto `django.conf.settings`, leaving the package to read its config exactly as it
 always does. Settings that are read once at boot (URL-routing toggles, admin
 nesting) are intentionally **not** surfaced — editing them at runtime wouldn't
 take effect — and no secret or credential is ever exposed this way.
+
+**Capacity and abuse-protection knobs stay out of the admin on purpose.**
+`SNAPADMIN_API_PAGE_SIZE`, `SNAPADMIN_API_MAX_PAGE_SIZE`, the two throttle rates and
+the two export ceilings are configured only in [`dist.env`](dist.env) /
+[`core/settings.py`](core/settings.py). They bound per-request cost and caller rate,
+so they belong to the deployment: surfacing them as admin-editable rows would let
+anyone holding the Setting change-permission relax the API's own rate limits and
+export ceilings from a web form, with no deploy trail.
+
+> If you ran an **earlier** build of this demo, those six were seeded as `Setting`
+> rows and are still in your database. They are now inert — the sync no longer
+> applies them, so editing them in the admin does nothing. Drop them once:
+> `Setting.objects.filter(name__in=[...]).delete()`, or just recreate the demo
+> database. Fresh databases never get them.
 
 ## Security controls on display
 

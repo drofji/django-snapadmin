@@ -362,13 +362,16 @@ Demo project restructured into a self-contained ``demo/`` folder
 
   The demo now also showcases the ``[extra-settings]`` extra as a runtime-editable, DB-backed
   configuration store: a curated set of *runtime-editable* ``SNAPADMIN_*`` settings (the ones the
-  package re-reads per request — masked fields, API page sizes, throttle rates, audit/error
-  retention, export ceilings, ``SNAPADMIN_DASHBOARD_PUBLIC``) appears under "Settings" in the admin,
-  each described, and edits take effect live with no restart. The bridge is demo-only
+  package re-reads per request — masked fields, audit-log toggle, audit/error retention,
+  ``SNAPADMIN_ES_SEARCH_LIMIT``, ``SNAPADMIN_DASHBOARD_PUBLIC``) appears under "Settings" in the
+  admin, each described, and edits take effect live with no restart. The bridge is demo-only
   (``demo/apps/shop/managed_settings.py``) — the ``snapadmin`` package still reads plain
   ``django.conf.settings`` and never depends on ``django-extra-settings``; the demo simply syncs the
   DB value back onto ``settings``. Boot-time-only settings (routing toggles, admin nesting) and all
-  secrets are deliberately excluded.
+  secrets are deliberately excluded, as are the **capacity and abuse-protection knobs**
+  (``SNAPADMIN_API_PAGE_SIZE``, ``SNAPADMIN_API_MAX_PAGE_SIZE``, the two throttle rates and the two
+  export ceilings): those bound per-request cost and caller rate, so they stay deployment-owned in
+  ``dist.env``/``settings.py`` rather than becoming editable from a web form with no deploy trail.
 
 **Breaking:** auto-generated REST API filters now default text fields to exact match, not
 substring

@@ -28,6 +28,16 @@ time — URL-routing toggles (``SNAPADMIN_REST_API_ENABLED`` &c.), admin-index n
 dotted-path hooks — are excluded, because editing them at runtime would not take
 effect and would mislead. Secrets/credentials (``SECRET_KEY``, DB/broker/SFTP
 passwords, API keys) are never surfaced.
+
+Also excluded: **capacity and abuse-protection knobs** — ``SNAPADMIN_API_PAGE_SIZE``,
+``SNAPADMIN_API_MAX_PAGE_SIZE``, ``SNAPADMIN_THROTTLE_ANON``, ``SNAPADMIN_THROTTLE_USER``,
+``SNAPADMIN_EXPORT_MAX_ROWS`` and ``SNAPADMIN_EXPORT_LIMIT_MAX``. These are technically
+runtime-editable, but they are *operational* controls that bound request cost and rate —
+the deployment owns them, and they belong in ``.env`` / ``settings.py`` under the same
+review and rollout as the rest of the infrastructure config. Surfacing them in the admin
+would let anyone with the Setting change-permission relax the API's own rate limits and
+export ceilings from a web form, turning a content-editing surface into a
+denial-of-service lever with no deploy trail.
 """
 
 from __future__ import annotations
@@ -50,30 +60,6 @@ MANAGED_SETTINGS_SPEC: list[dict[str, Any]] = [
         ),
     },
     {
-        "name": "SNAPADMIN_API_PAGE_SIZE",
-        "type": "int",
-        "value": 25,
-        "description": "Default page size for the auto-generated REST API list endpoints.",
-    },
-    {
-        "name": "SNAPADMIN_API_MAX_PAGE_SIZE",
-        "type": "int",
-        "value": 500,
-        "description": "Hard ceiling on a client-requested ?page_size= on the REST API.",
-    },
-    {
-        "name": "SNAPADMIN_THROTTLE_ANON",
-        "type": "string",
-        "value": "60/min",
-        "description": "DRF rate limit for anonymous API callers (e.g. '60/min'). Blank disables it.",
-    },
-    {
-        "name": "SNAPADMIN_THROTTLE_USER",
-        "type": "string",
-        "value": "600/min",
-        "description": "DRF rate limit for authenticated API callers (e.g. '600/min'). Blank disables it.",
-    },
-    {
         "name": "SNAPADMIN_AUDIT_LOG_ENABLED",
         "type": "bool",
         "value": True,
@@ -90,18 +76,6 @@ MANAGED_SETTINGS_SPEC: list[dict[str, Any]] = [
         "type": "int",
         "value": 30,
         "description": "Days to keep captured error events before the purge removes them (0 = keep forever).",
-    },
-    {
-        "name": "SNAPADMIN_EXPORT_MAX_ROWS",
-        "type": "int",
-        "value": 0,
-        "description": "Row ceiling on the synchronous streaming export before it steers to the async API (0 = unlimited).",
-    },
-    {
-        "name": "SNAPADMIN_EXPORT_LIMIT_MAX",
-        "type": "int",
-        "value": 0,
-        "description": "Hard cap applied to an explicit ?limit= on the streaming export (0 = no clamp).",
     },
     {
         "name": "SNAPADMIN_ES_SEARCH_LIMIT",

@@ -51,20 +51,21 @@ class TestBuildDefaults:
 
     def test_override_replaces_seed_value(self):
         defaults = ms.build_extra_settings_defaults(
-            overrides={"SNAPADMIN_API_PAGE_SIZE": 99}
+            overrides={"SNAPADMIN_ES_SEARCH_LIMIT": 99}
         )
         by_name = {d["name"]: d for d in defaults}
-        assert by_name["SNAPADMIN_API_PAGE_SIZE"]["value"] == 99
+        assert by_name["SNAPADMIN_ES_SEARCH_LIMIT"]["value"] == 99
         # An un-overridden setting keeps its spec default.
-        assert by_name["SNAPADMIN_API_MAX_PAGE_SIZE"]["value"] == 500
+        assert by_name["SNAPADMIN_AUDIT_RETENTION_DAYS"]["value"] == 365
 
     def test_returns_a_fresh_list_not_shared_spec(self):
         # Mutating the returned dicts must not corrupt the module-level spec.
-        defaults = ms.build_extra_settings_defaults(overrides={"SNAPADMIN_API_PAGE_SIZE": 1})
+        defaults = ms.build_extra_settings_defaults(overrides={"SNAPADMIN_ES_SEARCH_LIMIT": 1})
         for d in defaults:
-            if d["name"] == "SNAPADMIN_API_PAGE_SIZE":
+            if d["name"] == "SNAPADMIN_ES_SEARCH_LIMIT":
                 d["value"] = 12345
-        assert ms.MANAGED_SETTINGS_SPEC[1]["value"] == 25  # untouched
+        spec = {s["name"]: s for s in ms.MANAGED_SETTINGS_SPEC}
+        assert spec["SNAPADMIN_ES_SEARCH_LIMIT"]["value"] == 1000  # untouched
 
     def test_no_secret_settings_surfaced(self):
         names = set(ms.MANAGED_SETTING_NAMES)
@@ -97,19 +98,19 @@ class TestLiveApply:
         from extra_settings.models import Setting
 
         Setting.objects.create(
-            name="SNAPADMIN_API_PAGE_SIZE", value_type=Setting.TYPE_INT, value=7
+            name="SNAPADMIN_ES_SEARCH_LIMIT", value_type=Setting.TYPE_INT, value=7
         )
-        assert settings.SNAPADMIN_API_PAGE_SIZE == 7
+        assert settings.SNAPADMIN_ES_SEARCH_LIMIT == 7
 
     def test_editing_managed_setting_reapplies(self):
         from extra_settings.models import Setting
 
         obj = Setting.objects.create(
-            name="SNAPADMIN_API_PAGE_SIZE", value_type=Setting.TYPE_INT, value=7
+            name="SNAPADMIN_ES_SEARCH_LIMIT", value_type=Setting.TYPE_INT, value=7
         )
         obj.value = 13
         obj.save()
-        assert settings.SNAPADMIN_API_PAGE_SIZE == 13
+        assert settings.SNAPADMIN_ES_SEARCH_LIMIT == 13
 
     def test_unmanaged_setting_is_ignored(self):
         from extra_settings.models import Setting
@@ -170,12 +171,12 @@ def test_defaults_seed_and_apply():
     from django.test import override_settings
     from extra_settings.models import Setting
 
-    defaults = ms.build_extra_settings_defaults(overrides={"SNAPADMIN_API_PAGE_SIZE": 33})
+    defaults = ms.build_extra_settings_defaults(overrides={"SNAPADMIN_ES_SEARCH_LIMIT": 33})
     with override_settings(EXTRA_SETTINGS_DEFAULTS=defaults):
         Setting.set_defaults(defaults)  # what post_migrate does
-        settings_page = Setting.objects.get(name="SNAPADMIN_API_PAGE_SIZE")
+        settings_page = Setting.objects.get(name="SNAPADMIN_ES_SEARCH_LIMIT")
         assert settings_page.value == 33
     # sync applies it onto django settings
-    settings.SNAPADMIN_API_PAGE_SIZE = 25
+    settings.SNAPADMIN_ES_SEARCH_LIMIT = 1000
     ms.sync_managed_settings_to_django()
-    assert settings.SNAPADMIN_API_PAGE_SIZE == 33
+    assert settings.SNAPADMIN_ES_SEARCH_LIMIT == 33
