@@ -21,8 +21,14 @@ permissions:
   contents: read
 
 jobs:
+  # Gate: run the full test matrix on the tagged commit before anything is built or published.
+  test:
+    name: Test suite
+    uses: ./.github/workflows/test.yml
+
   build:
     name: Build & verify distribution
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

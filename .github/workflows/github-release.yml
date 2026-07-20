@@ -15,8 +15,14 @@ permissions:
   contents: write
 
 jobs:
+  # Gate: don't publish a GitHub release for a tag whose tests don't pass.
+  test:
+    name: Test suite
+    uses: ./.github/workflows/test.yml
+
   release:
     name: Create GitHub Release
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

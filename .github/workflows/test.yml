@@ -11,6 +11,9 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch: {}
+  # Reusable: the publish + github-release workflows call this as a gate, so a release only
+  # proceeds when the whole matrix is green.
+  workflow_call: {}
 
 permissions:
   contents: read
