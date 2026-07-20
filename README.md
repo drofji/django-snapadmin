@@ -13,7 +13,7 @@ model is mirrored there — plain listings stay on the database.
 
 📚 **[Full Documentation](https://drofji.github.io/django-snapadmin/)** — configuration guide, API reference, examples
 📦 **[Django Packages](https://djangopackages.org/packages/p/django-snapadmin/)** — compare SnapAdmin against other Django admin packages
-📝 **[Changelog](CHANGELOG.md)** · 🔒 **[Security policy](SECURITY.md)**
+📝 **[Changelog](https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md)** · 🔒 **[Security policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md)**
 
 ---
 
@@ -125,6 +125,21 @@ is safe for commercial and proprietary use. Opt into the rest:
 → **[Full installation guide](https://drofji.github.io/django-snapadmin/#installation)** —
 compatibility matrix, extras gotchas, and the licensing notes for `[wysiwyg]` and MySQL drivers.
 
+### Integrate into an existing project
+
+Adding SnapAdmin to a project you already have? Run the **read-only doctor** — it inspects your
+project and prints exactly what to paste (the `INSTALLED_APPS` ordering, the URL include, the
+settings block, the install line), **editing nothing**:
+
+```bash
+pip install django-snapadmin
+snapadmin-init                    # a per-item present/missing checklist with ready-to-paste snippets
+snapadmin-init --api --graphql    # also check the REST / GraphQL configuration
+```
+
+Because it only reports and prints snippets, there's no risk of a bad automatic edit — you review
+each and paste it yourself. → **[Integration guide](https://drofji.github.io/django-snapadmin/#snapadmin-init)**
+
 ---
 
 ## ✨ Features
@@ -212,7 +227,7 @@ admin password, debug), `--no-serve` to only prepare it, or `--skip-install` to 
 environment. See the [demo command guide](https://drofji.github.io/django-snapadmin/#snapadmin-demo).
 
 **Or from a clone — the full Docker stack** (PostgreSQL, Redis and Elasticsearch). The demo lives
-under [`demo/`](demo/) with example models (Product, Customer, Order) and a seeded database; it is
+under [`demo/`](https://github.com/drofji/django-snapadmin/tree/main/demo) with example models (Product, Customer, Order) and a seeded database; it is
 **not** published to PyPI, only the top-level `snapadmin/` package is:
 
 ```bash
@@ -233,14 +248,14 @@ HTTPS, the Elasticsearch profile, manual setup without Docker, and the seed comm
 
 | Topic | |
 |-------|--|
-| Getting started | [Installation](https://drofji.github.io/django-snapadmin/#installation) · [SnapModel](https://drofji.github.io/django-snapadmin/#snap-model) · [Field types](https://drofji.github.io/django-snapadmin/#snap-fields) · [Admin registration](https://drofji.github.io/django-snapadmin/#admin-registration) |
+| Getting started | [Installation](https://drofji.github.io/django-snapadmin/#installation) · [Integrate an existing project](https://drofji.github.io/django-snapadmin/#snapadmin-init) · [SnapModel](https://drofji.github.io/django-snapadmin/#snap-model) · [Field types](https://drofji.github.io/django-snapadmin/#snap-fields) · [Admin registration](https://drofji.github.io/django-snapadmin/#admin-registration) |
 | APIs | [REST](https://drofji.github.io/django-snapadmin/#api-rest) · [GraphQL](https://drofji.github.io/django-snapadmin/#api-graphql) · [Tokens](https://drofji.github.io/django-snapadmin/#api-tokens) · [Integrating auth / JWT / ETL](https://drofji.github.io/django-snapadmin/#integrating) |
 | Search | [Elasticsearch modes](https://drofji.github.io/django-snapadmin/#elasticsearch) · [Query routing](https://drofji.github.io/django-snapadmin/#es-routing) · [Filters](https://drofji.github.io/django-snapadmin/#es-filter) · [Facets](https://drofji.github.io/django-snapadmin/#es-aggregate) · [Deep scan](https://drofji.github.io/django-snapadmin/#es-scan) |
 | Operations | [Diagnostics (`snapadmin_info`)](https://drofji.github.io/django-snapadmin/#snapadmin-info) · [Licence audit](https://drofji.github.io/django-snapadmin/#license-check) · [Celery & scheduling](https://drofji.github.io/django-snapadmin/#celery) · [GDPR](https://drofji.github.io/django-snapadmin/#gdpr) · [Backups](https://drofji.github.io/django-snapadmin/#backups) · [Error monitoring](https://drofji.github.io/django-snapadmin/#error-monitoring) · [Performance](https://drofji.github.io/django-snapadmin/#performance) |
 | Reference | [All settings](https://drofji.github.io/django-snapadmin/#env-vars) · [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) · [Extending](https://drofji.github.io/django-snapadmin/#extending) · [Migration guides](https://drofji.github.io/django-snapadmin/#migration-guides) |
 
 Upgrading from `drofji-automatically-django-admin`? See the
-**[migration guide](docs/migrations/drofji-automatically-django-admin_to_django-snapadmin.md)**.
+**[migration guide](https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/drofji-automatically-django-admin_to_django-snapadmin.md)**.
 
 ---
 
@@ -248,17 +263,17 @@ Upgrading from `drofji-automatically-django-admin`? See the
 
 API tokens are hashed at rest, rich-text HTML is sanitized before display, GraphQL enforces
 permissions on every traversed relation, and PII masking is available on both APIs. Report
-vulnerabilities privately — see [SECURITY.md](SECURITY.md) for the policy, the supported-versions
+vulnerabilities privately — see [SECURITY.md](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md) for the policy, the supported-versions
 row, and the production-hardening checklist.
 
 Third-party dependency licences are inventoried in
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) — or run
+[THIRD_PARTY_NOTICES.md](https://github.com/drofji/django-snapadmin/blob/main/THIRD_PARTY_NOTICES.md) — or run
 `python manage.py snapadmin_license_check` for the same inventory computed from what you actually
 installed, with a commercial-usability verdict.
 
 ## 🤝 Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). The suite must stay green with 100% coverage on `snapadmin/`:
+See [CONTRIBUTING.md](https://github.com/drofji/django-snapadmin/blob/main/CONTRIBUTING.md). The suite must stay green with 100% coverage on `snapadmin/`:
 
 ```bash
 pytest
@@ -266,4 +281,4 @@ pytest
 
 ## 📜 License
 
-MIT — see [LICENSE](LICENSE).
+MIT — see [LICENSE](https://github.com/drofji/django-snapadmin/blob/main/LICENSE).

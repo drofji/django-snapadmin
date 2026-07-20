@@ -233,6 +233,7 @@
     <ul>
       <li><a href="#overview" class="active">Overview</a></li>
       <li><a href="#installation">Installation</a></li>
+      <li><a href="#snapadmin-init">Integrate an Existing Project</a></li>
       <li><a href="#snap-model">SnapModel</a></li>
       <li><a href="#snap-fields">Snap Fields</a></li>
       <li><a href="#advanced-layout">Advanced Layout</a></li>
@@ -543,6 +544,54 @@ SNAPADMIN_IMAGE_KEEP_DAYS=5 demo/scripts/docker_build.sh  # widen the window</co
   </div>
   <p>The pruner can also run standalone (e.g. in CI), with a dry-run mode:</p>
   <pre><code>python -m demo.scripts.docker_retention prune --image snapadmin-test --dry-run</code></pre>
+
+  <!-- ── Integrate into an existing project (snapadmin-init) ──────────────── -->
+  <h2 id="snapadmin-init">🩺 Integrate an existing project — <code>snapadmin-init</code></h2>
+  <p>Adding SnapAdmin to a project you already have means editing <code>INSTALLED_APPS</code> (with a
+  specific ordering), <code>urls.py</code>, a settings block and your requirements. The
+  <code>snapadmin-init</code> command (also <code>python -m snapadmin.integrate</code>) makes that
+  trivial — and safe.</p>
+
+  <div class="callout callout-info">
+    <strong>Read-only by design.</strong>
+    It inspects your project and <strong>prints the exact snippet to paste</strong> for each missing
+    piece — it never edits your files. Pasting a reviewed snippet is safer and more trustworthy than an
+    automatic edit that might misread a non-standard project, so there is no backup gate to worry about.
+  </div>
+
+  <pre><code>pip install django-snapadmin
+snapadmin-init                    # a per-item present/missing checklist with snippets
+snapadmin-init --api --graphql    # also check the REST / GraphQL configuration
+snapadmin-init --json             # machine-readable, for your own tooling</code></pre>
+
+  <p>For each item it reports <code>✓ already present</code> or <code>✗ add this —</code> followed by
+  the block to paste:</p>
+  <ul>
+    <li><strong>INSTALLED_APPS</strong> — the full list in the required order (<code>unfold</code>
+    before <code>django.contrib.admin</code>, <code>snapadmin</code> after), and a warning if
+    <code>unfold</code> is missing.</li>
+    <li><strong>URL routes</strong> — the <code>include("snapadmin.urls")</code> line, honouring
+    <code>--url-prefix</code>.</li>
+    <li><strong>SnapAdmin settings</strong> — the <code>SNAPADMIN_*</code> feature-toggle block.</li>
+    <li><strong>REST / GraphQL config</strong> — with <code>--api</code> / <code>--graphql</code>.</li>
+    <li><strong>Install line</strong> — <code>pip install django-snapadmin[extras]</code>
+    (<code>--extras</code>), and a warning if your requirements pin an incompatible Django.</li>
+    <li><strong>Model conversion (advisory)</strong> — lists files still subclassing
+    <code>models.Model</code> and shows how to convert one to <code>SnapModel</code>.</li>
+  </ul>
+
+  <h3>Flags</h3>
+  <table>
+    <thead><tr><th>Flag</th><th>Effect</th></tr></thead>
+    <tbody>
+      <tr><td><code>--path DIR</code></td><td>Project root (default: current directory).</td></tr>
+      <tr><td><code>--settings PATH</code> / <code>--urls PATH</code></td><td>Point at a non-standard layout (auto-detected otherwise via <code>manage.py</code> / globbing).</td></tr>
+      <tr><td><code>--url-prefix PREFIX</code></td><td>Prefix for the SnapAdmin routes in the URL snippet, e.g. <code>api/</code>.</td></tr>
+      <tr><td><code>--extras a,b</code></td><td>Extras for the install line (e.g. <code>elasticsearch,celery</code>).</td></tr>
+      <tr><td><code>--api</code> / <code>--graphql</code></td><td>Also check the REST / GraphQL configuration.</td></tr>
+      <tr><td><code>--json</code></td><td>Emit the checklist as JSON.</td></tr>
+    </tbody>
+  </table>
 
   <!-- ── SnapModel ─────────────────────────────────────────────────────────── -->
   <h2 id="snap-model">🏗 SnapModel</h2>
