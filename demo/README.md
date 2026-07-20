@@ -70,6 +70,11 @@ python demo/manage.py snapadmin_reindex --resume            # continue a crashed
 
 Each run is tracked on a `SnapReindexJob` row (progress, resume cursor, cancel).
 
+Run `python demo/manage.py snapadmin_info` against this project to see the diagnostics
+report — version, the database/Elasticsearch/Celery status, and the demo's registered
+models with their storage modes — or `snapadmin_info --health-check` for a probe-only
+readiness check that exits non-zero when a service is down.
+
 ## Configuration
 
 All settings are environment-variable driven with safe local-development
