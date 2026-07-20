@@ -6,3 +6,16 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+Added
+=====
+
+``snapadmin_info`` management command
+  A single command that reports SnapAdmin's configuration and health for operators and CI.
+  ``python manage.py snapadmin_info`` prints the installed version, the Django/Python runtime and the
+  resolved ``SNAPADMIN_*`` feature toggles. ``--json`` emits the same data machine-readably (for
+  monitoring dashboards), ``--section NAME`` limits the report to one section (repeatable),
+  ``--brief``/``--verbose`` adjust the level of detail, and ``--health-check`` runs the connection
+  probes for the configured services and exits non-zero if any fails (usable as a readiness check).
+  Secrets — passwords, keys, token values — are never printed. Report sections are pluggable, so
+  database, Elasticsearch, Redis/Celery and model detail extend the command without changing it.
