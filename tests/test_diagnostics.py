@@ -111,14 +111,17 @@ class TestCollect:
     def test_collect_unknown_section_yields_nothing(self):
         assert collect(sections=["nope"]) == []
 
-    def test_collect_health_only_skips_non_probes(self):
-        # No real health-probe collectors exist yet, so health_only yields nothing.
-        assert collect(health_only=True) == []
+    def test_collect_health_only_returns_only_probes(self):
+        # ``version`` is informational; ``database``/``elasticsearch`` are health probes.
+        names = [c.name for c, _ in collect(health_only=True)]
+        assert "version" not in names
+        assert "database" in names
 
     def test_collect_health_only_keeps_probes(self, temp_collector):
         temp_collector("probe_x", health_probe=True, ok=True)
         names = [c.name for c, _ in collect(health_only=True)]
-        assert names == ["probe_x"]
+        assert "probe_x" in names
+        assert "version" not in names  # non-probe stays out
 
 
 # ── renderer ──────────────────────────────────────────────────────────────────
@@ -237,6 +240,7 @@ def _run(**kwargs):
     return out.getvalue()
 
 
+@pytest.mark.django_db
 class TestSnapadminInfoCommand:
     def test_default_text_report(self):
         text = _run()
@@ -266,7 +270,7 @@ class TestSnapadminInfoCommand:
         text = _run(verbose=True)
         assert "Version & Status" in text
 
-    def test_health_check_passes_with_no_probes(self):
+    def test_health_check_passes_when_db_reachable(self):
         text = _run(health_check=True)
         assert "Health check passed" in text
 
