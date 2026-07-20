@@ -12,6 +12,45 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 
 _Nothing yet._
 
+## 0.1.0b3 — 2026-07-20
+
+A large security and Elasticsearch release: ten security fixes, a structured Elasticsearch query
+layer, and safer bulk imports. One breaking change to the auto-generated REST filters.
+
+- **Changed (BREAKING):** auto-generated REST filters now default text fields to **exact** match
+  instead of substring. `?field=value` was `icontains` (a never-indexable leading-wildcard `LIKE`,
+  and `?sku=123` also matched `sku=91234`); it is now an exact, index-usable match. Substring
+  search moves to the explicit `?field__icontains=value`, alongside new `__startswith` and `__in`
+  lookups. Set `api_filter_lookups` per model to restore the old behaviour for a given field.
+- **Security:** GraphQL now enforces `view` permission and PII masking on **every relation a query
+  traverses**, not just top-level fields, matching the REST contract.
+- **Security:** new `api_write_fields` mass-assignment guard restricts which fields accept a
+  client-supplied value on REST create/update; a system check (`snapadmin.W004`) flags models
+  without one.
+- **Security:** fixed an SSO provider open redirect, a fail-open in `SmartModelSelectorWidget`,
+  `mask_value()` type handling, and loss of upload-validator config on `Snap*Field`.
+- **Security:** export filters are restricted to the target model's own fields (a related-field
+  path could previously reach columns the caller could not otherwise read); PII masking is now
+  closed on export, the audit trail, and API filtering/ordering/search.
+- **Security:** database backup path hardened, plus assorted deployment-topology fixes.
+- **Added:** `es_filter()` (structured term filters in ES filter context), `es_aggregate()`
+  (terms facets) and `es_scan()` (a `search_after` iterator streaming past the 10k
+  `max_result_window`) — each falling back to an equivalent database query when ES is off.
+- **Added:** `etl.stale_sync()` prunes rows whose natural key vanished from the latest source sync,
+  refusing (via `StaleSyncAbort`) if that would delete more than `max_fraction` of the table — so a
+  truncated feed cannot silently wipe it.
+- **Added:** resumable, progress-tracking bulk reindex (`snapadmin_reindex` / `SnapReindexJob`), and
+  the `SNAPADMIN_EXPORT_MAX_ROWS` / `SNAPADMIN_EXPORT_LIMIT_MAX` ceilings on the streaming export.
+- **Added:** JSON key-path filtering for the REST API via `api_json_filters`.
+- **Fixed:** translation catalogs refreshed — the admin UI is fully localised again in all 10
+  locales; GDPR purge correctness (secondary-store failures, `retention_days=0`, inflated counts);
+  API pagination and throttling now actually enforced; async export torn-write duplication,
+  single-flight and OFFSET drift.
+- **Changed:** the README is now a 252-line overview, with the reference material moved to the
+  documentation site, which gains Internationalization and Environment Variables sections.
+
+See [the full release notes](https://github.com/drofji/django-snapadmin/blob/main/docs/releases/0.1.0b3.txt) for more detail.
+
 ## 0.1.0b2 — 2026-07-13
 
 - **Security:** the generic dynamic model API (`/api/models/<app>/<model>/`) now only resolves

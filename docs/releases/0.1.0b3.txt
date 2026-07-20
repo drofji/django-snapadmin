@@ -1,0 +1,543 @@
+0.1.0b3 — 2026-07-20 — Third Beta
+=================================
+
+A large security and Elasticsearch release. Ten security fixes close permission, masking and
+open-redirect gaps across the GraphQL API, the export and audit surfaces, the SSO login helper and
+the database-backup path. Elasticsearch grows a structured query layer — ``es_filter()``,
+``es_aggregate()`` and ``es_scan()`` — each with a database fallback so the API is the same whether
+or not ES is enabled. Imports gain a guarded ``stale_sync()`` prune and a resumable bulk reindex.
+
+**One breaking change:** auto-generated REST API text filters now default to exact match instead of
+substring — see the first entry under Changed for the one-line fix if you rely on the old behaviour.
+No migration guide is needed; no schema or data migration is required.
+
+Added
+-----
+
+Stale-row pruning for recurring imports (``snapadmin.etl.stale_sync()``)
+  ``upsert_from_source()`` writes the rows a source reports, but a recurring full-table sync also
+  needs to delete the rows the source *stopped* reporting — and doing that by hand is where imports
+  go wrong: a truncated or half-downloaded feed deletes almost the whole table. The new
+  ``stale_sync(model, seen_keys, key_field=..., max_fraction=0.1)`` helper handles the delete half
+  safely. It removes every local row whose natural key is absent from ``seen_keys`` (the keys present
+  in the latest sync), but refuses — deleting nothing and raising ``StaleSyncAbort`` — if that would
+  remove more than ``max_fraction`` of the candidate rows, so a bad fetch can't silently wipe the
+  table. It returns a summary (``total``/``stale``/``deleted``/``fraction``), accepts ``dry_run=True``
+  to preview counts and a ``queryset=`` to scope the sync to one source's slice of a shared table, and
+  for a ``DUAL``/ES-mirrored model clears the deleted documents from Elasticsearch in the same bulk
+  call (raising ``SnapPurgeError`` if the DB delete lands but the ES mirror can't be cleared — the same
+  no-two-phase-commit contract as ``purge_expired()``). ``stale_sync`` and ``StaleSyncAbort`` are
+  importable from ``snapadmin.etl``; the demo ``sync_exchange_rates`` command grows ``--only N`` and
+  ``--prune`` flags to show it end to end.
+
+Resumable, progress-tracking bulk reindex (``snapadmin_reindex``)
+  ``SnapModel.es_reindex_all`` is a single ``helpers.bulk`` over the whole table: no feedback, no
+  resume, no load tuning. On a multi-million-row table that means you can't tell "running" from
+  "hung", a crash restarts from zero, and the index refreshes on every write. The
+  ``snapadmin_reindex`` management command now drives a resumable, observable job instead, reusing
+  the async-export pattern — each run is tracked on a new ``SnapReindexJob`` row. It prints
+  ``processed/total (percent%) ETA Ns`` per chunk; DB-backed models are paged by a ``pk__gt`` cursor
+  checkpointed on the job after each chunk, so ``--resume`` continues the most recent
+  unfinished/failed run for a model from that checkpoint rather than restarting the table
+  (reindexing writes each document under ``_id = pk``, so a resumed — or fully restarted — run only
+  ever overwrites, never duplicates). ``--tune`` sets the index's ``refresh_interval`` to ``-1`` and
+  ``number_of_replicas`` to ``0`` for the duration of the load and restores both (to their captured
+  values) in a ``finally`` when the run ends or crashes; ``--parallel N`` indexes each chunk with
+  ``helpers.parallel_bulk`` (``thread_count=N``), with the pk cursor only advancing once a chunk
+  fully completes so out-of-order completions never corrupt the checkpoint; and setting a job's
+  status to ``cancelled`` stops the run between chunks, leaving partial progress in place. ES_ONLY
+  models have no DB pk to cursor over and reindex in a single pass (no resume). The existing
+  ``es_reindex_all`` method, the ``POST /api/es/reindex/`` endpoint and the ``run_es_reindex`` Celery
+  task are unchanged — this adds a new, richer command path alongside them. A ``SnapReindexJob``
+  model migration (``0003``) ships with this change.
+
+``SNAPADMIN_EXPORT_MAX_ROWS`` — row ceiling on the synchronous streaming export
+  ``GET .../export/`` (the synchronous, no-Celery counterpart to ``POST /api/exports/``) previously
+  had no upper bound: an unbounded or accidentally-ineffective filter with no explicit ``?limit=``
+  just started streaming the entire matching table, holding a database connection open until the
+  client gave up or the table finished streaming — with nothing steering the caller toward the
+  async export endpoint that exists specifically for large result sets. The new optional
+  ``SNAPADMIN_EXPORT_MAX_ROWS`` setting (default ``0`` = unlimited, unchanged from today) sets a
+  ceiling: when it's configured and no valid ``?limit=`` was passed, ``export()`` now runs a
+  ``count()`` on the filtered queryset *before* streaming, and responds ``413 Payload Too Large``
+  (reporting the actual match count and pointing at ``POST /api/exports/``) instead of opening a
+  stream that may never finish. An explicit, valid ``?limit=`` is treated as the caller opting into
+  a bounded response themselves and is never blocked by the ceiling, however large.
+
+``SNAPADMIN_EXPORT_LIMIT_MAX`` — hard cap on ``?limit=``
+  A new, separate optional setting caps any explicit ``?limit=`` passed to ``.../export/`` down to
+  a configured maximum (default ``0`` = no clamp, unchanged from today) instead of always honouring
+  an arbitrarily large caller-supplied value.
+
+JSON key-path filtering for the auto-generated REST API (``api_json_filters``)
+  The auto-generated filter set had no branch at all for ``JSONField`` — a model whose payload lives
+  in a JSON column could not be filtered through the dynamic REST API in any way. A new optional
+  model attribute, ``api_json_filters``, declares which key-paths within which JSON field should be
+  filterable: ``api_json_filters = {"payload": ["a.b", "a.c"]}`` exposes ``?payload__a__b=value`` and
+  ``?payload__a__c=value`` as query parameters (a dotted key-path becomes double-underscore-separated
+  in the parameter name, mirroring Django's own lookup convention). A match covers two cases in one
+  query parameter, since the same key-path can hold either shape from row to row: a **scalar match**
+  (the JSON value at the path equals the given value exactly) and a **list-membership match** (the
+  JSON value at the path is itself a list and the given value is one of its elements). The scalar case
+  uses Django's JSON key-transform exact lookup, which every backend supports natively, including
+  SQLite. The list-membership case prefers Django's native ``__contains=[value]`` JSON-containment
+  lookup where the backend supports it, but SQLite reports
+  ``connection.features.supports_json_field_contains = False`` and raises ``NotSupportedError`` for
+  that lookup — since SQLite is the default database for local development and the test suite, the
+  filter detects this via ``connection.features.supports_json_field_contains`` and falls back to a
+  row-by-row Python membership check on the extracted JSON value instead, so list-membership filtering
+  works out of the box on SQLite too, not just on PostgreSQL/MySQL. A model that doesn't set
+  ``api_json_filters`` (the default) exposes no JSON filters at all, matching prior behavior. **JSON
+  columns carry no index**, so any of these filters — on every backend — is always a full table scan;
+  for filtering JSON data at scale on large tables, use ``SnapModel.es_search()`` (the Elasticsearch
+  integration) instead of the DB-backed auto-filters.
+
+Structured Elasticsearch term filters (``SnapModel.es_filter()``)
+  ``es_search()`` builds exactly one kind of query — a fuzzy ``multi_match`` over text fields — so
+  there was no way to run a *structured* term filter against Elasticsearch (e.g. "every document
+  whose keyword-mapped field is one of these values"), which matters most for fields a relational
+  database can't index at all, such as a JSON column. The new ``es_filter()`` classmethod fills that
+  gap: ``Product.es_filter(available=True, price=[999, 1299])`` runs the constraints in ES *filter*
+  context (no relevance scoring, cacheable), with a scalar building a ``term`` clause and a
+  list/tuple/set a ``terms`` clause. Field names resolve through the model's effective ES mapping —
+  an exact-typed field (keyword/boolean/numeric/date/ip) filters directly, an analysed ``text`` field
+  automatically targets its keyword sub-field, and a ``__`` path descends into an ``object`` mapping's
+  properties so a JSON column mapped in ES can be filtered by nested key path
+  (``es_filter(payload__status="paid")`` → the ES field ``payload.status``); an unknown or
+  analysed-text-only field raises ``ValueError`` rather than silently matching nothing. An optional
+  ``query_string`` is added alongside as a scored full-text ``must`` clause, so structured filtering
+  and fuzzy search compose in one call. Results mirror ``es_search()``: a primary-key-ordered database
+  queryset for ``DUAL`` models (relevance order preserved), an ``EsQuerySet`` of reconstructed objects
+  for ``ES_ONLY``. When Elasticsearch is disabled or the query errors, a ``DUAL`` model falls back to
+  the equivalent database filter — failing closed to an empty result if a term field has no backing
+  column — while an ``ES_ONLY`` model returns empty; the result carries the same
+  ``X-Snap-Query-Backend`` marker (``elasticsearch``/``database``) as ``es_search()``. Like
+  ``es_search()`` this is a model-level query method; if you expose its results through your own view,
+  apply your own permission and PII-masking checks as the built-in REST/GraphQL layers already do.
+
+Elasticsearch facets / aggregations (``SnapModel.es_aggregate()``)
+  The faceting counterpart to ``es_filter()``: where a term filter *selects* documents,
+  ``es_aggregate()`` *counts* them per value. Each positional field runs one Elasticsearch ``terms``
+  aggregation and the buckets come back as plain dicts keyed by the original field name —
+  ``Product.es_aggregate("category", "available")`` →
+  ``{"category": [{"key": "Laptops", "count": 42}, …], "available": [{"key": True, "count": 87}, …]}``.
+  This answers "how many documents fall into each value of field X" without paging every hit, and it
+  works on the same fields ``es_filter()`` does, including a keyword sub-field of a ``text`` field or a
+  JSON/object key path a relational ``GROUP BY`` can't index. Field names resolve and validate through
+  the same machinery (an unknown or analysed-text-only field raises ``ValueError``); ``size=`` caps the
+  number of buckets per field (default 10), any ``**terms`` narrow the counted set in ES *filter*
+  context, and an optional ``query_string`` adds a scored full-text constraint. When Elasticsearch is
+  disabled or the query errors, a ``DUAL`` model recomputes each facet over the database with
+  ``values(field).annotate(Count(...))`` — failing closed to empty buckets for a field or filter term
+  with no backing column — while an ``ES_ONLY`` model returns empty buckets for every requested field.
+
+Deep-scan iterator past ``max_result_window`` (``SnapModel.es_scan()``)
+  Elasticsearch refuses a ``from + size`` deeper than ``index.max_result_window`` (10,000), so
+  ``es_search()`` and ``es_filter()`` could never return more than 10k hits — a hard ceiling on any
+  "walk every matching document" job. The new ``es_scan()`` classmethod removes it: it is a lazy
+  iterator that pages the whole result set with ``search_after`` over a stable ``id`` sort, one
+  ``page_size`` batch per round-trip (default ``SNAPADMIN_ES_SEARCH_LIMIT``), so memory stays bounded
+  no matter how large the match. Filtering is identical to ``es_filter()`` — scalar/list ``**terms``
+  run in ES filter context and an optional ``query_string`` adds a scored full-text constraint —
+  making it the natural way to stream a large filtered export. ``DUAL`` models yield database
+  instances in cursor (``id``-ascending) order; ``ES_ONLY`` models yield objects reconstructed from
+  the index. It fails safe like the other ES query methods: a ``DUAL`` model whose Elasticsearch is
+  disabled, or unreachable before it streams anything, walks the equivalent database filter with
+  ``.iterator()`` (failing closed to nothing if a term has no backing column), and an ``ES_ONLY``
+  model yields nothing. Once streaming has begun a mid-scan ES failure stops the iterator where it was
+  rather than restarting on the database and double-emitting. A non-positive ``page_size`` or an
+  unknown / non-term-filterable field raises ``ValueError`` eagerly, on the call rather than on the
+  first iteration.
+
+Changed
+-------
+
+**Breaking:** auto-generated REST API filters now default text fields to exact match, not
+substring
+  Every ``CharField``/``TextField``/``EmailField``/``URLField``/``SlugField`` on a ``SnapModel``
+  gets an auto-generated ``django-filter`` entry (see ``snapadmin/api/filters.py``). The bare
+  query parameter — ``?field=value`` — previously ran ``lookup_expr="icontains"``, i.e. a
+  leading-wildcard ``LIKE '%value%'``. That can never use a database index (Postgres cannot use a
+  b-tree index for a pattern with a leading wildcard, so every such request is a full table scan
+  on the underlying column) and is also semantically surprising for key-like fields: ``?sku=123``
+  matched ``sku=91234`` too, since any value *containing* the query string matched. ``?field=value``
+  now performs an **exact** match instead — index-usable, and no more surprise superstring hits.
+  Substring search hasn't been removed, only renamed: it is still available, explicitly, via
+  ``?field__icontains=value``. Text fields also gained explicit ``?field__startswith=value`` and
+  ``?field__in=a,b,c`` lookups, following the same suffix pattern the numeric/date filters already
+  used for ``__gte``/``__lte``. **Action required** if you (or a frontend) call the auto-generated
+  API with a bare text filter expecting a substring match: switch that query parameter to the
+  ``__icontains`` suffix. A new optional model attribute, ``api_filter_lookups``, lets a specific
+  model widen or narrow the lookup set for one of its own fields without waiting on a library-wide
+  default change, e.g. ``api_filter_lookups = {"name": ["exact", "icontains"]}`` restores the old
+  bare-key substring behaviour for just that field. Left unset (the default), every text field uses
+  the new ``exact`` + ``icontains``/``startswith``/``in`` suffix set described above. This also
+  hardens against a minor denial-of-service angle: an indexable exact-match filter is far cheaper
+  for the database to serve than a forced full table scan on every text-filtered ``list``/``count``/
+  ``export`` request, which any caller with a valid API token could previously trigger repeatedly
+  on a large table just by filtering on a text field.
+
+README trimmed to an overview; the reference material now lives on the docs site
+  The README had grown to 2,210 lines — a reader had to scroll past roughly 200 before seeing what
+  SnapAdmin looks like and past 300 before the install instructions, and most of the body duplicated
+  the docs site. It is now 252 lines covering what the package is, the three-step example, install
+  and extras, a grouped feature list that deep-links into the documentation, and how to run the demo.
+  Nothing was dropped: every section that moved was checked against ``docs/index.html`` first, and the
+  parts that had no equivalent there were ported before removal. The docs site accordingly gains an
+  **Internationalization** section (the ten shipped locales, the ``LocaleMiddleware``/``LANGUAGES``
+  wiring and the ``language_switcher.html`` include) and an **Environment Variables Reference**
+  section (every ``SNAPADMIN_*`` setting with its default, split into grouped tables by area), while
+  its Installation section absorbs the compatibility matrix, the ``INSTALLED_APPS`` ordering block,
+  the optional-extras table with the ``extra-settings`` gotchas, the ``[wysiwyg]``/CKEditor and MySQL
+  driver licensing notes, and the package layout. Since the README ships to PyPI as the package's
+  long description, the project page changes with it. The version badges are now generated from live
+  PyPI metadata rather than hand-written, so they stop drifting from the released version.
+
+Docs are explicit about what actually triggers each background task
+  Several features were described as running "automatically" or "on a schedule" without saying that
+  SnapAdmin ships no daemon and installs no schedule — so a reader could reasonably configure GDPR
+  retention, 3-2-1 backups or the error digest and believe they were live when nothing was ever going
+  to run. The README gains a "Background Tasks & Scheduling" section listing all six shipped Celery
+  tasks with what triggers each: four you must schedule yourself (``purge_expired_data``,
+  ``purge_expired_tokens``, ``send_error_digest``, ``run_db_backups``) and two that are event-driven
+  and need only a running worker (``run_export``, ``run_es_reindex``). ``purge_expired_tokens`` was
+  previously not documented in the README at all and now carries its own Beat and cron examples.
+  The GDPR, backup and error-digest sections now state plainly that nothing runs until wired — the
+  backup table's "Default frequency" column is relabelled "Due every", since those intervals only
+  describe when a destination becomes *due* and never fire on their own — and the error-monitoring
+  section distinguishes the spike alert (sent inline by the middleware, no scheduler needed) from the
+  digest (never sends itself). ``docs/index.html`` mirrors all of it: its task table now lists every
+  real task with a "Trigger" column instead of a misleading "Default Schedule", separates the two
+  demo-only example tasks from the package's own, and its Beat snippet covers every scheduled task
+  rather than a partial set. Also fixes a stale import in that page's reindex example, which still
+  pointed at the demo app's pre-restructure module path.
+
+Non-positive ``?limit=`` on the streaming export now rejects with ``400`` instead of silently streaming everything
+  **Behavior change.** ``_parse_export_limit()`` previously treated every invalid ``?limit=`` —
+  missing, blank, non-numeric, zero, or negative — the same way: fall back to unlimited (stream
+  every matching row). That made sense for a garbled value (a non-numeric ``?limit=`` should never
+  silently truncate an export) but meant an explicit non-positive value — almost always a caller
+  mistake, e.g. ``?limit=0`` or a typo'd negative number — degraded to the single most expensive
+  possible response instead of surfacing the mistake. A missing, blank, or non-numeric ``?limit=``
+  still degrades to "stream everything", unchanged; an explicit zero or negative ``?limit=`` now
+  responds ``400 Bad Request`` instead. If you relied on ``?limit=0`` meaning "unlimited", switch to
+  omitting ``?limit=`` entirely.
+
+Demo project restructured into a self-contained ``demo/`` folder
+  The repository's runnable demo/development project — previously scattered across a
+  root-level ``sandbox/`` Django project, a flat ``demo/`` app, and a pile of root files
+  (``manage.py``, ``requirements.txt``, the Docker/Traefik compose files, the ``dist.env``
+  template, an ``admin/index.html`` override) — now lives entirely under one top-level ``demo/``
+  folder: ``demo/core/`` (project config, formerly ``sandbox/``), ``demo/apps/shop/`` (the example app,
+  so more demo apps can be added alongside it later), and ``demo/manage.py`` /
+  ``demo/requirements.txt`` / ``demo/docker-compose*.yml`` / ``demo/Dockerfile`` / ``demo/dist.env``.
+  **This does not affect anyone who installs django-snapadmin** — ``pyproject.toml`` packages only
+  ``snapadmin/``, so none of the moved files were ever part of the distribution; there is no import
+  change, no settings change, and no migration for installed projects. It only changes how you run
+  the in-repo demo when developing against a checkout: use ``python demo/manage.py <command>`` (from
+  the repo root) and ``docker compose -f demo/docker-compose.yml up --build``. The example app kept
+  its ``demo`` app-label (via an explicit ``AppConfig.label``), so its migration history and every
+  ``demo.<Model>`` reference are unchanged. See the new ``demo/README.md``. The pytest suite still
+  runs from the repo root with ``pytest`` exactly as before. As part of the same work the demo's
+  root URL (``/``) is now a compact, public landing page (a login form for anonymous visitors; a
+  single-viewport app-shell with demo record counts and enabled-service facts once signed in, with
+  admin/dashboard links shown only to staff), and the staff-only system dashboard moved from ``/``
+  to ``/dashboard/``. This is all demo-only and, again, changes nothing for installers.
+
+  The demo now also showcases the ``[extra-settings]`` extra as a runtime-editable, DB-backed
+  configuration store: a curated set of *runtime-editable* ``SNAPADMIN_*`` settings (the ones the
+  package re-reads per request — masked fields, audit-log toggle, audit/error retention,
+  ``SNAPADMIN_ES_SEARCH_LIMIT``, ``SNAPADMIN_DASHBOARD_PUBLIC``) appears under "Settings" in the
+  admin, each described, and edits take effect live with no restart. The bridge is demo-only
+  (``demo/apps/shop/managed_settings.py``) — the ``snapadmin`` package still reads plain
+  ``django.conf.settings`` and never depends on ``django-extra-settings``; the demo simply syncs the
+  DB value back onto ``settings``. Boot-time-only settings (routing toggles, admin nesting) and all
+  secrets are deliberately excluded, as are the **capacity and abuse-protection knobs**
+  (``SNAPADMIN_API_PAGE_SIZE``, ``SNAPADMIN_API_MAX_PAGE_SIZE``, the two throttle rates and the two
+  export ceilings): those bound per-request cost and caller rate, so they stay deployment-owned in
+  ``dist.env``/``settings.py`` rather than becoming editable from a web form with no deploy trail.
+
+Fixed
+-----
+
+Translation catalogs refreshed — the admin UI is fully localised again in all 10 shipped locales
+  The bundled ``snapadmin/locale`` catalogs had drifted out of date: they still only covered the
+  dashboard/entry-point strings and had not been regenerated as newer ``gettext``-wrapped strings
+  landed (the API-token, error-event, audit-log and async-export model labels and help texts, the
+  file/phone/colour validator messages, the SSO login prompts, and more). Non-English admins saw
+  those newer strings fall back to English. The catalogs are now regenerated and translated in full
+  for every shipped locale — German (de), Swiss German (de_CH), Spanish (es), French (fr), Swiss
+  French (fr_CH), Italian (it), Dutch (nl), Polish (pl) and Russian (ru) — so the whole admin
+  surface renders in the active language again. English remains the source language (rendered via
+  ``gettext`` fallback, no catalog needed). A new regression test asserts every shipped string has a
+  translation in every locale, so a future ``_()`` string added without regenerating the catalogs
+  fails the suite instead of silently shipping untranslated.
+
+- The auto-injected validator on ``SnapFileField``, ``SnapImageField``, ``SnapPhoneField`` and
+  ``SnapColorField`` is now stripped from ``deconstruct()`` by identity rather than by class. A
+  caller-supplied validator of the same class passed via ``validators=[...]`` is no longer wrongly
+  removed and now survives migration round-trips unchanged.
+- A field declared ``required=True`` together with an explicit ``null=True`` is a contradiction
+  (mandatory yet nullable at the database level) that used to pass silently, since the explicit
+  ``null=True`` overrode what ``required=True`` would otherwise force. It now raises a
+  ``snapadmin.E003`` system-check error during ``manage.py check`` with guidance on how to resolve
+  it.
+- When the ``[extra-settings]`` extra was installed, its ``Setting`` admin rendered as a plain,
+  unstyled ``django.contrib.admin.ModelAdmin`` — extra_settings registers its own admin and knows
+  nothing about Unfold, so the page looked out of place next to the rest of the themed site.
+  SnapAdmin now upgrades that registration to an Unfold-derived admin automatically: from
+  ``SnapAdminConfig.ready()`` it re-registers the ``Setting`` admin (or its proxy, when
+  ``EXTRA_SETTINGS_ADMIN_APP`` re-homes it) with a class that inherits ``unfold.admin.ModelAdmin``
+  on top of extra_settings' own configuration, so ``list_display``, ``search_fields``, fieldsets
+  and media are all preserved while the page picks up the Unfold theme. This runs from ``ready()``
+  rather than an ``admin.py`` so it works regardless of where ``extra_settings`` sits relative to
+  ``snapadmin`` in ``INSTALLED_APPS``; the only requirement is that ``django.contrib.admin`` precede
+  ``snapadmin`` there, which Django's project template already guarantees. No configuration change
+  is needed, and installs without the extra are unaffected.
+
+GDPR purge correctness: surfaced secondary-store failures, fixed retention_days=0, fixed inflated counts
+  Three bugs in the GDPR/data-retention purge machinery are fixed. First, ``SnapModel.purge_expired()``
+  on a ``DUAL``-mode model (rows mirrored to Elasticsearch) previously deleted from the database, then
+  attempted to clear the matching Elasticsearch documents and only logged a warning if that failed —
+  the purge was reported as a clean success even when the "purged" personal data was still live and
+  searchable via the API. ``purge_expired()`` now raises ``snapadmin.models.SnapPurgeError`` when the
+  ES-side delete fails, and the ``purge_expired_data`` Celery task (as well as the
+  ``purge_expired_data`` management command) surfaces that as a per-model error instead of counting the
+  model as purged; the task's returned summary dict now has an ``errors`` key alongside ``purged`` and
+  ``total`` for exactly this. There is still no two-phase commit across the database and Elasticsearch
+  — the database delete has already happened by the time the ES failure is raised — but the failure is
+  no longer silent. ``_delete_pks_from_es`` also now issues a single bulk ``delete_by_query`` (an
+  ``ids`` filter) instead of one ``es.delete()`` call per primary key, matching the bulk pattern already
+  used by the ``ES_ONLY`` purge path. Second, ``snapadmin.monitoring.purge_expired_events()`` had no
+  guard against a non-positive ``SNAPADMIN_ERROR_RETENTION_DAYS`` — setting it to ``0``, the intuitive
+  way to mean "keep forever", instead collapsed the cutoff to roughly "now" and deleted the entire
+  ``ErrorEvent`` table on the next digest run. It now returns ``0`` immediately for
+  ``retention_days <= 0``, matching the guard ``SnapModel.purge_expired()`` already had. Third, every
+  purge count returned by ``SnapModel.purge_expired()`` (``DB_ONLY`` and ``DUAL`` modes) now reflects
+  the target model's own row count, captured before the delete, rather than Django's
+  ``QuerySet.delete()`` total — which includes rows cascade-deleted via ``on_delete=CASCADE`` on
+  related models and could report a count far larger than the number of target rows actually purged,
+  and larger than the matching ``dry_run=True`` count for the same rows.
+
+Enforced API pagination and throttling
+  ``DynamicModelViewSet`` now enforces pagination and rate limiting itself, instead of relying on
+  the host project's own ``REST_FRAMEWORK`` settings. Previously, ``SNAPADMIN_THROTTLE_ANON`` /
+  ``SNAPADMIN_THROTTLE_USER`` were documented but never read by the library, and ``list``
+  responses were only paginated because the demo project happened to configure
+  ``DEFAULT_PAGINATION_CLASS`` itself — a project installing ``django-snapadmin`` without also
+  setting that up could serve an unbounded ``list`` that serializes an entire table into memory in
+  one response, and had no rate limiting on the dynamic model API at all. ``list`` is now always
+  paginated (``SnapDynamicPagination``, default page size 25 via ``SNAPADMIN_API_PAGE_SIZE``, hard
+  ceiling 500 via ``SNAPADMIN_API_MAX_PAGE_SIZE`` on client-requested ``?page_size=``), and every
+  request against ``DynamicModelViewSet`` is throttled per ``SNAPADMIN_THROTTLE_ANON`` (default
+  ``60/min``) and ``SNAPADMIN_THROTTLE_USER`` (default ``600/min``), both readable independently of
+  DRF's ``DEFAULT_THROTTLE_RATES``. Set either throttle setting to ``None`` to disable it. The
+  streaming ``export`` action and the ``count`` action are unaffected by pagination, as before.
+
+Async export: torn-write duplication, no single-flight, local-disk-only, OFFSET drift
+  The background export writer (``snapadmin.exporting``) had four related reliability gaps, all
+  fixed together since the fixes share one mechanism. **Torn-write duplication:** each chunk used
+  to flush its rows to the file and *then* persist ``processed_rows`` as a separate save — a crash
+  between the two left the file ahead of the checkpoint, and resuming from the stale checkpoint
+  re-wrote (duplicated) rows already on disk. Chunks are now written and ``fsync``-ed to disk
+  *before* the checkpoint is persisted, and the checkpoint is a primary-key cursor
+  (``SnapExportJob.cursor_pk``) plus the confirmed byte length (``cursor_bytes``) rather than a row
+  count — on resume, any bytes past ``cursor_bytes`` are truncated (an unconfirmed tail, safe to
+  discard) and the writer continues from ``pk__gt=cursor_pk``, so a crash can only under-count,
+  never duplicate. **OFFSET drift:** paging switched from ``LIMIT/OFFSET`` (which silently skips or
+  duplicates rows when a concurrent insert/delete shifts the window) to that same primary-key
+  cursor — immune to concurrent writes elsewhere in the table. **No single-flight:** nothing
+  previously stopped a redelivered Celery task or a manual re-trigger from running the same job on
+  two workers at once and interleaving writes into one file. ``run_export_job`` now claims the job
+  with an atomic ``pending``/``failed`` → ``processing`` compare-and-set; a worker that loses the
+  claim (the job is already ``processing``) returns immediately without touching the file. Tradeoff:
+  a worker that crashes mid-``processing`` leaves the job stuck there — there is no heartbeat/TTL
+  auto-recovery — an operator resets it to ``pending`` to retry, and the crash-safe resume above
+  picks up from the last checkpoint rather than restarting. **Local-disk-only:** the write path
+  (``exporting.py``) and the download endpoint (``ExportJobViewSet.download``) both now go through
+  Django's storage API instead of raw ``open()``/``os.path.exists()``, via a new
+  ``SNAPADMIN_EXPORT_STORAGE`` setting (a dotted ``Storage`` class); left unset it defaults to a
+  local ``FileSystemStorage`` rooted at ``SNAPADMIN_EXPORT_DIR``, so existing installs keep working
+  with no configuration change. Setting it to a remote backend (S3, GCS, shared network storage, …)
+  makes a completed job downloadable from any web instance, not just the one that happens to share a
+  filesystem with the Celery worker that produced it. **New field:** ``SnapExportJob`` gained
+  ``cursor_pk`` and ``cursor_bytes`` (migration ``0002``); ``processed_rows`` keeps its existing
+  meaning as a row count for ``progress_percent``/``eta_seconds`` reporting. Existing rows default to
+  an empty cursor (start from the beginning), so upgrading is safe with no manual data migration.
+
+Security
+--------
+
+GraphQL relation permission + PII masking parity with REST
+  The auto-generated GraphQL schema bypassed two access controls the REST API enforces. First,
+  only the two top-level resolvers per model ran a permission check: every FK / M2M / reverse
+  relation graphene_django auto-generated resolved with no check at all, so a caller with ``view``
+  permission on model ``A`` could read a related model ``B`` through ``A { relatedB { … } }``
+  without holding ``view`` on ``B`` (or outside its API-token ``allowed_models`` scope), even when
+  ``B`` was not exposed as a top-level query field. Second, PII masking
+  (``SNAPADMIN_MASKED_FIELDS``) was applied only in the REST serializer, so a field configured for
+  masking came back **unmasked** over GraphQL for a user who would see it masked over REST. Both
+  are now fixed: every generated ``DjangoObjectType`` carries a ``get_queryset`` guard that runs
+  the same authentication + per-model ``view`` + token-scope check on **every** relation the query
+  traverses, and masked fields get per-field resolvers that mask exactly as the REST serializer
+  does (raw only when the requester may view raw PII, ``mask_value()`` otherwise). **Behavior
+  change:** a related object the caller may not view now resolves as a ``Permission denied.`` error
+  instead of the object's real data, and a masked field now returns its masked value over GraphQL.
+  The schema remains read-only (no mutations). This code path is unreleased, so no upgrade action
+  is required.
+
+New ``api_write_fields`` mass-assignment guard
+  Field exposure and field *writability* were previously the same knob: any field not listed in
+  a model's ``api_exclude_fields`` was both readable and writable through the auto-generated REST
+  API, so a plain ``SnapModel`` subclass accepted create/update payloads on every column, including
+  ones that should never be client-settable (status flags, ownership foreign keys, computed or
+  otherwise internal fields). A new optional ``api_write_fields`` model attribute splits the two:
+  set it to an explicit list of field names and every other field is forced read-only through REST
+  create/update (it can still be returned in responses, unless also excluded). Leaving it unset
+  keeps the previous, fully-writable behaviour — this is not a breaking change — but a new
+  ``snapadmin.W004`` system check now warns on every ``SnapModel`` that hasn't set it, so the
+  exposure becomes a deliberate choice rather than an unnoticed default. GraphQL is unaffected: the
+  generated schema has no mutations, so it was never writable. See ``api_write_fields`` in the
+  README and SECURITY.md for usage.
+
+``mask_value()`` type handling
+  ``mask_value()`` no longer coerces every value to a string before masking. Non-string PII
+  (``int``, ``float``, ``Decimal``, ``bool``) previously leaked real digits through the star
+  pattern once stringified (e.g. an integer PII value would show its first and last two digits);
+  these types now return a fixed ``"***"`` sentinel instead. ``list`` and ``dict`` values are now
+  masked recursively, element-by-element (and value-by-value, keys untouched), instead of being
+  flattened into a single mangled string that exposed structure and substrings. Short strings of
+  3-5 characters (e.g. a 5-digit PIN) previously kept their first and last character visible; they
+  are now fully starred like 1-2 character strings, closing a leak for short codes and IDs.
+
+``SmartModelSelectorWidget`` fail-open fix
+  ``SmartModelSelectorWidget`` (used for ``APIToken.allowed_models`` in the admin) rendered its
+  hidden input with a hardcoded ``value='[]'``, relying entirely on client-side JS to repopulate it
+  with the token's actual current scope before submit. If that JS didn't run — a CSP blocking it, a
+  JS error, or ``JSON.parse`` throwing on an unexpected character in a model's ``verbose_name`` — a
+  plain form submit sent the literal empty list. Since ``APIToken.can_access_model()`` treats an
+  empty ``allowed_models`` as "unrestricted, fall back to the user's Django permissions" (documented,
+  intentional behavior — see ``SECURITY.md``), simply re-saving a restricted token through the admin
+  could silently widen it to every model the owning user has Django permissions for. The widget now
+  renders the real current value server-side, so a no-JS round trip preserves the actual scope, and
+  additionally treats a missing/empty/unparseable submission as "no change" (via
+  ``value_omitted_from_data``) rather than "clear", so a broken submission can no longer wipe an
+  existing restriction even as defense in depth. One consequence: this widget can no longer be used
+  to deliberately clear ``allowed_models`` back to ``[]`` — only to widen it by adding entries or
+  narrow it to a non-empty subset. That's intentional: a scope that can silently self-widen on save
+  is a worse failure mode than a scope that can't be fully cleared from one screen.
+
+SSO provider open-redirect fix
+  ``SNAPADMIN_SSO_PROVIDERS`` entries with a protocol-relative ``url`` (``//host/path``) are now
+  dropped by ``get_sso_providers()`` instead of being resolved by ``SSOProviderView`` into an
+  absolute URL on an attacker-chosen external origin. ``"//evil.example.com/login"`` satisfies a
+  naive ``url.startswith("/")`` same-site check but ``request.build_absolute_uri()`` resolves it to
+  ``https://evil.example.com/login`` — an open-redirect login button if the setting is ever built
+  from a templated source (env var, admin-editable setting, generated value) rather than a
+  hardcoded Python literal. ``SSOProviderView`` now also checks for the ``//`` prefix directly, as
+  defense in depth independent of ``get_sso_providers()``. A new optional setting,
+  ``SNAPADMIN_SSO_ALLOWED_HOSTS``, lets operators further restrict *absolute* provider URLs to a
+  host allowlist; it is opt-in and empty by default, so deployments that legitimately point
+  providers at external identity providers (Microsoft, Okta, Keycloak, …) see no behavior change.
+  ``manage.py check`` now warns (``snapadmin.W005``) on a provider with a protocol-relative or
+  disallowed-host URL.
+
+Export filters restricted to the target model's own fields
+  ``POST /api/exports/`` accepted an arbitrary JSON ``filters`` dict and fed it straight into
+  ``queryset.filter(**filters)`` with no validation beyond checking that the target model itself
+  was exportable. Because the caller's ``view`` permission was only ever checked against that
+  target model, a key that traversed a relationship (``category__internal_note``,
+  ``customer__ssn__icontains``, a reverse foreign key, a many-to-many lookup, ...) could reach
+  fields on a *related* model the caller was never authorized to view — using the export's
+  row-count / success-vs-empty-result as a boolean or prefix exfiltration oracle, or targeting an
+  unindexed column / expensive join as a resource-exhaustion vector. ``filters`` keys are now
+  validated in ``ExportJobCreateSerializer.validate()`` against an allowlist built from the target
+  model's own concrete fields (relations, reverse relations and many-to-many fields are never
+  eligible — no ``fk__field`` traversal is possible), and each allowlisted field only accepts a
+  small, type-appropriate set of lookups (e.g. ``exact``/``in``/``icontains`` for text,
+  ``exact``/``in``/``gte``/``lte`` for numbers and dates, ``exact``/``in`` on a foreign key's
+  ``_id`` column). A request with an unknown field, a relation-traversing key, or a disallowed
+  lookup now gets a ``400`` naming the rejected key(s); exports filtered only on the model's own
+  fields continue to work exactly as before.
+
+Database backup hardening
+  SFTP offsite backups now **verify the remote host key against known_hosts** instead of trusting
+  it on first connect. The previous trust-on-first-use policy silently accepted any host key,
+  leaving a man-in-the-middle window on the first connection. **Behavior change / action
+  required:** if you use ``sftp`` offsite backups, you must pre-populate ``~/.ssh/known_hosts``
+  for the backup host (as the service user running the backups) before they will succeed — for
+  example ``ssh-keyscan -H offsite.example.com >> ~/.ssh/known_hosts`` during deployment, or a
+  one-off interactive ``ssh`` to accept the key. An unknown host now fails the backup with a clear
+  error rather than silently trusting it. FTP/FTPS and local/network destinations are unaffected.
+  Separately, the PostgreSQL dump path now **streams ``pg_dump`` output directly into gzip**
+  rather than buffering the entire uncompressed dump in memory first, avoiding an out-of-memory
+  risk on large databases; a failed ``pg_dump`` now removes the partial ``.gz`` file it produced.
+
+``Snap*Field`` upload-validator config loss
+  ``SnapFileField`` and ``SnapImageField`` no longer silently drop their upload restrictions
+  across a migration round-trip. Previously ``deconstruct()`` stripped the auto-built
+  ``SnapFileValidator`` without re-serialising ``allowed_extensions`` / ``allowed_encodings`` /
+  ``max_size_bytes``, so any field cloned by Django's migration machinery (``makemigrations``,
+  squash, reload) was rebuilt with an unbounded, any-extension validator — quietly removing the
+  size and file-type limits you configured. ``SnapImageField`` went further and never built a
+  validator at all, silently discarding ``allowed_extensions`` / ``max_size_bytes``. Both now
+  build the validator and round-trip the configuration correctly, so the limits you declare are
+  the limits that are enforced.
+
+Assorted cosmetic-vs-security and deployment-topology fixes
+  Five independent small fixes. **Docs:** ``SNAPADMIN_HIDDEN_APPS`` was documented without making
+  clear that it is a *cosmetic* index-page filter — the underlying ``ModelAdmin`` URLs for a hidden
+  app stay registered and reachable by any staff user holding the model's Django permission. The
+  ``snapadmin/nesting.py`` docstring, ``README.md`` and ``docs/index.html`` now say so explicitly,
+  pointing at Django's standard permission system as the actual access control mechanism.
+  **Custom AdminSite detection:** ``install_nested_apps()`` only ever patches
+  ``django.contrib.admin.site``, the default ``AdminSite`` — a project serving ``/admin/`` from a
+  different ``AdminSite`` instance silently never saw ``SNAPADMIN_NESTED_APPS`` /
+  ``SNAPADMIN_HIDDEN_APPS`` / ``SNAPADMIN_APP_LABELS`` applied there, with no indication why.
+  Reliably detecting the active site from ``AppConfig.ready()`` isn't possible (URLconf and app
+  ready-order aren't guaranteed at that point), so a new system check,
+  ``snapadmin.W006`` (``check_nesting_active_site``), instead warns at ``manage.py check`` time
+  when nesting settings are configured and another ``AdminSite`` with a non-empty registry is
+  detected via ``django.contrib.admin.sites.all_sites``. **Error digest consistency:**
+  ``send_error_digest()`` computed its subject-line total from an eager ``.count()`` but then
+  called ``purge_expired_events()`` — which deletes rows — *before* handing the same lazy queryset
+  to ``group_events()``, whose own aggregation query could then reflect fewer rows than the total
+  already reported. Grouping now happens against the pre-purge snapshot, and the retention purge
+  runs afterward, so the subject and body of a digest email always agree. **Validator message:**
+  ``SnapFileValidator``'s encoding check wrapped its own "no encoding matched" ``ValidationError``
+  inside the same broad ``try/except Exception`` guarding file I/O, so a genuinely invalid encoding
+  was always reported as the generic "Could not verify file encoding." instead of the specific
+  "Invalid encoding. Allowed: ..." message. The ``try/except`` now wraps only the file
+  read/seek, so the specific message reaches the caller. **File handle leak:** the Docker-detection
+  helper in the admin dashboard's environment panel (``_get_environment_details()``) opened
+  ``/proc/self/cgroup`` without a context manager or explicit close, relying on garbage collection
+  to release the handle. It's now opened with ``with``, unchanged short-circuit behavior preserved
+  (only opened when ``/.dockerenv`` doesn't already indicate Docker and the cgroup file exists).
+
+PII masking closed on export, audit trail and API filter/ordering/search
+  ``SNAPADMIN_MASKED_FIELDS`` was previously enforced only in the REST serializer's and GraphQL's
+  response body, leaving several other paths that could still expose or help recover a masked
+  value. Five gaps are fixed. **Async export:** ``POST /api/exports/`` serialised rows via
+  ``queryset.values(*fields)`` with no masking at all — a downloaded export contained every masked
+  field in the clear regardless of the requester's PII access. Exported rows are now masked unless
+  the job's ``requested_by`` holds PII access (fail-closed: a purged/unset requester is treated as
+  unprivileged); separately, the ``filters`` a caller may pass when creating the export job are now
+  rejected outright for a masked field (same as an unknown field), since a filter's effect on
+  ``job.total_rows`` would otherwise still leak a match/no-match or exact count for a value the
+  export output itself never reveals raw. **Audit trail:** ``SnapadminAuditLog.changes`` snapshots
+  the raw before/after value of every changed field, including masked ones, and was displayed and
+  exported verbatim. The admin's read-only detail view now shows a masked ``changes`` diff for a
+  viewer without PII access (a new ``mask_changes()`` helper in ``snapadmin.masking`` is the single
+  choke point both surfaces share), and ``snapadmin_audit_export`` masks the diff by default — pass
+  the new ``--reveal-pii`` flag for an operator who explicitly needs the raw values for an
+  investigation. The underlying row is never altered (the audit trail's append-only guarantee is
+  unaffected); only the display/export is masked. **Filter/ordering/search oracle:** the
+  auto-generated REST filter set, ``OrderingFilter`` and ``SearchFilter`` had no awareness of
+  masking at all, so a caller without PII access could still send ``?field=value``,
+  ``?field__icontains=``, ``?ordering=field`` or ``?search=`` against a masked field and infer its
+  raw value from a match/no-match, the returned row count, or sort order — even though the response
+  body itself always starred the field out. A masked field is now silently excluded from all three
+  (dropped as if the parameter were never sent, not rejected with ``400``, so the response doesn't
+  itself confirm the field is masked); ordering by every other field — including a many-to-many or
+  method field the auto-filter set never touched — is unaffected. A caller who does hold PII access
+  is unaffected by any of the above.

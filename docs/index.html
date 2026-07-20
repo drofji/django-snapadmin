@@ -223,7 +223,7 @@
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <h2>⚡ SnapAdmin</h2>
-    <span>Documentation v0.1.0b2</span>
+    <span>Documentation v0.1.0b3</span>
   </div>
   <div class="nav-search">
     <input type="search" id="navSearch" placeholder="Filter sections…" autocomplete="off">
@@ -286,12 +286,18 @@
     <p class="subtitle">Automatic, beautiful, production-ready Django Admin — zero boilerplate. REST &amp; GraphQL, Elasticsearch, offline mode and GDPR retention, all from your model definitions.</p>
 
     <div class="callout callout-success" style="text-align: left; margin: 18px auto 0;">
-      <strong>What's New in v0.1.0b2 — second beta</strong>
-      A security fix: the generic dynamic model API (<code>/api/models/&lt;app&gt;/&lt;model&gt;/</code>)
-      now only resolves <strong>SnapModel subclasses</strong>, mirroring the schema endpoint — previously
-      any registered Django model (e.g. <code>auth.User</code>) could be listed, retrieved, created,
-      updated or deleted through it. Also fixes broken doc links in the installed
-      <code>CHANGELOG.md</code>. No breaking changes, drop-in upgrade from 0.1.0b1.
+      <strong>What's New in v0.1.0b3 — third beta</strong>
+      A large security and Elasticsearch release. <strong>Ten security fixes</strong> close permission,
+      masking and open-redirect gaps across the GraphQL API, the export and audit surfaces, the SSO
+      login helper and the database-backup path — including GraphQL now enforcing permissions and PII
+      masking on <em>every relation a query traverses</em>, and a new <code>api_write_fields</code>
+      mass-assignment guard. Elasticsearch gains a structured query layer —
+      <a href="#es-filter"><code>es_filter()</code></a>, <a href="#es-aggregate"><code>es_aggregate()</code></a>
+      and <a href="#es-scan"><code>es_scan()</code></a> — each with a database fallback. Imports gain a
+      guarded <code>etl.stale_sync()</code> prune and a resumable bulk reindex.
+      <strong>One breaking change:</strong> auto-generated REST text filters now default to exact
+      match instead of substring — move substring queries to <code>?field__icontains=</code>, or set
+      <code>api_filter_lookups</code> per model. No schema or data migration is required.
     </div>
 
     <div class="card-grid">
@@ -917,7 +923,8 @@ for row in Product.objects.all().iterator(chunk_size=2000):
   <strong>Breaking change from earlier releases:</strong> the bare key used to run
   <code>lookup_expr="icontains"</code> — a leading-wildcard substring match that cannot use a
   database index. Callers relying on that now need <code>?field__icontains=value</code> instead of
-  the bare key. See <code>docs/releases/Unreleased.txt</code> for the full upgrade note.</p>
+  the bare key. See <a href="https://github.com/drofji/django-snapadmin/blob/main/docs/releases/0.1.0b3.txt">the
+  0.1.0b3 release notes</a> for the full upgrade note.</p>
 
   <h3>Filtering JSON columns — <code>api_json_filters</code></h3>
   <p><code>JSONField</code> gets no auto-generated filter by default. Declare which key-paths within
@@ -2384,7 +2391,7 @@ python manage.py seed_demo --no-index  # skip ES indexing (no ES cluster needed)
   </table>
 
   <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
-    SnapAdmin v0.1.0b2 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
+    SnapAdmin v0.1.0b3 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
   </div>
 
 </main>
