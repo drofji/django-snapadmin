@@ -36,7 +36,7 @@ class TestMain:
         assert code == 0
         assert captured["download"]["clear_cache"] is True
         assert captured["extract"]["assume_yes"] is True
-        assert captured["run"] == {"skip_install": True, "no_serve": True}
+        assert captured["run"] == {"skip_install": True, "no_serve": True, "mode": "runserver"}
         assert captured["path"] == "/tmp/z"
 
     def test_tag_not_found_returns_2(self, monkeypatch, capsys):
@@ -59,6 +59,66 @@ class TestParser:
         assert args.path == "."
         assert args.skip_install is False
         assert args.yes is False
+
+
+class TestConfigResolution:
+    def test_no_flags_returns_none(self):
+        args = cli.build_parser().parse_args([])
+        assert cli._config_from_args(args) is None
+
+    def test_flags_build_config(self):
+        args = cli.build_parser().parse_args(
+            ["--database", "postgresql", "--db-host", "h", "--no-elasticsearch", "--debug", "--no-secret-key"]
+        )
+        config = cli._config_from_args(args)
+        assert config["database"] == "postgresql"
+        assert config["db_host"] == "h"
+        assert config["elasticsearch"] is False
+        assert config["debug"] is True
+        assert config["generate_secret_key"] is False
+
+    def test_interactive_invokes_wizard(self, monkeypatch):
+        monkeypatch.setattr("snapadmin.quickstart.wizard.run_wizard", lambda: {"mode": "docker"})
+        args = cli.build_parser().parse_args(["--interactive"])
+        assert cli._config_from_args(args) == {"mode": "docker"}
+
+    def test_load_config(self, tmp_path):
+        from snapadmin.quickstart import config as config_mod
+
+        path = config_mod.save_config({"mode": "runserver", "database": "sqlite"}, tmp_path / "c.ini")
+        args = cli.build_parser().parse_args(["--load-config", str(path)])
+        assert cli._config_from_args(args)["mode"] == "runserver"
+
+
+class TestConfigWiring:
+    def test_writes_env_and_saves_config(self, monkeypatch, tmp_path):
+        demo_dir = tmp_path / "out" / "demo"
+        demo_dir.mkdir(parents=True)
+        _patch_pipeline(monkeypatch, extract=lambda a, p, **kw: demo_dir)
+        saved: dict = {}
+        monkeypatch.setattr(
+            "snapadmin.quickstart.config.save_config",
+            lambda c, p: saved.update(config=c, path=str(p)),
+        )
+        code = cli.main(
+            ["--database", "sqlite", "--admin-password", "s3cret", "--save-config", str(tmp_path / "team.ini"),
+             "--skip-install", "--no-serve"]
+        )
+        assert code == 0
+        assert (demo_dir / ".env").exists()
+        assert saved["config"]["database"] == "sqlite"
+
+    def test_mode_forwarded_to_run(self, monkeypatch, tmp_path):
+        demo_dir = tmp_path / "demo"
+        demo_dir.mkdir()
+        captured: dict = {}
+        _patch_pipeline(
+            monkeypatch,
+            extract=lambda a, p, **kw: demo_dir,
+            run=lambda d, **kw: captured.update(kw),
+        )
+        cli.main(["--mode", "docker", "--skip-install", "--no-serve"])
+        assert captured["mode"] == "docker"
 
 
 class TestDunderMain:

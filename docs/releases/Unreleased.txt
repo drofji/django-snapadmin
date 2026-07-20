@@ -39,5 +39,9 @@ Added
   wheel doesn't ship it), caches it under ``~/.cache/snapadmin-demo/`` and checksums it so re-runs work
   offline, extracts only ``demo/`` (with a zip-slip guard and an overwrite confirmation), then installs
   its requirements, migrates, seeds and serves. Flags: ``--version``, ``--path``, ``--skip-install``,
-  ``--no-serve``, ``--clear-cache`` and ``-y/--yes``. It is stdlib-only (no new dependency) and never
-  imports Django in-process — it drives ``manage.py`` as a subprocess.
+  ``--no-serve``, ``--clear-cache`` and ``-y/--yes``. ``--interactive`` runs a wizard (run mode,
+  SQLite/PostgreSQL, admin password, secret-key generation, debug) that writes a ``.env`` the demo
+  reads; ``--save-config``/``--load-config`` capture and replay a setup so a team shares one
+  environment, and the same choices are available as non-interactive flags (``--mode``, ``--database``,
+  ``--db-host`` …) for CI. It is stdlib-only (no new dependency) and never imports Django in-process —
+  it drives ``manage.py`` as a subprocess.
