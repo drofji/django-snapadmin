@@ -17,7 +17,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Permission
 from django.test import override_settings
 
-from demo.app.models import Category, Customer, Order, OrderItem, Product
+from demo.apps.shop.models import Category, Customer, Order, OrderItem, Product
 
 
 def _ctx(user, auth=None):

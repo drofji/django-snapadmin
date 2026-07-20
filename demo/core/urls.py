@@ -4,7 +4,7 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from snapadmin.views import DashboardView
-from demo.app.views import LandingView, product_search, trigger_error
+from demo.apps.shop.views import LandingView, product_search, trigger_error
 
 urlpatterns = [
     # Public landing page (login form for anonymous, session + demo facts for

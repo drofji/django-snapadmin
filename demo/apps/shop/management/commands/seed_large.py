@@ -25,7 +25,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from demo.app.models import Customer, Order
+from demo.apps.shop.models import Customer, Order
 
 FIRST_NAMES = [
     "Alice", "Bob", "Carol", "David", "Emma", "Frank", "Grace", "Henry",

@@ -25,7 +25,7 @@ class _EcoMixin:
 @pytest.mark.django_db
 class TestAdminMixins:
     def test_mixin_composes_with_snapadmin(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         dj_admin.site.unregister(Product)
         Product.admin_mixins = [_EcoMixin]
         try:
@@ -45,7 +45,7 @@ class TestAdminMixins:
             Product.register_admin()
 
     def test_mixin_precedes_snapadmin_in_mro(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         dj_admin.site.unregister(Product)
         Product.admin_mixins = [_EcoMixin]
         try:
@@ -58,7 +58,7 @@ class TestAdminMixins:
             Product.register_admin()
 
     def test_default_is_no_extra_bases(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         ma = dj_admin.site._registry[Product]
         assert isinstance(ma, SnapSaveMixin)  # normal composition unaffected
 
@@ -66,7 +66,7 @@ class TestAdminMixins:
 @pytest.mark.django_db
 class TestEscapeHatches:
     def test_admin_enabled_false_skips_registration(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         dj_admin.site.unregister(Product)
         Product.admin_enabled = False
         try:
@@ -79,7 +79,7 @@ class TestEscapeHatches:
     def test_register_admin_never_clobbers_existing(self):
         # A package (or the user) may register a custom admin first; SnapAdmin's
         # auto-registration must skip it, not overwrite it.
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
 
         class CustomAdmin(dj_admin.ModelAdmin):
             marker = "custom"

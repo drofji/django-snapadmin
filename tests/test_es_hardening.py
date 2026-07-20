@@ -11,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import override_settings
 
-from demo.app.models import Customer, Product, SearchLog
+from demo.apps.shop.models import Customer, Product, SearchLog
 
 
 # ── es_index_settings ─────────────────────────────────────────────────────────

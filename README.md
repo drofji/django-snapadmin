@@ -1931,7 +1931,7 @@ Copy `demo/dist.env` to `demo/.env` and configure:
 ## 🌟 Demo Application Features
 
 The runnable demo lives entirely under [`demo/`](demo/) — `demo/core/` is the project
-config, `demo/app/` is the example app (additional demo apps go alongside it), and every
+config, `demo/apps/shop/` is the example app (additional demo apps go alongside it), and every
 demo-only file (`manage.py`, `requirements.txt`, the Docker/Traefik compose files, the
 `dist.env` template) sits there too. See [`demo/README.md`](demo/README.md) for a focused
 guide. It showcases SnapAdmin's power:

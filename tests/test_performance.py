@@ -23,7 +23,7 @@ def _admin_for(model):
 
 class TestListViewKnobDefaults:
     def test_defaults_flow_onto_registered_admin(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
 
         model_admin = _admin_for(Product)
         assert model_admin.list_per_page == 100
@@ -41,24 +41,24 @@ class TestListViewKnobDefaults:
 class TestListSelectRelatedAutoDerivation:
     def test_fk_column_is_joined(self):
         # Order shows its `customer` FK in the list view.
-        from demo.app.models import Order
+        from demo.apps.shop.models import Order
 
         assert _admin_for(Order).list_select_related == ["customer"]
 
     def test_multiple_fk_columns_are_joined(self):
-        from demo.app.models import OrderItem
+        from demo.apps.shop.models import OrderItem
 
         sr = _admin_for(OrderItem).list_select_related
         assert set(sr) == {"order", "product"}
 
     def test_single_fk_column_is_joined(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
 
         assert _admin_for(Product).list_select_related == ["category"]
 
     def test_model_without_fk_columns_disables_select_related(self):
         # No FK columns → False, never an empty list (Django treats [] as "all").
-        from demo.app.models import Category, Customer
+        from demo.apps.shop.models import Category, Customer
 
         assert _admin_for(Category).list_select_related is False
         assert _admin_for(Customer).list_select_related is False
@@ -67,7 +67,7 @@ class TestListSelectRelatedAutoDerivation:
 class TestPerModelOverride:
     def test_class_attribute_overrides_flow_through(self):
         """Re-registering a model with custom knobs propagates them to the admin."""
-        from demo.app.models import Category
+        from demo.apps.shop.models import Category
 
         original = (
             Category.list_per_page,
@@ -98,7 +98,7 @@ class TestPerModelOverride:
 
 class TestSelectRelatedEliminatesNPlusOne:
     def test_fk_access_is_a_single_query(self, db):
-        from demo.app.models import Customer, Order
+        from demo.apps.shop.models import Customer, Order
 
         for i in range(10):
             cust = Customer.objects.create(
@@ -118,7 +118,7 @@ class TestSelectRelatedEliminatesNPlusOne:
 
     def test_without_select_related_triggers_n_plus_1(self, db):
         # Contrast case: proves the optimization is what avoids the extra queries.
-        from demo.app.models import Customer, Order
+        from demo.apps.shop.models import Customer, Order
 
         for i in range(10):
             cust = Customer.objects.create(

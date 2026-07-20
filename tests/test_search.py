@@ -22,35 +22,35 @@ import pytest
 class TestIsEsAvailable:
     def test_returns_false_when_disabled_in_settings(self, settings):
         settings.ELASTICSEARCH_ENABLED = False
-        from demo.app import search
+        from demo.apps.shop import search
         assert search.is_es_available() is False
 
     def test_returns_false_when_ping_fails(self, settings):
         settings.ELASTICSEARCH_ENABLED = True
-        with patch("demo.app.search.get_es_client") as mock_client:
+        with patch("demo.apps.shop.search.get_es_client") as mock_client:
             mock_client.return_value.ping.return_value = False
-            from demo.app import search
+            from demo.apps.shop import search
             assert search.is_es_available() is False
 
     def test_returns_true_when_ping_succeeds(self, settings):
         settings.ELASTICSEARCH_ENABLED = True
-        with patch("demo.app.search.get_es_client") as mock_client:
+        with patch("demo.apps.shop.search.get_es_client") as mock_client:
             mock_client.return_value.ping.return_value = True
-            from demo.app import search
+            from demo.apps.shop import search
             assert search.is_es_available() is True
 
     def test_returns_false_on_connection_error(self, settings):
         settings.ELASTICSEARCH_ENABLED = True
-        with patch("demo.app.search.get_es_client") as mock_client:
+        with patch("demo.apps.shop.search.get_es_client") as mock_client:
             mock_client.return_value.ping.side_effect = ConnectionError("refused")
-            from demo.app import search
+            from demo.apps.shop import search
             assert search.is_es_available() is False
 
     def test_never_raises(self, settings):
         settings.ELASTICSEARCH_ENABLED = True
-        with patch("demo.app.search.get_es_client") as mock_client:
+        with patch("demo.apps.shop.search.get_es_client") as mock_client:
             mock_client.side_effect = Exception("unexpected!")
-            from demo.app import search
+            from demo.apps.shop import search
             # Must not raise
             result = search.is_es_available()
             assert result is False
@@ -65,28 +65,28 @@ class TestSearchProductsDbFallback:
     """When ES is unavailable, search_products falls back to ORM queries."""
 
     def test_fallback_finds_matching_product(self, product):
-        with patch("demo.app.search.is_es_available", return_value=False):
-            from demo.app.search import search_products
+        with patch("demo.apps.shop.search.is_es_available", return_value=False):
+            from demo.apps.shop.search import search_products
             results = search_products("Laptop")
         names = [r["name"] for r in results]
         assert product.name in names
 
     def test_fallback_case_insensitive(self, product):
-        with patch("demo.app.search.is_es_available", return_value=False):
-            from demo.app.search import search_products
+        with patch("demo.apps.shop.search.is_es_available", return_value=False):
+            from demo.apps.shop.search import search_products
             results = search_products("laptop")  # lowercase
         names = [r["name"] for r in results]
         assert product.name in names
 
     def test_fallback_no_match_returns_empty(self, product):
-        with patch("demo.app.search.is_es_available", return_value=False):
-            from demo.app.search import search_products
+        with patch("demo.apps.shop.search.is_es_available", return_value=False):
+            from demo.apps.shop.search import search_products
             results = search_products("xyzzynonexistent")
         assert results == []
 
     def test_fallback_result_has_required_keys(self, product):
-        with patch("demo.app.search.is_es_available", return_value=False):
-            from demo.app.search import search_products
+        with patch("demo.apps.shop.search.is_es_available", return_value=False):
+            from demo.apps.shop.search import search_products
             results = search_products("Laptop")
         assert len(results) > 0
         r = results[0]
@@ -96,20 +96,20 @@ class TestSearchProductsDbFallback:
         assert "available" in r
 
     def test_fallback_respects_limit(self, many_products):
-        with patch("demo.app.search.is_es_available", return_value=False):
-            from demo.app.search import search_products
+        with patch("demo.apps.shop.search.is_es_available", return_value=False):
+            from demo.apps.shop.search import search_products
             results = search_products("Product", limit=5)
         assert len(results) <= 5
 
     def test_fallback_price_is_float(self, product):
-        with patch("demo.app.search.is_es_available", return_value=False):
-            from demo.app.search import search_products
+        with patch("demo.apps.shop.search.is_es_available", return_value=False):
+            from demo.apps.shop.search import search_products
             results = search_products("Laptop")
         assert isinstance(results[0]["price"], float)
 
     def test_fallback_available_is_bool(self, product):
-        with patch("demo.app.search.is_es_available", return_value=False):
-            from demo.app.search import search_products
+        with patch("demo.apps.shop.search.is_es_available", return_value=False):
+            from demo.apps.shop.search import search_products
             results = search_products("Laptop")
         assert isinstance(results[0]["available"], bool)
 
@@ -129,9 +129,9 @@ class TestSearchProductsEsPath:
                 ]
             }
         }
-        with patch("demo.app.search.is_es_available", return_value=True), \
-             patch("demo.app.search.get_es_client", return_value=mock_es):
-            from demo.app.search import search_products
+        with patch("demo.apps.shop.search.is_es_available", return_value=True), \
+             patch("demo.apps.shop.search.get_es_client", return_value=mock_es):
+            from demo.apps.shop.search import search_products
             results = search_products("Laptop")
         assert len(results) == 1
         assert results[0]["name"] == product.name
@@ -139,9 +139,9 @@ class TestSearchProductsEsPath:
     def test_falls_back_to_db_when_es_search_raises(self, product):
         mock_es = MagicMock()
         mock_es.search.side_effect = Exception("ES timeout")
-        with patch("demo.app.search.is_es_available", return_value=True), \
-             patch("demo.app.search.get_es_client", return_value=mock_es):
-            from demo.app.search import search_products
+        with patch("demo.apps.shop.search.is_es_available", return_value=True), \
+             patch("demo.apps.shop.search.get_es_client", return_value=mock_es):
+            from demo.apps.shop.search import search_products
             results = search_products("Laptop")
         # Should have fallen back to DB without raising
         assert isinstance(results, list)
@@ -155,16 +155,16 @@ class TestSearchProductsEsPath:
 class TestIndexProduct:
     def test_skips_when_es_unavailable(self, product):
         """index_product must be a no-op when ES is down."""
-        with patch("demo.app.search.is_es_available", return_value=False):
-            from demo.app.search import index_product
+        with patch("demo.apps.shop.search.is_es_available", return_value=False):
+            from demo.apps.shop.search import index_product
             index_product(product)  # must not raise
 
     def test_calls_es_index_when_available(self, product):
         mock_es = MagicMock()
         mock_es.indices.exists.return_value = True
-        with patch("demo.app.search.is_es_available", return_value=True), \
-             patch("demo.app.search.get_es_client", return_value=mock_es):
-            from demo.app.search import index_product
+        with patch("demo.apps.shop.search.is_es_available", return_value=True), \
+             patch("demo.apps.shop.search.get_es_client", return_value=mock_es):
+            from demo.apps.shop.search import index_product
             index_product(product)
         mock_es.index.assert_called_once()
         call_kwargs = mock_es.index.call_args.kwargs
@@ -174,9 +174,9 @@ class TestIndexProduct:
         mock_es = MagicMock()
         mock_es.indices.exists.return_value = True
         mock_es.index.side_effect = Exception("ES write failed")
-        with patch("demo.app.search.is_es_available", return_value=True), \
-             patch("demo.app.search.get_es_client", return_value=mock_es):
-            from demo.app.search import index_product
+        with patch("demo.apps.shop.search.is_es_available", return_value=True), \
+             patch("demo.apps.shop.search.get_es_client", return_value=mock_es):
+            from demo.apps.shop.search import index_product
             index_product(product)  # must not raise
 
 
@@ -187,22 +187,22 @@ class TestIndexProduct:
 @pytest.mark.django_db
 class TestDeleteProduct:
     def test_skips_when_es_unavailable(self):
-        with patch("demo.app.search.is_es_available", return_value=False):
-            from demo.app.search import delete_product
+        with patch("demo.apps.shop.search.is_es_available", return_value=False):
+            from demo.apps.shop.search import delete_product
             delete_product(99999)  # must not raise
 
     def test_calls_es_delete_when_available(self):
         mock_es = MagicMock()
-        with patch("demo.app.search.is_es_available", return_value=True), \
-             patch("demo.app.search.get_es_client", return_value=mock_es):
-            from demo.app.search import delete_product
+        with patch("demo.apps.shop.search.is_es_available", return_value=True), \
+             patch("demo.apps.shop.search.get_es_client", return_value=mock_es):
+            from demo.apps.shop.search import delete_product
             delete_product(42)
         mock_es.delete.assert_called_once()
 
     def test_swallows_es_errors(self):
         mock_es = MagicMock()
         mock_es.delete.side_effect = Exception("ES delete failed")
-        with patch("demo.app.search.is_es_available", return_value=True), \
-             patch("demo.app.search.get_es_client", return_value=mock_es):
-            from demo.app.search import delete_product
+        with patch("demo.apps.shop.search.is_es_available", return_value=True), \
+             patch("demo.apps.shop.search.get_es_client", return_value=mock_es):
+            from demo.apps.shop.search import delete_product
             delete_product(99)  # must not raise

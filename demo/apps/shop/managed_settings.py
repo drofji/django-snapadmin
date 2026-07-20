@@ -1,5 +1,5 @@
 """
-demo/app/managed_settings.py
+demo/apps/shop/managed_settings.py
 
 **Demo-only** bridge that surfaces a curated set of runtime-editable
 ``SNAPADMIN_*`` settings through ``django-extra-settings`` (the ``[extra-settings]``

@@ -19,7 +19,7 @@ class TestAllowedModelsValidation:
 
     def test_invalid_format_too_many_dots(self):
         with pytest.raises(ValidationError, match="Invalid model format"):
-            validate_allowed_models(["demo.app.Product"])
+            validate_allowed_models(["demo.apps.shop.Product"])
 
     def test_non_existent_model(self):
         with pytest.raises(ValidationError, match="does not exist"):

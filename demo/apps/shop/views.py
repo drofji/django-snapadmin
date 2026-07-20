@@ -6,7 +6,7 @@ from django.shortcuts import redirect, render
 from django.urls import NoReverseMatch, reverse
 from django.views.generic import TemplateView
 
-from demo.app.models import Product
+from demo.apps.shop.models import Product
 
 
 def trigger_error(request):

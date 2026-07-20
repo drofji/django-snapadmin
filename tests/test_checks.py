@@ -91,7 +91,7 @@ class TestNestingActiveSite:
     @override_settings(SNAPADMIN_HIDDEN_APPS=["silk"])
     def test_other_site_with_registered_models_warns(self):
         from django.contrib.admin.sites import AdminSite
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
 
         custom_site = AdminSite(name="custom")
         custom_site.register(Product)
@@ -163,12 +163,12 @@ class TestApiWriteFields:
         assert {w.id for w in result} == {"snapadmin.W004"}
 
     def test_warns_once_per_unconfigured_model(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         result = checks.check_api_write_fields(None)
         assert any("demo.Product" in w.msg for w in result)
 
     def test_model_with_write_fields_set_does_not_warn(self, monkeypatch):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         monkeypatch.setattr(Product, "api_write_fields", ["name"], raising=False)
         result = checks.check_api_write_fields(None)
         assert not any("demo.Product" in w.msg for w in result)

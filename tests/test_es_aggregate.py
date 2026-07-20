@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 
 from django.test import override_settings
 
-from demo.app.models import Product, SearchLog
+from demo.apps.shop.models import Product, SearchLog
 
 
 def _es_returning(aggregations):

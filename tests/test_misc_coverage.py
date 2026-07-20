@@ -73,7 +73,7 @@ class TestAuthenticationEdgeCases:
 class TestFiltersExtended:
     def test_build_filterset_for_model_caches_result(self):
         from snapadmin.api.filters import build_filterset_for_model, _filterset_cache
-        from demo.app.models import Customer
+        from demo.apps.shop.models import Customer
 
         build_filterset_for_model(Customer)
         # Second call should hit cache
@@ -82,7 +82,7 @@ class TestFiltersExtended:
 
     def test_filterset_includes_uuid_field(self):
         from snapadmin.api.filters import build_filterset_for_model
-        from demo.app.models import Showcase
+        from demo.apps.shop.models import Showcase
         filterset = build_filterset_for_model(Showcase)
         assert filterset is not None
 
@@ -126,7 +126,7 @@ class TestGraphqlSchema:
 
     def test_graphql_single_resolver(self):
         """Single resolver works without an actual DB hit error."""
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         product = Product.objects.create(name="GQL Test", price=Decimal("9.99"))
         from snapadmin.api.graphql import schema
         result = schema.execute(f"{{ demoProduct(id: {product.pk}) {{ id name }} }}")
@@ -148,7 +148,7 @@ class TestTasksEdgeCases:
 
     def test_purge_expired_data_task_handles_exception(self):
         from snapadmin.tasks import purge_expired_data
-        from demo.app.models import AuditLog
+        from demo.apps.shop.models import AuditLog
 
         # Patch model.objects.filter to raise
         with patch.object(AuditLog.objects.__class__, "filter", side_effect=Exception("DB error")):
@@ -224,13 +224,13 @@ class TestPurgeExpiredDataCommand:
         assert "Dry run" in output or "DRY RUN" in output or "dry" in output.lower()
 
     def test_purge_command_skips_es_only(self):
-        from demo.app.models import SearchLog
+        from demo.apps.shop.models import SearchLog
         output = self._run_command(dry_run=True)
         # SearchLog is ES_ONLY and should be skipped
         assert "SKIPPED" in output or True  # command runs without error
 
     def test_purge_command_handles_error_gracefully(self):
-        from demo.app.models import AuditLog
+        from demo.apps.shop.models import AuditLog
         with patch.object(AuditLog.objects.__class__, "filter", side_effect=Exception("DB error")):
             output = self._run_command(dry_run=False)
         assert "ERROR" in output or True  # command should not raise
@@ -269,7 +269,7 @@ class TestSnapOneToOneField:
         """SnapOneToOneField can be instantiated without error."""
         from snapadmin import fields as snap
         from django.db import models
-        from demo.app.models import Category
+        from demo.apps.shop.models import Category
         field = snap.SnapOneToOneField(Category, on_delete=models.CASCADE, null=True, blank=True)
         assert field is not None
 

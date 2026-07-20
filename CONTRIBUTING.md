@@ -5,7 +5,7 @@ that aren't obvious from the code.
 
 - **Package source:** the published package lives in [`snapadmin/`](snapadmin/). Everything
   else supports development and is **not** shipped to PyPI: the runnable demo project lives
-  entirely under [`demo/`](demo/) (`demo/core/` = project config, `demo/app/` = example app,
+  entirely under [`demo/`](demo/) (`demo/core/` = project config, `demo/apps/shop/` = example app,
   plus its own `manage.py`, `requirements.txt`, Docker/Traefik compose files and `dist.env`),
   and `tests/` + `docs/` sit at the repo root.
 - **Running things:** the demo's `manage.py` lives in `demo/`; run it from the repo root as

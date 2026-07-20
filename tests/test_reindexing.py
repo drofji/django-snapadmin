@@ -18,7 +18,7 @@ from django.utils import timezone
 
 @pytest.fixture
 def products(db):
-    from demo.app.models import Product
+    from demo.apps.shop.models import Product
     Product.objects.all().delete()
     from decimal import Decimal
     return [Product.objects.create(name=f"P{i}", price=Decimal("1.00")) for i in range(5)]
@@ -48,7 +48,7 @@ class TestSnapReindexJobModel:
         return SnapReindexJob.objects.create(app_label="demo", model="Product", **kw)
 
     def test_target_model_resolves(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         assert self._job().target_model() is Product
 
     def test_progress_percent_zero_total(self):
@@ -141,7 +141,7 @@ class TestRunReindexJob:
         return SnapReindexJob.objects.create(app_label="demo", model="Product", **kw)
 
     def test_indexes_all_rows(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.reindexing import run_reindex_job
         job = self._make_job()
         with patch.object(Product, "get_es_client", return_value=es_client), \
@@ -155,7 +155,7 @@ class TestRunReindexJob:
         assert bulk.called
 
     def test_resume_from_cursor(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.reindexing import run_reindex_job
         third_pk = str(products[2].pk)
         # Simulate a crash after 3 rows: cursor at row 3, 3 processed.
@@ -177,7 +177,7 @@ class TestRunReindexJob:
         assert job.status == "completed"
 
     def test_cancellation_stops_between_chunks(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.models import SnapReindexJob
         from snapadmin.reindexing import run_reindex_job
         job = self._make_job()
@@ -196,7 +196,7 @@ class TestRunReindexJob:
         assert job.processed_rows == 2  # only the first chunk was written
 
     def test_tune_relaxes_and_restores(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.reindexing import run_reindex_job
         job = self._make_job()
         with patch.object(Product, "get_es_client", return_value=es_client), \
@@ -213,7 +213,7 @@ class TestRunReindexJob:
         assert last["number_of_replicas"] == "1"
 
     def test_parallel_uses_parallel_bulk(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.reindexing import run_reindex_job
         job = self._make_job()
 
@@ -231,7 +231,7 @@ class TestRunReindexJob:
         assert pb.call_args.kwargs["thread_count"] == 4
 
     def test_bulk_errors_recorded_but_job_completes(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.reindexing import run_reindex_job
         job = self._make_job()
 
@@ -248,7 +248,7 @@ class TestRunReindexJob:
         assert "rejected" in job.error.lower()
 
     def test_exception_marks_job_failed(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.reindexing import run_reindex_job
         job = self._make_job()
         with patch.object(Product, "get_es_client", return_value=es_client), \
@@ -260,7 +260,7 @@ class TestRunReindexJob:
         assert summary["errors"]
 
     def test_progress_callback_invoked(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.reindexing import run_reindex_job
         job = self._make_job()
         seen = []
@@ -270,7 +270,7 @@ class TestRunReindexJob:
         assert seen and seen[-1] == 5
 
     def test_already_processing_is_skipped(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.reindexing import run_reindex_job
         job = self._make_job(status="processing")
         with patch.object(Product, "get_es_client", return_value=es_client), \
@@ -280,7 +280,7 @@ class TestRunReindexJob:
         assert not bulk.called
 
     def test_es_only_model_single_pass(self, db, es_client):
-        from demo.app.models import SearchLog
+        from demo.apps.shop.models import SearchLog
         from snapadmin.models import SnapReindexJob
         from snapadmin.reindexing import run_reindex_job
         job = SnapReindexJob.objects.create(app_label="demo", model="SearchLog")
@@ -299,7 +299,7 @@ class TestRunReindexJob:
         assert job.processed_rows == 1
 
     def test_parallel_bulk_counts_errors(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.reindexing import run_reindex_job
         job = self._make_job()
 
@@ -316,7 +316,7 @@ class TestRunReindexJob:
         assert summary["errors"] == 1
 
     def test_restart_clean_when_processed_but_no_cursor(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.reindexing import run_reindex_job
         # A stale counter (processed_rows set) with no cursor to resume from must
         # reset to 0 so the fresh pass doesn't double-count.
@@ -341,7 +341,7 @@ class TestRunReindexJob:
         return hits
 
     def test_es_only_multi_chunk_with_progress(self, db, es_client):
-        from demo.app.models import SearchLog
+        from demo.apps.shop.models import SearchLog
         from snapadmin.models import EsQuerySet
         from snapadmin.reindexing import run_reindex_job
         job = self._es_only_job()
@@ -356,7 +356,7 @@ class TestRunReindexJob:
         assert seen[-1] == 3               # progress fired per chunk + on completion
 
     def test_es_only_rerun_resets_counter(self, db, es_client):
-        from demo.app.models import SearchLog
+        from demo.apps.shop.models import SearchLog
         from snapadmin.models import EsQuerySet, SnapReindexJob
         from snapadmin.reindexing import run_reindex_job
         # A failed ES_ONLY job carrying a stale processed_rows must restart clean
@@ -373,7 +373,7 @@ class TestRunReindexJob:
         assert job.processed_rows == 2   # not 99 + 2
 
     def test_es_only_cancellation(self, db, es_client):
-        from demo.app.models import SearchLog
+        from demo.apps.shop.models import SearchLog
         from snapadmin.models import EsQuerySet, SnapReindexJob
         from snapadmin.reindexing import run_reindex_job
         job = self._es_only_job()

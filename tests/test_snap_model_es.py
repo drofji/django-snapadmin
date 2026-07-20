@@ -1,8 +1,8 @@
 
 import pytest
 from unittest.mock import MagicMock, patch
-from demo.app.models import Product
-from demo.app.models import SearchLog
+from demo.apps.shop.models import Product
+from demo.apps.shop.models import SearchLog
 from django.conf import settings
 from django.test import override_settings
 

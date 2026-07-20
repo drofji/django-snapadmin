@@ -12,7 +12,7 @@ import pytest
 from django.core.management import call_command
 from django.test import override_settings
 
-from demo.app.models import ExchangeRate
+from demo.apps.shop.models import ExchangeRate
 from snapadmin.etl import StaleSyncAbort, stale_sync, upsert_from_source
 from snapadmin.models import SnapPurgeError
 
@@ -67,7 +67,7 @@ class TestUpsertFromSource:
             upsert_from_source(ExchangeRate, _rows(1), unique_fields=[])
 
     def test_es_only_model_rejected(self):
-        from demo.app.models import SearchLog
+        from demo.apps.shop.models import SearchLog
 
         with pytest.raises(ValueError, match="ES_ONLY"):
             upsert_from_source(SearchLog, _rows(1), unique_fields=["code"])
@@ -212,7 +212,7 @@ class TestStaleSync:
         assert result == {"total": 0, "stale": 0, "deleted": 0, "fraction": 0.0, "dry_run": False}
 
     def test_es_only_model_rejected(self):
-        from demo.app.models import SearchLog
+        from demo.apps.shop.models import SearchLog
         with pytest.raises(ValueError, match="ES_ONLY"):
             stale_sync(SearchLog, ["x"], key_field="query")
 

@@ -4,7 +4,7 @@ tests/test_extra_settings_sync.py — demo extra_settings → settings bridge (#
 The demo surfaces a curated set of runtime-editable SNAPADMIN_* settings through
 django-extra-settings (DB-backed, admin-editable) and syncs the DB value back onto
 ``django.conf.settings`` so the (extra_settings-agnostic) package keeps reading its
-config normally. See demo/app/managed_settings.py.
+config normally. See demo/apps/shop/managed_settings.py.
 
 These tests create their own Setting rows (the suite otherwise seeds none — see
 ``EXTRA_SETTINGS_DEFAULTS = []`` in settings_test). The sync mutates the
@@ -15,7 +15,7 @@ below snapshots and restores every managed setting around each test.
 import pytest
 from django.conf import settings
 
-from demo.app import managed_settings as ms
+from demo.apps.shop import managed_settings as ms
 
 
 @pytest.fixture(autouse=True)

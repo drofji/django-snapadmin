@@ -66,7 +66,7 @@ INSTALLED_APPS = [
     'extra_settings',               # Optional extra: pip install django-snapadmin[extra-settings]
 
     # Local Apps
-    'demo.app',                       # label stays "demo" (DemoConfig.label) — Testing
+    'demo.apps.shop',                       # label stays "demo" (DemoConfig.label) — Testing
 ]
 
 MIDDLEWARE = [
@@ -501,18 +501,18 @@ CELERY_BEAT_SCHEDULE = {
 # ------------------------------------------------------------------------------
 # EXTRA_SETTINGS_ADMIN_APP must match an INSTALLED_APPS entry *literally* (extra_settings
 # checks membership in settings.INSTALLED_APPS, not the app's label) — this project lists
-# the demo app as 'demo.app' (DemoConfig.name), even though its app_label is the shorter
+# the demo app as 'demo.apps.shop' (DemoConfig.name), even though its app_label is the shorter
 # 'demo' (DemoConfig.label), so this must be the dotted path, not the bare label.
-EXTRA_SETTINGS_ADMIN_APP = "demo.app"
+EXTRA_SETTINGS_ADMIN_APP = "demo.apps.shop"
 EXTRA_SETTINGS_CACHE_NAME = "extra_settings"
 EXTRA_SETTINGS_VERBOSE_NAME = _("Settings")
 
 # Surface a curated set of *runtime-editable* SNAPADMIN_* settings as DB-backed,
 # admin-editable extra_settings rows (demo-only bridge; see
-# demo/app/managed_settings.py for the how/why and the exclusion rules). The
+# demo/apps/shop/managed_settings.py for the how/why and the exclusion rules). The
 # seed value for each row is the demo's own configured value when settings.py
 # already defines one, otherwise the package default carried in the spec.
-from demo.app.managed_settings import (  # noqa: E402
+from demo.apps.shop.managed_settings import (  # noqa: E402
     MANAGED_SETTING_NAMES,
     build_extra_settings_defaults,
 )

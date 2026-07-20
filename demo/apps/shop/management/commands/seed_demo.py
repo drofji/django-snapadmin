@@ -22,7 +22,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from demo.app.models import AuditLog, Category, Customer, Order, Product, SearchLog, Tag
+from demo.apps.shop.models import AuditLog, Category, Customer, Order, Product, SearchLog, Tag
 
 
 # ─── Sample data pools ───────────────────────────────────────────────────────
@@ -348,7 +348,7 @@ class Command(BaseCommand):
 
     def _index_to_elasticsearch(self, products: list):
         """Attempt to index products to Elasticsearch. Silently skips when ES is unavailable."""
-        from demo.app.search import index_product, is_es_available
+        from demo.apps.shop.search import index_product, is_es_available
         if not is_es_available():
             self._write(self.style.WARNING("   ⚠  Elasticsearch not available — skipping index."))
             return

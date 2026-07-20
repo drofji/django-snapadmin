@@ -3,7 +3,7 @@ from django.apps import AppConfig
 
 class DemoConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
-    name = 'demo.app'
+    name = 'demo.apps.shop'
     # Explicit label keeps the pre-restructure app_label ("demo") for migration
     # history and every documented "demo.<Model>" reference (URLs, README curl
     # examples, seed_demo/seed_large/benchmark_list_view commands) unchanged —
@@ -16,7 +16,7 @@ class DemoConfig(AppConfig):
         # wiring happens here (DB-free, no "database access during app init"
         # warning); the actual first sync runs one-shot on the first request,
         # and each admin edit re-applies live via post_save. See
-        # demo/app/managed_settings.py.
-        from demo.app.managed_settings import connect_managed_settings_signals
+        # demo/apps/shop/managed_settings.py.
+        from demo.apps.shop.managed_settings import connect_managed_settings_signals
 
         connect_managed_settings_signals()

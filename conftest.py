@@ -89,19 +89,19 @@ def anon_client():
 
 @pytest.fixture
 def product(db):
-    from demo.app.models import Product
+    from demo.apps.shop.models import Product
     return Product.objects.create(name="Test Laptop Stand", price=Decimal("49.99"), available=True)
 
 
 @pytest.fixture
 def product_unavailable(db):
-    from demo.app.models import Product
+    from demo.apps.shop.models import Product
     return Product.objects.create(name="Out-of-Stock Item", price=Decimal("9.99"), available=False)
 
 
 @pytest.fixture
 def many_products(db):
-    from demo.app.models import Product
+    from demo.apps.shop.models import Product
     objs = [
         Product(name=f"Product {i}", price=Decimal(f"{i}.99"), available=(i % 2 == 0))
         for i in range(1, 31)
@@ -111,7 +111,7 @@ def many_products(db):
 
 @pytest.fixture
 def customer(db):
-    from demo.app.models import Customer
+    from demo.apps.shop.models import Customer
     return Customer.objects.create(
         first_name="Alice", last_name="Smith",
         email="alice@example.com", origin="status_a", active=True
@@ -120,7 +120,7 @@ def customer(db):
 
 @pytest.fixture
 def customer_inactive(db):
-    from demo.app.models import Customer
+    from demo.apps.shop.models import Customer
     return Customer.objects.create(
         first_name="Bob", last_name="Jones",
         email="bob@example.com", origin="status_b", active=False
@@ -129,5 +129,5 @@ def customer_inactive(db):
 
 @pytest.fixture
 def order(db, customer):
-    from demo.app.models import Order
+    from demo.apps.shop.models import Order
     return Order.objects.create(customer=customer, total=Decimal("99.99"))

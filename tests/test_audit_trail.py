@@ -140,11 +140,11 @@ class TestRecordAudit:
 @pytest.mark.django_db
 class TestAdminCapture:
     def _product_admin(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         return site._registry[Product]
 
     def test_create_audited(self, admin_user):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         obj = Product(name="Fresh", price=3)
         form = SimpleNamespace(cleaned_data={"name": "Fresh", "price": 3}, changed_data=[], initial={})
         self._product_admin().save_model(_request(admin_user), obj, form, change=False)
@@ -173,7 +173,7 @@ class TestAdminCapture:
         assert SnapadminAuditLog.objects.filter(action="delete").count() == 1
 
     def test_delete_queryset_audited(self, admin_user, many_products):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         self._product_admin().delete_queryset(_request(admin_user), Product.objects.all())
         assert SnapadminAuditLog.objects.filter(action="delete").count() == len(many_products)
 

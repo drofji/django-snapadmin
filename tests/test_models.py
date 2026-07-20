@@ -92,28 +92,28 @@ class TestGetAdminFields:
     """get_admin_fields() must return the correct five-tuple for demo models."""
 
     def test_product_returns_five_tuple(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         result = Product.get_admin_fields()
         assert len(result) == 5
 
     def test_product_list_display_contains_id(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         _, list_display, *_ = Product.get_admin_fields()
         assert "id" in list_display
 
     def test_product_id_is_first_in_list_display(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         _, list_display, *_ = Product.get_admin_fields()
         assert list_display[0] == "id"
 
     def test_product_search_fields_contains_id(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         _, _, search_fields, *_ = Product.get_admin_fields()
         assert "id" in search_fields
 
     def test_customer_list_filter_has_origin(self):
         """origin has filterable=True, so it should appear in list_filter."""
-        from demo.app.models import Customer
+        from demo.apps.shop.models import Customer
         _, _, _, list_filter, _ = Customer.get_admin_fields()
         filter_names = []
         for item in list_filter:
@@ -125,7 +125,7 @@ class TestGetAdminFields:
 
     def test_order_autocomplete_fields_has_customer(self):
         """Order.customer has autocomplete=True."""
-        from demo.app.models import Order
+        from demo.apps.shop.models import Order
         _, _, _, _, autocomplete_fields = Order.get_admin_fields()
         assert "customer" in autocomplete_fields
 
@@ -139,20 +139,20 @@ class TestAdminRegistration:
     """All demo SnapModel subclasses must be registered in the admin site."""
 
     def test_product_registered(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         assert Product in admin.site._registry
 
     def test_customer_registered(self):
-        from demo.app.models import Customer
+        from demo.apps.shop.models import Customer
         assert Customer in admin.site._registry
 
     def test_order_registered(self):
-        from demo.app.models import Order
+        from demo.apps.shop.models import Order
         assert Order in admin.site._registry
 
     def test_register_already_registered_does_not_raise(self):
         """Calling register_admin twice must be silent."""
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         Product.register_admin()  # already registered – should not raise
 
     def test_admin_disabled_model_not_registered(self):
@@ -189,7 +189,7 @@ class TestProductModel:
         assert str(product) == "Test Laptop Stand"
 
     def test_price_precision(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         p = Product.objects.create(name="Precision Test", price=Decimal("1.99"), available=True)
         p.refresh_from_db()
         assert p.price == Decimal("1.99")
@@ -219,7 +219,7 @@ class TestCustomerModel:
         assert customer_inactive.active is False
 
     def test_customer_email_optional(self):
-        from demo.app.models import Customer
+        from demo.apps.shop.models import Customer
         c = Customer.objects.create(
             first_name="No", last_name="Email", origin="status_c", active=True
         )
@@ -244,7 +244,7 @@ class TestOrderModel:
     def test_order_select_related(self, order):
         """select_related should not cause extra queries."""
         o = (
-            __import__("demo.app.models", fromlist=["Order"])
+            __import__("demo.apps.shop.models", fromlist=["Order"])
             .Order.objects.select_related("customer")
             .get(pk=order.pk)
         )

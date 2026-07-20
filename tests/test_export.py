@@ -79,7 +79,7 @@ class NoPathExportStorage(Storage):
 
 @pytest.fixture
 def products(db):
-    from demo.app.models import Product
+    from demo.apps.shop.models import Product
     for i in range(5):
         Product.objects.create(name=f"P{i}", price=Decimal(i))
     return list(SnapExportJob.objects.none()) or None
@@ -116,7 +116,7 @@ class TestJobModel:
         assert job.eta_seconds == 30
 
     def test_target_model(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         assert _job().target_model() is Product
 
     def test_is_finished(self):
@@ -383,7 +383,7 @@ class TestRunExportJob:
     def test_pk_cursor_survives_concurrent_delete(self, products):
         # Delete an already-exported row (pk below the cursor) between chunks.
         # A pk__gt cursor must not let the OFFSET drift and skip a later row.
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         job = _job()
         exported_names: set[str] = set()
         real_refresh = SnapExportJob.refresh_from_db
@@ -436,7 +436,7 @@ class TestRunExportJob:
     def test_rows_deleted_mid_run_stops_cleanly(self, products, monkeypatch):
         # Concurrent deletion after the row count: the next slice comes back
         # empty and the writer breaks out rather than looping forever.
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         job = _job()
         real_refresh = SnapExportJob.refresh_from_db
 
@@ -470,7 +470,7 @@ class TestExportMasksPii:
 
     @staticmethod
     def _seed_customer():
-        from demo.app.models import Customer
+        from demo.apps.shop.models import Customer
         Customer.objects.create(
             first_name="Alice", last_name="Smith", email="alice@example.com",
             origin="status_a", active=True,
@@ -685,7 +685,7 @@ class TestAllowedFiltersForModel:
     """Unit coverage of the own-field/lookup allowlist dispatch."""
 
     def test_own_fields_only(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.api.exports import _allowed_filters_for_model
         allowed = _allowed_filters_for_model(Product)
         # Relations requiring a join are never allowlisted.
@@ -696,27 +696,27 @@ class TestAllowedFiltersForModel:
         assert allowed["category_id"] == {"exact", "in"}
 
     def test_text_field_lookups(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.api.exports import _allowed_filters_for_model
         assert _allowed_filters_for_model(Product)["name"] == {"exact", "in", "icontains"}
 
     def test_boolean_field_lookups(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.api.exports import _allowed_filters_for_model
         assert _allowed_filters_for_model(Product)["available"] == {"exact"}
 
     def test_numeric_field_lookups(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.api.exports import _allowed_filters_for_model
         assert _allowed_filters_for_model(Product)["price"] == {"exact", "in", "gte", "lte"}
 
     def test_datetime_field_lookups(self):
-        from demo.app.models import Order
+        from demo.apps.shop.models import Order
         from snapadmin.api.exports import _allowed_filters_for_model
         assert _allowed_filters_for_model(Order)["created_at"] == {"exact", "in", "gte", "lte"}
 
     def test_uuid_field_lookups(self):
-        from demo.app.models import Showcase
+        from demo.apps.shop.models import Showcase
         from snapadmin.api.exports import _allowed_filters_for_model
         assert _allowed_filters_for_model(Showcase)["uuid_field"] == {"exact", "in"}
 
@@ -725,28 +725,28 @@ class TestValidateExportFilters:
     """Unit coverage of the key/lookup rejection logic."""
 
     def test_relation_traversal_rejected(self):
-        from demo.app.models import Order
+        from demo.apps.shop.models import Order
         from snapadmin.api.exports import _validate_export_filters
         with pytest.raises(serializers.ValidationError) as exc:
             _validate_export_filters(Order, {"customer__email": "x"})
         assert "customer__email" in str(exc.value)
 
     def test_unknown_field_rejected(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.api.exports import _validate_export_filters
         with pytest.raises(serializers.ValidationError) as exc:
             _validate_export_filters(Product, {"nonexistent_field": "x"})
         assert "nonexistent_field" in str(exc.value)
 
     def test_disallowed_lookup_rejected(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.api.exports import _validate_export_filters
         with pytest.raises(serializers.ValidationError) as exc:
             _validate_export_filters(Product, {"name__gte": "x"})
         assert "name__gte" in str(exc.value)
 
     def test_valid_filters_pass(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.api.exports import _validate_export_filters
         _validate_export_filters(
             Product, {"name__icontains": "P", "price__gte": "1", "available": True,
@@ -756,14 +756,14 @@ class TestValidateExportFilters:
     def test_masked_field_rejected(self):
         # #SEC6: an otherwise-allowed filter on a masked field is still an
         # oracle (job.total_rows leaks a match/no-match) — reject it too.
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.api.exports import _validate_export_filters
         with pytest.raises(serializers.ValidationError) as exc:
             _validate_export_filters(Product, {"name": "x"}, {"name"})
         assert "name" in str(exc.value)
 
     def test_masked_field_empty_set_is_a_noop(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.api.exports import _validate_export_filters
         _validate_export_filters(Product, {"name": "x"})  # default masked_fields=frozenset()
 
@@ -773,7 +773,7 @@ class TestExportFilterValidationApi:
     """POST /api/exports/ end-to-end filter allowlist enforcement."""
 
     def test_relation_traversal_rejected(self, auth_client, products):
-        from demo.app.models import Category
+        from demo.apps.shop.models import Category
         Category.objects.create(name="C1", slug="c1")
         r = auth_client.post(
             "/api/exports/",
@@ -868,7 +868,7 @@ class TestExportFilterValidationApi:
         assert r.json()["processed_rows"] == 5  # all products default available=True
 
     def test_valid_fk_id_filter_applied(self, auth_client):
-        from demo.app.models import Customer, Order
+        from demo.apps.shop.models import Customer, Order
         c1 = Customer.objects.create(first_name="A", last_name="A", email="a@example.com")
         c2 = Customer.objects.create(first_name="B", last_name="B", email="b@example.com")
         Order.objects.create(customer=c1, total="10.00")
@@ -883,7 +883,7 @@ class TestExportFilterValidationApi:
         assert r.json()["processed_rows"] == 2
 
     def test_valid_date_filter_applied(self, auth_client):
-        from demo.app.models import Customer, Order
+        from demo.apps.shop.models import Customer, Order
         customer = Customer.objects.create(first_name="A", last_name="A", email="a@example.com")
         Order.objects.create(customer=customer, total="10.00")
         cutoff = (timezone.now() - timezone.timedelta(days=1)).isoformat()

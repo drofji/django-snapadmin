@@ -22,7 +22,7 @@ from snapadmin.pagination import (
 
 @pytest.fixture
 def products(db):
-    from demo.app.models import Product
+    from demo.apps.shop.models import Product
     from decimal import Decimal
     for i in range(5):
         Product.objects.create(name=f"P{i}", price=Decimal(i))
@@ -122,7 +122,7 @@ class TestPaginator:
 @pytest.mark.django_db
 class TestAdminWiring:
     def test_admin_uses_estimated_paginator(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         assert site._registry[Product].paginator is EstimatedCountPaginator
 
     def test_changelist_still_renders(self, admin_user, client, products):

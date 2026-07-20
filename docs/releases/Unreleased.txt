@@ -344,7 +344,7 @@ Demo project restructured into a self-contained ``demo/`` folder
   root-level ``sandbox/`` Django project, a flat ``demo/`` app, and a pile of root files
   (``manage.py``, ``requirements.txt``, the Docker/Traefik compose files, the ``dist.env``
   template, an ``admin/index.html`` override) — now lives entirely under one top-level ``demo/``
-  folder: ``demo/core/`` (project config, formerly ``sandbox/``), ``demo/app/`` (the example app,
+  folder: ``demo/core/`` (project config, formerly ``sandbox/``), ``demo/apps/shop/`` (the example app,
   so more demo apps can be added alongside it later), and ``demo/manage.py`` /
   ``demo/requirements.txt`` / ``demo/docker-compose*.yml`` / ``demo/Dockerfile`` / ``demo/dist.env``.
   **This does not affect anyone who installs django-snapadmin** — ``pyproject.toml`` packages only
@@ -365,7 +365,7 @@ Demo project restructured into a self-contained ``demo/`` folder
   package re-reads per request — masked fields, API page sizes, throttle rates, audit/error
   retention, export ceilings, ``SNAPADMIN_DASHBOARD_PUBLIC``) appears under "Settings" in the admin,
   each described, and edits take effect live with no restart. The bridge is demo-only
-  (``demo/app/managed_settings.py``) — the ``snapadmin`` package still reads plain
+  (``demo/apps/shop/managed_settings.py``) — the ``snapadmin`` package still reads plain
   ``django.conf.settings`` and never depends on ``django-extra-settings``; the demo simply syncs the
   DB value back onto ``settings``. Boot-time-only settings (routing toggles, admin nesting) and all
   secrets are deliberately excluded.

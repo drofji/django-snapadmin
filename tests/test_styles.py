@@ -48,24 +48,24 @@ class TestCssAssetsExist:
 
 class TestCssInjection:
     def test_core_css_loaded_on_every_model(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         assert CORE_CSS in _media_css(Product)
 
     @pytest.mark.skipif(not UNFOLD_INSTALLED, reason="Unfold not installed")
     def test_unfold_css_loaded_when_unfold_installed(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         assert UNFOLD_CSS in _media_css(Product)
 
     @pytest.mark.skipif(not UNFOLD_INSTALLED, reason="Unfold not installed")
     def test_unfold_css_loaded_after_core(self):
         """Unfold overrides must follow core so .unfold rules win the cascade."""
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         css = _media_css(Product)
         assert css.index(CORE_CSS) < css.index(UNFOLD_CSS)
 
     @pytest.mark.skipif(not UNFOLD_INSTALLED, reason="Unfold not installed")
     def test_unfold_css_listed_once(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         assert _media_css(Product).count(UNFOLD_CSS) == 1
 
 

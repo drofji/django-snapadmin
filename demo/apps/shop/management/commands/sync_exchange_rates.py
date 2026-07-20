@@ -18,7 +18,7 @@ import random
 
 from django.core.management.base import BaseCommand
 
-from demo.app.models import ExchangeRate
+from demo.apps.shop.models import ExchangeRate
 from snapadmin.etl import StaleSyncAbort, stale_sync, upsert_from_source
 
 # Stand-in for a response streamed from an external rates provider.

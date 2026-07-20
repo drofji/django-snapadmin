@@ -53,7 +53,7 @@ SNAPADMIN_THROTTLE_USER = None
 
 # ── extra_settings: seed no managed rows in the test DB ──────────────────────
 # The demo bridges a curated set of SNAPADMIN_* settings through
-# django-extra-settings (demo/app/managed_settings.py). Seeding those rows here
+# django-extra-settings (demo/apps/shop/managed_settings.py). Seeding those rows here
 # would let the first-request sync overwrite the test overrides above (e.g. the
 # throttle=None pins) with the seeded package defaults. The suite doesn't
 # exercise that bridge except in test_extra_settings_sync.py (which creates its

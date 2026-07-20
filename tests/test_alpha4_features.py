@@ -18,7 +18,7 @@ from django.core.management import call_command
 from django.db import models as dj_models
 from django.test import override_settings
 
-from demo.app.models import AuditLog, Customer, Product, SearchLog, Showcase
+from demo.apps.shop.models import AuditLog, Customer, Product, SearchLog, Showcase
 from snapadmin.models import SnapModel
 
 

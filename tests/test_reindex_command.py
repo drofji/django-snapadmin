@@ -32,7 +32,7 @@ def _bulk_ok(es, actions, **kwargs):
 @pytest.fixture
 def products(db):
     from decimal import Decimal
-    from demo.app.models import Product
+    from demo.apps.shop.models import Product
     Product.objects.all().delete()
     return [Product.objects.create(name=f"P{i}", price=Decimal("1.00")) for i in range(5)]
 
@@ -79,7 +79,7 @@ class TestRealRun:
         settings.ELASTICSEARCH_ENABLED = True
 
     def test_single_model_reports_progress_and_count(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         with patch.object(Product, "get_es_client", return_value=es_client), \
              patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
             out = StringIO()
@@ -89,7 +89,7 @@ class TestRealRun:
         assert "5 indexed" in text
 
     def test_creates_completed_job_row(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.models import SnapReindexJob
         with patch.object(Product, "get_es_client", return_value=es_client), \
              patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
@@ -98,7 +98,7 @@ class TestRealRun:
         assert job.status == "completed" and job.processed_rows == 5
 
     def test_resume_reuses_failed_job(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         from snapadmin.models import SnapReindexJob
         stale = SnapReindexJob.objects.create(
             app_label="demo", model="Product", status="failed",
@@ -113,7 +113,7 @@ class TestRealRun:
         assert SnapReindexJob.objects.filter(app_label="demo", model="Product").count() == 1
 
     def test_flags_forwarded_to_runner(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         with patch.object(Product, "get_es_client", return_value=es_client), \
              patch("snapadmin.management.commands.snapadmin_reindex.run_reindex_job") as run:
             run.return_value = {"indexed": 5, "errors": 0}
@@ -125,7 +125,7 @@ class TestRealRun:
         assert kwargs["chunk_size"] == 250
 
     def test_rejected_documents_reported(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         with patch.object(Product, "get_es_client", return_value=es_client), \
              patch("snapadmin.management.commands.snapadmin_reindex.run_reindex_job",
                    return_value={"indexed": 5, "errors": 2}):
@@ -134,7 +134,7 @@ class TestRealRun:
         assert "2 rejected" in out.getvalue()
 
     def test_cancelled_reported_without_error(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         with patch.object(Product, "get_es_client", return_value=es_client), \
              patch("snapadmin.management.commands.snapadmin_reindex.run_reindex_job",
                    return_value={"cancelled": True, "indexed": 2}):
@@ -143,7 +143,7 @@ class TestRealRun:
         assert "cancelled" in out.getvalue().lower()
 
     def test_skipped_job_reported(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         with patch.object(Product, "get_es_client", return_value=es_client), \
              patch("snapadmin.management.commands.snapadmin_reindex.run_reindex_job",
                    return_value={"skipped": True, "reason": "already processing or finished"}):
@@ -152,7 +152,7 @@ class TestRealRun:
         assert "skipped" in out.getvalue().lower()
 
     def test_failure_raises_commanderror(self, products, es_client):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         with patch.object(Product, "get_es_client", return_value=es_client), \
              patch("snapadmin.management.commands.snapadmin_reindex.run_reindex_job",
                    return_value={"errors": ["boom"], "indexed": 0}):

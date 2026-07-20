@@ -4,32 +4,32 @@ from decimal import Decimal
 
 @pytest.fixture
 def product(db):
-    from demo.app.models import Product
+    from demo.apps.shop.models import Product
     return Product.objects.create(name="Test Laptop Stand", price=Decimal("49.99"), available=True)
 
 @pytest.fixture
 def product_unavailable(db):
-    from demo.app.models import Product
+    from demo.apps.shop.models import Product
     return Product.objects.create(name="Out of Stock", price=Decimal("10.00"), available=False)
 
 @pytest.fixture
 def many_products(db):
-    from demo.app.models import Product
+    from demo.apps.shop.models import Product
     return [Product.objects.create(name=f"Product {i}", price=Decimal(i)) for i in range(30)]
 
 @pytest.fixture
 def customer(db):
-    from demo.app.models import Customer
+    from demo.apps.shop.models import Customer
     return Customer.objects.create(first_name="Alice", last_name="Smith", email="alice@example.com", origin="status_a", active=True)
 
 @pytest.fixture
 def customer_inactive(db):
-    from demo.app.models import Customer
+    from demo.apps.shop.models import Customer
     return Customer.objects.create(first_name="Bob", last_name="Jones", email="bob@example.com", origin="status_b", active=False)
 
 @pytest.fixture
 def order(db, customer):
-    from demo.app.models import Order
+    from demo.apps.shop.models import Order
     return Order.objects.create(customer=customer, total=Decimal("99.99"))
 
 @pytest.fixture

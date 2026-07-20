@@ -44,7 +44,7 @@ def search_products(query: str, limit: int = 20) -> list[dict]:
         except Exception:
             pass
 
-    from demo.app.models import Product
+    from demo.apps.shop.models import Product
     qs = Product.objects.filter(name__icontains=query)[:limit]
     return [
         {

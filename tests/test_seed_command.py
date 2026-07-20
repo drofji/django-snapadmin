@@ -34,17 +34,17 @@ class TestSeedDemoCommand:
         return out.getvalue()
 
     def test_creates_products(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         self._call(count=5)
         assert Product.objects.count() >= 5
 
     def test_creates_customers(self):
-        from demo.app.models import Customer
+        from demo.apps.shop.models import Customer
         self._call(count=5)
         assert Customer.objects.count() >= 5
 
     def test_creates_orders(self):
-        from demo.app.models import Order
+        from demo.apps.shop.models import Order
         self._call(count=5)
         assert Order.objects.count() >= 5
 
@@ -99,12 +99,12 @@ class TestSeedDemoCommand:
         assert token.token_prefix in output
 
     def test_custom_count_respected(self):
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         self._call(count=10)
         assert Product.objects.count() >= 10
 
     def test_flush_clears_existing_data(self):
-        from demo.app.models import Customer, Product
+        from demo.apps.shop.models import Customer, Product
         self._call(count=5)
         count_before = Product.objects.count()
         self._call(count=5, flush=True)
@@ -113,20 +113,20 @@ class TestSeedDemoCommand:
 
     def test_products_have_valid_prices(self):
         from decimal import Decimal
-        from demo.app.models import Product
+        from demo.apps.shop.models import Product
         self._call(count=10)
         for p in Product.objects.all():
             assert p.price > Decimal("0")
 
     def test_customers_have_valid_origins(self):
-        from demo.app.models import Customer
+        from demo.apps.shop.models import Customer
         valid_origins = {"status_a", "status_b", "status_c"}
         self._call(count=10)
         for c in Customer.objects.all():
             assert c.origin in valid_origins
 
     def test_orders_linked_to_customers(self):
-        from demo.app.models import Order
+        from demo.apps.shop.models import Order
         self._call(count=5)
         for o in Order.objects.select_related("customer"):
             assert o.customer_id is not None
@@ -141,7 +141,7 @@ class TestSeedDemoEsIndexing:
     def test_skips_index_when_es_unavailable(self):
         """--no-index flag means no ES calls are made."""
         out = StringIO()
-        with patch("demo.app.search.is_es_available", return_value=False):
+        with patch("demo.apps.shop.search.is_es_available", return_value=False):
             call_command("seed_demo", count=3, no_index=True, stdout=out)
         # No exception means graceful skip
         assert True
@@ -151,7 +151,7 @@ class TestSeedDemoEsIndexing:
         from unittest.mock import MagicMock, call
         mock_index = MagicMock()
         out = StringIO()
-        with patch("demo.app.search.is_es_available", return_value=True), \
-             patch("demo.app.search.index_product", mock_index):
+        with patch("demo.apps.shop.search.is_es_available", return_value=True), \
+             patch("demo.apps.shop.search.index_product", mock_index):
             call_command("seed_demo", count=3, no_index=False, stdout=out)
         assert mock_index.call_count >= 3
