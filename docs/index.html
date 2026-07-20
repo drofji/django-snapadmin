@@ -340,12 +340,14 @@
   <p>SnapAdmin requires <strong>Python ≥ 3.10</strong> and <strong>Django ≥ 5.2</strong> (no upper bound pinned). The package is <strong>beta</strong> (<code>Development Status :: 4 - Beta</code>) — the public API is stabilising but may still change before <code>0.1.0</code> stable, so pin an exact version in production.</p>
   <table>
     <tr><th></th><th>Versions</th><th>Status</th></tr>
-    <tr><td><strong>Python</strong></td><td>3.10 · 3.11 · 3.12 · 3.13</td><td>Supported (declared floor 3.10). The test suite is currently exercised on <strong>3.12</strong>.</td></tr>
-    <tr><td><strong>Django</strong></td><td>5.2 (LTS) · 6.0</td><td>Supported. The suite currently runs green on <strong>Django 6.0</strong>; <strong>5.2</strong> is the declared floor.</td></tr>
+    <tr><td><strong>Python</strong></td><td>3.10 · 3.11 · 3.12 · 3.13</td><td>Supported and <strong>tested in CI</strong> on every version (declared floor 3.10).</td></tr>
+    <tr><td><strong>Django</strong></td><td>5.2 (LTS) · 6.0</td><td>Supported and <strong>tested in CI</strong> on both (Django 6.0 requires Python ≥ 3.12).</td></tr>
   </table>
-  <div class="callout callout-warn">
-    <strong>No multi-version CI yet</strong>
-    There is no automated Python×Django test matrix in CI. The numbers above reflect the declared support range and the versions the suite is actively run against during development — not a CI-enforced grid. Treat combinations outside the "currently exercised" cells as supported-but-untested, and report any incompatibility you hit.
+  <div class="callout callout-info">
+    <strong>CI-enforced matrix.</strong>
+    Every push and pull request runs the full suite across the Python × Django grid above (GitHub
+    Actions, <code>test.yml</code>) and fails under 100% coverage of the <code>snapadmin/</code> package,
+    so the compatibility claims here are enforced, not aspirational.
   </div>
 
   <h3>Configuring <code>INSTALLED_APPS</code></h3>

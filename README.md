@@ -5,6 +5,7 @@ GraphQL API, and optional Elasticsearch search.** Every surface can be switched 
 single setting, and expensive `?search=` queries are routed to Elasticsearch automatically when a
 model is mirrored there — plain listings stay on the database.
 
+[![Tests](https://github.com/drofji/django-snapadmin/actions/workflows/test.yml/badge.svg)](https://github.com/drofji/django-snapadmin/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/django-snapadmin?logo=pypi&logoColor=white)](https://pypi.org/project/django-snapadmin/)
 [![Downloads](https://img.shields.io/pypi/dm/django-snapadmin)](https://pypi.org/project/django-snapadmin/)
 [![Python](https://img.shields.io/pypi/pyversions/django-snapadmin?logo=python&logoColor=white)](https://pypi.org/project/django-snapadmin/)
