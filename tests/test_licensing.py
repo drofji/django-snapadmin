@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import tomllib
+import sys
 from email.message import Message
 from importlib import metadata
 
@@ -81,9 +81,12 @@ class TestCuratedMap:
         assert ck.tier is Tier.RESTRICTED
         assert "CKEditor" in ck.bundles
 
+    @pytest.mark.skipif(sys.version_info < (3, 11), reason="tomllib is stdlib only on Python 3.11+")
     def test_map_matches_pyproject(self):
         # Drift guard: the curated set must equal pyproject's declared runtime deps, and each
         # package's core/extra classification must match pyproject's optional flag + extras table.
+        import tomllib
+
         with open("pyproject.toml", "rb") as fh:
             data = tomllib.load(fh)
         deps = data["tool"]["poetry"]["dependencies"]
