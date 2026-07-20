@@ -198,9 +198,22 @@ SnapAdmin is meant to be customised, not forked:
 
 ## 🌟 Trying the Demo
 
-The repository ships a runnable demo under [`demo/`](demo/) — example models (Product, Customer,
-Order), a seeded database, and a Docker stack with PostgreSQL, Redis and Elasticsearch. It is **not**
-published to PyPI; only the top-level `snapadmin/` package is.
+**Fastest — one command, no clone:**
+
+```bash
+pip install django-snapadmin
+snapadmin-demo            # downloads the demo, migrates, seeds, and serves at localhost:8000
+```
+
+`snapadmin-demo` (also `python -m snapadmin.quickstart`) fetches the `demo/` directory from the
+matching release tag — cached under `~/.cache/snapadmin-demo/`, so re-runs are instant and offline —
+then installs, migrates, seeds and serves it. Add `--interactive` for a wizard (SQLite/PostgreSQL,
+admin password, debug), `--no-serve` to only prepare it, or `--skip-install` to reuse the current
+environment. See the [demo command guide](https://drofji.github.io/django-snapadmin/#snapadmin-demo).
+
+**Or from a clone — the full Docker stack** (PostgreSQL, Redis and Elasticsearch). The demo lives
+under [`demo/`](demo/) with example models (Product, Customer, Order) and a seeded database; it is
+**not** published to PyPI, only the top-level `snapadmin/` package is:
 
 ```bash
 git clone https://github.com/drofji/django-snapadmin.git

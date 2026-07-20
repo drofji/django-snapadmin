@@ -268,6 +268,7 @@
     </ul>
     <div class="section-label">🌟 Sandbox / Demo</div>
     <ul>
+      <li><a href="#snapadmin-demo">Quick Start (snapadmin-demo)</a></li>
       <li><a href="#demo-setup">Running the Demo</a></li>
       <li><a href="#demo-models">Demo Models Overview</a></li>
       <li><a href="#demo-seed">Seed Command</a></li>
@@ -422,6 +423,58 @@
 ├── fields.py        # SnapField definitions with admin introspection
 ├── models.py        # SnapModel base, EsManager, and core logic
 └── urls.py          # Auto-configurable API and documentation routes</code></pre>
+
+  <!-- ── Quick Start (snapadmin-demo) ─────────────────────────────────────── -->
+  <h2 id="snapadmin-demo">🚀 Quick Start — <code>snapadmin-demo</code></h2>
+  <p>The fastest way to see SnapAdmin running, with <strong>no clone and no existing project</strong>.
+  <code>pip install django-snapadmin</code> puts a <code>snapadmin-demo</code> command on your PATH
+  (also <code>python -m snapadmin.quickstart</code>):</p>
+
+  <pre><code>pip install django-snapadmin
+snapadmin-demo</code></pre>
+
+  <p>It downloads the <code>demo/</code> directory from the GitHub source tarball of the matching
+  release tag (the wheel doesn't ship it), caches and checksums it under
+  <code>~/.cache/snapadmin-demo/</code> so re-runs are instant and work offline, extracts only
+  <code>demo/</code> into the current directory, then installs its requirements, applies migrations,
+  seeds example data and starts the server at <code>http://localhost:8000</code>.</p>
+
+  <div class="callout callout-warn">
+    <strong>What it does to your machine.</strong>
+    It fetches and runs the project's own demo release over HTTPS from the official repository, and
+    (unless <code>--skip-install</code>) <code>pip install</code>s the demo requirements into the
+    current environment — <strong>run it in a fresh virtualenv</strong>. Tar members are sanitised
+    (no path traversal, symlinks skipped) and you are asked before any existing file is overwritten.
+    It is stdlib-only and never imports Django in-process — it drives <code>manage.py</code> as a
+    subprocess.
+  </div>
+
+  <h3>Flags</h3>
+  <table>
+    <thead><tr><th>Flag</th><th>Effect</th></tr></thead>
+    <tbody>
+      <tr><td><code>--version X.Y.Z</code></td><td>Which release to fetch (default: the installed django-snapadmin version).</td></tr>
+      <tr><td><code>--path DIR</code></td><td>Where to extract <code>demo/</code> (default: current directory).</td></tr>
+      <tr><td><code>--skip-install</code></td><td>Reuse the current environment — don't <code>pip install</code> the demo requirements.</td></tr>
+      <tr><td><code>--no-serve</code></td><td>Prepare everything but don't start the server.</td></tr>
+      <tr><td><code>--clear-cache</code></td><td>Delete cached downloads under <code>~/.cache/snapadmin-demo/</code> first.</td></tr>
+      <tr><td><code>-y</code>, <code>--yes</code></td><td>Replace existing demo files without asking.</td></tr>
+    </tbody>
+  </table>
+
+  <h3>Configuration</h3>
+  <p><code>--interactive</code> runs a short wizard — run mode (runserver / Docker), database
+  (SQLite / PostgreSQL, with connection details), Elasticsearch on/off, admin password, secret-key
+  generation and debug — and writes a <code>.env</code> the demo reads. Capture and share a setup so a
+  whole team gets the same environment:</p>
+
+  <pre><code>snapadmin-demo --interactive --save-config team.ini   # answer once, save it
+snapadmin-demo --load-config team.ini                 # a colleague replays it</code></pre>
+
+  <p>The same choices are available as non-interactive flags for CI —
+  <code>--mode</code>, <code>--database</code>, <code>--db-host</code>, <code>--db-password</code>,
+  <code>--elasticsearch</code> / <code>--no-elasticsearch</code>, <code>--admin-password</code>,
+  <code>--debug</code>. (The demo runs on SQLite or PostgreSQL; MySQL is not one of its backends.)</p>
 
   <!-- ── Demo Setup ───────────────────────────────────────────────────────── -->
   <h2 id="demo-setup">🌟 Running the Demo</h2>

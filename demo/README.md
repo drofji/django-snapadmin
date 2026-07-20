@@ -6,6 +6,10 @@ published to PyPI — the package itself lives in [`../snapadmin/`](../snapadmin
 This project exists so you can evaluate SnapAdmin against realistic models and
 develop against the package in editable mode.
 
+> **Just want to run it, without cloning?** `pip install django-snapadmin && snapadmin-demo`
+> downloads this directory from the matching release tag and runs it for you. The instructions below
+> are for developing against the demo from a clone.
+
 ## Layout
 
 ```
