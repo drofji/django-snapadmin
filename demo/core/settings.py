@@ -225,6 +225,13 @@ SNAPADMIN_EXPORT_LIMIT_MAX = int(os.getenv('SNAPADMIN_EXPORT_LIMIT_MAX', '0'))
 SNAPADMIN_ES_QUERY_ROUTING = os.getenv('SNAPADMIN_ES_QUERY_ROUTING', 'True') == 'True'
 # Max hits fetched from ES per routed search / ES_ONLY listing.
 SNAPADMIN_ES_SEARCH_LIMIT = int(os.getenv('SNAPADMIN_ES_SEARCH_LIMIT', '1000'))
+# Project-wide default for the ES query layer's database fallback. True (default)
+# keeps today's behaviour: es_filter/es_aggregate/es_count/es_scan silently fall
+# back to the database when Elasticsearch is disabled or a query errors. Set False
+# to make those methods raise SnapEsUnavailable instead — the safe posture on a
+# large, DB-unindexable table where the fallback scan is worse than a clear
+# failure. Overridable per call via db_fallback=True/False.
+SNAPADMIN_ES_DB_FALLBACK = os.getenv('SNAPADMIN_ES_DB_FALLBACK', 'True') == 'True'
 
 # Expose the X-Snap-Query-Backend header on list responses (elasticsearch|database).
 SNAPADMIN_QUERY_BACKEND_HEADER = os.getenv('SNAPADMIN_QUERY_BACKEND_HEADER', 'True') == 'True'

@@ -941,6 +941,39 @@ for log in SearchLog.es_scan(query_string="error 404", page_size=5000):
   column); an <code>ES_ONLY</code> model yields nothing. If ES fails <em>after</em> streaming has
   begun, the scan stops where it was rather than restarting on the database and double-emitting.</p>
 
+  <h3 id="es-db-fallback">Fail loud instead of a silent DB scan — <code>db_fallback=False</code></h3>
+  <p>By default all four methods above degrade gracefully: when Elasticsearch is disabled or a query
+  errors, a <code>DUAL</code> model quietly re-runs the query on the database. That is exactly right for
+  a modest table — but on a <strong>large, DB-unindexable</strong> one it can be worse than a clear
+  failure: <code>es_aggregate()</code> falls back to a full-table <code>GROUP BY</code> on an unindexed
+  column, and <code>es_scan()</code> to an unbounded <code>.iterator()</code>. If you reached for
+  Elasticsearch <em>because</em> the database can't answer at that scale, a silent fallback just runs
+  the query you were avoiding.</p>
+  <p>Pass <code>db_fallback=False</code> to opt out — the method raises
+  <code>SnapEsUnavailable</code> instead of touching the database when ES can't answer:</p>
+  <pre><code>from snapadmin.models import SnapEsUnavailable
+
+# Default: graceful — falls back to the DB when ES is off
+Product.es_count(available=True)                       # → DB count() if ES down
+
+# Fail-fast: raise rather than run a query the DB can't scale
+try:
+    total = Product.es_count(available=True, db_fallback=False)
+except SnapEsUnavailable:
+    ...  # surface it, retry, alert — never a silent full-table scan
+
+# Same flag on es_filter / es_aggregate / es_scan
+for pk in Product.es_scan(available=True, db_fallback=False):  # raises if ES down
+    ...</code></pre>
+  <p><strong>The rule:</strong> reach for <code>db_fallback=False</code> whenever the database
+  <em>cannot</em> answer the query at your table's size (a JSON column, a multi-million-row facet) and a
+  loud failure is safer than a slow one; leave it at the default when the DB fallback is a legitimate,
+  affordable backup. Set the project-wide posture once with
+  <code>SNAPADMIN_ES_DB_FALLBACK</code> (default <code>True</code>); a per-call
+  <code>db_fallback=</code> always wins. <code>ES_ONLY</code> models are unaffected — they have no
+  database to fall back to — and a <em>mid-stream</em> <code>es_scan()</code> failure still stops rather
+  than raising, since its cursor is already gone.</p>
+
   <h3>Counting objects — with &amp; without filters</h3>
   <p>Every list response is paginated and already reports the <strong>total matching count</strong>
   in <code>count</code> — no need to page through everything. Request the smallest page to read

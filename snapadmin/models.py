@@ -10,6 +10,7 @@ import uuid
 from collections.abc import Iterator
 from datetime import timedelta
 from enum import Enum
+from typing import NoReturn
 
 from django.apps import apps
 from django.core.exceptions import FieldDoesNotExist, FieldError, ImproperlyConfigured, ValidationError
@@ -491,6 +492,20 @@ class SnapPurgeError(Exception):
     Typically means the primary database delete succeeded but a secondary
     store (e.g. the Elasticsearch mirror) could not be cleared — the caller
     must not treat the affected model as cleanly purged.
+    """
+
+
+class SnapEsUnavailable(Exception):
+    """Raised by an ES query method when Elasticsearch cannot answer and the
+    caller has opted out of the database fallback (``db_fallback=False`` or
+    ``SNAPADMIN_ES_DB_FALLBACK=False``).
+
+    Signals that a DUAL model's Elasticsearch backend is disabled or erroring,
+    so the query would otherwise have run its (potentially unscalable) database
+    equivalent — a full-table ``GROUP BY`` or an unbounded ``.iterator()``. The
+    original Elasticsearch error, when there was one, is chained as ``__cause__``.
+    ES_ONLY models never raise this (they have no database to fall back to), and
+    DB_ONLY models never raise it (the database is their primary store).
     """
 
 
@@ -1363,7 +1378,35 @@ class SnapModel(models.Model):
             )
 
     @classmethod
-    def es_filter(cls, *, query_string: str | None = None, limit: int | None = None, **terms):
+    def _es_db_fallback(cls, db_fallback: bool | None) -> bool:
+        """Resolve the effective ES→DB fallback posture for a query method.
+
+        ``None`` (the per-call default) defers to the project-wide
+        ``SNAPADMIN_ES_DB_FALLBACK`` setting (itself defaulting to ``True`` =
+        today's silent-fallback behaviour); an explicit ``bool`` overrides it.
+        """
+        if db_fallback is None:
+            return bool(getattr(settings, "SNAPADMIN_ES_DB_FALLBACK", True))
+        return db_fallback
+
+    @classmethod
+    def _raise_es_unavailable(cls, method: str, cause: Exception | None) -> NoReturn:
+        """Raise :class:`SnapEsUnavailable`, chaining the ES error when present."""
+        raise SnapEsUnavailable(
+            f"{cls.__name__}.{method}: Elasticsearch is unavailable and db_fallback is "
+            f"disabled, so the database fallback was refused (pass db_fallback=True or set "
+            f"SNAPADMIN_ES_DB_FALLBACK=True to allow it)"
+        ) from cause
+
+    @classmethod
+    def es_filter(
+        cls,
+        *,
+        query_string: str | None = None,
+        limit: int | None = None,
+        db_fallback: bool | None = None,
+        **terms,
+    ):
         """Structured Elasticsearch term filter — the counterpart to es_search().
 
         Each keyword argument is a term constraint on an ES-mapped field: a
@@ -1381,16 +1424,26 @@ class SnapModel(models.Model):
         result if a term field has no backing column); an ES_ONLY model returns
         an empty result.
 
-        Raises ``ValueError`` for an unknown or non-term-filterable field.
+        Set ``db_fallback=False`` to refuse that silent database fallback and
+        raise :class:`SnapEsUnavailable` instead when Elasticsearch can't answer
+        — the safe posture on a large, DB-unindexable table where the fallback
+        scan is worse than a clear failure. ``None`` (the default) defers to the
+        project-wide ``SNAPADMIN_ES_DB_FALLBACK`` setting (default ``True``).
+        ES_ONLY models are unaffected (no database to fall back to).
+
+        Raises ``ValueError`` for an unknown or non-term-filterable field, and
+        :class:`SnapEsUnavailable` when ES is unavailable and the fallback is
+        disabled.
         """
         # Resolve/validate every term up-front so a bad field raises regardless
         # of which backend ends up answering the query.
         resolved = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
 
         limit = limit or getattr(settings, "SNAPADMIN_ES_SEARCH_LIMIT", 1000)
-        use_es = (cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY) and getattr(
-            settings, "ELASTICSEARCH_ENABLED", False
-        )
+        fallback = cls._es_db_fallback(db_fallback)
+        es_intended = cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY
+        use_es = es_intended and getattr(settings, "ELASTICSEARCH_ENABLED", False)
+        es_error: Exception | None = None
 
         if use_es:
             try:
@@ -1423,15 +1476,20 @@ class SnapModel(models.Model):
                     "es_filter_failed",
                     model=cls.__name__,
                     terms=list(terms),
-                    fallback="empty" if cls.es_storage_mode == EsStorageMode.ES_ONLY else "db",
+                    fallback="empty" if cls.es_storage_mode == EsStorageMode.ES_ONLY
+                    else ("db" if fallback else "raise"),
                     error=str(exc),
                 )
                 if cls.es_storage_mode == EsStorageMode.ES_ONLY:
                     return cls._tag_search_backend(EsQuerySet(cls, []), "elasticsearch")
+                es_error = exc
 
         # Database fallback — only meaningful for models with a table.
         if cls.es_storage_mode == EsStorageMode.ES_ONLY:
             return cls._tag_search_backend(EsQuerySet(cls, []), "elasticsearch")
+
+        if es_intended and not fallback:
+            cls._raise_es_unavailable("es_filter", es_error)
 
         try:
             qs = cls.objects.filter(**cls._es_orm_terms(terms))
@@ -1478,6 +1536,7 @@ class SnapModel(models.Model):
         *fields: str,
         size: int | None = None,
         query_string: str | None = None,
+        db_fallback: bool | None = None,
         **terms,
     ) -> dict[str, list[dict[str, object]]]:
         """Faceted ``terms`` aggregations — the counterpart to es_filter().
@@ -1503,8 +1562,16 @@ class SnapModel(models.Model):
         a field (or filter term) with no backing column; an ES_ONLY model
         returns empty buckets for every requested field.
 
+        Set ``db_fallback=False`` to refuse that database recompute (a full-table
+        ``GROUP BY`` on an unindexed column) and raise :class:`SnapEsUnavailable`
+        instead when Elasticsearch can't answer; ``None`` (the default) defers to
+        ``SNAPADMIN_ES_DB_FALLBACK`` (default ``True``). ES_ONLY models are
+        unaffected.
+
         Raises ``ValueError`` if no field is given, if ``size`` is not positive,
-        or for an unknown / non-term-filterable field.
+        or for an unknown / non-term-filterable field, and
+        :class:`SnapEsUnavailable` when ES is unavailable and the fallback is
+        disabled.
         """
         if not fields:
             raise ValueError(f"{cls.__name__}.es_aggregate: at least one field is required")
@@ -1518,9 +1585,10 @@ class SnapModel(models.Model):
         resolved_fields = {name: cls._resolve_es_term_field(name) for name in fields}
         resolved_terms = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
 
-        use_es = (cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY) and getattr(
-            settings, "ELASTICSEARCH_ENABLED", False
-        )
+        fallback = cls._es_db_fallback(db_fallback)
+        es_intended = cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY
+        use_es = es_intended and getattr(settings, "ELASTICSEARCH_ENABLED", False)
+        es_error: Exception | None = None
 
         if use_es:
             try:
@@ -1550,15 +1618,20 @@ class SnapModel(models.Model):
                     "es_aggregate_failed",
                     model=cls.__name__,
                     fields=list(fields),
-                    fallback="empty" if cls.es_storage_mode == EsStorageMode.ES_ONLY else "db",
+                    fallback="empty" if cls.es_storage_mode == EsStorageMode.ES_ONLY
+                    else ("db" if fallback else "raise"),
                     error=str(exc),
                 )
                 if cls.es_storage_mode == EsStorageMode.ES_ONLY:
                     return {name: [] for name in resolved_fields}
+                es_error = exc
 
         # Database fallback — only meaningful for models with a table.
         if cls.es_storage_mode == EsStorageMode.ES_ONLY:
             return {name: [] for name in resolved_fields}
+
+        if es_intended and not fallback:
+            cls._raise_es_unavailable("es_aggregate", es_error)
 
         try:
             base_qs = cls.objects.filter(**cls._es_orm_terms(terms))
@@ -1584,7 +1657,13 @@ class SnapModel(models.Model):
         return result
 
     @classmethod
-    def es_count(cls, *, query_string: str | None = None, **terms) -> int:
+    def es_count(
+        cls,
+        *,
+        query_string: str | None = None,
+        db_fallback: bool | None = None,
+        **terms,
+    ) -> int:
         """Exact number of documents matching a structured ES term query.
 
         The counting counterpart to :meth:`es_filter`: every keyword argument is
@@ -1607,15 +1686,23 @@ class SnapModel(models.Model):
         back to the equivalent database ``count()`` (failing closed to ``0`` if a
         term field has no backing column); an ES_ONLY model returns ``0``.
 
-        Raises ``ValueError`` for an unknown or non-term-filterable field.
+        Set ``db_fallback=False`` to refuse that database ``count()`` and raise
+        :class:`SnapEsUnavailable` instead when Elasticsearch can't answer;
+        ``None`` (the default) defers to ``SNAPADMIN_ES_DB_FALLBACK`` (default
+        ``True``). ES_ONLY models are unaffected (they return ``0``).
+
+        Raises ``ValueError`` for an unknown or non-term-filterable field, and
+        :class:`SnapEsUnavailable` when ES is unavailable and the fallback is
+        disabled.
         """
         # Resolve/validate every term up-front so a bad field raises regardless
         # of which backend ends up answering the query.
         resolved = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
 
-        use_es = (cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY) and getattr(
-            settings, "ELASTICSEARCH_ENABLED", False
-        )
+        fallback = cls._es_db_fallback(db_fallback)
+        es_intended = cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY
+        use_es = es_intended and getattr(settings, "ELASTICSEARCH_ENABLED", False)
+        es_error: Exception | None = None
 
         if use_es:
             try:
@@ -1630,15 +1717,20 @@ class SnapModel(models.Model):
                     "es_count_failed",
                     model=cls.__name__,
                     terms=list(terms),
-                    fallback="zero" if cls.es_storage_mode == EsStorageMode.ES_ONLY else "db",
+                    fallback="zero" if cls.es_storage_mode == EsStorageMode.ES_ONLY
+                    else ("db" if fallback else "raise"),
                     error=str(exc),
                 )
                 if cls.es_storage_mode == EsStorageMode.ES_ONLY:
                     return 0
+                es_error = exc
 
         # Database fallback — only meaningful for models with a table.
         if cls.es_storage_mode == EsStorageMode.ES_ONLY:
             return 0
+
+        if es_intended and not fallback:
+            cls._raise_es_unavailable("es_count", es_error)
 
         try:
             qs = cls.objects.filter(**cls._es_orm_terms(terms))
@@ -1668,6 +1760,7 @@ class SnapModel(models.Model):
         *,
         query_string: str | None = None,
         page_size: int | None = None,
+        db_fallback: bool | None = None,
         **terms,
     ) -> Iterator["SnapModel"]:
         """Deep-scan iterator — yield every matching document, no ``from`` paging.
@@ -1693,8 +1786,18 @@ class SnapModel(models.Model):
         streaming has begun, the scan stops where it was rather than restarting
         on the database and double-emitting.
 
+        Set ``db_fallback=False`` to refuse the database ``.iterator()`` fallback
+        and raise :class:`SnapEsUnavailable` (during iteration) when Elasticsearch
+        is unavailable *before* streaming begins; ``None`` (the default) defers to
+        ``SNAPADMIN_ES_DB_FALLBACK`` (default ``True``). A *mid-stream* ES failure
+        still stops rather than raising — the ``search_after`` cursor is already
+        gone, so there is no database scan to suppress there. ES_ONLY models are
+        unaffected.
+
         Raises ``ValueError`` (eagerly, before iteration) for a non-positive
-        ``page_size`` or an unknown / non-term-filterable field.
+        ``page_size`` or an unknown / non-term-filterable field, and
+        :class:`SnapEsUnavailable` (lazily, on iteration) when ES is unavailable
+        and the fallback is disabled.
         """
         if page_size is not None and page_size < 1:
             raise ValueError(
@@ -1704,15 +1807,16 @@ class SnapModel(models.Model):
         # not lazily on the first `next()` of the returned generator.
         resolved = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
         page_size = page_size or getattr(settings, "SNAPADMIN_ES_SEARCH_LIMIT", 1000)
-        return cls._es_scan_iter(resolved, terms, query_string, page_size)
+        fallback = cls._es_db_fallback(db_fallback)
+        return cls._es_scan_iter(resolved, terms, query_string, page_size, fallback)
 
     @classmethod
     def _es_scan_iter(
-        cls, resolved: dict, terms: dict, query_string: str | None, page_size: int,
+        cls, resolved: dict, terms: dict, query_string: str | None, page_size: int, fallback: bool,
     ) -> Iterator["SnapModel"]:
-        use_es = (cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY) and getattr(
-            settings, "ELASTICSEARCH_ENABLED", False
-        )
+        es_intended = cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY
+        use_es = es_intended and getattr(settings, "ELASTICSEARCH_ENABLED", False)
+        es_error: Exception | None = None
         if use_es:
             produced = False
             try:
@@ -1727,17 +1831,20 @@ class SnapModel(models.Model):
                     terms=list(terms),
                     produced=produced,
                     fallback="none" if (produced or cls.es_storage_mode == EsStorageMode.ES_ONLY)
-                    else "db",
+                    else ("db" if fallback else "raise"),
                     error=str(exc),
                 )
                 # Once any document has been streamed the search_after position
                 # is gone, so a DB restart would double-emit — stop instead.
                 if produced or cls.es_storage_mode == EsStorageMode.ES_ONLY:
                     return
+                es_error = exc
 
         # Database fallback — only meaningful for models with a table.
         if cls.es_storage_mode == EsStorageMode.ES_ONLY:
             return
+        if es_intended and not fallback:
+            cls._raise_es_unavailable("es_scan", es_error)
         try:
             qs = cls.objects.filter(**cls._es_orm_terms(terms)).order_by("pk")
             # Force field resolution now so an ES-only term (no DB column) fails

@@ -92,6 +92,14 @@ class Product(snap_models.SnapModel):
     #   Product.es_count(available=True)  # e.g. 4217, however large
     # When ES is down, DUAL models fall back to a DB count(); ES_ONLY returns 0.
     #
+    # db_fallback=False opts OUT of that silent DB fallback on any of the four
+    # methods above — instead of quietly running a query that can't scale (a
+    # full-table GROUP BY, an unbounded .iterator()), it raises SnapEsUnavailable
+    # when ES can't answer. Use it on a large, DB-unindexable table where a clear
+    # failure beats a silent scan:
+    #   Product.es_count(available=True, db_fallback=False)  # raise if ES is down
+    # Set the project-wide default with SNAPADMIN_ES_DB_FALLBACK (default True).
+    #
     # es_scan() streams *every* match past ES's 10k max_result_window — a lazy
     # search_after iterator with the same filter args as es_filter():
     #   for product in Product.es_scan(available=True):  # no 10k ceiling

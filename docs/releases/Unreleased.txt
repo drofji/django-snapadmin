@@ -23,3 +23,18 @@ SnapModel.es_count() — true match count of a structured Elasticsearch query
   falls back to the equivalent database ``count()`` (failing closed to ``0`` for a term field with no
   backing column), an ``ES_ONLY`` model returns ``0``, and an unknown or analysed-text-only field raises
   ``ValueError``.
+
+Opt out of the silent Elasticsearch→database fallback (db_fallback=False)
+  The structured ES query methods — ``es_filter()``, ``es_aggregate()``, ``es_count()`` and
+  ``es_scan()`` — silently fall back to the database when Elasticsearch is disabled or a query errors.
+  That is the right default for a modest table, but on a large, DB-unindexable one it can be worse than
+  a clear failure: ``es_aggregate()`` recomputes a full-table ``GROUP BY`` on an unindexed column and
+  ``es_scan()`` streams an unbounded ``.iterator()``. Each method now accepts ``db_fallback=False``,
+  which raises the new ``snapadmin.models.SnapEsUnavailable`` exception (chaining the original ES error
+  as ``__cause__``) instead of running the database equivalent when ES can't answer — so a team that
+  chose Elasticsearch deliberately can fail loudly rather than quietly run a query that can't scale. The
+  new ``SNAPADMIN_ES_DB_FALLBACK`` setting (default ``True``) sets the project-wide posture once; a
+  per-call ``db_fallback=`` always overrides it. Nothing changes by default — ``ES_ONLY`` models (no
+  database to fall back to) and ``DB_ONLY`` models (the database is their primary store) never raise,
+  and a mid-stream ``es_scan()`` failure still stops rather than raising, since its ``search_after``
+  cursor is already gone.
