@@ -1,13 +1,20 @@
-name: Publish to PyPI
+name: Release (PyPI + GitHub)
 
-# Publishes a release to PyPI whenever a version tag (v*) is pushed, e.g. `v0.1.0a7`.
-# Uploads via PyPI Trusted Publishing (OIDC) — no API token is stored in the repo.
+# The full release pipeline, triggered whenever a version tag (v*) is pushed, e.g. `v0.1.0b4`.
+# Runs the test matrix ONCE, then: build & verify → publish to PyPI → create the GitHub release.
 #
+# Why one workflow: publish and the GitHub release used to be two tag-triggered workflows that both
+# called the reusable test workflow. Both instances shared the same `concurrency` group
+# (`tests-refs/tags/vX.Y.Z`), so GitHub cancelled one — which cascaded to cancel the GitHub-release
+# workflow entirely (PyPI still published). Merging them means a single test run gates both steps and
+# there is no cross-workflow concurrency collision. (#CI2)
+#
+# Uploads to PyPI via Trusted Publishing (OIDC) — no API token is stored in the repo.
 # One-time setup on PyPI (pypi.org → project "django-snapadmin" → Settings → Publishing,
 # or add a "pending publisher" before the first upload):
 #   Owner:            drofji
 #   Repository name:  django-snapadmin
-#   Workflow name:    publish.yml
+#   Workflow name:    publish.yml          # ← the OIDC publisher matches on this filename
 #   Environment name: pypi
 # See CONTRIBUTING.md → "Releasing to PyPI" for the full walkthrough.
 
@@ -90,3 +97,50 @@ jobs:
         with:
           packages-dir: dist/
           print-hash: true
+
+  # Create the GitHub release once the package is live on PyPI. Reads the notes from
+  # docs/releases/X.Y.Z.txt; marks alpha/beta tags as pre-releases.
+  github-release:
+    name: Create GitHub Release
+    needs: publish
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Parse version and pre-release flag
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          echo "version=$TAG" >> $GITHUB_OUTPUT
+          if [[ "$TAG" =~ (a|b) ]]; then
+            echo "prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          NOTES_FILE="docs/releases/${VERSION}.txt"
+          if [ ! -f "$NOTES_FILE" ]; then
+            echo "::error::Release notes file not found: $NOTES_FILE"
+            exit 1
+          fi
+
+          PRERELEASE_FLAG=""
+          if [ "$PRERELEASE" = "true" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          # Pass the notes as a FILE — never inline. The notes contain backticks,
+          # quotes and $ that a shell would otherwise try to expand/execute.
+          gh release create "v${VERSION}" \
+            $PRERELEASE_FLAG \
+            --title "v${VERSION}" \
+            --notes-file "$NOTES_FILE"
