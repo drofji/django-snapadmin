@@ -223,7 +223,7 @@
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <h2>⚡ SnapAdmin</h2>
-    <span>Documentation v0.1.0b3</span>
+    <span>Documentation v0.1.0b4</span>
   </div>
   <div class="nav-search">
     <input type="search" id="navSearch" placeholder="Filter sections…" autocomplete="off">
@@ -290,18 +290,18 @@
     <p class="subtitle">Automatic, beautiful, production-ready Django Admin — zero boilerplate. REST &amp; GraphQL, Elasticsearch, offline mode and GDPR retention, all from your model definitions.</p>
 
     <div class="callout callout-success" style="text-align: left; margin: 18px auto 0;">
-      <strong>What's New in v0.1.0b3 — third beta</strong>
-      A large security and Elasticsearch release. <strong>Ten security fixes</strong> close permission,
-      masking and open-redirect gaps across the GraphQL API, the export and audit surfaces, the SSO
-      login helper and the database-backup path — including GraphQL now enforcing permissions and PII
-      masking on <em>every relation a query traverses</em>, and a new <code>api_write_fields</code>
-      mass-assignment guard. Elasticsearch gains a structured query layer —
-      <a href="#es-filter"><code>es_filter()</code></a>, <a href="#es-aggregate"><code>es_aggregate()</code></a>
-      and <a href="#es-scan"><code>es_scan()</code></a> — each with a database fallback. Imports gain a
-      guarded <code>etl.stale_sync()</code> prune and a resumable bulk reindex.
-      <strong>One breaking change:</strong> auto-generated REST text filters now default to exact
-      match instead of substring — move substring queries to <code>?field__icontains=</code>, or set
-      <code>api_filter_lookups</code> per model. No schema or data migration is required.
+      <strong>What's New in v0.1.0b4 — fourth beta</strong>
+      An operability, onboarding and decoupling release. Four new operator commands —
+      <a href="#snapadmin-info"><code>snapadmin_info</code></a> (config &amp; health report),
+      <a href="#license-check"><code>snapadmin_license_check</code></a> (runtime licence audit),
+      <code>snapadmin-demo</code> (autonomous 30-second demo bootstrapper) and <code>snapadmin-init</code>
+      (read-only integration doctor) — plus a subsystem <strong>health-alert</strong> email channel
+      (database, Elasticsearch, REST API and GraphQL, each skipped when its feature is off) and Docker
+      self-healing in the demo. <strong><code>django-unfold</code> is now an optional
+      <code>[theme]</code> extra</strong>: the admin falls back to Django's built-in theme when Unfold is
+      absent, so the base install is leaner and strictly permissive while existing themed installs are
+      byte-identical. No model, no migration; every existing import path, setting and signature is
+      unchanged.
     </div>
 
     <div class="card-grid">
@@ -2684,7 +2684,7 @@ python manage.py seed_demo --no-index  # skip ES indexing (no ES cluster needed)
   </table>
 
   <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
-    SnapAdmin v0.1.0b3 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
+    SnapAdmin v0.1.0b4 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
   </div>
 
 </main>

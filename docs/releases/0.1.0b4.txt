@@ -1,0 +1,98 @@
+0.1.0b4 — 2026-07-21 — Fourth Beta
+==================================
+
+An operability, onboarding and decoupling release. Four new operator/onboarding commands —
+``snapadmin_info`` (config & health report), ``snapadmin_license_check`` (runtime licence audit),
+``snapadmin-demo`` (autonomous 30-second demo bootstrapper) and ``snapadmin-init`` (read-only
+integration doctor) — plus a subsystem **health-alert** email channel and Docker self-healing in the
+demo. ``django-unfold`` becomes an optional ``[theme]`` extra: the admin falls back to Django's
+built-in theme when Unfold is absent, so the base install is leaner and strictly permissive while
+existing themed installs are byte-identical. No model, no migration, and every existing import path,
+setting and signature is unchanged.
+
+Added
+=====
+
+``snapadmin_info`` management command
+  A single command that reports SnapAdmin's configuration and health for operators and CI.
+  ``python manage.py snapadmin_info`` prints the installed version, the Django/Python runtime and the
+  resolved ``SNAPADMIN_*`` feature toggles. ``--json`` emits the same data machine-readably (for
+  monitoring dashboards), ``--section NAME`` limits the report to one section (repeatable),
+  ``--brief``/``--verbose`` adjust the level of detail, and ``--health-check`` runs the connection
+  probes for the configured services and exits non-zero if any fails (usable as a readiness check).
+  Secrets — passwords, keys, token values — are never printed. Report sections are pluggable, so
+  database, Elasticsearch, Redis/Celery and model detail extend the command without changing it.
+
+``snapadmin_license_check`` management command
+  The runtime counterpart of ``THIRD_PARTY_NOTICES.md``: it audits the licences of the SnapAdmin
+  dependencies actually installed and tells you whether your install is safe for commercial /
+  proprietary use. It lists each core dependency and optional extra with its SPDX licence and a
+  🟢 permissive / 🟡 weak-copyleft / 🔴 copyleft-or-commercial tier, marks what is installed, and
+  gives an overall commercial-compatibility verdict (the base install is fully permissive; the
+  ``[wysiwyg]`` CKEditor extra is the one flagged). ``--json`` feeds CI, ``--critical-only`` shows
+  just the 🟡/🔴 licences, ``--compatible-with <SPDX>`` reports per-package compatibility with a
+  chosen project licence, and ``--verbose`` adds any uncurated declared dependency. It bundles no
+  vulnerability database — it points at ``pip-audit`` for a CVE scan and never claims "no known
+  vulnerabilities". Informational, not legal advice.
+
+``snapadmin-demo`` console script — 30-second demo bootstrapper
+  A new ``snapadmin-demo`` command (also ``python -m snapadmin.quickstart``), installed on the PATH by
+  ``pip install django-snapadmin``, brings up the SnapAdmin demo with **no existing project**. It
+  downloads the ``demo/`` directory from the GitHub source tarball of the matching release tag (the
+  wheel doesn't ship it), caches it under ``~/.cache/snapadmin-demo/`` and checksums it so re-runs work
+  offline, extracts only ``demo/`` (with a zip-slip guard and an overwrite confirmation), then installs
+  its requirements, migrates, seeds and serves. Flags: ``--version``, ``--path``, ``--skip-install``,
+  ``--no-serve``, ``--clear-cache`` and ``-y/--yes``. ``--interactive`` runs a wizard (run mode,
+  SQLite/PostgreSQL, admin password, secret-key generation, debug) that writes a ``.env`` the demo
+  reads; ``--save-config``/``--load-config`` capture and replay a setup so a team shares one
+  environment, and the same choices are available as non-interactive flags (``--mode``, ``--database``,
+  ``--db-host`` …) for CI. It is stdlib-only (no new dependency) and never imports Django in-process —
+  it drives ``manage.py`` as a subprocess.
+
+``snapadmin-init`` console script — integrate into an existing project
+  A new read-only ``snapadmin-init`` command (also ``python -m snapadmin.integrate``) inspects an
+  existing Django project and reports what SnapAdmin wiring is already present and what is missing,
+  printing the exact block to paste for each gap: ``INSTALLED_APPS`` (noting the ``unfold`` theme is
+  optional), the ``urls.py`` include, a ``SNAPADMIN_*`` settings block, optional REST/GraphQL config
+  (``--api`` / ``--graphql``), the ``pip install`` line (``--extras``), and advisory model-conversion
+  hints. It **never edits your files** — it only prints snippets you review before pasting, so there is
+  no risk of a bad automatic edit. ``--json`` feeds tooling and ``--settings`` / ``--urls`` point it at
+  a non-standard layout. Stdlib-only, no Django import at import time.
+
+Health alerting — email when a subsystem goes down
+  A new ``snapadmin.health.send_health_alert`` runs the same probes as
+  ``snapadmin_info --health-check`` — database, Elasticsearch, the REST API and GraphQL — and emails the
+  configured recipients when one reports a failure, so an outage reaches an operator instead of only the
+  logs. Each probe honours its feature toggle (``ELASTICSEARCH_ENABLED``, ``SNAPADMIN_REST_API_ENABLED``,
+  ``SNAPADMIN_GRAPHQL_ENABLED``), so a subsystem you turned off is never a false alarm. Run it on a
+  schedule: the ``snapadmin.send_health_alert`` Celery task (Celery Beat) or the new
+  ``snapadmin_health_alert`` management command (system cron; it also exits non-zero while a probe is
+  failing, so it doubles as a monitoring gate — ``--force`` re-sends within the cooldown). Recipients
+  come from ``SNAPADMIN_HEALTH_ALERT_EMAILS`` and fall back to ``SNAPADMIN_ERROR_ALERT_EMAILS``; a
+  cache-based cooldown (``SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES``, default 60) limits a persistent
+  outage to one email, and a recovery re-arms it. No new dependency, no migration; delivery uses
+  Django's standard email machinery.
+
+Demo — Docker restarts containers that go *unhealthy*, not just ones that crash
+  The demo ``docker-compose.yml`` gains a ``willfarrell/autoheal`` sidecar (demo-only) that restarts any
+  container labelled ``autoheal=true`` when its healthcheck flips to unhealthy — covering the "process
+  hung but never exited" case that ``restart: unless-stopped`` alone can't. The Celery ``worker`` gained
+  a ``celery inspect ping`` healthcheck, and db/redis/app/worker/elasticsearch are opted in. Paired with
+  the health-alert email above, a hung subsystem is both restarted and reported.
+
+Changed
+=======
+
+``django-unfold`` is now an optional theme, not a core dependency
+  The Unfold admin theme has moved out of the base install into a new ``[theme]`` extra
+  (``pip install django-snapadmin[theme]``, also part of ``[all]``). SnapAdmin resolves its admin base
+  class lazily: when Unfold is installed and enabled in ``INSTALLED_APPS`` the themed UI is
+  **byte-identical to before** — existing installs that keep Unfold see no change — and when it is
+  absent the admin, its token/error/audit screens and the optional ``django-extra-settings`` restyle
+  all fall back cleanly to Django's built-in admin. This keeps the base package's dependency graph
+  leaner and strictly permissive without giving up the themed experience for those who want it. A new
+  informational system check (``snapadmin.I001``) surfaces the stock-admin fallback so it is never
+  silent, and ``snapadmin_license_check`` / ``THIRD_PARTY_NOTICES.md`` now list ``django-unfold`` under
+  the ``[theme]`` extra. **Upgrading:** if you use the Unfold theme, install ``django-snapadmin[theme]``
+  (or ``[all]``); no code, settings or migration changes are required, and the REST/GraphQL stacks are
+  unchanged.

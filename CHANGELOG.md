@@ -12,6 +12,31 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 
 _Nothing yet._
 
+## 0.1.0b4 — 2026-07-21
+
+An operability, onboarding and decoupling release: four new operator/onboarding commands, a subsystem
+health-alert email channel, Docker self-healing in the demo, and `django-unfold` made an optional
+theme. No model, no migration; every existing import path, setting and signature is unchanged.
+
+- **Added:** `snapadmin_info` — one command reporting config, connected services and health
+  (`--json`, `--section`, `--brief`/`--verbose`, `--health-check`); secrets never printed.
+- **Added:** `snapadmin_license_check` — runtime licence audit with 🟢/🟡/🔴 tiers and a
+  commercial-compatibility verdict (`--json`, `--critical-only`, `--compatible-with`, `--verbose`).
+- **Added:** `snapadmin-demo` console script — stdlib-only bootstrapper that fetches, seeds and serves
+  the demo with no existing project (wizard, save/load config, non-interactive CI flags).
+- **Added:** `snapadmin-init` console script — read-only integration doctor that prints the exact
+  `INSTALLED_APPS` / urls / settings / install snippets to paste, editing nothing.
+- **Added:** subsystem health alerts — `snapadmin_health_alert` command and `snapadmin.send_health_alert`
+  task email when a probe (database, Elasticsearch, REST API, GraphQL — each skipped when its feature is
+  off) is down, with a cooldown. Recipients fall back to `SNAPADMIN_ERROR_ALERT_EMAILS`.
+- **Added:** multi-version CI (`test.yml`, Python 3.10–3.13 × Django 5.2/6.0, 100% coverage gate) and a
+  status badge; publish/release now gate on the matrix passing.
+- **Added (demo):** a `willfarrell/autoheal` sidecar and a Celery worker healthcheck so containers that
+  hang while unhealthy are restarted, not just ones that exit.
+- **Changed:** `django-unfold` moved from a core dependency to a `[theme]` extra (kept in `[all]`); the
+  admin falls back to Django's built-in theme when Unfold is absent (byte-identical when present). New
+  `snapadmin.I001` info check surfaces the fallback.
+
 ## 0.1.0b3 — 2026-07-20
 
 A large security and Elasticsearch release: ten security fixes, a structured Elasticsearch query
