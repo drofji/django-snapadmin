@@ -86,6 +86,12 @@ class Product(snap_models.SnapModel):
     # When ES is down, DUAL models recompute the facets over the DB
     # (values(field).annotate(Count)); ES_ONLY models return empty buckets.
     #
+    # es_count() gives the *true* match total of a structured query via ES's
+    # _count API — unlike len(es_filter(...)) it is not capped at
+    # SNAPADMIN_ES_SEARCH_LIMIT, so it stays exact past the 10k window:
+    #   Product.es_count(available=True)  # e.g. 4217, however large
+    # When ES is down, DUAL models fall back to a DB count(); ES_ONLY returns 0.
+    #
     # es_scan() streams *every* match past ES's 10k max_result_window — a lazy
     # search_after iterator with the same filter args as es_filter():
     #   for product in Product.es_scan(available=True):  # no 10k ceiling

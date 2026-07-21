@@ -165,7 +165,7 @@ each and paste it yourself. → **[Integration guide](https://drofji.github.io/d
 **Elasticsearch**
 - Per-model [`DB_ONLY` / `DUAL` / `ES_ONLY`](https://drofji.github.io/django-snapadmin/#elasticsearch) storage modes with auto-derived index mappings
 - [Smart routing](https://drofji.github.io/django-snapadmin/#es-routing) — `?search=` on `DUAL` models runs fuzzy on ES; plain listings stay on SQL
-- [`es_filter()`](https://drofji.github.io/django-snapadmin/#es-filter) structured term filters, [`es_aggregate()`](https://drofji.github.io/django-snapadmin/#es-aggregate) facets, [`es_scan()`](https://drofji.github.io/django-snapadmin/#es-scan) deep scan past the 10k window — each with a DB fallback when ES is off
+- [`es_filter()`](https://drofji.github.io/django-snapadmin/#es-filter) structured term filters, [`es_aggregate()`](https://drofji.github.io/django-snapadmin/#es-aggregate) facets, [`es_count()`](https://drofji.github.io/django-snapadmin/#es-count) true match totals past the search limit, [`es_scan()`](https://drofji.github.io/django-snapadmin/#es-scan) deep scan past the 10k window — each with a DB fallback when ES is off
 
 **Operations**
 - [GDPR retention](https://drofji.github.io/django-snapadmin/#gdpr) (`data_retention_days`) and an immutable audit trail

@@ -6,3 +6,20 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+Added
+=====
+
+SnapModel.es_count() — true match count of a structured Elasticsearch query
+  New classmethod ``SnapModel.es_count(*, query_string=None, **terms) -> int``, the counting
+  counterpart to ``es_filter()``. It uses the same term resolution and filter context (a scalar builds
+  a ``term`` clause, a list a ``terms`` clause, a ``__`` path reaches into a JSON/object mapping, and a
+  ``text`` field targets its keyword sub-field) but hits Elasticsearch's ``_count`` API instead of
+  ``_search``. Because ``es_filter()``/``es_search()`` cap their results at ``SNAPADMIN_ES_SEARCH_LIMIT``
+  and can never see past ES's ``index.max_result_window``, ``len(es_filter(...))`` silently under-reports
+  once a query matches more rows than the limit; ``es_count()`` returns the exact total no matter how
+  large the result set — the number you need for pagination, a dashboard tile, or a guard before a bulk
+  job. It fails safe like its siblings: a ``DUAL`` model whose Elasticsearch is disabled or erroring
+  falls back to the equivalent database ``count()`` (failing closed to ``0`` for a term field with no
+  backing column), an ``ES_ONLY`` model returns ``0``, and an unknown or analysed-text-only field raises
+  ``ValueError``.

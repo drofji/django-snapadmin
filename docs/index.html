@@ -899,6 +899,25 @@ Product.es_aggregate("category", query_string="laptop")</code></pre>
   every requested field. An unknown or analysed-text-only field raises <code>ValueError</code>, same
   as <code>es_filter()</code>.</p>
 
+  <h3 id="es-count">True match count — <code>es_count()</code></h3>
+  <p><code>es_filter()</code> returns at most <code>SNAPADMIN_ES_SEARCH_LIMIT</code> documents and can
+  never see past ES's <code>index.max_result_window</code>, so <code>len(Model.es_filter(…))</code>
+  under-reports the moment a query matches more rows than the limit. <code>es_count()</code> answers
+  the count question directly through the Elasticsearch <code>_count</code> API — no hits fetched, no
+  ceiling — using the exact same term resolution and filter context as <code>es_filter()</code>:</p>
+  <pre><code># Exact number of matches, regardless of the search limit
+Product.es_count(available=True)               # → 4217
+Product.es_count(price=[999, 1299])            # list → terms clause
+Product.es_count(query_string="laptop")        # scored full-text, still exact
+Order.es_count(payload__status="paid")         # → ES field payload.status</code></pre>
+  <p>The rule: reach for <code>es_count()</code> whenever you need <em>how many</em> match rather than
+  <em>which</em> rows — a total for pagination, a dashboard tile, a guard before a bulk job — on a
+  result set that may exceed the search limit. When Elasticsearch is disabled or a query errors, a
+  <code>DUAL</code> model falls back to the equivalent database <code>count()</code> (failing closed to
+  <code>0</code> for a term field with no backing column); an <code>ES_ONLY</code> model returns
+  <code>0</code>. An unknown or analysed-text-only field raises <code>ValueError</code>, same as
+  <code>es_filter()</code>.</p>
+
   <h3 id="es-scan">Deep scan past 10k — <code>es_scan()</code></h3>
   <p>Elasticsearch refuses a <code>from + size</code> deeper than
   <code>index.max_result_window</code> (10&nbsp;000), so <code>es_search()</code> and

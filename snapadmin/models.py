@@ -1584,6 +1584,72 @@ class SnapModel(models.Model):
         return result
 
     @classmethod
+    def es_count(cls, *, query_string: str | None = None, **terms) -> int:
+        """Exact number of documents matching a structured ES term query.
+
+        The counting counterpart to :meth:`es_filter`: every keyword argument is
+        a term constraint (scalar → ``term``, list/tuple/set → ``terms``) run in
+        ES *filter* context, and an optional ``query_string`` adds a scored
+        full-text ``multi_match``. Field names resolve through
+        :meth:`_resolve_es_term_field`, so a ``text`` field targets its keyword
+        sub-field and a ``__`` path reaches into a JSON/``object`` mapping.
+
+        Unlike :meth:`es_filter` — which caps its queryset at
+        ``SNAPADMIN_ES_SEARCH_LIMIT`` and can never see past ES's
+        ``index.max_result_window`` — ``es_count`` calls the Elasticsearch
+        ``_count`` API, so it returns the *true* match total no matter how large
+        the result set::
+
+            Product.es_count(available=True)              # every in-stock product
+            Product.es_count(query_string="laptop")       # matches, unbounded
+
+        When Elasticsearch is disabled or the query fails, a DUAL model falls
+        back to the equivalent database ``count()`` (failing closed to ``0`` if a
+        term field has no backing column); an ES_ONLY model returns ``0``.
+
+        Raises ``ValueError`` for an unknown or non-term-filterable field.
+        """
+        # Resolve/validate every term up-front so a bad field raises regardless
+        # of which backend ends up answering the query.
+        resolved = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
+
+        use_es = (cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY) and getattr(
+            settings, "ELASTICSEARCH_ENABLED", False
+        )
+
+        if use_es:
+            try:
+                es = cls.get_es_client()
+                response = es.count(
+                    index=cls.get_es_index_name(),
+                    body={"query": cls._build_es_term_query(resolved, query_string)},
+                )
+                return int(response.get("count", 0))
+            except Exception as exc:
+                logger.warning(
+                    "es_count_failed",
+                    model=cls.__name__,
+                    terms=list(terms),
+                    fallback="zero" if cls.es_storage_mode == EsStorageMode.ES_ONLY else "db",
+                    error=str(exc),
+                )
+                if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+                    return 0
+
+        # Database fallback — only meaningful for models with a table.
+        if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+            return 0
+
+        try:
+            qs = cls.objects.filter(**cls._es_orm_terms(terms))
+            # Force field resolution now so an ES-only term (no DB column) fails
+            # closed to 0 rather than raising when count() hits the database.
+            str(qs.query)
+        except FieldError:
+            return 0
+        return qs.count()
+
+    @classmethod
     def _es_orm_terms(cls, terms: dict) -> dict:
         """Translate es_filter/es_scan ``**terms`` to ORM filter kwargs.
 
