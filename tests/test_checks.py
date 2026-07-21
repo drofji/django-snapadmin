@@ -174,6 +174,27 @@ class TestApiWriteFields:
         assert not any("demo.Product" in w.msg for w in result)
 
 
+# ── optional Unfold theme ────────────────────────────────────────────────────
+
+class TestUnfoldTheme:
+    def test_no_info_when_unfold_active(self, monkeypatch):
+        # The test settings install Unfold, so the check stays quiet — the themed
+        # UI is active and there is nothing to surface.
+        import snapadmin.admin as admin_module
+        monkeypatch.setattr(admin_module, "UNFOLD_INSTALLED", True)
+        assert checks.check_unfold_theme(None) == []
+
+    def test_info_emitted_when_unfold_absent(self, monkeypatch):
+        # With Unfold absent SnapAdmin falls back to the stock admin theme; the
+        # check emits one informational (never error) message so it is not silent.
+        import snapadmin.admin as admin_module
+        monkeypatch.setattr(admin_module, "UNFOLD_INSTALLED", False)
+        result = checks.check_unfold_theme(None)
+        assert [i.id for i in result] == ["snapadmin.I001"]
+        assert result[0].level == 20  # Info
+        assert "django-snapadmin[theme]" in result[0].hint
+
+
 # ── integration ──────────────────────────────────────────────────────────────
 
 class TestIntegration:

@@ -351,9 +351,9 @@
   </div>
 
   <h3>Configuring <code>INSTALLED_APPS</code></h3>
-  <p><strong>Order matters</strong> — <code>unfold</code> and its contrib apps must come <em>before</em> <code>django.contrib.admin</code>.</p>
+  <p>The <strong>Unfold theme is optional</strong> (<code>pip install django-snapadmin[theme]</code>) — with it you get the themed UI, without it SnapAdmin renders on Django's built-in admin. If you use Unfold, its contrib apps must come <em>before</em> <code>django.contrib.admin</code>.</p>
   <pre><code>INSTALLED_APPS = [
-    # Theme — must precede django.contrib.admin
+    # Optional theme — only with the [theme] extra; must precede django.contrib.admin
     "unfold",
     "unfold.contrib.filters",
     "unfold.contrib.forms",
@@ -383,12 +383,13 @@
 
     # Your apps …
 ]</code></pre>
-  <p>Installing <code>django-snapadmin</code> pulls in <code>django-unfold</code>, <code>djangorestframework</code>, <code>drf-spectacular</code>, <code>django-filter</code> and <code>graphene-django</code> automatically — you only need to list them in <code>INSTALLED_APPS</code>. <code>django-ckeditor-5</code> is <strong>not</strong> installed by default (it bundles CKEditor 5, a GPL/commercial editor) — add it via the <code>[wysiwyg]</code> extra only if you use rich-text fields.</p>
+  <p>Installing <code>django-snapadmin</code> pulls in <code>djangorestframework</code>, <code>drf-spectacular</code>, <code>django-filter</code> and <code>graphene-django</code> automatically — you only need to list them in <code>INSTALLED_APPS</code>. <code>django-unfold</code> is <strong>not</strong> installed by the base package — add the <code>[theme]</code> extra for the Unfold-themed admin; without it the admin renders on stock Django. <code>django-ckeditor-5</code> is likewise <strong>not</strong> installed by default (it bundles CKEditor 5, a GPL/commercial editor) — add it via the <code>[wysiwyg]</code> extra only if you use rich-text fields.</p>
 
   <h3 id="extras">Optional extras</h3>
   <p>The base install is self-contained. Opt into extra integrations with pip extras:</p>
   <table>
     <tr><th>Extra</th><th><code>pip install</code></th><th>Pulls in</th><th>For</th></tr>
+    <tr><td><code>theme</code></td><td><code>django-snapadmin[theme]</code></td><td><code>django-unfold</code></td><td>Unfold-themed admin UI (falls back to Django's built-in admin without it)</td></tr>
     <tr><td><code>elasticsearch</code></td><td><code>django-snapadmin[elasticsearch]</code></td><td><code>elasticsearch</code></td><td>Full-text search / <code>ES_ONLY</code> / <code>DUAL</code> models</td></tr>
     <tr><td><code>celery</code></td><td><code>django-snapadmin[celery]</code></td><td><code>celery</code>, <code>django-celery-beat</code>, <code>django-celery-results</code></td><td>Background tasks (async export, GDPR purge, digests, backups)</td></tr>
     <tr><td><code>backup</code></td><td><code>django-snapadmin[backup]</code></td><td><code>paramiko</code></td><td>SFTP offsite database backups</td></tr>
@@ -569,9 +570,9 @@ snapadmin-init --json             # machine-readable, for your own tooling</code
   <p>For each item it reports <code>✓ already present</code> or <code>✗ add this —</code> followed by
   the block to paste:</p>
   <ul>
-    <li><strong>INSTALLED_APPS</strong> — the full list in the required order (<code>unfold</code>
-    before <code>django.contrib.admin</code>, <code>snapadmin</code> after), and a warning if
-    <code>unfold</code> is missing.</li>
+    <li><strong>INSTALLED_APPS</strong> — the full list with <code>snapadmin</code> in place, and a
+    note that the <code>unfold</code> theme is optional (<code>[theme]</code> extra) — if you use it,
+    its apps must precede <code>django.contrib.admin</code>.</li>
     <li><strong>URL routes</strong> — the <code>include("snapadmin.urls")</code> line, honouring
     <code>--url-prefix</code>.</li>
     <li><strong>SnapAdmin settings</strong> — the <code>SNAPADMIN_*</code> feature-toggle block.</li>
@@ -1725,6 +1726,7 @@ reindex_products_to_elasticsearch.delay()</code></pre>
     <tr><td><code>snapadmin.purge_expired_data</code></td><td><strong>You schedule it</strong></td><td>GDPR — delete rows past each model's <code>data_retention_days</code></td></tr>
     <tr><td><code>snapadmin.purge_expired_tokens</code></td><td><strong>You schedule it</strong></td><td>Delete <code>APIToken</code> rows past their expiry (an expired token stops authenticating immediately either way — this only reclaims the rows)</td></tr>
     <tr><td><code>snapadmin.send_error_digest</code></td><td><strong>You schedule it</strong></td><td>Daily grouped digest of captured error events</td></tr>
+    <tr><td><code>snapadmin.send_health_alert</code></td><td><strong>You schedule it</strong> (e.g. every 5 min)</td><td>Probe subsystem health (DB / Elasticsearch / REST API / GraphQL, each skipped when its feature is off) and email an alert when one is down; a cooldown limits a persistent outage to one email</td></tr>
     <tr><td><code>snapadmin.run_db_backups</code></td><td><strong>You schedule it</strong> (hourly due-check)</td><td>3-2-1 database dumps to each destination that is due</td></tr>
     <tr><td><code>snapadmin.run_export</code></td><td><strong>Event</strong> — enqueued when an async export job is created</td><td>Streams a large export in the background. No Beat entry; needs a running worker</td></tr>
     <tr><td><code>snapadmin.run_es_reindex</code></td><td><strong>Event</strong> — enqueued by <code>POST /api/es/reindex/</code> when <code>SNAPADMIN_REINDEX_API_ASYNC=True</code></td><td>Bulk-reindex a model into Elasticsearch. Needs a running worker; schedule it as well if you want periodic reindexing</td></tr>
@@ -1767,6 +1769,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "snapadmin.send_error_digest",
         "schedule": crontab(hour=8, minute=0),   # daily 8am
         "description": "Grouped digest of captured error events",
+    },
+    "send-health-alert": {
+        "task": "snapadmin.send_health_alert",
+        "schedule": crontab(minute="*/5"),       # every 5 minutes
+        "description": "Email an alert when a subsystem (DB/ES) is down",
     },
     "run-db-backups": {
         "task": "snapadmin.run_db_backups",
@@ -1839,7 +1846,7 @@ python manage.py snapadmin_info --health-check    # probes only; non-zero exit o
       <tr><td><code>--section NAME</code></td><td>Limit to one section (repeatable). Names: <code>version</code>, <code>database</code>, <code>elasticsearch</code>, <code>celery</code>, <code>inventory</code>.</td></tr>
       <tr><td><code>--brief</code></td><td>Show only the top-level scalar values of each section, hiding nested detail.</td></tr>
       <tr><td><code>--verbose</code></td><td>Include extra per-section detail (e.g. the list of online Celery workers).</td></tr>
-      <tr><td><code>--health-check</code></td><td>Run only the connection probes (database, Elasticsearch) and <strong>exit non-zero</strong> if any fails — usable as a readiness/liveness check.</td></tr>
+      <tr><td><code>--health-check</code></td><td>Run only the health probes (database, Elasticsearch, REST API, GraphQL — each skipped when its feature toggle is off) and <strong>exit non-zero</strong> if any fails — usable as a readiness/liveness check.</td></tr>
     </tbody>
   </table>
 
@@ -2086,6 +2093,45 @@ python manage.py send_error_digest --hours 12   # custom window</code></pre>
     Try it in the demo: hit <code>/demo/error/</code> a few times (DEBUG only) and watch
     <strong>Error Events</strong> fill up; with the default DEBUG console email backend the alert
     lands in your terminal.
+  </div>
+
+  <h3>Health alerts — email when a subsystem is down</h3>
+  <p>A third, independent channel watches <em>infrastructure</em> rather than application errors. It runs
+  the same probes as <code>snapadmin_info --health-check</code> — database, Elasticsearch, the REST API and
+  GraphQL — and emails when one reports a failure, so an outage reaches an operator instead of only the
+  logs. Each probe honours its feature toggle (<code>ELASTICSEARCH_ENABLED</code>,
+  <code>SNAPADMIN_REST_API_ENABLED</code>, <code>SNAPADMIN_GRAPHQL_ENABLED</code>), so a subsystem you
+  turned off is never a false alarm. Run it on a schedule —
+  the <code>snapadmin.send_health_alert</code> Celery task, or the <code>snapadmin_health_alert</code>
+  management command from cron (it also <strong>exits non-zero while a probe is failing</strong>, so it
+  doubles as a monitoring gate). A cache-based cooldown limits a persistent outage to one email; a
+  recovery re-arms it so the next outage alerts immediately.</p>
+  <pre><code># settings.py — recipients fall back to SNAPADMIN_ERROR_ALERT_EMAILS
+SNAPADMIN_HEALTH_ALERT_ENABLED = True
+SNAPADMIN_HEALTH_ALERT_EMAILS = ["ops@example.com"]
+SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES = 60
+
+# Celery Beat — probe every few minutes:
+"send-health-alert": {
+    "task": "snapadmin.send_health_alert",
+    "schedule": crontab(minute="*/5"),
+}
+
+# ...or plain cron, without Celery:
+*/5 * * * *  python manage.py snapadmin_health_alert
+python manage.py snapadmin_health_alert --force   # re-send within the cooldown</code></pre>
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>SNAPADMIN_HEALTH_ALERT_ENABLED</code></td><td><code>True</code></td><td>Enable the health-alert channel.</td></tr>
+    <tr><td><code>SNAPADMIN_HEALTH_ALERT_EMAILS</code></td><td><code>[]</code></td><td>Recipients; falls back to <code>SNAPADMIN_ERROR_ALERT_EMAILS</code>. Empty (both) = no email.</td></tr>
+    <tr><td><code>SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES</code></td><td><code>60</code></td><td>Minimum gap between two health-alert emails for an ongoing outage.</td></tr>
+  </table>
+  <div class="callout callout-info">
+    <strong>Restart the container too (demo).</strong> Emailing tells you a subsystem is down;
+    restarting it is a separate concern. The demo <code>docker-compose.yml</code> pairs this with a
+    <code>willfarrell/autoheal</code> sidecar that restarts any container labelled <code>autoheal=true</code>
+    once its healthcheck goes unhealthy — covering the "hung but not exited" case that
+    <code>restart: unless-stopped</code> alone can't. See the demo <a href="#demo-setup">Docker setup</a>.
   </div>
 
   <!-- ── 3-2-1 Backups ─────────────────────────────────────────────────────── -->

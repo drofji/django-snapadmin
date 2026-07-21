@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 
 from django.apps import apps
 from django.conf import settings
-from django.core.checks import Error, Warning
+from django.core.checks import Error, Info, Warning
 
 from snapadmin.models import SnapModel
 
@@ -176,6 +176,31 @@ def check_api_write_fields(app_configs, **kwargs):
     return warnings
 
 
+def check_unfold_theme(app_configs, **kwargs):
+    """Info: surface the stock-admin fallback so it is never silent.
+
+    ``django-unfold`` is an optional theme (``pip install django-snapadmin[theme]``).
+    SnapAdmin resolves its admin base class lazily — it uses Unfold's themed
+    ``ModelAdmin``/widgets when the package is installed *and* ``'unfold'`` is in
+    ``INSTALLED_APPS``, and otherwise renders on Django's built-in admin. When that
+    fallback is active this emits one informational message (never an error, never
+    blocks boot) so an operator who expected the themed UI can see why it isn't there.
+    """
+    from snapadmin.admin import UNFOLD_INSTALLED
+
+    if UNFOLD_INSTALLED:
+        return []
+    return [Info(
+        "SnapAdmin is running on Django's built-in admin theme — the optional "
+        "django-unfold theme is not active.",
+        hint="This is fully supported. For the themed UI, install the theme extra "
+             "(pip install django-snapadmin[theme]) and add 'unfold', "
+             "'unfold.contrib.filters', 'unfold.contrib.forms' and "
+             "'unfold.contrib.inlines' to INSTALLED_APPS before 'django.contrib.admin'.",
+        id="snapadmin.I001",
+    )]
+
+
 ALL_CHECKS = [
     check_analytics_db_alias,
     check_masked_fields,
@@ -183,6 +208,7 @@ ALL_CHECKS = [
     check_nesting_active_site,
     check_sso_providers,
     check_api_write_fields,
+    check_unfold_theme,
 ]
 
 

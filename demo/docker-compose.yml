@@ -69,6 +69,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    labels:
+      - "autoheal=true"   # restarted by the autoheal sidecar if it goes unhealthy
 
   # ── Redis ───────────────────────────────────────────────────────────────────
   redis:
@@ -83,6 +85,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    labels:
+      - "autoheal=true"
 
   # ── Django App ──────────────────────────────────────────────────────────────
   app:
@@ -103,6 +107,8 @@ services:
       interval: 30s
       timeout: 10s
       retries: 5
+    labels:
+      - "autoheal=true"
 
   # ── Celery Worker ───────────────────────────────────────────────────────────
   worker:
@@ -111,16 +117,47 @@ services:
     restart: unless-stopped
     depends_on:
       - app
+    healthcheck:
+      # `inspect ping` succeeds only while the worker is actually consuming — a hung
+      # worker fails it, and autoheal restarts the container.
+      test: [ "CMD-SHELL", "celery -A demo.core inspect ping -t 10 || exit 1" ]
+      interval: 30s
+      timeout: 15s
+      retries: 3
+      start_period: 40s
+    labels:
+      - "autoheal=true"
 
   # ── Celery Beat (Scheduler) ─────────────────────────────────────────────────
   # Uses Django DB-backed scheduler (django_celery_beat) so admins can inspect
   # and modify the schedule from the Django admin UI.
+  # Beat has no meaningful container-local healthcheck (it isn't a worker and
+  # exposes no readiness endpoint), so it relies on `restart: unless-stopped` for
+  # crash recovery. The send-health-alert schedule below emails if a subsystem is
+  # down, which is the practical signal that Beat has stopped firing.
   beat:
     <<: *app-common
     command: celery -A demo.core beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     restart: unless-stopped
     depends_on:
       - app
+
+  # ── Autoheal (restart unhealthy containers) ─────────────────────────────────
+  # Docker's `restart:` policy only restarts a container that *exits*; a process
+  # that hangs while its healthcheck reports "unhealthy" is never restarted on its
+  # own. This sidecar (willfarrell/autoheal, MIT — demo-only, not shipped in the
+  # wheel) watches every container labelled `autoheal=true` and restarts it when
+  # its healthcheck flips to unhealthy. It needs the Docker socket, mounted
+  # read-only, to observe and restart peers.
+  autoheal:
+    image: willfarrell/autoheal:1.2.0
+    restart: unless-stopped
+    environment:
+      AUTOHEAL_CONTAINER_LABEL: autoheal   # only act on containers we opted in
+      AUTOHEAL_INTERVAL: 10                 # poll health every 10s
+      AUTOHEAL_START_PERIOD: 60             # grace period before the first restart
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
 
   # ── Elasticsearch ───────────────────────────────────────────────────────────
   # Optional — only starts when running: docker compose --profile es up
@@ -143,6 +180,8 @@ services:
       interval: 15s
       timeout: 10s
       retries: 10
+    labels:
+      - "autoheal=true"
 
   # ── Kibana (dev tool — optional) ────────────────────────────────────────────
   # Only starts when: docker compose --profile es --profile dev up

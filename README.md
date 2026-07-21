@@ -47,9 +47,9 @@ from snapadmin.models import SnapModel
 SnapModel.register_all_admins()
 ```
 
-That's it — you get an Unfold-themed admin with filters, badges and change logging, `/api/product/`
-CRUD with Swagger docs, an `allDemoProducts` GraphQL field, and typo-tolerant search when
-Elasticsearch is on.
+That's it — you get a full admin with filters, badges and change logging (Unfold-themed with the
+`[theme]` extra, stock Django admin without it), `/api/product/` CRUD with Swagger docs, an
+`allDemoProducts` GraphQL field, and typo-tolerant search when Elasticsearch is on.
 
 → **[Field types](https://drofji.github.io/django-snapadmin/#snap-fields)** ·
 **[SnapModel reference](https://drofji.github.io/django-snapadmin/#snap-model)** ·
@@ -93,10 +93,13 @@ pip install django-snapadmin
 Requires **Python ≥ 3.10** and **Django ≥ 5.2**. The package is **beta** — the public API is
 stabilising but may still change before `0.1.0` stable, so pin an exact version in production.
 
-Add the stack to `INSTALLED_APPS` — **order matters**, `unfold` must precede `django.contrib.admin`:
+Add the stack to `INSTALLED_APPS`. The **Unfold theme is optional** (`pip install
+django-snapadmin[theme]`) — with it you get the themed UI; without it SnapAdmin renders on Django's
+built-in admin. If you use Unfold, its apps **must precede `django.contrib.admin`**:
 
 ```python
 INSTALLED_APPS = [
+    # Optional themed UI — pip install django-snapadmin[theme]. If used, list before admin:
     "unfold", "unfold.contrib.filters", "unfold.contrib.forms", "unfold.contrib.inlines",
     "django.contrib.admin", "django.contrib.auth", "django.contrib.contenttypes",
     "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",
@@ -105,8 +108,9 @@ INSTALLED_APPS = [
 ]
 ```
 
-Installing SnapAdmin pulls in `django-unfold`, `djangorestframework`, `drf-spectacular`,
-`django-filter` and `graphene-django` automatically — you only list them.
+Installing SnapAdmin pulls in `djangorestframework`, `drf-spectacular`, `django-filter` and
+`graphene-django` automatically — you only list them. `django-unfold` is **not** installed by the
+base package; add the `[theme]` extra for the Unfold-themed admin.
 
 ### Optional extras
 
@@ -115,6 +119,7 @@ is safe for commercial and proprietary use. Opt into the rest:
 
 | Extra | Pulls in | For |
 |-------|----------|-----|
+| `theme` | `django-unfold` | Unfold-themed admin UI (falls back to Django's built-in admin without it) |
 | `elasticsearch` | `elasticsearch` | Full-text search, `DUAL` / `ES_ONLY` models |
 | `celery` | `celery`, `django-celery-beat`, `django-celery-results` | Background tasks (export, GDPR purge, digests, backups) |
 | `backup` | `paramiko` | SFTP offsite database backups |
@@ -147,7 +152,7 @@ each and paste it yourself. → **[Integration guide](https://drofji.github.io/d
 
 **Admin**
 - Declarative `list_display` / `search_fields` / `list_filter` straight from field kwargs
-- Unfold-themed responsive UI, colour-coded [status badges](https://drofji.github.io/django-snapadmin/#status-badges), horizontal rows and tabs
+- Unfold-themed responsive UI (optional `[theme]` extra — falls back to Django's built-in admin), colour-coded [status badges](https://drofji.github.io/django-snapadmin/#status-badges), horizontal rows and tabs
 - Date and numeric [range filters](https://drofji.github.io/django-snapadmin/#advanced-layout); field-level change logging (`old → new`) with a history view
 - [Offline mode](https://drofji.github.io/django-snapadmin/#offline) — per-model IndexedDB prefetch, real backend health checks, sync on reconnect
 
@@ -165,6 +170,7 @@ each and paste it yourself. → **[Integration guide](https://drofji.github.io/d
 **Operations**
 - [GDPR retention](https://drofji.github.io/django-snapadmin/#gdpr) (`data_retention_days`) and an immutable audit trail
 - [Error monitoring](https://drofji.github.io/django-snapadmin/#error-monitoring) — spike alerts + daily grouped email digests
+- [Health alerts](https://drofji.github.io/django-snapadmin/#error-monitoring) — email when a subsystem probe (DB / Elasticsearch / REST API / GraphQL, each skipped when its feature is off) goes down; `snapadmin_health_alert` (cron) or the `snapadmin.send_health_alert` task (Beat), with a cooldown so an outage emails once
 - [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, and offsite FTPS/SFTP
 - [Large-dataset tuning](https://drofji.github.io/django-snapadmin/#performance) — auto `list_select_related` (no admin N+1), estimated counts, per-model paging
 - [Generic ETL](https://drofji.github.io/django-snapadmin/#integrating) — `upsert_from_source()` and `stale_sync()` with a `max_fraction` wipe guard
@@ -172,7 +178,7 @@ each and paste it yourself. → **[Integration guide](https://drofji.github.io/d
 - [One-command diagnostics](https://drofji.github.io/django-snapadmin/#snapadmin-info) — `snapadmin_info` reports the version, connected services (DB / Elasticsearch / Celery), registered models and health as text or `--json`, with a `--health-check` readiness probe
 - [Licence audit](https://drofji.github.io/django-snapadmin/#license-check) — `snapadmin_license_check` reports the licence and 🟢/🟡/🔴 commercial-usability tier of every installed dependency, so you know your install is proprietary-safe
 
-Management commands: `snapadmin_info` (diagnostics & health), `snapadmin_license_check` (licence audit), `snapadmin_reindex`, `db_backup`, `send_error_digest`, `purge_expired_data`.
+Management commands: `snapadmin_info` (diagnostics & health), `snapadmin_license_check` (licence audit), `snapadmin_health_alert` (email on unhealthy subsystem), `snapadmin_reindex`, `db_backup`, `send_error_digest`, `purge_expired_data`.
 
 > ⏱ **Nothing runs on its own.** SnapAdmin ships no daemon — the retention purge, digests and backups
 > need a Celery Beat entry or a cron line. See

@@ -1,0 +1,42 @@
+{% load i18n %}<!DOCTYPE html>
+<html>
+<body style="margin:0;padding:24px;background:#f4f4f7;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f2933;">
+  <div style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:8px;overflow:hidden;border:1px solid #e4e7eb;">
+    <div style="background:#b91c1c;color:#ffffff;padding:20px 24px;">
+      <h1 style="margin:0;font-size:18px;">&#9888;&#65039; SnapAdmin — health alert</h1>
+      <p style="margin:8px 0 0;font-size:14px;opacity:.9;">
+        <strong>{{ failing|length }}</strong> of <strong>{{ checked }}</strong>
+        health prob{{ checked|pluralize:"e,es" }} reporting a failure
+      </p>
+    </div>
+    <div style="padding:24px;">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <thead>
+          <tr style="text-align:left;color:#616e7c;border-bottom:2px solid #e4e7eb;">
+            <th style="padding:8px 6px;">Subsystem</th>
+            <th style="padding:8px 6px;">Status</th>
+            <th style="padding:8px 6px;">Detail</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for probe in probes %}
+          <tr style="border-bottom:1px solid #f0f2f5;vertical-align:top;">
+            <td style="padding:8px 6px;"><strong>{{ probe.title }}</strong></td>
+            <td style="padding:8px 6px;">
+              {% if probe.ok is True %}<span style="background:#dcfce7;color:#166534;border-radius:10px;padding:2px 8px;font-weight:600;">OK</span>
+              {% elif probe.ok is False %}<span style="background:#fee2e2;color:#b91c1c;border-radius:10px;padding:2px 8px;font-weight:600;">DOWN</span>
+              {% else %}<span style="color:#616e7c;">n/a</span>{% endif %}
+            </td>
+            <td style="padding:8px 6px;font-family:monospace;color:#616e7c;">{{ probe.data.error|default:"—"|truncatechars:160 }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p style="margin:20px 0 0;font-size:12px;color:#616e7c;">
+        Generated at {{ generated_at|date:"Y-m-d H:i:s e" }} — investigate with
+        <span style="font-family:monospace;">python manage.py snapadmin_info --health-check</span>.
+      </p>
+    </div>
+  </div>
+</body>
+</html>

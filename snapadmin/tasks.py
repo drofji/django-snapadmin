@@ -119,6 +119,21 @@ def run_es_reindex(self, chunk_size: int = 500):
     return summary
 
 
+@shared_task(bind=True, name="snapadmin.send_health_alert")
+def send_health_alert(self):
+    """Probe subsystem health and email the recipients when one is down.
+
+    Schedule this via Celery Beat (e.g. every few minutes). A cache-based cooldown
+    means a persistent outage emails at most once per
+    ``SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES``; a recovery re-arms it immediately.
+    """
+    from snapadmin.health import send_health_alert as run
+
+    summary = run()
+    logger.info("health_alert_task_finished", **summary)
+    return summary
+
+
 @shared_task(bind=True, name="snapadmin.run_db_backups")
 def run_db_backups(self):
     """

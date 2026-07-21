@@ -6,13 +6,13 @@ from django.utils.translation import gettext_lazy as _
 try:
     from django.conf import settings
     if 'unfold' not in settings.INSTALLED_APPS:
-        raise ImportError("Unfold not in INSTALLED_APPS")  # pragma: no cover
+        raise ImportError("Unfold not in INSTALLED_APPS")
 
     from unfold.admin import ModelAdmin, TabularInline, StackedInline
     from unfold.contrib.filters.admin import RelatedDropdownFilter, ChoicesDropdownFilter
     from unfold.decorators import display
     UNFOLD_INSTALLED = True
-except (ImportError, RuntimeError):  # pragma: no cover
+except (ImportError, RuntimeError):
     from django.contrib.admin import ModelAdmin, TabularInline, StackedInline
     RelatedDropdownFilter = admin.RelatedFieldListFilter
     ChoicesDropdownFilter = admin.ChoicesFieldListFilter
@@ -114,7 +114,7 @@ class APITokenAdmin(ModelAdmin):
         val = f"{obj.token_prefix}••••••••"
         if UNFOLD_INSTALLED:
             return [val, None, None]
-        return val  # pragma: no cover
+        return val
 
     @display(description=_("Status"), label=True)
     def status_badge(self, obj: APIToken):
@@ -129,7 +129,7 @@ class APITokenAdmin(ModelAdmin):
         if UNFOLD_INSTALLED:
             return res
 
-        return res[0]  # pragma: no cover
+        return res[0]
 
 
 class ErrorEventAdmin(ModelAdmin):
@@ -171,7 +171,7 @@ class ErrorEventAdmin(ModelAdmin):
         res = (str(obj.status_code), "danger" if obj.status_code >= 500 else "warning")
         if UNFOLD_INSTALLED:
             return res
-        return res[0]  # pragma: no cover
+        return res[0]
 
     @display(description=_("Message"))
     def short_message(self, obj: ErrorEvent):
@@ -231,4 +231,4 @@ class SnapadminAuditLogAdmin(ModelAdmin):
         res = (obj.get_action_display(), colours.get(obj.action, "info"))
         if UNFOLD_INSTALLED:
             return res
-        return res[0]  # pragma: no cover
+        return res[0]

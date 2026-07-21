@@ -1,0 +1,13 @@
+SnapAdmin health alert
+======================
+
+{{ failing|length }} of {{ checked }} health prob{{ checked|pluralize:"e,es" }} reporting a failure.
+Generated at {{ generated_at|date:"Y-m-d H:i:s e" }}.
+
+Down:
+{% for probe in failing %}  - {{ probe.title }}{% if probe.data.error %}: {{ probe.data.error|truncatechars:200 }}{% endif %}
+{% endfor %}
+All probes:
+{% for probe in probes %}  - {{ probe.title }}: {% if probe.ok is True %}OK{% elif probe.ok is False %}DOWN{% else %}n/a{% endif %}
+{% endfor %}
+Investigate with: python manage.py snapadmin_info --health-check

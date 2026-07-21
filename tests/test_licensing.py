@@ -65,8 +65,8 @@ class TestNormalize:
 class TestCuratedMap:
     def test_curated_has_core_and_extras(self):
         assert len(CURATED) == 18
-        assert sum(1 for i in CURATED.values() if i.is_core) == 10
-        assert sum(1 for i in CURATED.values() if not i.is_core) == 8
+        assert sum(1 for i in CURATED.values() if i.is_core) == 9
+        assert sum(1 for i in CURATED.values() if not i.is_core) == 9
 
     def test_license_info_properties(self):
         paramiko = CURATED["paramiko"]

@@ -35,7 +35,6 @@ Everything a plain `pip install django-snapadmin` pulls in. **All permissive (MI
 | drf-spectacular | BSD-3-Clause | 🟢 | OpenAPI schema + Swagger/ReDoc |
 | django-filter | BSD-3-Clause | 🟢 | REST filtering backend |
 | graphene-django | MIT | 🟢 | Dynamic GraphQL schema |
-| django-unfold | MIT | 🟢 | Admin theme / UI |
 | django-admin-rangefilter | MIT | 🟢 | Admin date-range filters |
 | structlog | MIT or Apache-2.0 | 🟢 | Structured logging |
 | colorama | BSD-3-Clause | 🟢 | Coloured console output |
@@ -47,6 +46,7 @@ Nothing here is installed by a base `pip install`. Install via, e.g., `pip insta
 
 | Extra | Package(s) | Licence | | Purpose |
 |-------|------------|---------|---|---------|
+| `theme` | django-unfold | MIT | 🟢 | Unfold admin theme / UI (falls back to Django's built-in admin without it) |
 | `elasticsearch` | elasticsearch | Apache-2.0 | 🟢 | Full-text search (`ES_ONLY` / `DUAL` models) |
 | `celery` | celery, django-celery-beat, django-celery-results | BSD-3 / BSD / BSD | 🟢 | Background tasks (async export, GDPR purge, digests, backups) |
 | `extra-settings` | django-extra-settings | MIT | 🟢 | In-admin dynamic key/value `Setting` model |

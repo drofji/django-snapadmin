@@ -14,8 +14,10 @@ _SKIP_DIRS = {".venv", "venv", "env", "node_modules", "__pycache__", ".git", ".s
 
 _INSTALLED_APPS_SNIPPET = (
     "INSTALLED_APPS = [\n"
+    "    # Optional themed UI — pip install django-snapadmin[theme]. If you use Unfold,\n"
+    '    # its apps must be listed before "django.contrib.admin":\n'
     '    "unfold", "unfold.contrib.filters", "unfold.contrib.forms", "unfold.contrib.inlines",\n'
-    '    "django.contrib.admin",  # must come after unfold\n'
+    '    "django.contrib.admin",\n'
     '    "django.contrib.auth", "django.contrib.contenttypes",\n'
     '    "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",\n'
     '    "rest_framework", "drf_spectacular", "django_filters", "graphene_django",\n'
@@ -70,7 +72,11 @@ def _has(text: str, *tokens: str) -> bool:
 
 def installed_apps_step(ctx: ProjectContext) -> Step:
     present = _has(ctx.settings_text, '"snapadmin"', "'snapadmin'")
-    note = "" if _has(ctx.settings_text, "unfold") else "'unfold' must be listed before 'django.contrib.admin'."
+    note = "" if _has(ctx.settings_text, "unfold") else (
+        "The 'unfold' theme is optional (pip install django-snapadmin[theme]); without it "
+        "SnapAdmin renders on Django's built-in admin. If you add it, list the unfold apps "
+        "before 'django.contrib.admin'."
+    )
     return Step("installed_apps", "INSTALLED_APPS", present, _INSTALLED_APPS_SNIPPET, note)
 
 

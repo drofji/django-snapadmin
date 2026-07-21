@@ -58,7 +58,6 @@ snapadmin-init = "snapadmin.integrate.cli:main"
 python = ">=3.10"
 Django = ">=5.2"
 django-admin-rangefilter = ">=0.13.3"
-django-unfold = ">=0.40.0"
 djangorestframework = ">=3.15.0"
 drf-spectacular = ">=0.27.0"
 django-filter = ">=24.0"
@@ -66,6 +65,12 @@ structlog = ">=24.1.0"
 colorama = ">=0.4.6"
 graphene-django = ">=3.2.0"
 nh3 = ">=0.2.0"
+
+# Optional: django-unfold theme (permissive MIT). SnapAdmin resolves its admin base class
+# lazily — it uses Unfold's themed ModelAdmin/widgets when installed and enabled in
+# INSTALLED_APPS, and falls back to Django's stock admin otherwise. Install the [theme] extra
+# for the full themed UI; the core admin works without it.
+django-unfold = {version = ">=0.40.0", optional = true}
 
 # Optional: Elasticsearch integration (required when ELASTICSEARCH_ENABLED=True)
 elasticsearch = {version = ">=8.0.0", optional = true}
@@ -93,13 +98,14 @@ django-ckeditor-5 = {version = ">=0.0.12", optional = true}
 django-admin-autocomplete-filter = {version = ">=0.7.1", optional = true}
 
 [tool.poetry.extras]
+theme = ["django-unfold"]
 elasticsearch = ["elasticsearch"]
 celery = ["celery", "django-celery-beat", "django-celery-results"]
 backup = ["paramiko"]
 extra-settings = ["django-extra-settings"]
 wysiwyg = ["django-ckeditor-5"]
 autocomplete-filter = ["django-admin-autocomplete-filter"]
-all = ["elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "django-extra-settings", "django-ckeditor-5", "django-admin-autocomplete-filter"]
+all = ["django-unfold", "elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "django-extra-settings", "django-ckeditor-5", "django-admin-autocomplete-filter"]
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.0.0"

@@ -682,7 +682,7 @@ def formatted_id(obj):
         val = mark_safe(str(pk))
     if UNFOLD_INSTALLED:
         return [val, None, None]
-    return val  # pragma: no cover
+    return val
 
 # ===========================================================================
 # Admin Mixin

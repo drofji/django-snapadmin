@@ -62,6 +62,16 @@ Add Elasticsearch with `docker compose --profile es up --build`. See the
 top-of-file comments in [`../docker-compose.yml`](../docker-compose.yml) for the
 full profile matrix and the Traefik overlays.
 
+**Self-healing.** `restart: unless-stopped` only restarts a container that *exits* —
+a process that hangs while its healthcheck reports `unhealthy` is never restarted on
+its own. The stack includes a [`willfarrell/autoheal`](https://github.com/willfarrell/docker-autoheal)
+sidecar (MIT, demo-only) that watches every container labelled `autoheal=true`
+(db, redis, app, worker, elasticsearch) and restarts it when its healthcheck goes
+unhealthy. Paired with the `send-health-alert` Beat entry — which emails when a
+subsystem probe (DB / Elasticsearch / REST API / GraphQL) is down — a hung subsystem
+is both restarted and reported. Set `SNAPADMIN_HEALTH_ALERT_EMAILS` in `demo/.env` to
+receive the alert.
+
 With Elasticsearch running, the demo's `Product` (DUAL) and `SearchLog` (ES_ONLY)
 models exercise the resumable bulk reindex — run it against the seeded data to
 watch live progress, then try the flags:

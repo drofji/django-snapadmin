@@ -28,10 +28,13 @@ class TestInstalledApps:
         assert step.present is True
         assert step.note == ""
 
-    def test_missing_and_warns_about_unfold(self):
+    def test_missing_notes_unfold_is_optional(self):
         step = steps.installed_apps_step(_ctx(settings_text="INSTALLED_APPS=[]"))
         assert step.present is False
+        # Unfold is now an optional theme, not a hard requirement — the note frames
+        # it that way rather than demanding it precede django.contrib.admin.
         assert "unfold" in step.note
+        assert "optional" in step.note
 
 
 class TestUrls:

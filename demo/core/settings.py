@@ -362,6 +362,19 @@ SNAPADMIN_ERROR_DIGEST_MAX_GROUPS = int(os.getenv('SNAPADMIN_ERROR_DIGEST_MAX_GR
 SNAPADMIN_ERROR_DIGEST_HOUR = int(os.getenv('SNAPADMIN_ERROR_DIGEST_HOUR', '8'))
 SNAPADMIN_ERROR_DIGEST_MINUTE = int(os.getenv('SNAPADMIN_ERROR_DIGEST_MINUTE', '0'))
 
+# Health alert: email when a subsystem probe (DB / Elasticsearch / REST API / GraphQL,
+# each skipped when its feature toggle is off) is down. Runs the same checks as
+# `snapadmin_info --health-check` on a schedule (the send-health-alert Beat entry below,
+# or `manage.py snapadmin_health_alert` from cron). Recipients fall back to
+# SNAPADMIN_ERROR_ALERT_EMAILS; a persistent outage emails at most once per cooldown window.
+SNAPADMIN_HEALTH_ALERT_ENABLED = os.getenv('SNAPADMIN_HEALTH_ALERT_ENABLED', 'True') == 'True'
+SNAPADMIN_HEALTH_ALERT_EMAILS = [
+    e.strip() for e in os.getenv('SNAPADMIN_HEALTH_ALERT_EMAILS', '').split(',') if e.strip()
+]
+SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES = int(
+    os.getenv('SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES', '60')
+)
+
 # ErrorEvent rows older than this are purged by the digest task.
 SNAPADMIN_ERROR_RETENTION_DAYS = int(os.getenv('SNAPADMIN_ERROR_RETENTION_DAYS', '30'))
 
@@ -505,6 +518,11 @@ CELERY_BEAT_SCHEDULE = {
         # Send time is env-configurable: SNAPADMIN_ERROR_DIGEST_HOUR / _MINUTE
         "schedule": crontab(hour=SNAPADMIN_ERROR_DIGEST_HOUR, minute=SNAPADMIN_ERROR_DIGEST_MINUTE),
         "description": "Email the grouped 24h error digest and purge expired ErrorEvents",
+    },
+    "send-health-alert": {
+        "task": "snapadmin.send_health_alert",
+        "schedule": crontab(minute="*/5"),  # every 5 minutes
+        "description": "Probe subsystem health (DB/ES) and email an alert when one is down",
     },
     "run-db-backups": {
         "task": "snapadmin.run_db_backups",
