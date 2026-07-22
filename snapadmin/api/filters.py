@@ -14,6 +14,7 @@ the lookup set for one of its own fields via ``SnapModel.api_filter_lookups``.
 """
 
 import django_filters
+from django.conf import settings
 from django.db import connections, models as django_models
 from django.db.models import QuerySet
 from django_filters.constants import EMPTY_VALUES
@@ -121,6 +122,29 @@ def _text_filter_for_lookup(name: str, lookup: str) -> tuple[str, django_filters
     return f"{name}__{lookup}", django_filters.CharFilter(field_name=name, lookup_expr=lookup)
 
 
+def _resolve_text_lookups(
+    model_class: type[django_models.Model], name: str, model_lookups: dict[str, list[str]]
+) -> list[str]:
+    """The lookup set for one text field, first non-``None`` source winning.
+
+    Order: the per-field ``api_filter_lookups`` entry (narrowest, model-authored),
+    then the model-wide ``api_default_text_lookups``, then the project-wide
+    ``SNAPADMIN_API_TEXT_LOOKUPS`` setting, then the library default. This lets a
+    project drop the non-indexable ``icontains`` once — per-model or per-project —
+    without enumerating every column, while a per-field override still wins.
+    """
+    field_lookups = model_lookups.get(name)
+    if field_lookups is not None:
+        return field_lookups
+    model_default = getattr(model_class, "api_default_text_lookups", None)
+    if model_default is not None:
+        return model_default
+    project_default = getattr(settings, "SNAPADMIN_API_TEXT_LOOKUPS", None)
+    if project_default is not None:
+        return project_default
+    return _TEXT_LOOKUPS_DEFAULT
+
+
 def _build_filters_for_model(model_class: type[django_models.Model]) -> dict[str, django_filters.Filter]:
     filters: dict[str, django_filters.Filter] = {}
     model_lookups: dict[str, list[str]] = getattr(model_class, "api_filter_lookups", None) or {}
@@ -132,7 +156,7 @@ def _build_filters_for_model(model_class: type[django_models.Model]) -> dict[str
         name = field.name
 
         if isinstance(field, _TEXT_FIELD_TYPES):
-            lookups = model_lookups.get(name, _TEXT_LOOKUPS_DEFAULT)
+            lookups = _resolve_text_lookups(model_class, name, model_lookups)
             for lookup in lookups:
                 key, filter_instance = _text_filter_for_lookup(name, lookup)
                 filters[key] = filter_instance

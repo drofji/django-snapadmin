@@ -347,6 +347,15 @@ class Showcase(snap_models.SnapModel):
     # JSON array) through the auto-generated REST API filter set.
     api_json_filters = {"json_field": ["a.b", "tags"]}
 
+    # api_default_text_lookups → model-wide default lookup set for EVERY text field
+    # (char_field/text_field/wysiwyg_field/…), so you set the posture once instead of
+    # enumerating each column in api_filter_lookups. Here we drop the non-indexable
+    # `icontains` to keep the auto REST filters index-friendly: ?char_field=value is
+    # an exact match, with ?char_field__startswith= and ?char_field__in= available.
+    # A per-field api_filter_lookups entry (or the project-wide SNAPADMIN_API_TEXT_LOOKUPS
+    # setting) still overrides this.
+    api_default_text_lookups = ["exact", "startswith", "in"]
+
     class Meta:
         verbose_name = _("Showcase")
         verbose_name_plural = _("Showcase")

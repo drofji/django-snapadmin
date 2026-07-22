@@ -245,6 +245,39 @@ class TestBulkReindex:
             result = SearchLog.es_reindex_all()
         assert result == {"indexed": 0}
 
+    @override_settings(ELASTICSEARCH_ENABLED=True)
+    def test_db_reindex_uses_keyset_paging_not_iterator(self):
+        # Regression (#BUG9): QuerySet.iterator() buffers the whole result set on
+        # mysqlclient → OOM on a large table. The DB reindex must page a pk__gt
+        # keyset cursor instead — bounded memory on every backend.
+        Product.objects.all().delete()
+        products = [Product.objects.create(name=f"P{i}", price=Decimal("1.00")) for i in range(5)]
+        indexed_ids = []
+
+        def rec(es, actions, **kwargs):
+            acted = list(actions)          # force the keyset generator to run
+            indexed_ids.extend(a["_id"] for a in acted)
+            return (len(acted), [])
+
+        orig_iterator = dj_models.QuerySet.iterator
+        iterator_calls = []
+
+        def spy_iterator(self, *a, **k):
+            iterator_calls.append(self)
+            return orig_iterator(self, *a, **k)
+
+        with patch.object(Product, "get_es_client", return_value=MagicMock()), \
+                patch.object(Product, "_ensure_es_index_and_mapping"), \
+                patch.object(dj_models.QuerySet, "iterator", spy_iterator), \
+                patch("elasticsearch.helpers.bulk", side_effect=rec):
+            result = Product.es_reindex_all(chunk_size=2)
+
+        assert result == {"indexed": 5}
+        # Every row indexed, streamed in pk order across multiple keyset pages…
+        assert indexed_ids == [p.pk for p in products]
+        # …and never via QuerySet.iterator() (the OOM path).
+        assert iterator_calls == []
+
 
 # ── X-Snap-Query-Backend: toggle + honest fallback ────────────────────────────
 

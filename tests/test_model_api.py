@@ -690,6 +690,100 @@ class TestAutoFilterTextFieldLookups:
         }
 
 
+# ── global / model-wide text-lookup defaults (#FEAT8a) ───────────────────────
+
+@pytest.mark.django_db
+class TestGlobalTextLookupDefaults:
+    """Drop `icontains` once — per-model (api_default_text_lookups) or project-wide
+    (SNAPADMIN_API_TEXT_LOOKUPS) — instead of enumerating every column, while a
+    per-field api_filter_lookups override still wins."""
+
+    @staticmethod
+    def _fresh_filterset(model):
+        # The FilterSet is cached per model; pop it so this build observes the
+        # patched attribute / overridden setting, and leave the cache clean after.
+        from snapadmin.api import filters as fm
+        key = f"{model._meta.app_label}.{model._meta.model_name}"
+        fm._filterset_cache.pop(key, None)
+        try:
+            return fm.build_filterset_for_model(model)
+        finally:
+            fm._filterset_cache.pop(key, None)
+
+    @staticmethod
+    def _text_keys(filterset_cls, field):
+        return {
+            k for k in filterset_cls.base_filters if k == field or k.startswith(f"{field}__")
+        }
+
+    def test_project_setting_narrows_every_text_field(self):
+        from demo.apps.shop.models import Product
+        with override_settings(SNAPADMIN_API_TEXT_LOOKUPS=["exact", "startswith"]):
+            fs = self._fresh_filterset(Product)
+        assert self._text_keys(fs, "name") == {"name", "name__startswith"}
+        assert self._text_keys(fs, "description") == {"description", "description__startswith"}
+
+    def test_model_attr_narrows_every_text_field(self, monkeypatch):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_default_text_lookups", ["exact", "in"], raising=False)
+        fs = self._fresh_filterset(Product)
+        assert self._text_keys(fs, "name") == {"name", "name__in"}
+        assert self._text_keys(fs, "description") == {"description", "description__in"}
+
+    def test_model_attr_wins_over_project_setting(self, monkeypatch):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_default_text_lookups", ["exact", "startswith"], raising=False)
+        with override_settings(SNAPADMIN_API_TEXT_LOOKUPS=["exact", "in"]):
+            fs = self._fresh_filterset(Product)
+        assert self._text_keys(fs, "name") == {"name", "name__startswith"}
+
+    def test_per_field_lookups_win_over_both_defaults(self, monkeypatch):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_default_text_lookups", ["exact"], raising=False)
+        monkeypatch.setattr(
+            Product, "api_filter_lookups", {"name": ["exact", "icontains"]}, raising=False
+        )
+        with override_settings(SNAPADMIN_API_TEXT_LOOKUPS=["exact", "startswith"]):
+            fs = self._fresh_filterset(Product)
+        # A per-field entry wins for `name`…
+        assert self._text_keys(fs, "name") == {"name", "name__icontains"}
+        # …while a field with no per-field entry uses the model-wide default.
+        assert self._text_keys(fs, "description") == {"description"}
+
+    def test_unset_everywhere_falls_back_to_library_default(self):
+        from demo.apps.shop.models import Product
+        # No per-field, no model attr, and SNAPADMIN_API_TEXT_LOOKUPS is None in the
+        # test settings → the library default set.
+        fs = self._fresh_filterset(Product)
+        assert self._text_keys(fs, "name") == {
+            "name", "name__icontains", "name__startswith", "name__in",
+        }
+
+    def test_demo_showcase_ships_an_index_friendly_default(self):
+        # The demo wires api_default_text_lookups on Showcase (drops icontains).
+        from demo.apps.shop.models import Showcase
+        fs = self._fresh_filterset(Showcase)
+        assert self._text_keys(fs, "char_field") == {
+            "char_field", "char_field__startswith", "char_field__in",
+        }
+
+    def test_project_setting_drops_icontains_at_the_http_layer(self, auth_client):
+        from snapadmin.api import filters as fm
+        from demo.apps.shop.models import Product
+        Product.objects.create(name="Laptop Pro", price=Decimal("20.00"))
+        Product.objects.create(name="Desktop", price=Decimal("30.00"))
+        fm._filterset_cache.pop("demo.product", None)
+        try:
+            with override_settings(SNAPADMIN_API_TEXT_LOOKUPS=["exact", "startswith", "in"]):
+                r = auth_client.get("/api/models/demo/Product/?name__icontains=Laptop")
+            assert r.status_code == 200
+            # icontains dropped project-wide → the param is unknown and ignored, so
+            # BOTH rows come back (an active icontains filter would return only one).
+            assert len(r.json()["results"]) == 2
+        finally:
+            fm._filterset_cache.pop("demo.product", None)
+
+
 # ── DynamicModelViewSet – always-on pagination (#SEC4) ────────────────────────
 
 @pytest.mark.django_db

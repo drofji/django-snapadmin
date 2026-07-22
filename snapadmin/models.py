@@ -896,9 +896,20 @@ class SnapModel(models.Model):
     # suffix. Set a field's lookup list here to widen or narrow that default
     # for one field on one model, e.g.
     #   api_filter_lookups = {"name": ["exact", "icontains"]}
-    # Left as None (the default), every text field uses the library default
-    # lookup set.
+    # Left as None (the default), every text field uses the model/project/library
+    # default lookup set (see api_default_text_lookups below).
     api_filter_lookups: dict[str, list[str]] | None = None
+
+    # Model-wide default lookup set for *every* text field, applied to any field
+    # not named in api_filter_lookups. Use it to change the posture for a whole
+    # model at once instead of enumerating each column — e.g. drop the
+    # non-indexable ``icontains`` on a large table:
+    #   api_default_text_lookups = ["exact", "startswith", "in"]
+    # Precedence (first non-None wins): per-field api_filter_lookups → this
+    # attribute → the project-wide SNAPADMIN_API_TEXT_LOOKUPS setting → the
+    # library default (exact/icontains/startswith/in). Left as None (the default),
+    # the project setting or library default applies.
+    api_default_text_lookups: list[str] | None = None
 
     # Auto-generated REST API filters for JSON columns. JSONField gets no filter
     # by default — declare which key-paths within which JSON field are filterable
@@ -1982,13 +1993,35 @@ class SnapModel(models.Model):
                 return
 
     @classmethod
+    def _es_keyset_iter(cls, qs: models.QuerySet, chunk_size: int) -> Iterator["SnapModel"]:
+        """Stream ``qs`` in bounded memory by paging a ``pk__gt`` keyset cursor.
+
+        ``QuerySet.iterator()`` buffers the *entire* result set client-side on the
+        mysqlclient backend (it has no true server-side cursor), so it can OOM a
+        large table. Paging by ``pk__gt`` instead holds at most ``chunk_size`` rows
+        at a time on every backend. Ordering is by primary key; each document is
+        written under ``_id = pk``, so iteration order doesn't affect the result.
+        """
+        pk_attname = cls._meta.pk.attname
+        qs = qs.order_by("pk")
+        cursor = None
+        while True:
+            page = qs.filter(pk__gt=cursor) if cursor is not None else qs
+            batch = list(page[:chunk_size])
+            if not batch:
+                return
+            yield from batch
+            cursor = getattr(batch[-1], pk_attname)
+
+    @classmethod
     def es_reindex_all(cls, *, chunk_size: int = 500) -> dict:
         """Synchronise all records to the Elasticsearch index.
 
-        Uses the bulk API (one round-trip per ``chunk_size`` documents) with a
-        streaming ``.iterator()`` over the table, so re-indexing millions of
-        rows neither floods ES with per-row requests nor loads the whole
-        queryset into memory.
+        Uses the bulk API (one round-trip per ``chunk_size`` documents). DB-backed
+        models are streamed with a ``pk__gt`` keyset cursor (:meth:`_es_keyset_iter`)
+        rather than ``QuerySet.iterator()``, so re-indexing millions of rows holds
+        bounded memory on every backend — including mysqlclient, where
+        ``.iterator()`` would buffer the whole result set client-side and OOM.
         """
         if not getattr(settings, "ELASTICSEARCH_ENABLED", False):
             return {"skipped": True, "reason": "Elasticsearch not available"}
@@ -2000,8 +2033,9 @@ class SnapModel(models.Model):
         index_name = cls.get_es_index_name()
 
         qs = cls.objects.all()
-        # EsQuerySet (ES_ONLY models) has no .iterator(); DB querysets stream.
-        rows = iter(qs) if isinstance(qs, EsQuerySet) else qs.iterator(chunk_size=chunk_size)
+        # EsQuerySet (ES_ONLY models) is already materialised hits, single pass;
+        # DB querysets stream in bounded memory via the keyset paginator.
+        rows = iter(qs) if isinstance(qs, EsQuerySet) else cls._es_keyset_iter(qs, chunk_size)
 
         def actions():
             for obj in rows:

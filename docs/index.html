@@ -1085,7 +1085,7 @@ for row in Product.objects.all().iterator(chunk_size=2000):
   — the <code>snapadmin.W004</code> system check warns on any model that hasn't made the choice
   explicitly, so the exposure is deliberate rather than an oversight.</p>
 
-  <h3>Auto-filter lookups — <code>api_filter_lookups</code></h3>
+  <h3 id="auto-filter-lookups">Auto-filter lookups — <code>api_filter_lookups</code></h3>
   <p>Every text-type field (<code>CharField</code>/<code>TextField</code>/<code>EmailField</code>/
   <code>URLField</code>/<code>SlugField</code>) gets an auto-generated filter. The bare
   <code>?field=value</code> query parameter is always an <strong>exact</strong>, index-usable match;
@@ -1106,6 +1106,24 @@ for row in Product.objects.all().iterator(chunk_size=2000):
   database index. Callers relying on that now need <code>?field__icontains=value</code> instead of
   the bare key. See <a href="https://github.com/drofji/django-snapadmin/blob/main/docs/releases/0.1.0b3.txt">the
   0.1.0b3 release notes</a> for the full upgrade note.</p>
+
+  <h4>Change the default for a whole model or project — not column by column</h4>
+  <p><code>api_filter_lookups</code> is per-field, so making a table's filters index-friendly (dropping
+  the non-indexable <code>icontains</code>) would mean enumerating every column — and any column added
+  later silently re-enables <code>icontains</code>. Two broader knobs set the default once; the
+  <strong>first non-empty source wins</strong>: per-field <code>api_filter_lookups</code> →
+  per-model <code>api_default_text_lookups</code> → project-wide <code>SNAPADMIN_API_TEXT_LOOKUPS</code>
+  → the library default.</p>
+  <pre><code># Per model — every text field on this model, index-friendly by default
+class Product(SnapModel):
+    api_default_text_lookups = ["exact", "startswith", "in"]   # no __icontains
+    api_filter_lookups = {"name": ["exact", "icontains"]}      # …except name, which keeps it
+
+# Project-wide (settings.py) — the safe posture for every model at once
+SNAPADMIN_API_TEXT_LOOKUPS = ["exact", "startswith", "in"]     # unset → library default</code></pre>
+  <p>Reach for these on large tables where a leading-wildcard <code>icontains</code> scan is the query
+  you're trying to avoid; use <a href="#es-filter">Elasticsearch</a> for substring/fuzzy search at
+  scale instead.</p>
 
   <h3>Filtering JSON columns — <code>api_json_filters</code></h3>
   <p><code>JSONField</code> gets no auto-generated filter by default. Declare which key-paths within
@@ -1790,7 +1808,9 @@ articles = Article.es_search("django")   # works even with ELASTICSEARCH_ENABLED
   <h3>Re-indexing (DUAL mode)</h3>
   <pre><code># Manually trigger a full re-index of every row into ES.
 # Streams the table through the bulk API — one round-trip per 500 docs
-# (tune with chunk_size=), flat memory even on million-row tables:
+# (tune with chunk_size=). DB-backed models page a pk__gt keyset cursor
+# (not QuerySet.iterator, which buffers the whole result on mysqlclient),
+# so memory stays flat even on million-row tables — on every backend:
 Product.es_reindex_all()      # {"indexed": N} — or {"skipped": True} if ES is off
 
 # Per-instance indexing happens automatically on save() in DUAL/ES_ONLY mode.

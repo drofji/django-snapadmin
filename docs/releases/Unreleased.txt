@@ -10,6 +10,18 @@ Each notable change should be a paragraph or bullet, explaining what changed and
 Added
 =====
 
+Project- and model-wide default lookup set for auto-generated REST text filters
+  The auto-generated REST filters give every text field (CharField/TextField/EmailField/URLField/
+  SlugField) an ``exact`` + ``icontains``/``startswith``/``in`` lookup set. ``api_filter_lookups`` could
+  already override that, but only per field — so making a large table index-friendly (dropping the
+  leading-wildcard ``icontains`` that can't use an index) meant enumerating every column, and any column
+  added later silently re-enabled ``icontains``. Two broader knobs now set the default once: the per-model
+  ``SnapModel.api_default_text_lookups`` attribute and the project-wide ``SNAPADMIN_API_TEXT_LOOKUPS``
+  setting. Resolution takes the first non-empty source in the order per-field ``api_filter_lookups`` →
+  per-model ``api_default_text_lookups`` → ``SNAPADMIN_API_TEXT_LOOKUPS`` → the library default, so a
+  project can adopt the index-friendly posture globally while still widening or narrowing a single field.
+  Both default to today's behaviour when unset.
+
 snapadmin_reindex — probe runs with --limit and a configurable --tune default
   The bulk reindex command gains ``--limit N`` to reindex only the first ``N`` rows — a probe or canary
   run to sanity-check a mapping change or measure throughput before committing to a full load, with
@@ -65,3 +77,16 @@ Opt out of the silent Elasticsearch→database fallback (db_fallback=False)
   database to fall back to) and ``DB_ONLY`` models (the database is their primary store) never raise,
   and a mid-stream ``es_scan()`` failure still stops rather than raising, since its ``search_after``
   cursor is already gone.
+
+
+Fixed
+=====
+
+SnapModel.es_reindex_all() no longer risks OOM on MySQL
+  ``es_reindex_all()`` streamed the table with ``QuerySet.iterator()``, which on the mysqlclient backend
+  has no true server-side cursor and buffers the entire result set client-side — so a full re-index of a
+  large table could exhaust memory. It now pages the table with a ``pk__gt`` keyset cursor (the same
+  technique the ``snapadmin_reindex`` command already uses), holding at most ``chunk_size`` rows at a time
+  on every backend. The method signature and return shape are unchanged, and the ES_ONLY single-pass path
+  is unaffected; iteration is now primary-key-ordered, which doesn't change the result since each document
+  is written under ``_id = pk``.

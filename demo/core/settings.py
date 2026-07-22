@@ -210,6 +210,16 @@ SNAPADMIN_DASHBOARD_PUBLIC = os.getenv('SNAPADMIN_DASHBOARD_PUBLIC', 'False') ==
 SNAPADMIN_API_PAGE_SIZE = int(os.getenv('SNAPADMIN_API_PAGE_SIZE', '25'))
 # Hard ceiling on a client-requested ?page_size= on the REST API.
 SNAPADMIN_API_MAX_PAGE_SIZE = int(os.getenv('SNAPADMIN_API_MAX_PAGE_SIZE', '500'))
+# Project-wide default lookup set for auto-generated REST text-field filters
+# (CharField/TextField/EmailField/URLField/SlugField). Comma-separated; unset (the
+# default, → None) uses the library default exact,icontains,startswith,in. Drop the
+# non-indexable `icontains` here to make the index-friendly posture the default for
+# every text field on every model at once — e.g. SNAPADMIN_API_TEXT_LOOKUPS=exact,startswith,in.
+# A per-model SnapModel.api_default_text_lookups, then a per-field api_filter_lookups, override it.
+SNAPADMIN_API_TEXT_LOOKUPS = (
+    [s.strip() for s in os.getenv('SNAPADMIN_API_TEXT_LOOKUPS', '').split(',') if s.strip()]
+    or None
+)
 # DRF rate limits (e.g. '60/min'). Empty value disables that throttle.
 SNAPADMIN_THROTTLE_ANON = os.getenv('SNAPADMIN_THROTTLE_ANON', '60/min') or None
 SNAPADMIN_THROTTLE_USER = os.getenv('SNAPADMIN_THROTTLE_USER', '600/min') or None

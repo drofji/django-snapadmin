@@ -157,7 +157,7 @@ each and paste it yourself. → **[Integration guide](https://drofji.github.io/d
 - [Offline mode](https://drofji.github.io/django-snapadmin/#offline) — per-model IndexedDB prefetch, real backend health checks, sync on reconnect
 
 **APIs**
-- [REST CRUD](https://drofji.github.io/django-snapadmin/#api-rest) for every `SnapModel`, with Swagger + ReDoc, filters derived from field types, and streaming/async export
+- [REST CRUD](https://drofji.github.io/django-snapadmin/#api-rest) for every `SnapModel`, with Swagger + ReDoc, filters derived from field types (tune text lookups per-field, per-model or project-wide with [`api_filter_lookups`/`api_default_text_lookups`/`SNAPADMIN_API_TEXT_LOOKUPS`](https://drofji.github.io/django-snapadmin/#auto-filter-lookups)), and streaming/async export
 - [GraphQL](https://drofji.github.io/django-snapadmin/#api-graphql) schema generated from the same models, auth-enforced on every traversed relation
 - [API tokens](https://drofji.github.io/django-snapadmin/#api-tokens) hashed at rest (SHA-256), shown once, scoped per model — or plug in [JWT/session/custom auth](https://drofji.github.io/django-snapadmin/#integrating)
 - Privacy controls: `api_exclude_fields`, `api_write_fields` (mass-assignment guard), `api_json_filters`, PII masking
