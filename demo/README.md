@@ -78,11 +78,15 @@ watch live progress, then try the flags:
 
 ```bash
 python demo/manage.py snapadmin_reindex --model demo.Product --tune
+python demo/manage.py snapadmin_reindex --model demo.Product --limit 100  # probe run
 python demo/manage.py snapadmin_reindex --parallel 4        # fan out with parallel_bulk
 python demo/manage.py snapadmin_reindex --resume            # continue a crashed run
 ```
 
 Each run is tracked on a `SnapReindexJob` row (progress, resume cursor, cancel).
+It fetches only the ES-mapped columns (`Product` maps `name`/`price`/`available`,
+so its large `description` body is skipped); `--limit N` bounds a probe/canary run;
+and `--tune` defaults to `SNAPADMIN_REINDEX_TUNE_DEFAULT` (use `--no-tune` to override).
 
 Run `python demo/manage.py snapadmin_info` against this project to see the diagnostics
 report — version, the database/Elasticsearch/Celery status, and the demo's registered

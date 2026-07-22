@@ -161,8 +161,11 @@ def test_search_method_signatures():
     assert _params(SnapModel.es_filter) == ["query_string", "limit", "db_fallback", "terms"]
     assert _params(SnapModel.es_aggregate) == ["fields", "size", "query_string", "db_fallback", "terms"]
     assert _params(SnapModel.es_count) == ["query_string", "db_fallback", "terms"]
-    assert _params(SnapModel.es_scan) == ["query_string", "page_size", "db_fallback", "terms"]
+    assert _params(SnapModel.es_scan) == [
+        "query_string", "page_size", "db_fallback", "source", "limit", "terms",
+    ]
     assert _params(SnapModel.es_reindex_all) == ["chunk_size"]
+    assert _params(SnapModel.es_reindex_only_fields) == []
     assert _params(SnapModel.purge_expired) == ["now", "dry_run"]
 
 

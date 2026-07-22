@@ -106,6 +106,10 @@ class Product(snap_models.SnapModel):
     #       ...
     # DUAL models yield DB objects in cursor order; when ES is down they fall
     # back to a .iterator() over the equivalent DB filter.
+    # For the pks of millions of matches, skip the document body + the DB
+    # in_bulk() round-trip with source=False, and bound the walk with limit:
+    #   for pk in Product.es_scan(available=True, source=False, limit=10000):
+    #       ...  # yields pks straight from the sort cursor, no hydration
     es_mapping = {
         "name": {"type": "text", "analyzer": "standard"},
         "price": {"type": "float"},

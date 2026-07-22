@@ -10,6 +10,33 @@ Each notable change should be a paragraph or bullet, explaining what changed and
 Added
 =====
 
+snapadmin_reindex — probe runs with --limit and a configurable --tune default
+  The bulk reindex command gains ``--limit N`` to reindex only the first ``N`` rows — a probe or canary
+  run to sanity-check a mapping change or measure throughput before committing to a full load, with
+  progress measured against the limit. ``--tune`` becomes a ``--tune`` / ``--no-tune`` pair whose default
+  is the new ``SNAPADMIN_REINDEX_TUNE_DEFAULT`` setting (default ``False`` = unchanged), so a project that
+  always wants a mass load to relax the index (refresh off, replicas 0) can set the posture once and still
+  override it per run. The reindex now also fetches **only the ES-mapped columns** each chunk — a document
+  is built from just the primary key plus the mapped fields, so a wide table's large unmapped ``TEXT``
+  bodies are no longer dragged through every batch (via the new ``SnapModel.es_reindex_only_fields()``,
+  which restricts the queryset with ``.only()`` and safely falls back to fetching all columns when a
+  mapping key isn't a plain concrete field). All three are opt-in / automatic and change nothing for an
+  existing full reindex.
+
+SnapModel.es_scan() — stream the primary keys of N-million matches with source=False and limit
+  ``es_scan()`` gains two opt-in fast paths for very large result sets. ``source=False`` streams
+  **primary keys only**: the request sends ``"_source": false`` so Elasticsearch never ships the
+  document body, and each pk is read straight from the sort cursor — so a ``DUAL`` model also skips its
+  per-page ``in_bulk()`` database round-trip. When you only need the ids of millions of matches (to feed
+  a queue, a bulk job, or a downstream ``pk__in`` query), hydrating a full model per hit is wasted work;
+  because the pk comes from ES alone, a pk indexed in ES but missing from the table is still yielded
+  (the default full-hydration path drops it). ``limit=N`` stops the walk after ``N`` results and caps the
+  ES request ``size`` to what remains, so a limit below ``page_size`` never over-fetches. Both flags are
+  honoured by the disabled-ES database fallback too — it streams pks via ``values_list("pk")`` and applies
+  the limit. The default call (``source=None``) keeps full object hydration, byte-identical to before; the
+  scan keeps its unique ``id`` sort, already the cheapest *stable* ``search_after`` order since the primary
+  key needs no separate tiebreak.
+
 SnapModel.es_count() — true match count of a structured Elasticsearch query
   New classmethod ``SnapModel.es_count(*, query_string=None, **terms) -> int``, the counting
   counterpart to ``es_filter()``. It uses the same term resolution and filter context (a scalar builds

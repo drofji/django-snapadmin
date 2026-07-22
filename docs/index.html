@@ -941,6 +941,28 @@ for log in SearchLog.es_scan(query_string="error 404", page_size=5000):
   column); an <code>ES_ONLY</code> model yields nothing. If ES fails <em>after</em> streaming has
   begun, the scan stops where it was rather than restarting on the database and double-emitting.</p>
 
+  <h4>Stream the primary keys of N-million matches — <code>source=False</code> + <code>limit</code></h4>
+  <p>When you only need the pks of a huge match (to feed a bulk job, a queue, a downstream
+  <code>pk__in</code> query), hydrating a full model per hit is wasted work. Pass
+  <code>source=False</code> and <code>es_scan()</code> sends <code>"_source": false</code> — ES never
+  ships the document body — and reads each pk straight from the sort cursor, so a <code>DUAL</code>
+  model also skips its per-page <code>in_bulk()</code> database round-trip. Add <code>limit=N</code> to
+  stop after <code>N</code> pks; the ES request size is capped to what remains, so a limit below
+  <code>page_size</code> never over-fetches:</p>
+  <pre><code># Stream just the pks — no _source, no in_bulk() hydration
+for pk in Product.es_scan(available=True, source=False):
+    enqueue(pk)
+
+# Bound the walk to the first 10k pks
+first = list(Product.es_scan(available=True, source=False, limit=10_000))</code></pre>
+  <p><strong>The rule:</strong> reach for <code>source=False</code> whenever the object body is dead
+  weight — you want ids, not rows. It skips the DB entirely, so a pk indexed in ES but missing from the
+  table is still yielded (the default full-hydration path would drop it). The default call
+  (<code>source=None</code>) keeps full object hydration, byte-identical to before. When ES is disabled
+  the DB fallback honours both flags — it streams pks via <code>values_list("pk")</code> and applies
+  <code>limit</code>. The scan keeps its unique <code>id</code> sort: it is already the cheapest
+  <em>stable</em> <code>search_after</code> order, since the primary key needs no separate tiebreak.</p>
+
   <h3 id="es-db-fallback">Fail loud instead of a silent DB scan — <code>db_fallback=False</code></h3>
   <p>By default all four methods above degrade gracefully: when Elasticsearch is disabled or a query
   errors, a <code>DUAL</code> model quietly re-runs the query on the database. That is exactly right for
@@ -1173,11 +1195,13 @@ urlpatterns += [
 # …or full control (cloud_id, sniffing, custom transport):
 SNAPADMIN_ES_CLIENT_FACTORY = "myproject.es.make_client"   # zero-arg callable → client</code></pre>
 
-  <h3>Bulk reindex command</h3>
+  <h3 id="bulk-reindex-command">Bulk reindex command</h3>
   <pre><code>python manage.py snapadmin_reindex                       # all ES-enabled SnapModels
 python manage.py snapadmin_reindex --model demo.Product  # one model
 python manage.py snapadmin_reindex --chunk-size 1000     # tune bulk batch size
+python manage.py snapadmin_reindex --limit 1000          # probe run — first 1000 rows only
 python manage.py snapadmin_reindex --tune                # relax refresh/replicas for the load
+python manage.py snapadmin_reindex --no-tune             # force tuning off (overrides the setting)
 python manage.py snapadmin_reindex --parallel 4          # fan out with helpers.parallel_bulk
 python manage.py snapadmin_reindex --resume              # continue a crashed run from its checkpoint</code></pre>
   <p>Every run is tracked on a <code>SnapReindexJob</code> row (the async-export job pattern), so a large
@@ -1190,6 +1214,22 @@ python manage.py snapadmin_reindex --resume              # continue a crashed ru
   a <code>finally</code>; <code>--parallel N</code> indexes each chunk with <code>helpers.parallel_bulk</code>;
   and setting the job's status to <code>cancelled</code> stops the run between chunks. ES_ONLY models have
   no DB pk to cursor over, so they reindex in a single pass (no resume).</p>
+  <p>Two efficiency/ergonomics touches for wide tables and mass loads:</p>
+  <ul>
+    <li><strong>Fetches only the ES-mapped columns.</strong> Each chunk is loaded with
+    <code>.only(*mapped, pk)</code> — a document is built from just the primary key plus the mapped
+    fields, so a table's large unmapped <code>TEXT</code> bodies are never dragged through the reindex.
+    This is automatic and needs no flag; it is skipped only when a mapping key isn't a plain concrete
+    column (a property or relation-spanning key), where deferring columns could cause per-row queries —
+    then the run falls back to fetching every column (today's behaviour).</li>
+    <li><strong><code>--limit N</code></strong> reindexes only the first <code>N</code> rows — a
+    probe/canary run to sanity-check a mapping change or throughput before committing to a full load. The
+    ES request stays bounded and progress is measured against the limit.</li>
+    <li><strong>Configurable tuning default.</strong> <code>--tune</code> defaults to the
+    <code>SNAPADMIN_REINDEX_TUNE_DEFAULT</code> setting (default <code>False</code>), so a project that
+    always wants a mass load to relax the index can set it once; <code>--no-tune</code> forces it off for
+    a single run.</li>
+  </ul>
 
   <h3>Reindex over HTTP (admin only, opt-in)</h3>
   <p>The same bulk reindex, for ops without shell access — <strong>off by default</strong>, staff-only

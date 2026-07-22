@@ -162,6 +162,7 @@ def run_reindex_job(
     chunk_size: int = DEFAULT_CHUNK_SIZE,
     parallel: int = 0,
     tune: bool = False,
+    limit: int | None = None,
     on_progress: ProgressCallback | None = None,
 ) -> dict:
     """Execute (or resume) the reindex for ``job``.
@@ -173,6 +174,9 @@ def run_reindex_job(
     Returns a summary dict: ``{"indexed": int, "errors": int}`` on success,
     ``{"skipped": True, ...}`` when not claimed, ``{"cancelled": True, ...}`` when
     cancelled mid-run, or ``{"errors": [...], "indexed": int}`` on failure.
+
+    ``limit`` bounds the run to the first ``N`` rows (a probe / canary run);
+    ``None`` (the default) reindexes the whole table.
     """
     from snapadmin.models import SnapReindexJob
 
@@ -188,7 +192,10 @@ def run_reindex_job(
 
     job.refresh_from_db()
     try:
-        return _run(job, chunk_size=chunk_size, parallel=parallel, tune=tune, on_progress=on_progress)
+        return _run(
+            job, chunk_size=chunk_size, parallel=parallel, tune=tune, limit=limit,
+            on_progress=on_progress,
+        )
     except Exception as exc:
         logger.exception("snapadmin.reindex.failed", job=str(job.pk))
         job.status = Status.FAILED
@@ -198,7 +205,7 @@ def run_reindex_job(
         return {"errors": [str(exc)], "indexed": job.processed_rows}
 
 
-def _run(job, *, chunk_size, parallel, tune, on_progress) -> dict:
+def _run(job, *, chunk_size, parallel, tune, limit, on_progress) -> dict:
     from snapadmin.models import EsQuerySet, SnapReindexJob
 
     Status = SnapReindexJob.Status
@@ -219,6 +226,8 @@ def _run(job, *, chunk_size, parallel, tune, on_progress) -> dict:
         # Always restart clean — there is no resume here, so a re-run (e.g. of a
         # failed job via --resume) must reset the counter or it would double-count.
         rows = list(qs)
+        if limit is not None:
+            rows = rows[:limit]
         job.total_rows = len(rows)
         job.cursor_pk = ""
         job.processed_rows = 0
@@ -228,7 +237,13 @@ def _run(job, *, chunk_size, parallel, tune, on_progress) -> dict:
         )
 
     qs = qs.order_by("pk")
-    job.total_rows = qs.count()
+    # Fetch only the ES-mapped columns (+ pk) where that can be proven safe — a
+    # wide table's unmapped TEXT bodies never reach get_es_document() anyway.
+    only_fields = model.es_reindex_only_fields()
+    if only_fields is not None:
+        qs = qs.only(*only_fields)
+    total = qs.count()
+    job.total_rows = min(total, limit) if limit is not None else total
     resuming = bool(job.cursor_pk)
     if not resuming and job.processed_rows:
         # A stale counter with no cursor to resume from — restart clean so the
@@ -248,8 +263,14 @@ def _run(job, *, chunk_size, parallel, tune, on_progress) -> dict:
                 logger.info("snapadmin.reindex.cancelled", job=str(job.pk), rows=job.processed_rows)
                 return {"cancelled": True, "indexed": job.processed_rows}
 
+            take = chunk_size
+            if limit is not None:
+                remaining = limit - job.processed_rows
+                if remaining <= 0:
+                    break
+                take = min(chunk_size, remaining)
             chunk_qs = qs.filter(pk__gt=cursor) if cursor is not None else qs
-            batch = list(chunk_qs[:chunk_size])
+            batch = list(chunk_qs[:take])
             if not batch:
                 break
 

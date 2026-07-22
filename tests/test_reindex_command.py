@@ -118,11 +118,27 @@ class TestRealRun:
              patch("snapadmin.management.commands.snapadmin_reindex.run_reindex_job") as run:
             run.return_value = {"indexed": 5, "errors": 0}
             call_command("snapadmin_reindex", "--model", "demo.Product",
-                         "--parallel", "3", "--tune", "--chunk-size", "250")
+                         "--parallel", "3", "--tune", "--chunk-size", "250", "--limit", "10")
         kwargs = run.call_args.kwargs
         assert kwargs["parallel"] == 3
         assert kwargs["tune"] is True
         assert kwargs["chunk_size"] == 250
+        assert kwargs["limit"] == 10
+
+    def test_limit_bounds_a_real_run(self, products, es_client):
+        from demo.apps.shop.models import Product
+        from snapadmin.models import SnapReindexJob
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
+            out = StringIO()
+            call_command("snapadmin_reindex", "--model", "demo.Product", "--limit", "2", stdout=out)
+        assert "2 indexed" in out.getvalue()
+        job = SnapReindexJob.objects.filter(app_label="demo", model="Product").latest("created_at")
+        assert job.processed_rows == 2
+
+    def test_non_positive_limit_errors(self, products):
+        with pytest.raises(CommandError, match="limit"):
+            call_command("snapadmin_reindex", "--model", "demo.Product", "--limit", "0")
 
     def test_rejected_documents_reported(self, products, es_client):
         from demo.apps.shop.models import Product
@@ -158,6 +174,40 @@ class TestRealRun:
                    return_value={"errors": ["boom"], "indexed": 0}):
             with pytest.raises(CommandError, match="finished with errors"):
                 call_command("snapadmin_reindex", "--model", "demo.Product")
+
+
+@pytest.mark.django_db
+class TestTuneDefault:
+    """`--tune` defaults to SNAPADMIN_REINDEX_TUNE_DEFAULT; --tune/--no-tune override."""
+
+    def _run_and_capture_tune(self, es_client, *args):
+        from demo.apps.shop.models import Product
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("snapadmin.management.commands.snapadmin_reindex.run_reindex_job") as run:
+            run.return_value = {"indexed": 5, "errors": 0}
+            call_command("snapadmin_reindex", "--model", "demo.Product", *args, stdout=StringIO())
+        return run.call_args.kwargs["tune"]
+
+    @override_settings(ELASTICSEARCH_ENABLED=True, SNAPADMIN_REINDEX_TUNE_DEFAULT=True)
+    def test_setting_true_makes_tune_default_on(self, products, es_client):
+        assert self._run_and_capture_tune(es_client) is True
+
+    @override_settings(ELASTICSEARCH_ENABLED=True, SNAPADMIN_REINDEX_TUNE_DEFAULT=False)
+    def test_setting_false_keeps_tune_off_by_default(self, products, es_client):
+        assert self._run_and_capture_tune(es_client) is False
+
+    @override_settings(ELASTICSEARCH_ENABLED=True, SNAPADMIN_REINDEX_TUNE_DEFAULT=True)
+    def test_no_tune_flag_overrides_a_true_setting(self, products, es_client):
+        assert self._run_and_capture_tune(es_client, "--no-tune") is False
+
+    @override_settings(ELASTICSEARCH_ENABLED=True, SNAPADMIN_REINDEX_TUNE_DEFAULT=False)
+    def test_tune_flag_overrides_a_false_setting(self, products, es_client):
+        assert self._run_and_capture_tune(es_client, "--tune") is True
+
+    @override_settings(ELASTICSEARCH_ENABLED=True)
+    def test_unset_setting_defaults_tune_off(self, products, es_client):
+        # No SNAPADMIN_REINDEX_TUNE_DEFAULT configured → today's behaviour (off).
+        assert self._run_and_capture_tune(es_client) is False
 
 
 @pytest.mark.django_db

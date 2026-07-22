@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Iterator
 from datetime import timedelta
 from enum import Enum
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from django.apps import apps
 from django.core.exceptions import FieldDoesNotExist, FieldError, ImproperlyConfigured, ValidationError
@@ -1100,6 +1100,36 @@ class SnapModel(models.Model):
         return doc
 
     @classmethod
+    def es_reindex_only_fields(cls) -> list[str] | None:
+        """Field names a reindex queryset can ``.only(*fields)`` down to.
+
+        :meth:`get_es_document` reads only the primary key plus the keys of
+        :meth:`get_es_mapping`, so a bulk reindex has no need to fetch every column
+        (a wide table's large ``TEXT`` bodies are dead weight). This returns the
+        concrete local field names to load — the pk plus each mapped field — so the
+        runner can restrict the queryset with ``.only()``.
+
+        Returns ``None`` when the restriction can't be proven safe: a mapping key
+        that isn't a concrete local field (a property, a relation-spanning path, a
+        many-to-many) may itself read columns that ``.only()`` would defer, turning
+        every row into an extra query. In that case the caller fetches all columns
+        (today's behaviour). An empty mapping yields just the pk.
+        """
+        fields = [cls._meta.pk.name]
+        mapping = cls.get_es_mapping()
+        if not mapping:
+            return fields
+        for key in mapping:
+            try:
+                field = cls._meta.get_field(key)
+            except FieldDoesNotExist:
+                return None
+            if not getattr(field, "concrete", False) or field.many_to_many:
+                return None
+            fields.append(field.name)
+        return fields
+
+    @classmethod
     def _ensure_es_index_and_mapping(cls):
         """
         Create index and update mapping if necessary. Called during post_migrate.
@@ -1761,8 +1791,10 @@ class SnapModel(models.Model):
         query_string: str | None = None,
         page_size: int | None = None,
         db_fallback: bool | None = None,
+        source: bool | None = None,
+        limit: int | None = None,
         **terms,
-    ) -> Iterator["SnapModel"]:
+    ) -> Iterator["SnapModel"] | Iterator[Any]:
         """Deep-scan iterator — yield every matching document, no ``from`` paging.
 
         Elasticsearch refuses a ``from + size`` deeper than
@@ -1771,7 +1803,9 @@ class SnapModel(models.Model):
         walks the whole result set instead by paging with ``search_after`` over a
         stable ``id`` sort — one request of ``page_size`` documents per
         round-trip (default ``SNAPADMIN_ES_SEARCH_LIMIT``), lazily, so memory
-        stays bounded no matter how large the match is.
+        stays bounded no matter how large the match is. The ``id`` sort is kept
+        deliberately: it is the cheapest *stable* ``search_after`` order because
+        the primary key is unique, so no separate tiebreak is needed.
 
         Filtering is identical to :meth:`es_filter`: scalar/list ``**terms`` run
         in ES filter context (resolved through :meth:`_resolve_es_term_field`),
@@ -1779,12 +1813,26 @@ class SnapModel(models.Model):
         DUAL models yield database instances in cursor (``id``-ascending) order;
         ES_ONLY models yield objects reconstructed from the index.
 
+        Pass ``source=False`` to stream **primary keys only**: the request sends
+        ``"_source": false`` (ES never ships the document body), and each pk comes
+        straight from the sort cursor — so a DUAL model skips the per-page
+        ``in_bulk`` round-trip entirely (a pk indexed in ES but missing from the
+        table is still yielded, since the database is never consulted). This is
+        the cheap way to walk the pks of millions of matches. ``source=None`` (the
+        default) or ``source=True`` keeps full object hydration, byte-identical to
+        before.
+
+        Pass ``limit=N`` to stop after ``N`` results; the ES request size is
+        capped to what remains, so a limit below ``page_size`` never over-fetches.
+        ``None`` (the default) streams the whole match.
+
         Fails safe: a DUAL model whose Elasticsearch is disabled — or unreachable
         *before* any document is streamed — walks the equivalent database filter
         with ``.iterator()`` instead (failing closed to nothing if a term has no
-        backing column); an ES_ONLY model yields nothing. If ES fails *after*
-        streaming has begun, the scan stops where it was rather than restarting
-        on the database and double-emitting.
+        backing column; ``source=False`` streams pks via ``values_list`` and
+        ``limit`` still applies); an ES_ONLY model yields nothing. If ES fails
+        *after* streaming has begun, the scan stops where it was rather than
+        restarting on the database and double-emitting.
 
         Set ``db_fallback=False`` to refuse the database ``.iterator()`` fallback
         and raise :class:`SnapEsUnavailable` (during iteration) when Elasticsearch
@@ -1795,7 +1843,7 @@ class SnapModel(models.Model):
         unaffected.
 
         Raises ``ValueError`` (eagerly, before iteration) for a non-positive
-        ``page_size`` or an unknown / non-term-filterable field, and
+        ``page_size`` / ``limit`` or an unknown / non-term-filterable field, and
         :class:`SnapEsUnavailable` (lazily, on iteration) when ES is unavailable
         and the fallback is disabled.
         """
@@ -1803,24 +1851,38 @@ class SnapModel(models.Model):
             raise ValueError(
                 f"{cls.__name__}.es_scan: page_size must be a positive integer, got {page_size!r}"
             )
+        if limit is not None and limit < 1:
+            raise ValueError(
+                f"{cls.__name__}.es_scan: limit must be a positive integer, got {limit!r}"
+            )
         # Resolve/validate every term up-front so a bad field raises on the call,
         # not lazily on the first `next()` of the returned generator.
         resolved = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
         page_size = page_size or getattr(settings, "SNAPADMIN_ES_SEARCH_LIMIT", 1000)
         fallback = cls._es_db_fallback(db_fallback)
-        return cls._es_scan_iter(resolved, terms, query_string, page_size, fallback)
+        pk_only = source is False
+        return cls._es_scan_iter(
+            resolved, terms, query_string, page_size, fallback, pk_only, limit,
+        )
 
     @classmethod
     def _es_scan_iter(
-        cls, resolved: dict, terms: dict, query_string: str | None, page_size: int, fallback: bool,
-    ) -> Iterator["SnapModel"]:
+        cls,
+        resolved: dict,
+        terms: dict,
+        query_string: str | None,
+        page_size: int,
+        fallback: bool,
+        pk_only: bool,
+        limit: int | None,
+    ) -> Iterator["SnapModel"] | Iterator[Any]:
         es_intended = cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY
         use_es = es_intended and getattr(settings, "ELASTICSEARCH_ENABLED", False)
         es_error: Exception | None = None
         if use_es:
             produced = False
             try:
-                for obj in cls._es_scan_via_es(resolved, query_string, page_size):
+                for obj in cls._es_scan_via_es(resolved, query_string, page_size, pk_only, limit):
                     produced = True
                     yield obj
                 return
@@ -1847,6 +1909,10 @@ class SnapModel(models.Model):
             cls._raise_es_unavailable("es_scan", es_error)
         try:
             qs = cls.objects.filter(**cls._es_orm_terms(terms)).order_by("pk")
+            if pk_only:
+                qs = qs.values_list("pk", flat=True)
+            if limit is not None:
+                qs = qs[:limit]
             # Force field resolution now so an ES-only term (no DB column) fails
             # closed to an empty scan rather than raising during iteration.
             str(qs.query)
@@ -1856,38 +1922,63 @@ class SnapModel(models.Model):
 
     @classmethod
     def _es_scan_via_es(
-        cls, resolved: dict, query_string: str | None, page_size: int,
-    ) -> Iterator["SnapModel"]:
+        cls,
+        resolved: dict,
+        query_string: str | None,
+        page_size: int,
+        pk_only: bool,
+        limit: int | None,
+    ) -> Iterator["SnapModel"] | Iterator[Any]:
         es = cls.get_es_client()
         index_name = cls.get_es_index_name()
         query = cls._build_es_term_query(resolved, query_string)
         search_after: list | None = None
+        produced = 0
         while True:
-            body: dict = {"query": query, "size": page_size, "sort": [{"id": "asc"}]}
+            size = page_size
+            if limit is not None:
+                remaining = limit - produced
+                if remaining <= 0:
+                    return
+                size = min(page_size, remaining)
+            body: dict = {"query": query, "size": size, "sort": [{"id": "asc"}]}
+            if pk_only:
+                # Skip the document body — the pk is read from the sort cursor.
+                body["_source"] = False
             if search_after is not None:
                 body["search_after"] = search_after
             response = es.search(index=index_name, body=body)
             hits = response.get("hits", {}).get("hits", [])
             if not hits:
                 return
+            # A page can exceed `size` only if ES ignored it; keep the stream at
+            # the requested width so `limit` is exact.
+            hits = hits[:size]
 
-            if cls.es_storage_mode == EsStorageMode.ES_ONLY:
+            if pk_only:
+                for hit in hits:
+                    # The sole sort key is `id`, so its value is the pk.
+                    yield hit["sort"][0]
+                    produced += 1
+            elif cls.es_storage_mode == EsStorageMode.ES_ONLY:
                 for hit in hits:
                     data = hit["_source"]
                     obj = cls(**{k: v for k, v in data.items() if k != "id"})
                     obj.pk = data.get("id")
                     yield obj
+                    produced += 1
             else:
                 pks = [hit["_source"]["id"] for hit in hits]
                 by_pk = cls.objects.in_bulk(pks)
                 for pk in pks:
                     if pk in by_pk:
                         yield by_pk[pk]
+                        produced += 1
 
             search_after = hits[-1].get("sort")
             # A short page (fewer than requested) means the index is exhausted;
             # a missing cursor would make the next request restart from the top.
-            if search_after is None or len(hits) < page_size:
+            if search_after is None or len(hits) < size:
                 return
 
     @classmethod

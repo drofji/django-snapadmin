@@ -392,3 +392,161 @@ class TestRunReindexJob:
         assert summary.get("cancelled") is True
         assert job.status == "cancelled"
         assert job.processed_rows == 1
+
+
+# ── .only() restriction: fetch just the ES-mapped columns ─────────────────────
+
+@pytest.mark.django_db
+class TestEsReindexOnlyFields:
+    def test_returns_pk_plus_mapped_concrete_fields(self):
+        from demo.apps.shop.models import Product
+        # Product.es_mapping is a strict subset — name/price/available — so the
+        # reindex can skip the large `description` TEXT column and the FK.
+        assert Product.es_reindex_only_fields() == ["id", "name", "price", "available"]
+
+    def test_returns_pk_only_when_model_has_no_mapping(self):
+        from demo.apps.shop.models import Category
+        # Category maps nothing → the document is just {"id": pk}.
+        assert Category.es_reindex_only_fields() == ["id"]
+
+    def test_returns_none_when_a_mapping_key_is_not_a_concrete_field(self):
+        from demo.apps.shop.models import Product
+        # A property / computed mapping key can read arbitrary columns; deferring
+        # them would trigger per-row queries, so `.only()` must be skipped.
+        with patch.object(Product, "get_es_mapping", return_value={"headline": {"type": "text"}}):
+            assert Product.es_reindex_only_fields() is None
+
+    def test_returns_none_for_a_many_to_many_mapping_key(self):
+        from demo.apps.shop.models import Product
+        with patch.object(Product, "get_es_mapping", return_value={"tags": {"type": "keyword"}}):
+            assert Product.es_reindex_only_fields() is None
+
+
+@pytest.mark.django_db
+class TestReindexOnlyRestriction:
+    @pytest.fixture(autouse=True)
+    def _enable_es(self, settings):
+        settings.ELASTICSEARCH_ENABLED = True
+
+    def _make_job(self):
+        from snapadmin.models import SnapReindexJob
+        return SnapReindexJob.objects.create(app_label="demo", model="Product")
+
+    def test_run_defers_unmapped_columns(self, products, es_client):
+        from demo.apps.shop.models import Product
+        from snapadmin.reindexing import run_reindex_job
+        seen = []
+        orig = Product.get_es_document
+
+        def spy(self):
+            seen.append(self)
+            return orig(self)
+
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch.object(Product, "get_es_document", spy), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
+            run_reindex_job(self._make_job())
+        # Every object fed to the indexer had the unmapped `description` column
+        # deferred — proof the queryset was restricted with `.only(*mapped)`.
+        assert seen
+        assert all("description" in o.get_deferred_fields() for o in seen)
+
+    def test_run_fetches_all_columns_when_only_fields_unsafe(self, products, es_client):
+        from demo.apps.shop.models import Product
+        from snapadmin.reindexing import run_reindex_job
+        seen = []
+        orig = Product.get_es_document
+
+        def spy(self):
+            seen.append(self)
+            return orig(self)
+
+        # es_reindex_only_fields() → None means "can't prove .only() safe" → fetch
+        # every column, so nothing is deferred.
+        with patch.object(Product, "es_reindex_only_fields", classmethod(lambda cls: None)), \
+             patch.object(Product, "get_es_client", return_value=es_client), \
+             patch.object(Product, "get_es_document", spy), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
+            run_reindex_job(self._make_job())
+        assert seen
+        assert all(o.get_deferred_fields() == set() for o in seen)
+
+
+# ── --limit: bound a probe / canary run ───────────────────────────────────────
+
+@pytest.mark.django_db
+class TestReindexLimit:
+    @pytest.fixture(autouse=True)
+    def _enable_es(self, settings):
+        settings.ELASTICSEARCH_ENABLED = True
+
+    def _make_job(self):
+        from snapadmin.models import SnapReindexJob
+        return SnapReindexJob.objects.create(app_label="demo", model="Product")
+
+    def test_limit_bounds_a_db_run_to_the_first_n_rows(self, products, es_client):
+        from demo.apps.shop.models import Product
+        from snapadmin.reindexing import run_reindex_job
+        seen = []
+
+        def rec(es, actions, **kw):
+            acted = list(actions)
+            seen.extend(a["_id"] for a in acted)
+            return (len(acted), [])
+
+        job = self._make_job()
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=rec):
+            summary = run_reindex_job(job, limit=2)
+        job.refresh_from_db()
+        assert seen == [products[0].pk, products[1].pk]
+        assert job.processed_rows == 2
+        assert job.total_rows == 2          # progress is measured against the limit
+        assert summary["indexed"] == 2
+        assert job.status == "completed"
+
+    def test_limit_spans_multiple_chunks(self, products, es_client):
+        from demo.apps.shop.models import Product
+        from snapadmin.reindexing import run_reindex_job
+        seen = []
+
+        def rec(es, actions, **kw):
+            acted = list(actions)
+            seen.extend(a["_id"] for a in acted)
+            return (len(acted), [])
+
+        job = self._make_job()
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=rec):
+            run_reindex_job(job, chunk_size=1, limit=3)
+        assert seen == [products[0].pk, products[1].pk, products[2].pk]
+
+    def test_no_limit_processes_every_row(self, products, es_client):
+        from demo.apps.shop.models import Product
+        from snapadmin.reindexing import run_reindex_job
+        job = self._make_job()
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
+            run_reindex_job(job)
+        job.refresh_from_db()
+        assert job.processed_rows == 5
+
+    def test_limit_bounds_an_es_only_run(self, db, es_client):
+        from demo.apps.shop.models import SearchLog
+        from snapadmin.models import EsQuerySet, SnapReindexJob
+        from snapadmin.reindexing import run_reindex_job
+        job = SnapReindexJob.objects.create(app_label="demo", model="SearchLog")
+        hits = []
+        for i in range(4):
+            hit = MagicMock()
+            hit.pk = i + 1
+            hit.get_es_document.return_value = {"id": i + 1}
+            hits.append(hit)
+        with patch.object(SearchLog, "objects") as mgr, \
+             patch.object(SearchLog, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
+            mgr.all.return_value = EsQuerySet(SearchLog, hits=hits)
+            run_reindex_job(job, limit=2)
+        job.refresh_from_db()
+        assert job.processed_rows == 2
+        assert job.total_rows == 2

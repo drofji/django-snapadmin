@@ -4,15 +4,23 @@ Bulk-reindex SnapModels into Elasticsearch, with live progress and resume.
     python manage.py snapadmin_reindex                        # every ES-enabled SnapModel
     python manage.py snapadmin_reindex --model demo.Product   # one model
     python manage.py snapadmin_reindex --chunk-size 1000      # docs per bulk request
+    python manage.py snapadmin_reindex --limit 1000           # probe run — first 1000 rows only
     python manage.py snapadmin_reindex --tune                 # relax refresh/replicas for the load
+    python manage.py snapadmin_reindex --no-tune              # force tuning off (overrides the setting)
     python manage.py snapadmin_reindex --parallel 4           # fan out with parallel_bulk
     python manage.py snapadmin_reindex --resume               # continue a crashed run from its checkpoint
+
+The reindex fetches only the ES-mapped columns (``.only(*mapped, pk)``) where that
+is safe, so wide tables don't drag their large ``TEXT`` bodies through each chunk.
+``--tune`` defaults to the ``SNAPADMIN_REINDEX_TUNE_DEFAULT`` setting.
 
 Each model's run is tracked on a ``SnapReindexJob`` row: progress is printed as
 it goes, a crash leaves a resumable checkpoint (``--resume`` continues from the
 last indexed pk instead of restarting the table), and the run is cancellable by
 setting the job's status to ``cancelled``.
 """
+
+import argparse
 
 from django.apps import apps
 from django.conf import settings
@@ -44,8 +52,18 @@ class Command(BaseCommand):
         )
         parser.add_argument(
             "--tune",
-            action="store_true",
-            help="Disable the index refresh and drop replicas to 0 for the load, restored afterwards.",
+            action=argparse.BooleanOptionalAction,
+            default=None,
+            help=(
+                "Disable the index refresh and drop replicas to 0 for the load, restored afterwards. "
+                "Defaults to SNAPADMIN_REINDEX_TUNE_DEFAULT (default off); pass --no-tune to override."
+            ),
+        )
+        parser.add_argument(
+            "--limit",
+            type=int,
+            default=None,
+            help="Reindex only the first N rows — a probe/canary run (default: no limit).",
         )
         parser.add_argument(
             "--resume",
@@ -54,6 +72,14 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        limit = options["limit"]
+        if limit is not None and limit < 1:
+            raise CommandError(f"--limit must be a positive integer, got {limit}.")
+        # --tune / --no-tune override the project default; unset defers to the setting.
+        tune = options["tune"]
+        if tune is None:
+            tune = getattr(settings, "SNAPADMIN_REINDEX_TUNE_DEFAULT", False)
+
         if options["model"]:
             try:
                 app_label, model_name = options["model"].split(".", 1)
@@ -92,7 +118,8 @@ class Command(BaseCommand):
                 job,
                 chunk_size=options["chunk_size"],
                 parallel=options["parallel"],
-                tune=options["tune"],
+                tune=tune,
+                limit=limit,
                 on_progress=_progress,
             )
 

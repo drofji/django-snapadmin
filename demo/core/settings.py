@@ -248,6 +248,10 @@ SNAPADMIN_API_DELETE_GUARD = os.getenv('SNAPADMIN_API_DELETE_GUARD') or None
 # snapadmin.run_es_reindex Celery task (needs Celery + a broker).
 SNAPADMIN_REINDEX_API_ENABLED = os.getenv('SNAPADMIN_REINDEX_API_ENABLED', 'False') == 'True'
 SNAPADMIN_REINDEX_API_ASYNC = os.getenv('SNAPADMIN_REINDEX_API_ASYNC', 'False') == 'True'
+# Default for `snapadmin_reindex --tune` when neither --tune nor --no-tune is
+# passed. False (default) keeps today's behaviour (tuning off); set True to make
+# a mass load relax the index (refresh off, replicas 0) unless --no-tune overrides.
+SNAPADMIN_REINDEX_TUNE_DEFAULT = os.getenv('SNAPADMIN_REINDEX_TUNE_DEFAULT', 'False') == 'True'
 
 # Read-replica routing: alias (from DATABASES) that auto-generated read-only
 # API list/retrieve querysets are pinned to via .using(). Writes always stay on

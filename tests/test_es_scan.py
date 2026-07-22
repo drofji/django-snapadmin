@@ -208,3 +208,126 @@ class TestEsScanFallback:
         # Only the one already-yielded row — no DB restart that would re-add "A"
         # or spuriously pull in "B".
         assert names == ["A"]
+
+
+# ── source=False → stream primary keys only (no _source, no in_bulk) ──────────
+
+@pytest.mark.django_db
+class TestEsScanPkOnly:
+    def test_source_false_requests_no_source(self):
+        es = _es_pages([])
+        with override_settings(ELASTICSEARCH_ENABLED=True), \
+                patch.object(SearchLog, "get_es_client", return_value=es):
+            list(SearchLog.es_scan(source=False))
+        # `_source: false` tells ES not to ship the document body — only ids.
+        assert _bodies(es)[0]["_source"] is False
+
+    def test_default_call_does_not_disable_source(self):
+        es = _es_pages([])
+        with override_settings(ELASTICSEARCH_ENABLED=True), \
+                patch.object(SearchLog, "get_es_client", return_value=es):
+            list(SearchLog.es_scan())
+        # The default (full hydration) must be byte-identical to today — no
+        # `_source` key added to the request body.
+        assert "_source" not in _bodies(es)[0]
+
+    def test_source_true_behaves_like_default(self):
+        es = _es_pages([])
+        with override_settings(ELASTICSEARCH_ENABLED=True), \
+                patch.object(SearchLog, "get_es_client", return_value=es):
+            list(SearchLog.es_scan(source=True))
+        assert "_source" not in _bodies(es)[0]
+
+    def test_source_false_yields_pks_from_the_sort_cursor(self):
+        es = _es_pages([{"id": 11, "query": "a", "results_count": 0},
+                        {"id": 22, "query": "b", "results_count": 0}])
+        with override_settings(ELASTICSEARCH_ENABLED=True, SNAPADMIN_ES_SEARCH_LIMIT=2), \
+                patch.object(SearchLog, "get_es_client", return_value=es):
+            pks = list(SearchLog.es_scan(source=False))
+        assert pks == [11, 22]
+
+    def test_source_false_skips_the_db_in_bulk_lookup(self):
+        # A DUAL model normally re-hydrates every hit's pk via in_bulk(); pk-only
+        # streaming must NOT touch the DB, so a pk absent from the table is still
+        # yielded verbatim (in_bulk would have dropped it — see
+        # test_dual_skips_pks_absent_from_the_db).
+        es = _es_pages([{"id": 123}, {"id": 999999}])
+        with override_settings(ELASTICSEARCH_ENABLED=True, SNAPADMIN_ES_SEARCH_LIMIT=2), \
+                patch.object(Product, "get_es_client", return_value=es), \
+                patch.object(Product.objects, "in_bulk") as in_bulk:
+            pks = list(Product.es_scan(available=True, source=False))
+        assert pks == [123, 999999]
+        in_bulk.assert_not_called()
+
+    def test_source_false_yields_pks_for_es_only(self):
+        es = _es_pages([{"id": 7, "query": "hi", "results_count": 3}])
+        with override_settings(ELASTICSEARCH_ENABLED=True), \
+                patch.object(SearchLog, "get_es_client", return_value=es):
+            pks = list(SearchLog.es_scan(source=False))
+        assert pks == [7]
+
+    def test_source_false_walks_multiple_pages(self):
+        es = _es_pages([{"id": 1}, {"id": 2}], [{"id": 3}])
+        with override_settings(ELASTICSEARCH_ENABLED=True, SNAPADMIN_ES_SEARCH_LIMIT=2), \
+                patch.object(Product, "get_es_client", return_value=es):
+            pks = list(Product.es_scan(available=True, source=False))
+        assert pks == [1, 2, 3]
+
+    def test_source_false_db_fallback_streams_pks(self):
+        # ES disabled (default in tests) → the DB fallback must also yield pks,
+        # not model instances, when source=False.
+        p1 = Product.objects.create(name="On1", price=1, available=True)
+        p2 = Product.objects.create(name="On2", price=2, available=True)
+        Product.objects.create(name="Off", price=1, available=False)
+        pks = sorted(Product.es_scan(available=True, source=False))
+        assert pks == sorted([p1.pk, p2.pk])
+
+
+# ── limit → stop after N results, capping the ES request size ─────────────────
+
+@pytest.mark.django_db
+class TestEsScanLimit:
+    def test_limit_stops_after_n(self):
+        es = _es_pages([{"id": 1}, {"id": 2}, {"id": 3}, {"id": 4}, {"id": 5}])
+        with override_settings(ELASTICSEARCH_ENABLED=True, SNAPADMIN_ES_SEARCH_LIMIT=1000), \
+                patch.object(Product, "get_es_client", return_value=es):
+            pks = list(Product.es_scan(available=True, source=False, limit=2))
+        assert pks == [1, 2]
+
+    def test_limit_caps_the_es_request_size(self):
+        es = _es_pages([{"id": 1}, {"id": 2}, {"id": 3}])
+        with override_settings(ELASTICSEARCH_ENABLED=True, SNAPADMIN_ES_SEARCH_LIMIT=1000), \
+                patch.object(Product, "get_es_client", return_value=es):
+            list(Product.es_scan(available=True, source=False, limit=2))
+        # Never over-fetch: a limit below page_size shrinks the request itself.
+        assert _bodies(es)[0]["size"] == 2
+
+    def test_limit_larger_than_page_size_spans_pages(self):
+        es = _es_pages([{"id": 1}, {"id": 2}], [{"id": 3}, {"id": 4}])
+        with override_settings(ELASTICSEARCH_ENABLED=True, SNAPADMIN_ES_SEARCH_LIMIT=2), \
+                patch.object(Product, "get_es_client", return_value=es):
+            pks = list(Product.es_scan(available=True, source=False, limit=3))
+        assert pks == [1, 2, 3]
+        # Two pages fetched (2 + 1); the third page is never requested.
+        assert es.search.call_count == 2
+
+    def test_limit_applies_to_full_object_hydration(self):
+        a = Product.objects.create(name="A", price=1, available=True)
+        b = Product.objects.create(name="B", price=2, available=True)
+        Product.objects.create(name="C", price=3, available=True)
+        es = _es_pages([{"id": a.pk}, {"id": b.pk}])
+        with override_settings(ELASTICSEARCH_ENABLED=True, SNAPADMIN_ES_SEARCH_LIMIT=1000), \
+                patch.object(Product, "get_es_client", return_value=es):
+            names = [p.name for p in Product.es_scan(available=True, limit=1)]
+        assert names == ["A"]
+
+    def test_limit_applies_to_db_fallback(self):
+        Product.objects.create(name="A", price=1, available=True)
+        Product.objects.create(name="B", price=2, available=True)
+        # ES disabled → DB fallback; limit still caps the stream.
+        got = list(Product.es_scan(available=True, limit=1))
+        assert len(got) == 1
+
+    def test_non_positive_limit_raises_eagerly(self):
+        with pytest.raises(ValueError, match="limit"):
+            Product.es_scan(limit=0)
