@@ -36,6 +36,15 @@ class Product(snap_models.SnapModel):
     price = snap_fields.SnapDecimalField(max_digits=10, decimal_places=2, verbose_name=_("Price"), show_in_form=True, filterable=True, row="pricing")
     available = snap_fields.SnapBooleanField(default=True, verbose_name=_("Available"), show_in_form=True, filterable=True, row="pricing")
 
+    # The auto-generated REST FilterSet exposes null-checks and membership lists per
+    # field type — no config needed. On this model:
+    #   GET /api/models/demo/Product/?category_id__isnull=true  (rows with no category)
+    #   GET /api/models/demo/Product/?category_id__in=1,2       (FK membership)
+    #   GET /api/models/demo/Product/?price__in=9.99,19.99      (numeric membership)
+    #   GET /api/models/demo/Product/?price__isnull=false       (rows that have a price)
+    # A text field opts into ?name__isnull=<bool> by adding "isnull" to
+    # api_filter_lookups (dates get ?field__isnull= too, but no __in).
+
     # SnapStatusBadgeField renders a color-coded pill badge in the list view
     # True → green badge, False → red badge (no extra template needed)
     status_badge = snap_fields.SnapStatusBadgeField(

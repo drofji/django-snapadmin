@@ -220,6 +220,16 @@ SNAPADMIN_API_TEXT_LOOKUPS = (
     [s.strip() for s in os.getenv('SNAPADMIN_API_TEXT_LOOKUPS', '').split(',') if s.strip()]
     or None
 )
+# Filter-backend chain for the auto-generated model REST API. Comma-separated dotted
+# paths; unset (the default, → None) uses the built-in chain
+# [SnapAdminFilterBackend, SearchFilter, OrderingFilter]. Set it to plug in a custom
+# django-filter FilterSet / backend without monkeypatching — list every backend you
+# want, since it replaces the whole chain (like DRF's DEFAULT_FILTER_BACKENDS), e.g.
+# SNAPADMIN_API_FILTER_BACKEND=myapp.filters.MyBackend,rest_framework.filters.OrderingFilter
+SNAPADMIN_API_FILTER_BACKEND = (
+    [s.strip() for s in os.getenv('SNAPADMIN_API_FILTER_BACKEND', '').split(',') if s.strip()]
+    or None
+)
 # DRF rate limits (e.g. '60/min'). Empty value disables that throttle.
 SNAPADMIN_THROTTLE_ANON = os.getenv('SNAPADMIN_THROTTLE_ANON', '60/min') or None
 SNAPADMIN_THROTTLE_USER = os.getenv('SNAPADMIN_THROTTLE_USER', '600/min') or None

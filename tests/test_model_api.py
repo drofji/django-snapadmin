@@ -784,6 +784,213 @@ class TestGlobalTextLookupDefaults:
             fm._filterset_cache.pop("demo.product", None)
 
 
+# ── auto-generated isnull / __in filters (#FEAT8b) ───────────────────────────
+
+@pytest.mark.django_db
+class TestIsNullAndInFilters:
+    """`?field__isnull=true/false` must return 200 on text/numeric/date/FK (was a
+    500 for text `isnull`, and numeric/date/FK had no `isnull`/`__in` at all), and
+    numeric/FK gain a comma-separated `__in`."""
+
+    @staticmethod
+    def _fresh_filterset(model):
+        from snapadmin.api import filters as fm
+        key = f"{model._meta.app_label}.{model._meta.model_name}"
+        fm._filterset_cache.pop(key, None)
+        try:
+            return fm.build_filterset_for_model(model)
+        finally:
+            fm._filterset_cache.pop(key, None)
+
+    # ---- filterset construction -------------------------------------------------
+
+    def test_numeric_field_gets_in_and_isnull(self):
+        import django_filters
+        from snapadmin.api.filters import _NumberInFilter
+        from demo.apps.shop.models import Product
+        fs = self._fresh_filterset(Product)
+        assert isinstance(fs.base_filters["price__in"], _NumberInFilter)
+        assert isinstance(fs.base_filters["price__isnull"], django_filters.BooleanFilter)
+        assert fs.base_filters["price__isnull"].lookup_expr == "isnull"
+
+    def test_date_field_gets_isnull_but_no_in(self):
+        import django_filters
+        from demo.apps.shop.models import Order
+        fs = self._fresh_filterset(Order)
+        assert isinstance(fs.base_filters["created_at__isnull"], django_filters.BooleanFilter)
+        assert "created_at__in" not in fs.base_filters
+
+    def test_fk_field_gets_id_in_and_isnull(self):
+        import django_filters
+        from snapadmin.api.filters import _NumberInFilter
+        from demo.apps.shop.models import Product
+        fs = self._fresh_filterset(Product)
+        assert isinstance(fs.base_filters["category_id__in"], _NumberInFilter)
+        assert isinstance(fs.base_filters["category_id__isnull"], django_filters.BooleanFilter)
+        assert fs.base_filters["category_id__isnull"].field_name == "category_id"
+
+    def test_text_isnull_maps_to_boolean_filter(self, monkeypatch):
+        import django_filters
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(
+            Product, "api_filter_lookups", {"name": ["exact", "isnull"]}, raising=False
+        )
+        fs = self._fresh_filterset(Product)
+        assert isinstance(fs.base_filters["name__isnull"], django_filters.BooleanFilter)
+        assert fs.base_filters["name__isnull"].lookup_expr == "isnull"
+
+    # ---- HTTP behaviour ---------------------------------------------------------
+
+    def test_text_isnull_returns_200_not_500(self, auth_client, monkeypatch):
+        # Regression: a text field with `isnull` in its lookup set used to build a
+        # CharFilter → the string "false" hit Django's isnull lookup → ValueError →
+        # HTTP 500. It must now be a BooleanFilter → 200.
+        from snapadmin.api import filters as fm
+        from demo.apps.shop.models import Product
+        Product.objects.create(name="Laptop", price=Decimal("10.00"))
+        monkeypatch.setattr(
+            Product, "api_filter_lookups", {"name": ["exact", "isnull"]}, raising=False
+        )
+        fm._filterset_cache.pop("demo.product", None)
+        try:
+            r = auth_client.get("/api/models/demo/Product/?name__isnull=false")
+            assert r.status_code == 200
+            names = [row["name"] for row in r.json()["results"]]
+            assert names == ["Laptop"]
+        finally:
+            fm._filterset_cache.pop("demo.product", None)
+
+    def test_fk_isnull_true_matches_rows_without_relation(self, auth_client):
+        from demo.apps.shop.models import Category, Product
+        cat = Category.objects.create(name="Peripherals", slug="peripherals")
+        Product.objects.create(name="With category", price=Decimal("10.00"), category=cat)
+        Product.objects.create(name="No category", price=Decimal("20.00"), category=None)
+
+        r = auth_client.get("/api/models/demo/Product/?category_id__isnull=true")
+        assert r.status_code == 200
+        names = [row["name"] for row in r.json()["results"]]
+        assert names == ["No category"]
+
+    def test_fk_isnull_false_matches_rows_with_relation(self, auth_client):
+        from demo.apps.shop.models import Category, Product
+        cat = Category.objects.create(name="Peripherals", slug="peripherals")
+        Product.objects.create(name="With category", price=Decimal("10.00"), category=cat)
+        Product.objects.create(name="No category", price=Decimal("20.00"), category=None)
+
+        r = auth_client.get("/api/models/demo/Product/?category_id__isnull=false")
+        assert r.status_code == 200
+        names = [row["name"] for row in r.json()["results"]]
+        assert names == ["With category"]
+
+    def test_numeric_isnull_false_returns_non_null_rows(self, auth_client):
+        from demo.apps.shop.models import Product
+        Product.objects.create(name="Cheap", price=Decimal("10.00"))
+        Product.objects.create(name="Pricey", price=Decimal("20.00"))
+
+        r = auth_client.get("/api/models/demo/Product/?price__isnull=false")
+        assert r.status_code == 200
+        names = {row["name"] for row in r.json()["results"]}
+        assert names == {"Cheap", "Pricey"}
+
+    def test_numeric_in_accepts_comma_separated_values(self, auth_client):
+        from demo.apps.shop.models import Product
+        Product.objects.create(name="Ten", price=Decimal("10.00"))
+        Product.objects.create(name="Twenty", price=Decimal("20.00"))
+        Product.objects.create(name="Thirty", price=Decimal("30.00"))
+
+        r = auth_client.get("/api/models/demo/Product/?price__in=10.00,30.00")
+        assert r.status_code == 200
+        names = {row["name"] for row in r.json()["results"]}
+        assert names == {"Ten", "Thirty"}
+
+    def test_fk_id_in_accepts_comma_separated_values(self, auth_client, order, customer):
+        r = auth_client.get(f"/api/models/demo/Order/?customer_id__in={customer.pk}")
+        assert r.status_code == 200
+        assert len(r.json()["results"]) == 1
+
+    def test_date_isnull_false_returns_dated_rows(self, auth_client, order):
+        r = auth_client.get("/api/models/demo/Order/?created_at__isnull=false")
+        assert r.status_code == 200
+        assert len(r.json()["results"]) == 1
+
+
+# ── swappable filter backend — SNAPADMIN_API_FILTER_BACKEND (#FEAT8c) ─────────
+
+from rest_framework.filters import BaseFilterBackend  # noqa: E402
+
+
+class _MarkerFilterBackend(BaseFilterBackend):
+    """Test backend that filters everything out, so its presence is observable."""
+
+    def filter_queryset(self, request, queryset, view):
+        return queryset.none()
+
+
+@pytest.mark.django_db
+class TestApiFilterBackendSetting:
+    """SNAPADMIN_API_FILTER_BACKEND swaps DynamicModelViewSet.filter_backends
+    without monkeypatching; unset keeps the current default list."""
+
+    def test_default_when_unset(self):
+        from snapadmin.api.filters import (
+            get_api_filter_backends, SnapAdminFilterBackend,
+        )
+        from rest_framework.filters import OrderingFilter, SearchFilter
+        assert get_api_filter_backends() == [
+            SnapAdminFilterBackend, SearchFilter, OrderingFilter,
+        ]
+
+    def test_single_dotted_path_string_replaces_list(self):
+        from snapadmin.api.filters import get_api_filter_backends
+        from rest_framework.filters import OrderingFilter
+        with override_settings(
+            SNAPADMIN_API_FILTER_BACKEND="rest_framework.filters.OrderingFilter"
+        ):
+            assert get_api_filter_backends() == [OrderingFilter]
+
+    def test_single_class_object_replaces_list(self):
+        from snapadmin.api.filters import get_api_filter_backends
+        from rest_framework.filters import OrderingFilter
+        with override_settings(SNAPADMIN_API_FILTER_BACKEND=OrderingFilter):
+            assert get_api_filter_backends() == [OrderingFilter]
+
+    def test_list_of_dotted_paths(self):
+        from snapadmin.api.filters import get_api_filter_backends, SnapAdminFilterBackend
+        from rest_framework.filters import SearchFilter
+        with override_settings(SNAPADMIN_API_FILTER_BACKEND=[
+            "snapadmin.api.filters.SnapAdminFilterBackend",
+            "rest_framework.filters.SearchFilter",
+        ]):
+            assert get_api_filter_backends() == [SnapAdminFilterBackend, SearchFilter]
+
+    def test_viewset_property_default(self):
+        from snapadmin.api.views import DynamicModelViewSet
+        from snapadmin.api.filters import SnapAdminFilterBackend
+        from rest_framework.filters import OrderingFilter, SearchFilter
+        assert DynamicModelViewSet().filter_backends == [
+            SnapAdminFilterBackend, SearchFilter, OrderingFilter,
+        ]
+
+    def test_viewset_property_reflects_setting(self):
+        from snapadmin.api.views import DynamicModelViewSet
+        with override_settings(
+            SNAPADMIN_API_FILTER_BACKEND="tests.test_model_api._MarkerFilterBackend"
+        ):
+            assert DynamicModelViewSet().filter_backends == [_MarkerFilterBackend]
+
+    def test_custom_backend_applied_at_http_layer(self, auth_client, product):
+        # Default: the product is listed.
+        assert auth_client.get("/api/models/demo/Product/").json()["count"] == 1
+        # Swap in a backend that filters everything out → empty list, proving the
+        # setting actually replaces the backend chain (no monkeypatch).
+        with override_settings(
+            SNAPADMIN_API_FILTER_BACKEND="tests.test_model_api._MarkerFilterBackend"
+        ):
+            r = auth_client.get("/api/models/demo/Product/")
+        assert r.status_code == 200
+        assert r.json()["count"] == 0
+
+
 # ── DynamicModelViewSet – always-on pagination (#SEC4) ────────────────────────
 
 @pytest.mark.django_db

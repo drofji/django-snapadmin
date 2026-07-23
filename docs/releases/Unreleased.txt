@@ -78,9 +78,37 @@ Opt out of the silent Elasticsearch→database fallback (db_fallback=False)
   and a mid-stream ``es_scan()`` failure still stops rather than raising, since its ``search_after``
   cursor is already gone.
 
+Null checks and membership lists in the auto-generated REST filters
+  The dynamic REST FilterSet now exposes null-checks and comma-separated membership lists automatically,
+  with no per-field configuration. Numeric fields (Integer/Float/Decimal…) gain ``?field__in=1,2,3`` and
+  ``?field__isnull=true`` alongside the existing ``__gte``/``__lte`` range; foreign keys gain
+  ``?field_id__in=1,2`` and ``?field_id__isnull=true`` (rows with — or without — a related object) next
+  to the existing exact ``?field_id=`` match; date and datetime fields gain ``?field__isnull=true`` (no
+  ``__in``, since an exact-timestamp list is rarely useful and ranges are covered by ``__gte``/``__lte``).
+  Text fields can opt into a null check by adding ``"isnull"`` to ``api_filter_lookups`` (or a model-/
+  project-wide default); it is not in the library default set. All of these are additive — existing query
+  parameters are unchanged.
+
+Swap the REST API filter backend with SNAPADMIN_API_FILTER_BACKEND
+  The dynamic model API's filter chain (``SnapAdminFilterBackend`` + DRF's ``SearchFilter`` and
+  ``OrderingFilter``) used to be a hardcoded class attribute on the viewset, so plugging in a custom
+  django-filter ``FilterSet`` or a bespoke backend meant subclassing the view and monkeypatching it. The
+  new ``SNAPADMIN_API_FILTER_BACKEND`` setting takes a dotted path — or a list of them, or a class object
+  — and replaces the whole chain (mirroring DRF's own ``DEFAULT_FILTER_BACKENDS``), so list every backend
+  you still want alongside your custom one. It is resolved on each request, so ``override_settings`` in
+  tests and deploy-time config both apply, and drf-spectacular still introspects the resolved backends for
+  the Swagger schema. Unset (the default) keeps the built-in chain unchanged.
+
 
 Fixed
 =====
+
+Text ?field__isnull= no longer returns HTTP 500
+  Adding ``"isnull"`` to a text field's ``api_filter_lookups`` used to build a plain text filter that
+  forwarded the raw query string (``"true"``/``"false"``) to Django's ``isnull`` lookup, which only
+  accepts a bool — raising ``ValueError`` and surfacing as ``HTTP 500``. Numeric, date and foreign-key
+  fields had no ``isnull`` filter at all. ``isnull`` now maps to a boolean filter across every field
+  type, so ``?field__isnull=true``/``false`` parses to a real bool and returns ``200``.
 
 SnapModel.es_reindex_all() no longer risks OOM on MySQL
   ``es_reindex_all()`` streamed the table with ``QuerySet.iterator()``, which on the mysqlclient backend

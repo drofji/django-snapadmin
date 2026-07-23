@@ -1125,6 +1125,35 @@ SNAPADMIN_API_TEXT_LOOKUPS = ["exact", "startswith", "in"]     # unset → libra
   you're trying to avoid; use <a href="#es-filter">Elasticsearch</a> for substring/fuzzy search at
   scale instead.</p>
 
+  <h4 id="auto-filter-isnull">Null checks and membership lists — <code>?field__isnull=</code>, <code>?field__in=</code></h4>
+  <p>Beyond the text lookups above, the generated FilterSet exposes null-checks and comma-separated
+  membership lists automatically — no per-field configuration:</p>
+  <ul>
+    <li><strong>Numeric fields</strong> (<code>Integer</code>/<code>Float</code>/<code>Decimal</code>…)
+      gain <code>?field__in=1,2,3</code> and <code>?field__isnull=true</code> (alongside the existing
+      <code>?field__gte=</code>/<code>?field__lte=</code> range).</li>
+    <li><strong>Date / datetime fields</strong> gain <code>?field__isnull=true</code>. They deliberately
+      get <em>no</em> <code>__in</code> — an exact-timestamp membership list is rarely what you want, and
+      ranges are already covered by <code>__gte</code>/<code>__lte</code>.</li>
+    <li><strong>Foreign keys</strong> gain <code>?field_id__in=1,2</code> and
+      <code>?field_id__isnull=true</code> (find rows with — or without — a related object) next to the
+      existing <code>?field_id=</code> exact match.</li>
+    <li><strong>Text fields</strong> can opt into a null check by adding <code>"isnull"</code> to
+      <code>api_filter_lookups</code> (or a model-/project-wide default); it is <em>not</em> in the
+      library default set. It maps to a boolean, so <code>?field__isnull=false</code> returns a proper
+      <code>200</code> — earlier releases built a text filter here that forwarded the raw string to
+      Django's <code>isnull</code> lookup and raised <code>HTTP 500</code>.</li>
+  </ul>
+  <pre><code># find products that were never categorised, or priced in a specific set
+GET /api/models/demo/Product/?category_id__isnull=true
+GET /api/models/demo/Product/?price__in=9.99,19.99&amp;price__isnull=false
+
+# opt a text field into a null check
+class Product(SnapModel):
+    api_filter_lookups = {"sku": ["exact", "isnull"]}   # exposes ?sku__isnull=true</code></pre>
+  <p>The <code>isnull</code> value follows the usual boolean parsing — <code>true</code>/<code>false</code>
+  (also <code>1</code>/<code>0</code>). All of these are additive: existing query parameters are unchanged.</p>
+
   <h3>Filtering JSON columns — <code>api_json_filters</code></h3>
   <p><code>JSONField</code> gets no auto-generated filter by default. Declare which key-paths within
   which JSON field should be filterable and the dynamic API exposes each as a query parameter — a
@@ -1152,6 +1181,26 @@ SNAPADMIN_API_TEXT_LOOKUPS = ["exact", "startswith", "in"]     # unset → libra
   <code>SnapModel.es_search()</code> (the Elasticsearch integration) instead of the DB-backed
   auto-filters. Leaving <code>api_json_filters</code> unset (the default) exposes no JSON filters at
   all — matching prior behaviour.</p>
+
+  <h3 id="api-filter-backend">Swapping the filter backend — <code>SNAPADMIN_API_FILTER_BACKEND</code></h3>
+  <p>The dynamic model API's filter chain is
+  <code>[SnapAdminFilterBackend, SearchFilter, OrderingFilter]</code> — the auto-generated
+  django-filter FilterSet plus DRF's search and ordering backends. To plug in a <strong>custom
+  <code>FilterSet</code> or a bespoke backend</strong> (say, one that adds a full-text or geo filter),
+  set <code>SNAPADMIN_API_FILTER_BACKEND</code> to a dotted path — or a list of them — instead of
+  subclassing the view and monkeypatching its <code>filter_backends</code>:</p>
+  <pre><code># settings.py — replaces the whole chain, exactly like DRF's DEFAULT_FILTER_BACKENDS,
+# so list every backend you still want alongside your custom one:
+SNAPADMIN_API_FILTER_BACKEND = [
+    "myapp.filters.MyFilterBackend",
+    "rest_framework.filters.OrderingFilter",
+]
+
+# a single dotted path (or the class object) is accepted too:
+SNAPADMIN_API_FILTER_BACKEND = "myapp.filters.MyFilterBackend"</code></pre>
+  <p>Left unset (the default), the built-in chain is used unchanged. The value is resolved on each
+  request, so <code>override_settings</code> in tests and deploy-time config both take effect, and
+  drf-spectacular still introspects the resolved backends for the Swagger schema.</p>
 
   <h3>Vetoing deletes — <code>api_can_delete</code> + <code>SNAPADMIN_API_DELETE_GUARD</code></h3>
   <p>Forbid deleting <strong>specific objects</strong> through the dynamic model API without

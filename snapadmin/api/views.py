@@ -12,7 +12,7 @@ from django.http import StreamingHttpResponse
 from django.urls import reverse
 from django.utils.module_loading import import_string
 from rest_framework import mixins, permissions, status, viewsets
-from rest_framework.filters import OrderingFilter, SearchFilter
+from rest_framework.filters import BaseFilterBackend, OrderingFilter
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.settings import api_settings
@@ -22,7 +22,7 @@ from drf_spectacular.utils import extend_schema
 
 from snapadmin.api.authentication import SnapAPIAuthMixin, token_has_permission
 from snapadmin.db import route_read
-from snapadmin.api.filters import SnapAdminFilterBackend
+from snapadmin.api.filters import get_api_filter_backends
 from snapadmin.logging_config import get_logger
 from snapadmin.masking import get_masked_fields, user_can_view_pii
 from snapadmin.models import APIToken, EsStorageMode, SnapModel
@@ -133,9 +133,18 @@ class APITokenViewSet(
 
 class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, TokenModelPermission]
-    filter_backends = [SnapAdminFilterBackend, SearchFilter, OrderingFilter]
     pagination_class = SnapDynamicPagination
     throttle_classes = [SnapAnonRateThrottle, SnapUserRateThrottle]
+
+    @property
+    def filter_backends(self) -> list[type[BaseFilterBackend]]:
+        """Resolved from ``SNAPADMIN_API_FILTER_BACKEND`` on each access so a
+        project can swap the backend chain via settings (default: the built-in
+        SnapAdminFilterBackend + DRF Search/Ordering). A property — not a class
+        attribute — so ``override_settings`` and deploy-time config both apply,
+        while drf-spectacular still reads ``self.filter_backends`` for the schema.
+        """
+        return get_api_filter_backends()
 
     def _get_model_class(self):
         app_label  = self.kwargs["app_label"]

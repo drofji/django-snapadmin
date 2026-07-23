@@ -17,8 +17,10 @@ import django_filters
 from django.conf import settings
 from django.db import connections, models as django_models
 from django.db.models import QuerySet
+from django.utils.module_loading import import_string
 from django_filters.constants import EMPTY_VALUES
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.filters import BaseFilterBackend, OrderingFilter, SearchFilter
 
 from snapadmin.masking import get_masked_fields, user_can_view_pii
 
@@ -41,6 +43,10 @@ _TEXT_LOOKUPS_DEFAULT: list[str] = ["exact", "icontains", "startswith", "in"]
 
 class _CharInFilter(django_filters.BaseInFilter, django_filters.CharFilter):
     """CharFilter accepting a comma-separated list, for ``__in`` lookups."""
+
+
+class _NumberInFilter(django_filters.BaseInFilter, django_filters.NumberFilter):
+    """NumberFilter accepting a comma-separated list, for numeric/FK ``__in`` lookups."""
 
 
 class JsonKeyPathFilter(django_filters.CharFilter):
@@ -119,6 +125,11 @@ def _text_filter_for_lookup(name: str, lookup: str) -> tuple[str, django_filters
         return name, django_filters.CharFilter(field_name=name, lookup_expr="exact")
     if lookup == "in":
         return f"{name}__in", _CharInFilter(field_name=name, lookup_expr="in")
+    if lookup == "isnull":
+        # A CharFilter would forward the raw string ("true"/"false") to Django's
+        # isnull lookup, which only accepts a bool -> ValueError -> HTTP 500. Map it
+        # to a BooleanFilter so ?field__isnull=true/false parses to a real bool.
+        return f"{name}__isnull", django_filters.BooleanFilter(field_name=name, lookup_expr="isnull")
     return f"{name}__{lookup}", django_filters.CharFilter(field_name=name, lookup_expr=lookup)
 
 
@@ -183,6 +194,10 @@ def _build_filters_for_model(model_class: type[django_models.Model]) -> dict[str
             filters[f"{name}__lte"] = django_filters.NumberFilter(
                 field_name=name, lookup_expr="lte"
             )
+            filters[f"{name}__in"] = _NumberInFilter(field_name=name, lookup_expr="in")
+            filters[f"{name}__isnull"] = django_filters.BooleanFilter(
+                field_name=name, lookup_expr="isnull"
+            )
 
         elif isinstance(field, (django_models.DateTimeField, django_models.DateField)):
             filter_cls = (
@@ -193,10 +208,21 @@ def _build_filters_for_model(model_class: type[django_models.Model]) -> dict[str
             filters[name] = filter_cls(lookup_expr="exact")
             filters[f"{name}__gte"] = filter_cls(field_name=name, lookup_expr="gte")
             filters[f"{name}__lte"] = filter_cls(field_name=name, lookup_expr="lte")
+            # No __in for dates: an exact-datetime membership list is rarely useful,
+            # and ranges are already covered by __gte/__lte. isnull stays available.
+            filters[f"{name}__isnull"] = django_filters.BooleanFilter(
+                field_name=name, lookup_expr="isnull"
+            )
 
         elif isinstance(field, django_models.ForeignKey):
             filters[f"{name}_id"] = django_filters.NumberFilter(
                 field_name=f"{name}_id", lookup_expr="exact"
+            )
+            filters[f"{name}_id__in"] = _NumberInFilter(
+                field_name=f"{name}_id", lookup_expr="in"
+            )
+            filters[f"{name}_id__isnull"] = django_filters.BooleanFilter(
+                field_name=f"{name}_id", lookup_expr="isnull"
             )
 
         elif isinstance(field, django_models.JSONField):
@@ -280,3 +306,28 @@ class SnapAdminFilterBackend(DjangoFilterBackend):
         if model_class is None:
             return None
         return build_filterset_for_model(model_class)
+
+
+def get_api_filter_backends() -> list[type[BaseFilterBackend]]:
+    """Resolve the dynamic REST API's filter-backend chain from settings.
+
+    ``SNAPADMIN_API_FILTER_BACKEND`` lets a project swap the auto-generated
+    ``SnapAdminFilterBackend`` (or the whole chain) for a custom
+    ``FilterSet``/backend without monkeypatching ``DynamicModelViewSet``:
+
+    - **Unset** (the default) → the built-in chain
+      ``[SnapAdminFilterBackend, SearchFilter, OrderingFilter]``.
+    - **A single dotted path or backend class** → a one-element chain of it.
+    - **A list/tuple of dotted paths / classes** → that exact chain, replacing
+      the default entirely (mirroring DRF's own ``DEFAULT_FILTER_BACKENDS``).
+
+    String entries are imported with :func:`~django.utils.module_loading.import_string`;
+    a class object is used as-is.
+    """
+    configured = getattr(settings, "SNAPADMIN_API_FILTER_BACKEND", None)
+    if configured is None:
+        return [SnapAdminFilterBackend, SearchFilter, OrderingFilter]
+    if isinstance(configured, (str, type)):
+        configured = [configured]
+    return [import_string(backend) if isinstance(backend, str) else backend
+            for backend in configured]
