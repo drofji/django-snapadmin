@@ -12,11 +12,22 @@ rates in place instead of duplicating (demonstrating
 feed no longer reports — the delete half of a recurring sync. Combine with
 `--only N` to shrink the feed and watch the stale rows get removed (guarded by
 `max_fraction` so a shrunken feed can't wipe the table by accident).
+
+`--strategy` picks how stale rows are found:
+
+  * `keyset` (default) diffs the local `code`s against the feed in memory, then
+    raises `StaleSyncAbort` if too many are stale (the classic guard).
+  * `last_seen` is DB-side and holds no key set: every synced row is stamped with
+    `run_started` (the `last_seen` watermark column), then `stale_sync` deletes
+    rows left below it. It runs with `on_exceed="skip"`, so an over-the-ceiling
+    prune logs and continues (returns `aborted=True`) instead of raising — the
+    posture an unattended job usually wants.
 """
 
 import random
 
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
 from demo.apps.shop.models import ExchangeRate
 from snapadmin.etl import StaleSyncAbort, stale_sync, upsert_from_source
@@ -25,9 +36,15 @@ from snapadmin.etl import StaleSyncAbort, stale_sync, upsert_from_source
 _CURRENCIES = ["USD", "GBP", "JPY", "CHF", "CAD", "AUD", "SEK", "NOK", "PLN", "CZK"]
 
 
-def _feed_rows(codes):
+def _feed_rows(codes, run_started):
     for code in codes:
-        yield {"code": code, "base": "EUR", "rate": round(random.uniform(0.1, 200), 6)}
+        yield {
+            "code": code, "base": "EUR",
+            "rate": round(random.uniform(0.1, 200), 6),
+            # Watermark for the last_seen prune strategy — every reported row is
+            # stamped with this run's start time so stale rows fall below it.
+            "last_seen": run_started,
+        }
 
 
 class Command(BaseCommand):
@@ -42,12 +59,17 @@ class Command(BaseCommand):
             "--prune", action="store_true",
             help="After upserting, delete currencies the feed no longer reports (stale_sync).",
         )
+        parser.add_argument(
+            "--strategy", choices=["keyset", "last_seen"], default="keyset",
+            help="How --prune finds stale rows: keyset (in-memory diff) or last_seen (DB-side watermark).",
+        )
 
     def handle(self, *args, **options):
+        run_started = timezone.now()
         codes = _CURRENCIES[: options["only"]]
         summary = upsert_from_source(
             ExchangeRate,
-            _feed_rows(codes),
+            _feed_rows(codes, run_started),
             unique_fields=["code"],
         )
         self.stdout.write(self.style.SUCCESS(
@@ -55,17 +77,32 @@ class Command(BaseCommand):
             f"reindex: {summary['reindex']}"
         ))
 
-        if options["prune"]:
+        if not options["prune"]:
+            return
+
+        # max_fraction=0.5 keeps this demo runnable with a shrunk feed; production
+        # syncs should keep the default 0.1 guard.
+        if options["strategy"] == "last_seen":
+            pruned = stale_sync(
+                ExchangeRate, strategy="last_seen", last_seen_field="last_seen",
+                run_started=run_started, max_fraction=0.5, on_exceed="skip",
+            )
+            if pruned["aborted"]:
+                self.stderr.write(self.style.WARNING(
+                    f"Prune skipped (safety guard): {pruned['fraction']:.0%} of "
+                    f"{pruned['total']} rows were stale."
+                ))
+                return
+        else:
             try:
-                # max_fraction=0.5 keeps this demo runnable with a shrunk feed;
-                # production syncs should keep the default 0.1 guard.
                 pruned = stale_sync(
                     ExchangeRate, set(codes), key_field="code", max_fraction=0.5,
                 )
             except StaleSyncAbort as exc:
                 self.stderr.write(self.style.WARNING(f"Prune aborted (safety guard): {exc}"))
                 return
-            self.stdout.write(self.style.SUCCESS(
-                f"Pruned {pruned['deleted']} stale currency row(s) "
-                f"({pruned['fraction']:.0%} of {pruned['total']})."
-            ))
+
+        self.stdout.write(self.style.SUCCESS(
+            f"Pruned {pruned['deleted']} stale currency row(s) "
+            f"({pruned['fraction']:.0%} of {pruned['total']})."
+        ))

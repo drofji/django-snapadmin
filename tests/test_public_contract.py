@@ -223,7 +223,8 @@ def test_etl_and_auth_signatures():
     from snapadmin.etl import stale_sync
 
     assert _params(stale_sync) == [
-        "model", "seen_keys", "key_field", "max_fraction", "queryset", "dry_run",
+        "model", "seen_keys", "key_field", "strategy", "last_seen_field", "run_started",
+        "max_fraction", "on_exceed", "queryset", "dry_run",
     ]
 
 

@@ -1359,12 +1359,46 @@ stale_sync(
   <p>If the stale rows exceed <code>max_fraction</code> of the candidate rows, <strong>nothing is
   deleted</strong> and <code>StaleSyncAbort</code> is raised (its <code>.stale</code>/<code>.total</code>/
   <code>.fraction</code> let you alert, retry the fetch, or deliberately override). Pass
-  <code>dry_run=True</code> to preview the counts, or <code>queryset=</code> to scope the sync to one
-  source's slice of a shared table so rows owned by others are never treated as stale. For a
-  <code>DUAL</code>/ES-mirrored model the deleted rows are cleared from Elasticsearch in the same
-  bulk call (no two-phase commit — the database delete lands first, mirroring
+  <code>max_fraction=1.0</code> to disable the guard entirely (allow an unbounded delete — the explicit
+  no-guard override). Pass <code>dry_run=True</code> to preview the counts, or <code>queryset=</code> to
+  scope the sync to one source's slice of a shared table so rows owned by others are never treated as
+  stale. For a <code>DUAL</code>/ES-mirrored model the deleted rows are cleared from Elasticsearch in the
+  same bulk call (no two-phase commit — the database delete lands first, mirroring
   <code>purge_expired()</code>). Demo:
   <code>python manage.py sync_exchange_rates --only 7 --prune</code>.</p>
+
+  <h4>Non-raising skip mode — <code>on_exceed="skip"</code></h4>
+  <p>An unattended job often wants to log-and-continue rather than crash when the guard trips. Pass
+  <code>on_exceed="skip"</code> and <code>stale_sync()</code> returns the summary with
+  <code>deleted=0</code> and <code>aborted=True</code> instead of raising — you decide whether to alert
+  on it. The default stays <code>on_exceed="raise"</code>.</p>
+  <pre><code>result = stale_sync(ExchangeRate, seen, key_field="code", on_exceed="skip")
+if result["aborted"]:
+    logger.warning("rates prune skipped: %.0f%% stale", result["fraction"] * 100)</code></pre>
+
+  <h4>Scaling past an in-memory key set — <code>strategy="last_seen"</code></h4>
+  <p>The default <code>strategy="keyset"</code> diffs the local natural keys against
+  <code>seen_keys</code> in Python — simple and exact, but it holds the whole key column <em>and</em> the
+  passed <code>seen_keys</code> in memory. On a table too large to diff that way, switch to the DB-side
+  <strong>watermark</strong> strategy: stamp every row the sync still reports with the run's start time in
+  a timestamp column, then delete the rows left below it — <strong>no natural-key set is ever
+  materialised</strong>.</p>
+  <pre><code>run_started = timezone.now()
+# the upsert stamps last_seen = run_started on every reported row …
+upsert_from_source(ExchangeRate, rows_with_last_seen(run_started), unique_fields=["code"])
+# … then prune everything the sync left behind, entirely DB-side:
+stale_sync(
+    ExchangeRate,
+    strategy="last_seen",
+    last_seen_field="last_seen",
+    run_started=run_started,
+    max_fraction=0.1,
+)</code></pre>
+  <p>Rows whose <code>last_seen</code> is <code>NULL</code> (never synced) are treated as <em>not</em>
+  stale, so populate the column on every sync for the guard to be reliable. The <code>max_fraction</code>,
+  <code>on_exceed</code>, <code>queryset</code>, <code>dry_run</code> and the ES-mirror clear all work the
+  same as the keyset strategy. Demo:
+  <code>python manage.py sync_exchange_rates --only 8 --prune --strategy last_seen</code>.</p>
 
   <h3>Optional user-management API (admin-only)</h3>
   <p>Set <code>SNAPADMIN_USER_API_ENABLED = True</code> for admin-only user/permission endpoints —

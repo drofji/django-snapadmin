@@ -174,7 +174,7 @@ each and paste it yourself. → **[Integration guide](https://drofji.github.io/d
 - [Health alerts](https://drofji.github.io/django-snapadmin/#error-monitoring) — email when a subsystem probe (DB / Elasticsearch / REST API / GraphQL, each skipped when its feature is off) goes down; `snapadmin_health_alert` (cron) or the `snapadmin.send_health_alert` task (Beat), with a cooldown so an outage emails once
 - [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, and offsite FTPS/SFTP
 - [Large-dataset tuning](https://drofji.github.io/django-snapadmin/#performance) — auto `list_select_related` (no admin N+1), estimated counts, per-model paging
-- [Generic ETL](https://drofji.github.io/django-snapadmin/#integrating) — `upsert_from_source()` and `stale_sync()` with a `max_fraction` wipe guard
+- [Generic ETL](https://drofji.github.io/django-snapadmin/#integrating) — `upsert_from_source()` and `stale_sync()` with a `max_fraction` wipe guard, a non-raising `on_exceed="skip"` mode, and a DB-side `strategy="last_seen"` prune that holds no in-memory key set
 - [Structured logging](https://drofji.github.io/django-snapadmin/#logging) via `structlog`; [i18n](https://drofji.github.io/django-snapadmin/#i18n) in 10 locales
 - [One-command diagnostics](https://drofji.github.io/django-snapadmin/#snapadmin-info) — `snapadmin_info` reports the version, connected services (DB / Elasticsearch / Celery), registered models and health as text or `--json`, with a `--health-check` readiness probe
 - [Licence audit](https://drofji.github.io/django-snapadmin/#license-check) — `snapadmin_license_check` reports the licence and 🟢/🟡/🔴 commercial-usability tier of every installed dependency, so you know your install is proprietary-safe

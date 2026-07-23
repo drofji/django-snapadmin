@@ -262,6 +262,12 @@ class ExchangeRate(snap_models.SnapModel):
     base = snap_fields.SnapCharField(max_length=3, default="EUR", verbose_name=_("Base"), filterable=True, show_in_form=True)
     rate = snap_fields.SnapDecimalField(max_digits=18, decimal_places=6, verbose_name=_("Rate"), filterable=True, show_in_form=True)
     synced_at = snap_fields.SnapDateTimeField(auto_now=True, verbose_name=_("Last Synced"))
+    # Watermark for stale_sync(strategy="last_seen"): the sync stamps every row it
+    # still reports with run_started, then stale_sync deletes rows left below it —
+    # a DB-side prune that never materialises a natural-key set in memory. Distinct
+    # from synced_at (auto_now, which bulk upserts don't trigger); this is set
+    # explicitly in the upsert rows. Nullable so a never-synced row is never stale.
+    last_seen = snap_fields.SnapDateTimeField(null=True, blank=True, verbose_name=_("Last Seen In Feed"))
 
     es_index_enabled = True
     es_storage_mode = snap_models.EsStorageMode.DUAL

@@ -89,6 +89,19 @@ Null checks and membership lists in the auto-generated REST filters
   project-wide default); it is not in the library default set. All of these are additive — existing query
   parameters are unchanged.
 
+etl.stale_sync() scales past an in-memory key set and can skip instead of raising
+  ``stale_sync()`` gains two options for large or unattended syncs. ``strategy="last_seen"`` prunes
+  entirely DB-side: instead of diffing the whole natural-key column against a ``seen_keys`` set in Python
+  (two N-sized sets in memory), the sync stamps every row it still reports with the run's start time in a
+  watermark column, and ``stale_sync`` deletes the rows left below it (``last_seen_field < run_started``)
+  — holding no key set at all, so it scales to a table too large to diff in memory. Rows whose watermark is
+  NULL (never synced) are treated as not stale. ``on_exceed="skip"`` makes the ``max_fraction`` guard
+  non-raising: instead of raising ``StaleSyncAbort`` it returns the summary with ``deleted=0`` and a new
+  ``aborted=True`` flag, for an unattended job that should log-and-continue. The summary dict now always
+  carries ``aborted``. The defaults are unchanged (``strategy="keyset"``, ``on_exceed="raise"``,
+  ``seen_keys`` still the second positional argument), and ``max_fraction=1.0`` is now documented as the
+  explicit "disable the guard" override.
+
 JSON key-path filters now OR on commas and stream at scale
   ``api_json_filters`` query params (``?payload__a__b=value``) now treat a comma as an OR, exactly like
   the ``__in`` filters: ``?payload__a__b=x,y`` matches rows whose value at that path is ``x`` or ``y``

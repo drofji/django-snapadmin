@@ -209,7 +209,10 @@ class TestStaleSync:
 
     def test_empty_table_is_a_noop(self):
         result = stale_sync(ExchangeRate, ["USD"], key_field="code")
-        assert result == {"total": 0, "stale": 0, "deleted": 0, "fraction": 0.0, "dry_run": False}
+        assert result == {
+            "total": 0, "stale": 0, "deleted": 0, "fraction": 0.0,
+            "dry_run": False, "aborted": False,
+        }
 
     def test_es_only_model_rejected(self):
         from demo.apps.shop.models import SearchLog
@@ -250,6 +253,115 @@ class TestStaleSync:
 
 
 @pytest.mark.django_db
+class TestStaleSyncOnExceedSkip:
+    """`on_exceed="skip"` returns the summary with aborted=True instead of raising."""
+
+    def _seed(self, n):
+        upsert_from_source(ExchangeRate, _rows(n), unique_fields=["code"])
+
+    def test_skip_returns_aborted_and_deletes_nothing(self):
+        self._seed(10)
+        result = stale_sync(ExchangeRate, ["USD"], key_field="code", on_exceed="skip")
+        assert result["aborted"] is True
+        assert result["deleted"] == 0
+        assert result["stale"] == 9
+        assert ExchangeRate.objects.count() == 10        # nothing deleted
+
+    def test_raise_is_the_default(self):
+        self._seed(10)
+        with pytest.raises(StaleSyncAbort):
+            stale_sync(ExchangeRate, ["USD"], key_field="code")
+
+    def test_skip_within_ceiling_still_deletes(self):
+        self._seed(10)
+        seen = set(ExchangeRate.objects.values_list("code", flat=True)) - {"CZK"}
+        result = stale_sync(ExchangeRate, seen, key_field="code",
+                            max_fraction=0.1, on_exceed="skip")
+        assert result["aborted"] is False
+        assert result["deleted"] == 1
+
+    def test_invalid_on_exceed_rejected(self):
+        with pytest.raises(ValueError, match="on_exceed"):
+            stale_sync(ExchangeRate, ["USD"], key_field="code", on_exceed="explode")
+
+
+@pytest.mark.django_db
+class TestStaleSyncLastSeenStrategy:
+    """`strategy="last_seen"` prunes DB-side by a watermark timestamp, holding no
+    in-RAM natural-key set."""
+
+    def _seed_with_last_seen(self, n, when):
+        upsert_from_source(ExchangeRate, _rows(n), unique_fields=["code"])
+        ExchangeRate.objects.update(last_seen=when)
+
+    def test_deletes_rows_below_the_watermark(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        t0 = timezone.now()
+        self._seed_with_last_seen(5, t0)                 # all 5 at t0
+        run_started = t0 + timedelta(minutes=1)
+        # Feed still reports 3 of them → bump those to run_started.
+        ExchangeRate.objects.filter(code__in=["USD", "GBP", "JPY"]).update(last_seen=run_started)
+
+        result = stale_sync(
+            ExchangeRate, strategy="last_seen", last_seen_field="last_seen",
+            run_started=run_started, max_fraction=1.0,
+        )
+        assert result["deleted"] == 2
+        assert set(ExchangeRate.objects.values_list("code", flat=True)) == {"USD", "GBP", "JPY"}
+
+    def test_null_last_seen_rows_are_never_stale(self):
+        from django.utils import timezone
+        self._seed_with_last_seen(3, None)               # never-synced → NULL
+        result = stale_sync(
+            ExchangeRate, strategy="last_seen", last_seen_field="last_seen",
+            run_started=timezone.now(), max_fraction=1.0,
+        )
+        assert result["deleted"] == 0
+        assert ExchangeRate.objects.count() == 3
+
+    def test_last_seen_respects_max_fraction_guard(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        t0 = timezone.now()
+        self._seed_with_last_seen(10, t0)
+        run_started = t0 + timedelta(minutes=1)
+        ExchangeRate.objects.filter(code="USD").update(last_seen=run_started)  # 9/10 stale
+        with pytest.raises(StaleSyncAbort):
+            stale_sync(ExchangeRate, strategy="last_seen", last_seen_field="last_seen",
+                       run_started=run_started)          # default max_fraction 0.1
+
+    def test_last_seen_skip_mode(self):
+        from django.utils import timezone
+        from datetime import timedelta
+        t0 = timezone.now()
+        self._seed_with_last_seen(10, t0)
+        run_started = t0 + timedelta(minutes=1)
+        ExchangeRate.objects.filter(code="USD").update(last_seen=run_started)
+        result = stale_sync(ExchangeRate, strategy="last_seen", last_seen_field="last_seen",
+                            run_started=run_started, on_exceed="skip")
+        assert result["aborted"] is True
+        assert ExchangeRate.objects.count() == 10
+
+    def test_missing_last_seen_field_rejected(self):
+        from django.utils import timezone
+        with pytest.raises(ValueError, match="last_seen_field"):
+            stale_sync(ExchangeRate, strategy="last_seen", run_started=timezone.now())
+
+    def test_missing_run_started_rejected(self):
+        with pytest.raises(ValueError, match="run_started"):
+            stale_sync(ExchangeRate, strategy="last_seen", last_seen_field="last_seen")
+
+    def test_invalid_strategy_rejected(self):
+        with pytest.raises(ValueError, match="strategy"):
+            stale_sync(ExchangeRate, ["USD"], key_field="code", strategy="bogus")
+
+    def test_keyset_requires_seen_keys(self):
+        with pytest.raises(ValueError, match="seen_keys"):
+            stale_sync(ExchangeRate, key_field="code")   # keyset default, no seen_keys
+
+
+@pytest.mark.django_db
 def test_sync_exchange_rates_command():
     out = StringIO()
     call_command("sync_exchange_rates", stdout=out)
@@ -278,4 +390,26 @@ def test_sync_exchange_rates_command_prune_respects_guard():
     err = StringIO()
     call_command("sync_exchange_rates", "--only", "1", "--prune", stderr=err)
     assert "aborted" in err.getvalue().lower()
+    assert ExchangeRate.objects.count() == 10          # nothing pruned
+
+
+@pytest.mark.django_db
+def test_sync_exchange_rates_command_last_seen_prune():
+    call_command("sync_exchange_rates", stdout=StringIO())          # 10 rows @ T1
+    out = StringIO()
+    # Feed shrinks to 8; the DB-side watermark prune removes the 2 left behind.
+    call_command("sync_exchange_rates", "--only", "8", "--prune",
+                 "--strategy", "last_seen", stdout=out)
+    assert "Pruned 2 stale currency row(s)" in out.getvalue()
+    assert ExchangeRate.objects.count() == 8
+
+
+@pytest.mark.django_db
+def test_sync_exchange_rates_command_last_seen_skip_over_ceiling():
+    call_command("sync_exchange_rates", stdout=StringIO())          # 10 rows @ T1
+    err = StringIO()
+    # Shrinking to 3 would prune 70% > 50% ceiling → skip mode logs, deletes nothing.
+    call_command("sync_exchange_rates", "--only", "3", "--prune",
+                 "--strategy", "last_seen", stderr=err)
+    assert "skipped" in err.getvalue().lower()
     assert ExchangeRate.objects.count() == 10          # nothing pruned

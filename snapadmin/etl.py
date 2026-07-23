@@ -35,6 +35,7 @@ where a truncated or half-downloaded feed wipes almost everything):
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Iterable, Iterator
 
 from django.conf import settings
@@ -184,34 +185,61 @@ def upsert_from_source(
 
 def stale_sync(
     model: type[SnapModel],
-    seen_keys: Iterable,
+    seen_keys: Iterable | None = None,
     *,
-    key_field: str,
+    key_field: str = "",
+    strategy: str = "keyset",
+    last_seen_field: str = "",
+    run_started: datetime | None = None,
     max_fraction: float = 0.1,
+    on_exceed: str = "raise",
     queryset: QuerySet | None = None,
     dry_run: bool = False,
 ) -> dict:
-    """Delete rows whose natural key vanished from the latest source sync.
+    """Delete rows a recurring source sync no longer reports.
 
     The delete half of a recurring full-table import: after upserting the rows a
     source *does* report, remove the local rows it no longer does. A
     ``max_fraction`` ceiling guards the common footgun where a truncated or
     half-downloaded feed would otherwise wipe most of the table — if the stale
-    rows exceed that fraction, nothing is deleted and :class:`StaleSyncAbort` is
-    raised instead.
+    rows exceed that fraction, nothing is deleted and either :class:`StaleSyncAbort`
+    is raised (``on_exceed="raise"``, the default) or the summary is returned with
+    ``aborted=True`` (``on_exceed="skip"``).
+
+    Two strategies pick the stale rows:
+
+    - ``strategy="keyset"`` (default) — diff the local natural keys against the
+      ``seen_keys`` of the latest sync in Python. Simple and exact, but holds the
+      whole natural-key column *and* the passed ``seen_keys`` in memory; fine for
+      modest tables.
+    - ``strategy="last_seen"`` — pure DB-side. Every row the sync still reports has
+      its ``last_seen_field`` timestamp bumped to ``run_started`` during the upsert;
+      this then deletes ``last_seen_field < run_started`` with **no in-RAM key set**,
+      so it scales to a table too large to diff in Python. Rows whose watermark is
+      ``NULL`` (never synced) are treated as *not* stale — populate the column on
+      every sync for the guard to be reliable.
 
     Args:
         model: Target SnapModel subclass (must have a DB table — not ES_ONLY).
-        seen_keys: The natural-key values present in the latest sync. Any local
-            row whose ``key_field`` is *not* in this collection is stale.
-            Materialised into a set, so pass an iterator freely.
-        key_field: The natural-key column to match ``seen_keys`` against —
-            normally the same unique field used as ``upsert_from_source``'s
-            conflict target.
-        max_fraction: Abort (delete nothing, raise :class:`StaleSyncAbort`) if
-            the stale rows would exceed this fraction of the candidate rows.
-            Must be in ``(0, 1]``; default ``0.1`` (10%). Pass ``1.0`` to allow
-            an unbounded delete.
+        seen_keys: (keyset strategy) The natural-key values present in the latest
+            sync. Any local row whose ``key_field`` is *not* in this collection is
+            stale. Materialised into a set, so pass an iterator freely. Required for
+            ``strategy="keyset"``; ignored by ``strategy="last_seen"``.
+        key_field: (keyset strategy) The natural-key column to match ``seen_keys``
+            against — normally the same unique field used as
+            ``upsert_from_source``'s conflict target.
+        strategy: ``"keyset"`` (default) or ``"last_seen"`` — see above.
+        last_seen_field: (last_seen strategy) The watermark timestamp column bumped
+            to ``run_started`` for every row the sync still reports.
+        run_started: (last_seen strategy) The moment the sync began; rows whose
+            watermark is below it are stale.
+        max_fraction: Abort if the stale rows would exceed this fraction of the
+            candidate rows. Must be in ``(0, 1]``; default ``0.1`` (10%). Pass
+            ``1.0`` to disable the guard entirely (allow an unbounded delete).
+        on_exceed: ``"raise"`` (default) raises :class:`StaleSyncAbort` when the
+            fraction is exceeded; ``"skip"`` instead returns the summary with
+            ``deleted=0`` and ``aborted=True`` (no exception) — for an unattended
+            job that should log-and-continue rather than crash.
         queryset: Restrict the candidate rows (and the fraction denominator) to
             this queryset — e.g. sync only one source's slice of a shared table
             so rows owned by other sources are never treated as stale. Defaults
@@ -220,25 +248,51 @@ def stale_sync(
 
     Returns:
         Summary dict: ``total`` (candidate rows), ``stale`` (rows to delete),
-        ``deleted`` (rows actually removed — ``0`` on a dry run), ``fraction``
-        (``stale / total``) and ``dry_run``. The ``deleted`` count is this
+        ``deleted`` (rows actually removed — ``0`` on a dry run or a skipped abort),
+        ``fraction`` (``stale / total``), ``dry_run`` and ``aborted`` (``True`` only
+        when ``on_exceed="skip"`` tripped the guard). The ``deleted`` count is this
         model's own rows, never the cascade-inflated ``QuerySet.delete()`` total.
 
     Raises:
-        StaleSyncAbort: when the stale fraction exceeds ``max_fraction``.
+        StaleSyncAbort: when the stale fraction exceeds ``max_fraction`` and
+            ``on_exceed="raise"``.
         SnapPurgeError: for a ``DUAL``/ES-mirrored model whose database rows were
             deleted but whose Elasticsearch mirror could not be cleared (no
             two-phase commit — the DB delete has already happened, mirroring
             :meth:`SnapModel.purge_expired`).
-        ValueError: for an empty ``key_field``, an out-of-range ``max_fraction``,
-            or an ES_ONLY model.
+        ValueError: for an invalid ``strategy``/``on_exceed``, an out-of-range
+            ``max_fraction``, a keyset call missing ``key_field``/``seen_keys``, a
+            last_seen call missing ``last_seen_field``/``run_started``, or an
+            ES_ONLY model.
     """
-    if not key_field:
-        raise ValueError("stale_sync requires key_field (the natural-key column).")
+    if strategy not in ("keyset", "last_seen"):
+        raise ValueError(
+            f"stale_sync strategy must be 'keyset' or 'last_seen'; got {strategy!r}."
+        )
+    if on_exceed not in ("raise", "skip"):
+        raise ValueError(
+            f"stale_sync on_exceed must be 'raise' or 'skip'; got {on_exceed!r}."
+        )
     if not 0 < max_fraction <= 1:
         raise ValueError(
             f"stale_sync max_fraction must be in (0, 1]; got {max_fraction!r}."
         )
+    if strategy == "keyset":
+        if not key_field:
+            raise ValueError(
+                "stale_sync(strategy='keyset') requires key_field (the natural-key column)."
+            )
+        if seen_keys is None:
+            raise ValueError("stale_sync(strategy='keyset') requires seen_keys.")
+    else:
+        if not last_seen_field:
+            raise ValueError(
+                "stale_sync(strategy='last_seen') requires last_seen_field (the watermark column)."
+            )
+        if run_started is None:
+            raise ValueError(
+                "stale_sync(strategy='last_seen') requires run_started (the sync start time)."
+            )
 
     storage_mode = getattr(model, "es_storage_mode", EsStorageMode.DB_ONLY)
     if storage_mode == EsStorageMode.ES_ONLY:
@@ -247,25 +301,41 @@ def stale_sync(
         )
 
     base = model._default_manager.all() if queryset is None else queryset
-    seen = seen_keys if isinstance(seen_keys, (set, frozenset)) else set(seen_keys)
 
     total = base.count()
-    result = {"total": total, "stale": 0, "deleted": 0, "fraction": 0.0, "dry_run": dry_run}
+    result = {
+        "total": total, "stale": 0, "deleted": 0, "fraction": 0.0,
+        "dry_run": dry_run, "aborted": False,
+    }
     if total == 0:
         return result
 
-    # Diff the existing keys against the sync in Python: a healthy sync leaves
-    # few stale keys, so the follow-up delete filters on a small `IN (...)` set
-    # rather than a table-sized `NOT IN (seen)`.
-    existing_keys = set(base.values_list(key_field, flat=True))
-    stale_keys = existing_keys - seen
-    stale_qs = base.filter(**{f"{key_field}__in": stale_keys}) if stale_keys else base.none()
+    if strategy == "keyset":
+        # Diff the existing keys against the sync in Python: a healthy sync leaves
+        # few stale keys, so the follow-up delete filters on a small `IN (...)` set
+        # rather than a table-sized `NOT IN (seen)`.
+        seen = seen_keys if isinstance(seen_keys, (set, frozenset)) else set(seen_keys)
+        existing_keys = set(base.values_list(key_field, flat=True))
+        stale_keys = existing_keys - seen
+        stale_qs = base.filter(**{f"{key_field}__in": stale_keys}) if stale_keys else base.none()
+    else:
+        # DB-side watermark prune: no natural-key set is materialised. NULL
+        # watermarks (never synced) are excluded by SQL's NULL comparison rules.
+        stale_qs = base.filter(**{f"{last_seen_field}__lt": run_started})
+
     stale = stale_qs.count()
     fraction = stale / total
     result["stale"] = stale
     result["fraction"] = fraction
 
     if stale and fraction > max_fraction:
+        if on_exceed == "skip":
+            result["aborted"] = True
+            logger.warning(
+                "etl_stale_sync_aborted", model=model._meta.label,
+                total=total, stale=stale, fraction=fraction, max_fraction=max_fraction,
+            )
+            return result
         raise StaleSyncAbort(
             model, total=total, stale=stale, fraction=fraction, max_fraction=max_fraction
         )
