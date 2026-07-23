@@ -46,6 +46,18 @@ def apply_unfold_styling() -> bool:
     admin is registered, or every one is already Unfold-styled. Safe and
     idempotent: calling it more than once never double-wraps an admin.
     """
+    from django.apps import apps
+
+    # Gate on is_installed() BEFORE importing the model. When django-extra-settings
+    # is importable (a transitive/leftover install) but not in INSTALLED_APPS,
+    # ``from extra_settings.models import Setting`` raises RuntimeError ("Model class
+    # ... doesn't declare an explicit app_label"), which the plain ``except
+    # ImportError`` below never caught — crashing django.setup() for the whole
+    # project. The styling is only meaningful when the app is actually installed, so
+    # short-circuit otherwise. (The try/except still handles a genuinely broken
+    # install of an app that *is* listed.)
+    if not apps.is_installed("extra_settings"):
+        return False
     try:
         from extra_settings.models import Setting
     except ImportError:

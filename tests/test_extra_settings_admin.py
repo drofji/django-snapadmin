@@ -80,3 +80,19 @@ def test_returns_false_when_extra_settings_missing(monkeypatch):
     """No hard dependency: a missing extra_settings is handled gracefully."""
     monkeypatch.setitem(sys.modules, "extra_settings.models", None)
     assert apply_unfold_styling() is False
+
+
+def test_no_crash_when_importable_but_not_installed(monkeypatch):
+    """Regression: extra_settings importable (transitive/leftover install) but not in
+    INSTALLED_APPS. Importing its model raises RuntimeError, not ImportError — the old
+    ``except ImportError`` didn't catch it, so django.setup() crashed. The is_installed()
+    guard must short-circuit before the import, leaving ready()/styling a clean no-op."""
+    from django.apps import apps as django_apps
+
+    real_is_installed = django_apps.is_installed
+    monkeypatch.setattr(
+        django_apps, "is_installed",
+        lambda label: False if label == "extra_settings" else real_is_installed(label),
+    )
+    # Must not raise (the buggy path hit RuntimeError on the model import).
+    assert apply_unfold_styling() is False

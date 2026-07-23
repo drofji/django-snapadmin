@@ -143,6 +143,16 @@ Swap the REST API filter backend with SNAPADMIN_API_FILTER_BACKEND
 Fixed
 =====
 
+AppConfig.ready() no longer crashes when an optional package is importable but not installed
+  If ``django-extra-settings`` was importable (a transitive or leftover install) but not listed in
+  ``INSTALLED_APPS``, SnapAdmin's ``ready()`` crashed the entire project at ``django.setup()``: the Unfold
+  re-styling helper did ``from extra_settings.models import Setting`` inside an ``except ImportError`` block,
+  but importing a model whose app is not registered raises ``RuntimeError`` ("Model class ... doesn't declare
+  an explicit app_label"), not ``ImportError`` — so the guard never caught it. The helper now checks
+  ``apps.is_installed("extra_settings")`` before importing the model and is a clean no-op when the app is not
+  installed. Behaviour is unchanged when extra_settings is properly installed. (The Unfold theme import was
+  already guarded this way.)
+
 Text ?field__isnull= no longer returns HTTP 500
   Adding ``"isnull"`` to a text field's ``api_filter_lookups`` used to build a plain text filter that
   forwarded the raw query string (``"true"``/``"false"``) to Django's ``isnull`` lookup, which only
