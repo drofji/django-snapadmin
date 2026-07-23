@@ -107,6 +107,14 @@ Key protections:
   API (it may still be returned in responses). Left unset, every non-excluded field stays writable,
   matching pre-existing behaviour; the `snapadmin.W004` system check flags any model that hasn't made
   the choice explicitly, so the exposure is a deliberate decision rather than an oversight.
+- **`api_read_only` / `api_http_method_names`** remove write verbs entirely for a model, not just at
+  the field level. `api_read_only = True` serves a model read-only over the dynamic REST API
+  (list/retrieve/count/export) and answers `405` to POST/PUT/PATCH/DELETE — the whole create/update/
+  delete surface is gone, so an import-only or reference table can never be written or a blank row
+  inserted through the API. `api_http_method_names` is an explicit verb allowlist for finer control.
+  Both default to full CRUD; the `snapadmin.W007` check nudges a field-read-only model
+  (`api_write_fields = []`) toward `api_read_only` so it returns a clean `405` instead of a
+  blank-row insert.
 
 ### Data protection & auditability
 - **PII masking** — `SNAPADMIN_MASKED_FIELDS` masks configured fields in the admin, the REST API and

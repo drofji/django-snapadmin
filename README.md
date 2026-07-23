@@ -160,7 +160,7 @@ each and paste it yourself. → **[Integration guide](https://drofji.github.io/d
 - [REST CRUD](https://drofji.github.io/django-snapadmin/#api-rest) for every `SnapModel`, with Swagger + ReDoc, filters derived from field types (range/`__in`/[`__isnull`](https://drofji.github.io/django-snapadmin/#auto-filter-isnull) plus text lookups tunable per-field, per-model or project-wide with [`api_filter_lookups`/`api_default_text_lookups`/`SNAPADMIN_API_TEXT_LOOKUPS`](https://drofji.github.io/django-snapadmin/#auto-filter-lookups)), and streaming/async export
 - [GraphQL](https://drofji.github.io/django-snapadmin/#api-graphql) schema generated from the same models, auth-enforced on every traversed relation
 - [API tokens](https://drofji.github.io/django-snapadmin/#api-tokens) hashed at rest (SHA-256), shown once, scoped per model — or plug in [JWT/session/custom auth](https://drofji.github.io/django-snapadmin/#integrating)
-- Privacy controls: `api_exclude_fields`, `api_write_fields` (mass-assignment guard), `api_json_filters`, PII masking; swap the whole filter chain with [`SNAPADMIN_API_FILTER_BACKEND`](https://drofji.github.io/django-snapadmin/#api-filter-backend)
+- Privacy controls: `api_exclude_fields`, `api_write_fields` (mass-assignment guard), [`api_read_only`/`api_http_method_names`](https://drofji.github.io/django-snapadmin/#api-read-only) (serve a model read-only — writes get 405), `api_json_filters`, PII masking; swap the whole filter chain with [`SNAPADMIN_API_FILTER_BACKEND`](https://drofji.github.io/django-snapadmin/#api-filter-backend)
 
 **Elasticsearch**
 - Per-model [`DB_ONLY` / `DUAL` / `ES_ONLY`](https://drofji.github.io/django-snapadmin/#elasticsearch) storage modes with auto-derived index mappings

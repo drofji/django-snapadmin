@@ -131,6 +131,28 @@ class APITokenViewSet(
         return Response(output.data, status=status.HTTP_201_CREATED)
 
 
+# HTTP-method sets the per-model policy resolves to.
+_SAFE_HTTP_METHOD_NAMES = ["get", "head", "options"]
+_FULL_HTTP_METHOD_NAMES = ["get", "post", "put", "patch", "delete", "head", "options"]
+
+
+class _PerModelHttpMethods:
+    """Descriptor for ``DynamicModelViewSet.http_method_names``.
+
+    Class access (``DynamicModelViewSet.http_method_names``) returns full CRUD — this
+    is what drf-spectacular reads (``callback.cls.http_method_names``) to enumerate a
+    path's operations, so the generated schema still advertises every verb. Instance
+    access (``self.http_method_names`` inside ``dispatch``/``options``) resolves the
+    per-request target model's ``api_read_only`` / ``api_http_method_names`` policy,
+    so a disallowed verb is rejected with ``405``.
+    """
+
+    def __get__(self, instance, owner=None) -> list[str]:
+        if instance is None:
+            return list(_FULL_HTTP_METHOD_NAMES)
+        return instance._resolve_http_method_names()
+
+
 class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
     permission_classes = [permissions.IsAuthenticated, TokenModelPermission]
     pagination_class = SnapDynamicPagination
@@ -145,6 +167,39 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         while drf-spectacular still reads ``self.filter_backends`` for the schema.
         """
         return get_api_filter_backends()
+
+    # Per-model HTTP-method allowlist. ``http_method_names`` is a descriptor rather
+    # than a plain class attribute so it can resolve the *target model's* policy on
+    # each request while still answering full CRUD at the class level — drf-spectacular
+    # introspects ``callback.cls.http_method_names`` (class access) to enumerate the
+    # schema's operations, and a bare @property would hand it the descriptor object.
+    http_method_names = _PerModelHttpMethods()
+
+    def _resolve_http_method_names(self) -> list[str]:
+        """The HTTP verbs allowed for this request's target model.
+
+        ``api_http_method_names`` (an explicit lowercase allowlist, HEAD/OPTIONS
+        always added — wins when set) or ``api_read_only`` (``True`` -> only
+        GET/HEAD/OPTIONS); otherwise full CRUD. A disallowed verb is rejected with
+        ``405`` in dispatch before any handler runs (so a read-only model never gets
+        a blank-row insert), and is pruned from the ``OPTIONS`` ``Allow`` header. A
+        missing/unknown model falls back to full CRUD.
+        """
+        model = self._model_for_method_policy()
+        if model is None:
+            return list(_FULL_HTTP_METHOD_NAMES)
+        explicit = getattr(model, "api_http_method_names", None)
+        if explicit is not None:
+            return sorted({name.lower() for name in explicit} | {"head", "options"})
+        if getattr(model, "api_read_only", False):
+            return list(_SAFE_HTTP_METHOD_NAMES)
+        return list(_FULL_HTTP_METHOD_NAMES)
+
+    def _model_for_method_policy(self):
+        kwargs = getattr(self, "kwargs", None) or {}
+        if "app_label" not in kwargs or "model_name" not in kwargs:
+            return None
+        return self._get_model_class()
 
     def _get_model_class(self):
         app_label  = self.kwargs["app_label"]

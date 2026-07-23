@@ -89,6 +89,21 @@ Null checks and membership lists in the auto-generated REST filters
   project-wide default); it is not in the library default set. All of these are additive — existing query
   parameters are unchanged.
 
+Per-model read-only REST API and HTTP-method allowlists (api_read_only / api_http_method_names)
+  A SnapModel can now remove write verbs from the dynamic REST API entirely, not just at the field level.
+  ``api_read_only = True`` serves a model read-only — ``list``/``retrieve``/``count``/``export`` work while
+  ``POST``/``PUT``/``PATCH``/``DELETE`` answer ``405 Method Not Allowed`` — so an import-only or reference
+  table (fed by an ETL job or another service) can never be written through the API. Previously
+  ``api_write_fields = []`` made every field read-only but still let a client POST a blank row or PATCH a
+  no-op; there was no way to disable create/update/destroy for a model. ``api_http_method_names`` is an
+  explicit lowercase verb allowlist (HEAD/OPTIONS always added; wins over ``api_read_only``) for finer
+  control such as an append-only ``["get", "post"]``. The verb is rejected in dispatch before any handler
+  runs — a read-only model never inserts a blank row — and disallowed verbs are dropped from the
+  ``OPTIONS`` ``Allow`` header. Both default to full CRUD, so existing models are unchanged. A new
+  ``snapadmin.W007`` system check flags a field-read-only model (``api_write_fields = []``) that is still
+  write-exposed, nudging it toward ``api_read_only``. (Security: this is a write-surface control — see
+  SECURITY.md.)
+
 etl.stale_sync() scales past an in-memory key set and can skip instead of raising
   ``stale_sync()`` gains two options for large or unattended syncs. ``strategy="last_seen"`` prunes
   entirely DB-side: instead of diffing the whole natural-key column against a ``seen_keys`` set in Python

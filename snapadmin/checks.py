@@ -176,6 +176,39 @@ def check_api_write_fields(app_configs, **kwargs):
     return warnings
 
 
+def check_api_read_only(app_configs, **kwargs):
+    """Warn: a model whose fields are all read-only but whose writes still reach the API.
+
+    ``api_write_fields = []`` makes every field read-only, so a REST create inserts a
+    blank row (all defaults) and an update is a silent no-op — a confusing surface.
+    Such a model almost always wants ``api_read_only = True`` (a clean 405 on writes)
+    instead. Quiet once the model sets ``api_read_only`` or an explicit
+    ``api_http_method_names`` policy, so the tradeoff is a deliberate choice.
+    """
+    if not getattr(settings, "SNAPADMIN_REST_API_ENABLED", True):
+        return []
+    warnings = []
+    for model in apps.get_models():
+        if not SnapModel.is_concrete_subclass(model):
+            continue
+        if getattr(model, "api_write_fields", None) != []:
+            continue
+        if getattr(model, "api_read_only", False):
+            continue
+        if getattr(model, "api_http_method_names", None) is not None:
+            continue
+        warnings.append(Warning(
+            f"{model._meta.label} sets api_write_fields = [] (no field is writable) but "
+            "still exposes create/update/delete through the API — a REST create inserts a "
+            "blank row and an update is a silent no-op, rather than a clean 405.",
+            hint="Set api_read_only = True to serve this model read-only "
+                 "(list/retrieve/count/export) and answer 405 to POST/PUT/PATCH/DELETE, "
+                 "or set api_http_method_names to an explicit allowlist.",
+            id="snapadmin.W007",
+        ))
+    return warnings
+
+
 def check_unfold_theme(app_configs, **kwargs):
     """Info: surface the stock-admin fallback so it is never silent.
 
@@ -208,6 +241,7 @@ ALL_CHECKS = [
     check_nesting_active_site,
     check_sso_providers,
     check_api_write_fields,
+    check_api_read_only,
     check_unfold_theme,
 ]
 

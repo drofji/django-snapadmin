@@ -272,6 +272,10 @@ class ExchangeRate(snap_models.SnapModel):
     es_index_enabled = True
     es_storage_mode = snap_models.EsStorageMode.DUAL
     es_auto_mapping = True
+    # Rates are imported from the external feed (see sync_exchange_rates), never
+    # written by API clients — so the dynamic REST API serves this table read-only:
+    # list/retrieve/count/export work, POST/PUT/PATCH/DELETE answer 405.
+    api_read_only = True
 
     class Meta:
         verbose_name = _("Exchange Rate")

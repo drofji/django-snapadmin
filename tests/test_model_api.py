@@ -991,6 +991,96 @@ class TestApiFilterBackendSetting:
         assert r.json()["count"] == 0
 
 
+# ── #FEAT9: per-model read-only / HTTP-method allowlist ──────────────────────
+
+@pytest.mark.django_db
+class TestApiReadOnlyAndMethodAllowlist:
+    def test_read_only_model_allows_list_and_retrieve(self, auth_client):
+        from demo.apps.shop.models import ExchangeRate
+        rate = ExchangeRate.objects.create(code="USD", base="EUR", rate=Decimal("1.10"))
+        assert auth_client.get("/api/models/demo/ExchangeRate/").status_code == 200
+        assert auth_client.get(f"/api/models/demo/ExchangeRate/{rate.pk}/").status_code == 200
+
+    def test_read_only_model_blocks_create(self, auth_client):
+        from demo.apps.shop.models import ExchangeRate
+        before = ExchangeRate.objects.count()
+        r = auth_client.post(
+            "/api/models/demo/ExchangeRate/",
+            {"code": "XXX", "base": "EUR", "rate": "1.0"}, format="json",
+        )
+        assert r.status_code == 405
+        assert ExchangeRate.objects.count() == before      # no blank-row insert
+
+    def test_read_only_model_blocks_delete(self, auth_client):
+        from demo.apps.shop.models import ExchangeRate
+        rate = ExchangeRate.objects.create(code="USD", base="EUR", rate=Decimal("1.10"))
+        r = auth_client.delete(f"/api/models/demo/ExchangeRate/{rate.pk}/")
+        assert r.status_code == 405
+        assert ExchangeRate.objects.filter(pk=rate.pk).exists()
+
+    def test_default_model_still_allows_full_crud(self, auth_client, product):
+        # A model with neither attr keeps create/update/delete.
+        assert auth_client.delete(f"/api/models/demo/Product/{product.pk}/").status_code == 204
+
+    def test_explicit_method_allowlist_blocks_unlisted_verbs(
+        self, auth_client, product, monkeypatch
+    ):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_http_method_names", ["get"], raising=False)
+        assert auth_client.get("/api/models/demo/Product/").status_code == 200
+        assert auth_client.delete(f"/api/models/demo/Product/{product.pk}/").status_code == 405
+
+    def test_explicit_allowlist_allows_listed_write(self, auth_client, monkeypatch):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_http_method_names", ["get", "post"], raising=False)
+        r = auth_client.post(
+            "/api/models/demo/Product/",
+            {"name": "New", "price": "9.99"}, format="json",
+        )
+        assert r.status_code == 201
+
+    # ---- http_method_names property units ---------------------------------------
+
+    def _viewset(self, app_label, model_name):
+        from snapadmin.api.views import DynamicModelViewSet
+        v = DynamicModelViewSet()
+        v.kwargs = {"app_label": app_label, "model_name": model_name}
+        return v
+
+    def test_property_read_only_model(self):
+        assert set(self._viewset("demo", "ExchangeRate").http_method_names) == {
+            "get", "head", "options",
+        }
+
+    def test_property_default_model_full_crud(self):
+        methods = self._viewset("demo", "Product").http_method_names
+        assert {"post", "put", "patch", "delete"} <= set(methods)
+
+    def test_property_explicit_allowlist_adds_head_options(self, monkeypatch):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_http_method_names", ["GET", "POST"], raising=False)
+        assert set(self._viewset("demo", "Product").http_method_names) == {
+            "get", "post", "head", "options",
+        }
+
+    def test_property_no_kwargs_returns_full_crud(self):
+        from snapadmin.api.views import DynamicModelViewSet
+        # No kwargs (e.g. drf-spectacular schema generation) → safe full-CRUD default.
+        assert "post" in DynamicModelViewSet().http_method_names
+
+    def test_class_level_access_returns_full_crud(self):
+        # drf-spectacular reads ``callback.cls.http_method_names`` (class access) to
+        # enumerate a path's operations — that must be an iterable list, not the
+        # descriptor object, and advertise every verb.
+        from snapadmin.api.views import DynamicModelViewSet
+        methods = DynamicModelViewSet.http_method_names
+        assert isinstance(methods, list)
+        assert {"get", "post", "put", "patch", "delete"} <= set(methods)
+
+    def test_property_unknown_model_returns_full_crud(self):
+        assert "post" in self._viewset("demo", "NoSuchModel").http_method_names
+
+
 # ── DynamicModelViewSet – always-on pagination (#SEC4) ────────────────────────
 
 @pytest.mark.django_db

@@ -174,6 +174,38 @@ class TestApiWriteFields:
         assert not any("demo.Product" in w.msg for w in result)
 
 
+# ── field-read-only but still write-exposed (W007) ───────────────────────────
+
+class TestApiReadOnlyNudge:
+    @override_settings(SNAPADMIN_REST_API_ENABLED=False)
+    def test_disabled_api_returns_no_warnings(self):
+        assert checks.check_api_read_only(None) == []
+
+    def test_no_warning_when_no_model_is_field_read_only(self):
+        # No demo model sets api_write_fields = [] by default.
+        assert not any(w.id == "snapadmin.W007" for w in checks.check_api_read_only(None))
+
+    def test_warns_for_field_read_only_but_write_exposed(self, monkeypatch):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_write_fields", [], raising=False)
+        result = checks.check_api_read_only(None)
+        assert any(w.id == "snapadmin.W007" and "demo.Product" in w.msg for w in result)
+
+    def test_silent_when_read_only_already_set(self, monkeypatch):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_write_fields", [], raising=False)
+        monkeypatch.setattr(Product, "api_read_only", True, raising=False)
+        result = checks.check_api_read_only(None)
+        assert not any("demo.Product" in w.msg for w in result)
+
+    def test_silent_when_explicit_method_names_set(self, monkeypatch):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_write_fields", [], raising=False)
+        monkeypatch.setattr(Product, "api_http_method_names", ["get"], raising=False)
+        result = checks.check_api_read_only(None)
+        assert not any("demo.Product" in w.msg for w in result)
+
+
 # ── optional Unfold theme ────────────────────────────────────────────────────
 
 class TestUnfoldTheme:

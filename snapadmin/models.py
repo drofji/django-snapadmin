@@ -885,6 +885,23 @@ class SnapModel(models.Model):
     # about this so the tradeoff is a deliberate choice, not an oversight.
     api_write_fields: list[str] | None = None
 
+    # Per-model REST HTTP-method policy for the dynamic model API. By default a
+    # SnapModel exposes full CRUD (list/retrieve/create/update/destroy). Two knobs
+    # narrow that per model, without re-mounting routes:
+    #
+    #   api_read_only = True   -> only the safe read methods (GET/HEAD/OPTIONS) are
+    #       allowed; POST/PUT/PATCH/DELETE answer 405 (no blank-row insert). For an
+    #       import-only / reference table served read-only over the API.
+    #   api_http_method_names  -> an explicit lowercase allowlist mirroring DRF's
+    #       http_method_names, e.g. ["get", "post"]. HEAD and OPTIONS are always
+    #       included. Takes precedence over api_read_only when both are set.
+    #
+    # Both default to today's full CRUD. A snapadmin.W007 system check flags a model
+    # that is field-read-only (api_write_fields = []) yet still write-exposed,
+    # nudging toward api_read_only.
+    api_read_only: bool = False
+    api_http_method_names: list[str] | None = None
+
     # Per-model override for the auto-generated REST API filters (see
     # snapadmin.api.filters). By default every text-type field (CharField,
     # TextField, EmailField, URLField, SlugField) exposes exact/icontains/

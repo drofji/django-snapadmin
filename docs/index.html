@@ -1085,6 +1085,29 @@ for row in Product.objects.all().iterator(chunk_size=2000):
   — the <code>snapadmin.W004</code> system check warns on any model that hasn't made the choice
   explicitly, so the exposure is deliberate rather than an oversight.</p>
 
+  <h3 id="api-read-only">Read-only models &amp; verb allowlists — <code>api_read_only</code> / <code>api_http_method_names</code></h3>
+  <p><code>api_write_fields</code> controls <em>which fields</em> a write may touch;
+  <code>api_read_only</code> removes the write verbs <em>entirely</em>. Set it on an import-only or
+  reference table — one fed by an ETL job or another service, never by API clients — and the dynamic
+  REST API serves it read-only: <code>list</code>/<code>retrieve</code>/<code>count</code>/<code>export</code>
+  work, while <code>POST</code>/<code>PUT</code>/<code>PATCH</code>/<code>DELETE</code> answer
+  <code>405 Method Not Allowed</code> (no blank-row insert, no silent no-op update):</p>
+  <pre><code>class ExchangeRate(SnapModel):
+    code = snap_fields.SnapCharField(max_length=3, unique=True)
+    rate = snap_fields.SnapDecimalField(max_digits=18, decimal_places=6)
+
+    api_read_only = True                       # rates come from the feed, not API clients
+
+# or an explicit verb allowlist (HEAD/OPTIONS are always added):
+class AuditEvent(SnapModel):
+    api_http_method_names = ["get", "post"]    # append-only: read + create, no update/delete</code></pre>
+  <p>The verb is rejected in dispatch <strong>before</strong> any handler runs, so a read-only model can
+  never insert a blank row, and the disallowed verbs are dropped from the <code>OPTIONS</code>
+  <code>Allow</code> header too. <code>api_http_method_names</code> takes precedence over
+  <code>api_read_only</code> when both are set; both default to full CRUD. A model that is
+  field-read-only (<code>api_write_fields = []</code>) yet still write-exposed is flagged by the
+  <code>snapadmin.W007</code> check, nudging it toward <code>api_read_only</code>.</p>
+
   <h3 id="auto-filter-lookups">Auto-filter lookups — <code>api_filter_lookups</code></h3>
   <p>Every text-type field (<code>CharField</code>/<code>TextField</code>/<code>EmailField</code>/
   <code>URLField</code>/<code>SlugField</code>) gets an auto-generated filter. The bare
