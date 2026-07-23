@@ -342,6 +342,7 @@
     <tr><th></th><th>Versions</th><th>Status</th></tr>
     <tr><td><strong>Python</strong></td><td>3.10 · 3.11 · 3.12 · 3.13</td><td>Supported and <strong>tested in CI</strong> on every version (declared floor 3.10).</td></tr>
     <tr><td><strong>Django</strong></td><td>5.2 (LTS) · 6.0</td><td>Supported and <strong>tested in CI</strong> on both (Django 6.0 requires Python ≥ 3.12).</td></tr>
+    <tr><td><strong>Databases</strong></td><td>SQLite · PostgreSQL · MySQL / MariaDB</td><td>Any Django-supported backend — SnapAdmin uses the ORM, adding no driver dependency. For MySQL, note the <a href="#mysql-drivers"><code>mysqlclient</code> (GPL) vs <code>PyMySQL</code> (MIT) driver-licence trade-off</a> before shipping a closed-source product.</td></tr>
   </table>
   <div class="callout callout-info">
     <strong>CI-enforced matrix.</strong>
@@ -411,7 +412,7 @@
     <strong><code>wysiwyg</code> bundles CKEditor 5 (GPL-or-commercial)</strong>
     The rich-text editor (<code>django-ckeditor-5</code>) bundles <strong>CKEditor 5</strong>, which is dual-licensed <strong>GPL-2.0+ or commercial</strong>. It is kept out of the base install so the core package carries no GPL/commercial code — the base is permissive (MIT/BSD/Apache) and safe for commercial and proprietary use. Opt into <code>[wysiwyg]</code> only if you want rich-text fields, and for a commercial product obtain a CKEditor licence (they offer a free tier) or supply your own widget. Without the extra, using a <code>wysiwyg=True</code> field raises a clear <code>ImproperlyConfigured</code> telling you to install it.
   </div>
-  <div class="callout callout-warn">
+  <div class="callout callout-warn" id="mysql-drivers">
     <strong>MySQL drivers</strong>
     SnapAdmin itself carries no MySQL driver dependency. If you configure Django to use MySQL (<code>DATABASES[...]['ENGINE'] = 'django.db.backends.mysql'</code>), you must separately install <code>mysqlclient</code> (GPL-2.0-or-later). That is fine for internal or non-redistributed applications, but check your licence posture before shipping a closed-source product. Django also supports the pure-Python <code>PyMySQL</code> — install it and call <code>pymysql.install_as_MySQLdb()</code> in your project's <code>__init__.py</code> or early in <code>settings.py</code> before Django loads. PyMySQL is MIT-licensed but pure-Python and slower than the C-extension <code>mysqlclient</code>, so production deployments typically prefer the latter.
   </div>
