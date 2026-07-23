@@ -89,6 +89,18 @@ Null checks and membership lists in the auto-generated REST filters
   project-wide default); it is not in the library default set. All of these are additive — existing query
   parameters are unchanged.
 
+Feature-adoption audit — snapadmin_info --section features
+  ``snapadmin_info`` gains a "Feature adoption" section: a commerce-readiness ✓/✗ checklist of which
+  business-important SnapAdmin capabilities are actually turned on or in use in your project vs. sitting
+  unused — backups, retention-based deletion, audit trail, PII masking, the REST/GraphQL APIs, API tokens,
+  Elasticsearch, background tasks, health/error alerting, rate limiting, the read-only / write-allowlist /
+  delete guards and SSO. Unlike the ``SNAPADMIN_*_ENABLED`` toggle list, the signal here is *adoption* — a
+  model actually declaring retention, a masked field actually configured, a token actually issued — so an
+  operator can see at a glance what is protected and what is left open. Run
+  ``python manage.py snapadmin_info --section features`` for just the checklist, add ``--verbose`` for a
+  per-capability count (e.g. "3 models" with retention), or ``--json`` for a monitoring endpoint. No new
+  dependency; nothing here prints a secret.
+
 Per-model read-only REST API and HTTP-method allowlists (api_read_only / api_http_method_names)
   A SnapModel can now remove write verbs from the dynamic REST API entirely, not just at the field level.
   ``api_read_only = True`` serves a model read-only — ``list``/``retrieve``/``count``/``export`` work while

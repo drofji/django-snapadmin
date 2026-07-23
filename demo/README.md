@@ -91,7 +91,10 @@ and `--tune` defaults to `SNAPADMIN_REINDEX_TUNE_DEFAULT` (use `--no-tune` to ov
 Run `python demo/manage.py snapadmin_info` against this project to see the diagnostics
 report — version, the database/Elasticsearch/Celery status, and the demo's registered
 models with their storage modes — or `snapadmin_info --health-check` for a probe-only
-readiness check that exits non-zero when a service is down.
+readiness check that exits non-zero when a service is down. `snapadmin_info --section
+features` prints a ✓/✗ checklist of which commerce-important capabilities (backups,
+retention-based deletion, PII masking, read-only models, SSO, …) are actually on or in
+use in the project; add `--verbose` for a per-capability count.
 
 ## Configuration
 

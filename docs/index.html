@@ -2072,7 +2072,7 @@ python manage.py snapadmin_info --health-check    # probes only; non-zero exit o
     <thead><tr><th>Flag</th><th>Effect</th></tr></thead>
     <tbody>
       <tr><td><code>--json</code></td><td>Emit the raw report as JSON — one object per section — for a monitoring endpoint or CI step.</td></tr>
-      <tr><td><code>--section NAME</code></td><td>Limit to one section (repeatable). Names: <code>version</code>, <code>database</code>, <code>elasticsearch</code>, <code>celery</code>, <code>inventory</code>.</td></tr>
+      <tr><td><code>--section NAME</code></td><td>Limit to one section (repeatable). Names: <code>version</code>, <code>features</code>, <code>database</code>, <code>elasticsearch</code>, <code>celery</code>, <code>inventory</code>.</td></tr>
       <tr><td><code>--brief</code></td><td>Show only the top-level scalar values of each section, hiding nested detail.</td></tr>
       <tr><td><code>--verbose</code></td><td>Include extra per-section detail (e.g. the list of online Celery workers).</td></tr>
       <tr><td><code>--health-check</code></td><td>Run only the health probes (database, Elasticsearch, REST API, GraphQL — each skipped when its feature toggle is off) and <strong>exit non-zero</strong> if any fails — usable as a readiness/liveness check.</td></tr>
@@ -2082,6 +2082,7 @@ python manage.py snapadmin_info --health-check    # probes only; non-zero exit o
   <h3>Sections</h3>
   <ul>
     <li><strong>Version &amp; Status</strong> — SnapAdmin version, the Django/Python runtime, and every <code>SNAPADMIN_*</code> feature toggle at its effective value.</li>
+    <li><strong>Feature adoption</strong> — a commerce-readiness <code>✓</code>/<code>✗</code> checklist of which business-important capabilities are actually on or in use in <em>this</em> project: backups, retention-based deletion, audit trail, PII masking, the REST/GraphQL APIs, API tokens, Elasticsearch, background tasks, health/error alerting, rate limiting, the read-only / write-allowlist / delete guards and SSO. Where a capability is adopted per-model or per-field (retention, masking, read-only models, …), <code>--verbose</code> adds a one-line count. Unlike the toggle list above, the signal here is <em>adoption</em> — a model actually declaring retention, a masked field actually configured — so you can see at a glance what is protected and what is left open.</li>
     <li><strong>Database</strong> — engine, name, host, port and user (never the password), reachability, table count and — where the backend exposes it — on-disk size.</li>
     <li><strong>Elasticsearch</strong> — collapses to <code>disabled</code> when off; otherwise cluster reachability, status and index count, plus the <code>DB_ONLY</code> / <code>DUAL</code> / <code>ES_ONLY</code> tally of your models.</li>
     <li><strong>Celery &amp; Broker</strong> — broker and result-backend URLs with the password redacted, the number of online workers, and the configured Beat schedule (collapses to <code>disabled</code> when Celery isn't installed).</li>
@@ -2094,6 +2095,16 @@ python manage.py snapadmin_info --health-check    # probes only; non-zero exit o
   Status: pre-release
   Django: 6.0.6
   Python: 3.12.4
+🧩 Feature adoption
+  Rest api: ✓
+  Graphql: ✓
+  Audit trail: ✓
+  Backups: ✗
+  Retention purge: ✓
+  Pii masking: ✓
+  Api tokens: ✓
+  Read only models: ✓
+  Sso: ✗
 🗄 Database
   Engine: postgresql
   Name: snapadmin_db

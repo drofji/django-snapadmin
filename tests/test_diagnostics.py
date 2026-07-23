@@ -261,7 +261,11 @@ class TestSnapadminInfoCommand:
         assert "Unknown section" in str(exc.value)
 
     def test_brief(self):
-        text = _run(brief=True)
+        # Scope to the version section: the feature-adoption section (#CLI5) renders
+        # its capabilities as top-level scalar lines, which brief mode intentionally
+        # *does* show — here we assert the version collector's nested feature-flag
+        # dict is the thing hidden in brief mode.
+        text = _run(brief=True, sections=["version"])
         assert "Version & Status" in text
         # Feature flags live under a nested dict, hidden in brief mode.
         assert "Rest api" not in text
