@@ -1175,46 +1175,6 @@ class TestAutoFilterJsonFieldLookups:
             showcase_records["green"].char_field
         ]
 
-    def test_native_contains_branch_used_when_backend_supports_it(
-        self, monkeypatch, showcase_records
-    ):
-        # Directly exercise the branch-selection logic for a backend that DOES
-        # support native JSON `contains` (e.g. PostgreSQL/MySQL). The test
-        # suite only ever runs against SQLite, so the native SQL path can't be
-        # executed end-to-end here — instead we monkeypatch the feature flag
-        # and a fake queryset to confirm the filter takes the native-`contains`
-        # branch (rather than falling back to the Python-side check) once the
-        # backend claims support.
-        from snapadmin.api.filters import JsonKeyPathFilter
-
-        json_filter = JsonKeyPathFilter(json_field_name="json_field", key_path="tags")
-
-        calls = []
-
-        class FakePks:
-            def __init__(self, pks):
-                self._pks = pks
-
-            def values_list(self, *args, **kwargs):
-                return self._pks
-
-        class FakeQuerySet:
-            db = "default"
-
-            def filter(self, **kwargs):
-                calls.append(kwargs)
-                return FakePks([])
-
-        fake_features = type("F", (), {"supports_json_field_contains": True})()
-        fake_connection = type("C", (), {"features": fake_features})()
-        monkeypatch.setattr(
-            "snapadmin.api.filters.connections", {"default": fake_connection}
-        )
-
-        json_filter._list_membership_pks(FakeQuerySet(), "green")
-
-        assert {"json_field__tags__contains": ["green"]} in calls
-
     def test_unknown_key_path_is_not_filterable(self, auth_client, showcase_records):
         # A key-path that isn't declared in api_json_filters has no
         # corresponding filter field at all — django-filter silently ignores
@@ -1267,6 +1227,107 @@ class TestAutoFilterJsonFieldLookups:
 
         cached = build_filterset_for_model(Showcase)
         assert cached is fresh
+
+
+# ── #PERF5: JSON filter comma-OR, lazy native queryset, scan cap ─────────────
+
+def _flatten_q(q):
+    from django.db.models import Q
+    out = set()
+    for child in q.children:
+        if isinstance(child, Q):
+            out |= _flatten_q(child)
+        else:
+            key, val = child
+            out.add((key, tuple(val) if isinstance(val, list) else val))
+    return out
+
+
+@pytest.mark.django_db
+class TestJsonFilterCommaOrLazyAndCap:
+    @pytest.fixture
+    def showcase_records(self, db):
+        from demo.apps.shop.models import Showcase
+        return {
+            "red": Showcase.objects.create(
+                char_field="red", json_field={"a": {"b": "x"}, "tags": ["red", "blue"]}),
+            "green": Showcase.objects.create(
+                char_field="green", json_field={"a": {"b": "y"}, "tags": ["green"]}),
+            "amber": Showcase.objects.create(
+                char_field="amber", json_field={"a": {"b": "z"}, "tags": ["amber"]}),
+        }
+
+    def test_comma_separated_list_membership_or(self, auth_client, showcase_records):
+        r = auth_client.get("/api/models/demo/Showcase/?json_field__tags=red,green")
+        assert r.status_code == 200
+        assert {i["char_field"] for i in r.json()["results"]} == {"red", "green"}
+
+    def test_comma_separated_scalar_or(self, auth_client, showcase_records):
+        r = auth_client.get("/api/models/demo/Showcase/?json_field__a__b=x,z")
+        assert r.status_code == 200
+        assert {i["char_field"] for i in r.json()["results"]} == {"red", "amber"}
+
+    def test_single_value_still_matches(self, auth_client, showcase_records):
+        r = auth_client.get("/api/models/demo/Showcase/?json_field__tags=green")
+        assert r.status_code == 200
+        assert {i["char_field"] for i in r.json()["results"]} == {"green"}
+
+    def test_only_commas_is_treated_as_empty(self, auth_client, showcase_records):
+        # value "," → no non-empty parts → the filter is a no-op (all rows back).
+        r = auth_client.get("/api/models/demo/Showcase/?json_field__tags=,")
+        assert r.status_code == 200
+        assert len(r.json()["results"]) == 3
+
+    def test_empty_value_is_noop(self, showcase_records):
+        from demo.apps.shop.models import Showcase
+        from snapadmin.api.filters import JsonKeyPathFilter
+        jf = JsonKeyPathFilter(json_field_name="json_field", key_path="tags")
+        qs = Showcase.objects.all()
+        assert jf.filter(qs, "") is qs
+
+    def test_scan_cap_exceeded_returns_400(self, auth_client, showcase_records):
+        # 3 rows, cap 1 → the SQLite membership scan refuses rather than OOM.
+        with override_settings(SNAPADMIN_API_JSON_FILTER_SCAN_CAP=1):
+            r = auth_client.get("/api/models/demo/Showcase/?json_field__tags=red")
+        assert r.status_code == 400
+
+    def test_scan_cap_not_exceeded_ok(self, auth_client, showcase_records):
+        with override_settings(SNAPADMIN_API_JSON_FILTER_SCAN_CAP=1000):
+            r = auth_client.get("/api/models/demo/Showcase/?json_field__tags=red")
+        assert r.status_code == 200
+        assert {i["char_field"] for i in r.json()["results"]} == {"red"}
+
+    def test_native_branch_is_lazy_no_pk_materialisation(self, monkeypatch):
+        from django.db.models import Q
+        from snapadmin.api.filters import JsonKeyPathFilter
+        jf = JsonKeyPathFilter(json_field_name="json_field", key_path="tags")
+        captured = {}
+
+        class FakeQuerySet:
+            db = "default"
+
+            def filter(self, *args, **kwargs):
+                captured["args"] = args
+                captured["kwargs"] = kwargs
+                return "LAZY_QS"
+
+        fake_conn = type("C", (), {
+            "features": type("F", (), {"supports_json_field_contains": True})()
+        })()
+        monkeypatch.setattr("snapadmin.api.filters.connections", {"default": fake_conn})
+
+        result = jf.filter(FakeQuerySet(), "green,blue")
+        # Returned the lazy queryset directly — no PK set materialised, so an
+        # export's .iterator() still streams. FakeQuerySet has *only* .filter():
+        # any .count()/.values_list()/.iterator() call would AttributeError.
+        assert result == "LAZY_QS"
+        assert captured["kwargs"] == {}          # the Q is positional, no pk__in=
+        q = captured["args"][0]
+        assert isinstance(q, Q)
+        assert _flatten_q(q) == {
+            ("json_field__tags", "green"), ("json_field__tags__contains", ("green",)),
+            ("json_field__tags", "blue"), ("json_field__tags__contains", ("blue",)),
+        }
 
 
 # ── PII masking excluded from filter/ordering/search (#SEC6) ────────────────

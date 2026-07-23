@@ -230,6 +230,11 @@ SNAPADMIN_API_FILTER_BACKEND = (
     [s.strip() for s in os.getenv('SNAPADMIN_API_FILTER_BACKEND', '').split(',') if s.strip()]
     or None
 )
+# Row-scan ceiling for api_json_filters on a backend WITHOUT native JSON containment
+# (e.g. SQLite). List-membership there is a per-row Python scan, so past this many rows
+# the filter returns HTTP 400 instead of risking OOM. Ignored on PostgreSQL/MySQL (the
+# query is a lazy native JSON lookup there). Default 100000.
+SNAPADMIN_API_JSON_FILTER_SCAN_CAP = int(os.getenv('SNAPADMIN_API_JSON_FILTER_SCAN_CAP', '100000'))
 # DRF rate limits (e.g. '60/min'). Empty value disables that throttle.
 SNAPADMIN_THROTTLE_ANON = os.getenv('SNAPADMIN_THROTTLE_ANON', '60/min') or None
 SNAPADMIN_THROTTLE_USER = os.getenv('SNAPADMIN_THROTTLE_USER', '600/min') or None

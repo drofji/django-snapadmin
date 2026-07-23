@@ -89,6 +89,18 @@ Null checks and membership lists in the auto-generated REST filters
   project-wide default); it is not in the library default set. All of these are additive — existing query
   parameters are unchanged.
 
+JSON key-path filters now OR on commas and stream at scale
+  ``api_json_filters`` query params (``?payload__a__b=value``) now treat a comma as an OR, exactly like
+  the ``__in`` filters: ``?payload__a__b=x,y`` matches rows whose value at that path is ``x`` or ``y``
+  (previously the whole ``"x,y"`` was matched as one literal string — a comma matched nothing). On a
+  backend with native JSON containment (PostgreSQL/MySQL) the filter is now a single lazy
+  ``queryset.filter(Q(...))`` that composes with ``.iterator()``, so the streaming export no longer
+  materialises a potentially huge primary-key list in memory. The SQLite / no-native-containment fallback
+  still scans rows in Python for the list-membership half, but is now bounded by the new
+  ``SNAPADMIN_API_JSON_FILTER_SCAN_CAP`` setting (default 100000): past that row count it answers HTTP 400
+  rather than risk running the process out of memory, steering the caller to a native-JSON backend or
+  Elasticsearch. Single-value filtering is unchanged.
+
 Swap the REST API filter backend with SNAPADMIN_API_FILTER_BACKEND
   The dynamic model API's filter chain (``SnapAdminFilterBackend`` + DRF's ``SearchFilter`` and
   ``OrderingFilter``) used to be a hardcoded class attribute on the viewset, so plugging in a custom

@@ -1176,6 +1176,17 @@ class Product(SnapModel):
   <code>connection.features.supports_json_field_contains</code> and falls back to a row-by-row Python
   membership check instead, so list-membership filtering works out of the box on SQLite too, not just
   PostgreSQL/MySQL.</p>
+  <p><strong>Comma-separated OR.</strong> Like the <code>__in</code> filters, a comma in the value is an
+  OR: <code>?payload__a__b=x,y</code> matches rows whose value at the path is <code>x</code> or
+  <code>y</code> (each side still tried as both a scalar and a list-membership match). A value that
+  legitimately contains a comma can't be expressed — the same trade-off <code>__in</code> makes.</p>
+  <p><strong>Streaming at scale.</strong> On a backend with native JSON containment
+  (PostgreSQL/MySQL) the whole filter is one lazy <code>queryset.filter(Q(…))</code> — it composes with
+  <code>.iterator()</code>, so the streaming <code>export/</code> endpoint never pulls a PK list
+  into memory. The SQLite / no-native fallback must scan rows in Python for the list-membership half, so
+  it is capped at <code>SNAPADMIN_API_JSON_FILTER_SCAN_CAP</code> rows (default <code>100000</code>);
+  past the cap it answers <code>HTTP 400</code> rather than risk running the table out of memory,
+  pointing the caller at a native-JSON backend or Elasticsearch.</p>
   <p><strong>JSON columns carry no index</strong>, so any of these filters is always a full table scan
   on every backend. For filtering JSON data at scale on large tables, use
   <code>SnapModel.es_search()</code> (the Elasticsearch integration) instead of the DB-backed

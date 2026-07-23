@@ -353,7 +353,10 @@ class Showcase(snap_models.SnapModel):
 
     # api_json_filters → exposes ?json_field__a__b=value (nested scalar match) and
     # ?json_field__tags=value (list-membership match, since "tags" is stored as a
-    # JSON array) through the auto-generated REST API filter set.
+    # JSON array) through the auto-generated REST API filter set. A comma is an OR,
+    # like __in: ?json_field__tags=red,green matches either. On PostgreSQL/MySQL this
+    # is a lazy native JSON query (streams with export/); on SQLite it is a capped
+    # Python row scan (SNAPADMIN_API_JSON_FILTER_SCAN_CAP → 400 past the cap).
     api_json_filters = {"json_field": ["a.b", "tags"]}
 
     # api_default_text_lookups → model-wide default lookup set for EVERY text field

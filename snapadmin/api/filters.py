@@ -16,15 +16,21 @@ the lookup set for one of its own fields via ``SnapModel.api_filter_lookups``.
 import django_filters
 from django.conf import settings
 from django.db import connections, models as django_models
-from django.db.models import QuerySet
+from django.db.models import Q, QuerySet
 from django.utils.module_loading import import_string
 from django_filters.constants import EMPTY_VALUES
 from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework.exceptions import ValidationError
 from rest_framework.filters import BaseFilterBackend, OrderingFilter, SearchFilter
 
 from snapadmin.masking import get_masked_fields, user_can_view_pii
 
 _filterset_cache: dict = {}
+
+# Default row-scan ceiling for JsonKeyPathFilter's Python list-membership fallback
+# (backends without native JSON containment, e.g. SQLite). Overridable per project
+# via SNAPADMIN_API_JSON_FILTER_SCAN_CAP.
+_JSON_FILTER_SCAN_CAP_DEFAULT = 100_000
 
 # Text-type model fields that get the exact/icontains/startswith/in lookup set below.
 _TEXT_FIELD_TYPES = (
@@ -72,6 +78,20 @@ class JsonKeyPathFilter(django_filters.CharFilter):
     A row matches if either check matches (a single query parameter covers both
     cases without the caller having to know which shape a given row's data uses).
 
+    **Comma-separated OR.** Like the ``__in`` text/numeric filters, a comma in the
+    value is an OR: ``?payload__a__b=x,y`` matches rows whose value at the path is
+    ``x`` *or* ``y`` (each side still tried as both a scalar and a list-membership
+    match). A value that legitimately contains a comma can't be expressed — the
+    same trade-off ``__in`` makes.
+
+    **Laziness at scale.** On a backend with native JSON containment
+    (PostgreSQL/MySQL) the whole thing is one lazy ``qs.filter(Q(...))`` — it
+    composes with ``.iterator()`` (so the streaming export never materialises a
+    PK list). The SQLite / no-native fallback must scan rows in Python for the
+    list-membership half, so it is capped at ``SNAPADMIN_API_JSON_FILTER_SCAN_CAP``
+    rows (default 100_000); past the cap it raises ``ValidationError`` (HTTP 400)
+    rather than risk OOM — pointing the caller at a native-JSON backend or ES.
+
     JSON columns carry no index, so any of these filters is always a full table
     scan — for filtering at scale on large tables, use ``SnapModel.es_search()``
     (Elasticsearch integration) instead.
@@ -86,31 +106,62 @@ class JsonKeyPathFilter(django_filters.CharFilter):
     def filter(self, qs: QuerySet, value: str | None) -> QuerySet:
         if value in EMPTY_VALUES:
             return qs
+        values = [part.strip() for part in value.split(",") if part.strip()]
+        if not values:
+            return qs
 
-        exact_pks = set(qs.filter(**{self.lookup_field: value}).values_list("pk", flat=True))
-        matching_pks = exact_pks | self._list_membership_pks(qs, value)
-        return self.get_method(qs)(pk__in=matching_pks)
+        if connections[qs.db].features.supports_json_field_contains:
+            return self._native_filter(qs, values)
+        return self._python_fallback_filter(qs, values)
 
-    def _list_membership_pks(self, qs: QuerySet, value: str) -> set:
-        db_alias = qs.db
-        if connections[db_alias].features.supports_json_field_contains:
-            return set(
-                qs.filter(**{f"{self.lookup_field}__contains": [value]}).values_list(
-                    "pk", flat=True
-                )
+    def _q_for_value(self, value: str) -> Q:
+        """Scalar-exact OR native list-membership for one value."""
+        return (
+            Q(**{self.lookup_field: value})
+            | Q(**{f"{self.lookup_field}__contains": [value]})
+        )
+
+    def _native_filter(self, qs: QuerySet, values: list[str]) -> QuerySet:
+        # Native JSON containment (PostgreSQL/MySQL): return one lazy queryset so
+        # `.iterator()` still streams — no PK list is built. Seed the OR from the
+        # first value (an empty Q() OR-ed would match every row).
+        combined = self._q_for_value(values[0])
+        for value in values[1:]:
+            combined |= self._q_for_value(value)
+        return self.get_method(qs)(combined)
+
+    def _python_fallback_filter(self, qs: QuerySet, values: list[str]) -> QuerySet:
+        # No native JSON `contains` (e.g. SQLite): the scalar-exact half is still a
+        # DB lookup, but list-membership needs a per-row Python scan, so it is
+        # capped to avoid pulling an unbounded table into memory.
+        scalar_q = Q(**{self.lookup_field: values[0]})
+        for value in values[1:]:
+            scalar_q |= Q(**{self.lookup_field: value})
+        scalar_pks = set(qs.filter(scalar_q).values_list("pk", flat=True))
+        membership_pks = self._python_membership_pks(qs, values)
+        return self.get_method(qs)(pk__in=scalar_pks | membership_pks)
+
+    def _scan_cap(self) -> int:
+        return (
+            getattr(settings, "SNAPADMIN_API_JSON_FILTER_SCAN_CAP", None)
+            or _JSON_FILTER_SCAN_CAP_DEFAULT
+        )
+
+    def _python_membership_pks(self, qs: QuerySet, values: list[str]) -> set:
+        cap = self._scan_cap()
+        if qs.count() > cap:
+            raise ValidationError(
+                f"JSON filter '{self.lookup_field}' would scan more than {cap} rows "
+                "on a database without native JSON support; narrow the query, raise "
+                "SNAPADMIN_API_JSON_FILTER_SCAN_CAP, or use a native-JSON backend / "
+                "Elasticsearch."
             )
-        return self._python_list_membership_pks(qs, value)
-
-    def _python_list_membership_pks(self, qs: QuerySet, value: str) -> set:
-        # Backend has no native JSON `contains` support (e.g. SQLite, the default
-        # dev/test database) — the `__contains` lookup would raise NotSupportedError,
-        # so check list-membership on the extracted JSON value row by row instead.
         pks = set()
-        for pk, data in qs.values_list("pk", self.json_field_name):
+        for pk, data in qs.values_list("pk", self.json_field_name).iterator():
             node = data
             for part in self.key_parts:
                 node = node.get(part) if isinstance(node, dict) else None
-            if isinstance(node, list) and value in node:
+            if isinstance(node, list) and any(value in node for value in values):
                 pks.add(pk)
         return pks
 
