@@ -1,0 +1,209 @@
+0.1.0b5 — 2026-07-24 — Fifth Beta
+=================================
+
+Scale-hardening and operability. This beta finishes the production-scale Elasticsearch query
+layer (es_count, db_fallback opt-out, es_scan PK streaming, OOM-safe reindex), makes the
+auto-generated REST filters richer and safer (isnull/__in, JSON comma-OR + lazy queryset + scan
+cap, per-model read-only guards, a swappable filter backend), scales etl.stale_sync past an
+in-memory key set, makes async export sources pluggable, and adds a feature-adoption audit to
+snapadmin_info. Everything is additive and backward-compatible; two additive migrations ship
+(a demo-only watermark column and SnapExportJob.source).
+
+Added
+=====
+
+Project- and model-wide default lookup set for auto-generated REST text filters
+  The auto-generated REST filters give every text field (CharField/TextField/EmailField/URLField/
+  SlugField) an ``exact`` + ``icontains``/``startswith``/``in`` lookup set. ``api_filter_lookups`` could
+  already override that, but only per field — so making a large table index-friendly (dropping the
+  leading-wildcard ``icontains`` that can't use an index) meant enumerating every column, and any column
+  added later silently re-enabled ``icontains``. Two broader knobs now set the default once: the per-model
+  ``SnapModel.api_default_text_lookups`` attribute and the project-wide ``SNAPADMIN_API_TEXT_LOOKUPS``
+  setting. Resolution takes the first non-empty source in the order per-field ``api_filter_lookups`` →
+  per-model ``api_default_text_lookups`` → ``SNAPADMIN_API_TEXT_LOOKUPS`` → the library default, so a
+  project can adopt the index-friendly posture globally while still widening or narrowing a single field.
+  Both default to today's behaviour when unset.
+
+snapadmin_reindex — probe runs with --limit and a configurable --tune default
+  The bulk reindex command gains ``--limit N`` to reindex only the first ``N`` rows — a probe or canary
+  run to sanity-check a mapping change or measure throughput before committing to a full load, with
+  progress measured against the limit. ``--tune`` becomes a ``--tune`` / ``--no-tune`` pair whose default
+  is the new ``SNAPADMIN_REINDEX_TUNE_DEFAULT`` setting (default ``False`` = unchanged), so a project that
+  always wants a mass load to relax the index (refresh off, replicas 0) can set the posture once and still
+  override it per run. The reindex now also fetches **only the ES-mapped columns** each chunk — a document
+  is built from just the primary key plus the mapped fields, so a wide table's large unmapped ``TEXT``
+  bodies are no longer dragged through every batch (via the new ``SnapModel.es_reindex_only_fields()``,
+  which restricts the queryset with ``.only()`` and safely falls back to fetching all columns when a
+  mapping key isn't a plain concrete field). All three are opt-in / automatic and change nothing for an
+  existing full reindex.
+
+SnapModel.es_scan() — stream the primary keys of N-million matches with source=False and limit
+  ``es_scan()`` gains two opt-in fast paths for very large result sets. ``source=False`` streams
+  **primary keys only**: the request sends ``"_source": false`` so Elasticsearch never ships the
+  document body, and each pk is read straight from the sort cursor — so a ``DUAL`` model also skips its
+  per-page ``in_bulk()`` database round-trip. When you only need the ids of millions of matches (to feed
+  a queue, a bulk job, or a downstream ``pk__in`` query), hydrating a full model per hit is wasted work;
+  because the pk comes from ES alone, a pk indexed in ES but missing from the table is still yielded
+  (the default full-hydration path drops it). ``limit=N`` stops the walk after ``N`` results and caps the
+  ES request ``size`` to what remains, so a limit below ``page_size`` never over-fetches. Both flags are
+  honoured by the disabled-ES database fallback too — it streams pks via ``values_list("pk")`` and applies
+  the limit. The default call (``source=None``) keeps full object hydration, byte-identical to before; the
+  scan keeps its unique ``id`` sort, already the cheapest *stable* ``search_after`` order since the primary
+  key needs no separate tiebreak.
+
+SnapModel.es_count() — true match count of a structured Elasticsearch query
+  New classmethod ``SnapModel.es_count(*, query_string=None, **terms) -> int``, the counting
+  counterpart to ``es_filter()``. It uses the same term resolution and filter context (a scalar builds
+  a ``term`` clause, a list a ``terms`` clause, a ``__`` path reaches into a JSON/object mapping, and a
+  ``text`` field targets its keyword sub-field) but hits Elasticsearch's ``_count`` API instead of
+  ``_search``. Because ``es_filter()``/``es_search()`` cap their results at ``SNAPADMIN_ES_SEARCH_LIMIT``
+  and can never see past ES's ``index.max_result_window``, ``len(es_filter(...))`` silently under-reports
+  once a query matches more rows than the limit; ``es_count()`` returns the exact total no matter how
+  large the result set — the number you need for pagination, a dashboard tile, or a guard before a bulk
+  job. It fails safe like its siblings: a ``DUAL`` model whose Elasticsearch is disabled or erroring
+  falls back to the equivalent database ``count()`` (failing closed to ``0`` for a term field with no
+  backing column), an ``ES_ONLY`` model returns ``0``, and an unknown or analysed-text-only field raises
+  ``ValueError``.
+
+Opt out of the silent Elasticsearch→database fallback (db_fallback=False)
+  The structured ES query methods — ``es_filter()``, ``es_aggregate()``, ``es_count()`` and
+  ``es_scan()`` — silently fall back to the database when Elasticsearch is disabled or a query errors.
+  That is the right default for a modest table, but on a large, DB-unindexable one it can be worse than
+  a clear failure: ``es_aggregate()`` recomputes a full-table ``GROUP BY`` on an unindexed column and
+  ``es_scan()`` streams an unbounded ``.iterator()``. Each method now accepts ``db_fallback=False``,
+  which raises the new ``snapadmin.models.SnapEsUnavailable`` exception (chaining the original ES error
+  as ``__cause__``) instead of running the database equivalent when ES can't answer — so a team that
+  chose Elasticsearch deliberately can fail loudly rather than quietly run a query that can't scale. The
+  new ``SNAPADMIN_ES_DB_FALLBACK`` setting (default ``True``) sets the project-wide posture once; a
+  per-call ``db_fallback=`` always overrides it. Nothing changes by default — ``ES_ONLY`` models (no
+  database to fall back to) and ``DB_ONLY`` models (the database is their primary store) never raise,
+  and a mid-stream ``es_scan()`` failure still stops rather than raising, since its ``search_after``
+  cursor is already gone.
+
+Null checks and membership lists in the auto-generated REST filters
+  The dynamic REST FilterSet now exposes null-checks and comma-separated membership lists automatically,
+  with no per-field configuration. Numeric fields (Integer/Float/Decimal…) gain ``?field__in=1,2,3`` and
+  ``?field__isnull=true`` alongside the existing ``__gte``/``__lte`` range; foreign keys gain
+  ``?field_id__in=1,2`` and ``?field_id__isnull=true`` (rows with — or without — a related object) next
+  to the existing exact ``?field_id=`` match; date and datetime fields gain ``?field__isnull=true`` (no
+  ``__in``, since an exact-timestamp list is rarely useful and ranges are covered by ``__gte``/``__lte``).
+  Text fields can opt into a null check by adding ``"isnull"`` to ``api_filter_lookups`` (or a model-/
+  project-wide default); it is not in the library default set. All of these are additive — existing query
+  parameters are unchanged.
+
+Top-level re-exports — from snapadmin import SnapModel, SnapCharField, …
+  The most common public names — ``SnapModel``, every ``Snap*Field`` type, the ``EsStorageMode`` enum, the
+  ``APIToken`` model, the ``SnapEsUnavailable``/``SnapPurgeError`` exceptions and the ``Snap*Validator``
+  classes — are now importable directly from the package root, so ``from snapadmin import SnapModel,
+  SnapCharField`` works alongside the existing deep paths (``from snapadmin.models import SnapModel``), which
+  are unchanged. The re-exports are lazy (PEP 562), so importing ``snapadmin`` — or a console script such as
+  ``snapadmin-demo`` that runs before Django is configured — never eagerly imports the Django-backed
+  modules. A new ``docs/index.html`` module map documents what each top-level module owns.
+
+Pluggable async-export row sources (SNAPADMIN_EXPORT_SOURCES)
+  The async export job was hard-wired to one row source — ``model.objects.filter(**filters)`` serialized as
+  raw column rows. Three shapes a large-scale integrator needs couldn't be expressed: a result set defined
+  by a structured Elasticsearch query (routing it through ``filters`` would force the DB-fallback scan the ES
+  query exists to avoid), an explicit key list (encoding it as a ``__in`` filter re-evaluates a giant clause
+  on every cursor page), and a custom document shape (not raw ``values()`` rows). A new
+  ``SNAPADMIN_EXPORT_SOURCES = {name: "dotted.path.to.factory"}`` registry plus a ``source`` field on
+  ``SnapExportJob`` let a project register a custom source — an object with ``field_names()``, ``count()`` and
+  ``iter_batches(*, cursor, chunk_size)`` — without subclassing the job or its runner. The writer keeps
+  everything else: the resumable primary-key-cursor chunking, progress/ETA, single-flight claim,
+  cancellation, crash-safe checkpointing and configurable storage all work unchanged for a custom source, as
+  proven by the resume test. A blank ``source`` (the default) is byte-for-byte the built-in ORM export, so
+  existing jobs are unaffected. An unknown source name fails the job cleanly rather than crashing the worker.
+  This adds one database migration (``SnapExportJob.source``). The demo registers a ``product_catalog``
+  source that emits a compact catalogue line per product.
+
+Feature-adoption audit — snapadmin_info --section features
+  ``snapadmin_info`` gains a "Feature adoption" section: a commerce-readiness ✓/✗ checklist of which
+  business-important SnapAdmin capabilities are actually turned on or in use in your project vs. sitting
+  unused — backups, retention-based deletion, audit trail, PII masking, the REST/GraphQL APIs, API tokens,
+  Elasticsearch, background tasks, health/error alerting, rate limiting, the read-only / write-allowlist /
+  delete guards and SSO. Unlike the ``SNAPADMIN_*_ENABLED`` toggle list, the signal here is *adoption* — a
+  model actually declaring retention, a masked field actually configured, a token actually issued — so an
+  operator can see at a glance what is protected and what is left open. Run
+  ``python manage.py snapadmin_info --section features`` for just the checklist, add ``--verbose`` for a
+  per-capability count (e.g. "3 models" with retention), or ``--json`` for a monitoring endpoint. No new
+  dependency; nothing here prints a secret.
+
+Per-model read-only REST API and HTTP-method allowlists (api_read_only / api_http_method_names)
+  A SnapModel can now remove write verbs from the dynamic REST API entirely, not just at the field level.
+  ``api_read_only = True`` serves a model read-only — ``list``/``retrieve``/``count``/``export`` work while
+  ``POST``/``PUT``/``PATCH``/``DELETE`` answer ``405 Method Not Allowed`` — so an import-only or reference
+  table (fed by an ETL job or another service) can never be written through the API. Previously
+  ``api_write_fields = []`` made every field read-only but still let a client POST a blank row or PATCH a
+  no-op; there was no way to disable create/update/destroy for a model. ``api_http_method_names`` is an
+  explicit lowercase verb allowlist (HEAD/OPTIONS always added; wins over ``api_read_only``) for finer
+  control such as an append-only ``["get", "post"]``. The verb is rejected in dispatch before any handler
+  runs — a read-only model never inserts a blank row — and disallowed verbs are dropped from the
+  ``OPTIONS`` ``Allow`` header. Both default to full CRUD, so existing models are unchanged. A new
+  ``snapadmin.W007`` system check flags a field-read-only model (``api_write_fields = []``) that is still
+  write-exposed, nudging it toward ``api_read_only``. (Security: this is a write-surface control — see
+  SECURITY.md.)
+
+etl.stale_sync() scales past an in-memory key set and can skip instead of raising
+  ``stale_sync()`` gains two options for large or unattended syncs. ``strategy="last_seen"`` prunes
+  entirely DB-side: instead of diffing the whole natural-key column against a ``seen_keys`` set in Python
+  (two N-sized sets in memory), the sync stamps every row it still reports with the run's start time in a
+  watermark column, and ``stale_sync`` deletes the rows left below it (``last_seen_field < run_started``)
+  — holding no key set at all, so it scales to a table too large to diff in memory. Rows whose watermark is
+  NULL (never synced) are treated as not stale. ``on_exceed="skip"`` makes the ``max_fraction`` guard
+  non-raising: instead of raising ``StaleSyncAbort`` it returns the summary with ``deleted=0`` and a new
+  ``aborted=True`` flag, for an unattended job that should log-and-continue. The summary dict now always
+  carries ``aborted``. The defaults are unchanged (``strategy="keyset"``, ``on_exceed="raise"``,
+  ``seen_keys`` still the second positional argument), and ``max_fraction=1.0`` is now documented as the
+  explicit "disable the guard" override.
+
+JSON key-path filters now OR on commas and stream at scale
+  ``api_json_filters`` query params (``?payload__a__b=value``) now treat a comma as an OR, exactly like
+  the ``__in`` filters: ``?payload__a__b=x,y`` matches rows whose value at that path is ``x`` or ``y``
+  (previously the whole ``"x,y"`` was matched as one literal string — a comma matched nothing). On a
+  backend with native JSON containment (PostgreSQL/MySQL) the filter is now a single lazy
+  ``queryset.filter(Q(...))`` that composes with ``.iterator()``, so the streaming export no longer
+  materialises a potentially huge primary-key list in memory. The SQLite / no-native-containment fallback
+  still scans rows in Python for the list-membership half, but is now bounded by the new
+  ``SNAPADMIN_API_JSON_FILTER_SCAN_CAP`` setting (default 100000): past that row count it answers HTTP 400
+  rather than risk running the process out of memory, steering the caller to a native-JSON backend or
+  Elasticsearch. Single-value filtering is unchanged.
+
+Swap the REST API filter backend with SNAPADMIN_API_FILTER_BACKEND
+  The dynamic model API's filter chain (``SnapAdminFilterBackend`` + DRF's ``SearchFilter`` and
+  ``OrderingFilter``) used to be a hardcoded class attribute on the viewset, so plugging in a custom
+  django-filter ``FilterSet`` or a bespoke backend meant subclassing the view and monkeypatching it. The
+  new ``SNAPADMIN_API_FILTER_BACKEND`` setting takes a dotted path — or a list of them, or a class object
+  — and replaces the whole chain (mirroring DRF's own ``DEFAULT_FILTER_BACKENDS``), so list every backend
+  you still want alongside your custom one. It is resolved on each request, so ``override_settings`` in
+  tests and deploy-time config both apply, and drf-spectacular still introspects the resolved backends for
+  the Swagger schema. Unset (the default) keeps the built-in chain unchanged.
+
+
+Fixed
+=====
+
+AppConfig.ready() no longer crashes when an optional package is importable but not installed
+  If ``django-extra-settings`` was importable (a transitive or leftover install) but not listed in
+  ``INSTALLED_APPS``, SnapAdmin's ``ready()`` crashed the entire project at ``django.setup()``: the Unfold
+  re-styling helper did ``from extra_settings.models import Setting`` inside an ``except ImportError`` block,
+  but importing a model whose app is not registered raises ``RuntimeError`` ("Model class ... doesn't declare
+  an explicit app_label"), not ``ImportError`` — so the guard never caught it. The helper now checks
+  ``apps.is_installed("extra_settings")`` before importing the model and is a clean no-op when the app is not
+  installed. Behaviour is unchanged when extra_settings is properly installed. (The Unfold theme import was
+  already guarded this way.)
+
+Text ?field__isnull= no longer returns HTTP 500
+  Adding ``"isnull"`` to a text field's ``api_filter_lookups`` used to build a plain text filter that
+  forwarded the raw query string (``"true"``/``"false"``) to Django's ``isnull`` lookup, which only
+  accepts a bool — raising ``ValueError`` and surfacing as ``HTTP 500``. Numeric, date and foreign-key
+  fields had no ``isnull`` filter at all. ``isnull`` now maps to a boolean filter across every field
+  type, so ``?field__isnull=true``/``false`` parses to a real bool and returns ``200``.
+
+SnapModel.es_reindex_all() no longer risks OOM on MySQL
+  ``es_reindex_all()`` streamed the table with ``QuerySet.iterator()``, which on the mysqlclient backend
+  has no true server-side cursor and buffers the entire result set client-side — so a full re-index of a
+  large table could exhaust memory. It now pages the table with a ``pk__gt`` keyset cursor (the same
+  technique the ``snapadmin_reindex`` command already uses), holding at most ``chunk_size`` rows at a time
+  on every backend. The method signature and return shape are unchanged, and the ES_ONLY single-pass path
+  is unaffected; iteration is now primary-key-ordered, which doesn't change the result since each document
+  is written under ``_id = pk``.

@@ -12,6 +12,30 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 
 _Nothing yet._
 
+## 0.1.0b5 — 2026-07-24
+
+Scale-hardening and operability. The production-scale Elasticsearch query layer is finished, the
+auto-generated REST filters are richer and safer, `etl.stale_sync` scales past an in-memory key set,
+async export sources become pluggable, and `snapadmin_info` gains a feature-adoption audit. Everything
+is additive and backward-compatible; two additive migrations ship (a demo-only watermark column and
+`SnapExportJob.source`).
+
+- **Added:** `SnapModel.es_count()` — exact match count of a structured ES query, past the search limit.
+- **Added:** ES query methods accept `db_fallback=False` (+ `SNAPADMIN_ES_DB_FALLBACK`) to raise
+  `SnapEsUnavailable` instead of silently falling back to the database.
+- **Added:** `es_scan(source=False, limit=…)` streams primary keys of N-million matches; `snapadmin_reindex`
+  gains `--limit` and a settable `--tune` default and fetches only ES-mapped columns.
+- **Added:** REST filters gain `?field__isnull=` / `?field__in=` across text/numeric/date/FK, a swappable
+  `SNAPADMIN_API_FILTER_BACKEND`, project/model-wide text-lookup defaults, and JSON comma-OR with a lazy
+  native queryset + `SNAPADMIN_API_JSON_FILTER_SCAN_CAP`.
+- **Added:** per-model `api_read_only` / `api_http_method_names` (write verbs answer 405; `snapadmin.W007`).
+- **Added:** `etl.stale_sync` DB-side `strategy="last_seen"` and non-raising `on_exceed="skip"`.
+- **Added:** pluggable async-export row sources (`SNAPADMIN_EXPORT_SOURCES` + `SnapExportJob.source`).
+- **Added:** `snapadmin_info --section features` — a ✓/✗ commerce-readiness feature-adoption checklist.
+- **Added:** lazy top-level re-exports (`from snapadmin import SnapModel, SnapCharField`) + a module map.
+- **Fixed:** `AppConfig.ready()` no longer crashes when an optional package is importable but not in
+  `INSTALLED_APPS`; text `?field__isnull=` no longer 500s; `es_reindex_all()` no longer risks OOM on MySQL.
+
 ## 0.1.0b4 — 2026-07-21
 
 An operability, onboarding and decoupling release: four new operator/onboarding commands, a subsystem
