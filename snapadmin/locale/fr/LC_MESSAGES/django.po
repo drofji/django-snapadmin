@@ -428,3 +428,9 @@ msgstr "Encodage invalide. Autorisés : %(encodings)s"
 
 #~ msgid "Dutch"
 #~ msgstr "Néerlandais"
+
+msgid "Row Source"
+msgstr "Source des lignes"
+
+msgid "Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."
+msgstr "Nom enregistré dans SNAPADMIN_EXPORT_SOURCES ; vide utilise la source ORM par défaut."

@@ -350,6 +350,12 @@ class SnapExportJob(models.Model):
     model = models.CharField(max_length=100, verbose_name=_("Model"))
     export_format = models.CharField(max_length=8, choices=Format.choices, default=Format.CSV, verbose_name=_("Format"))
     filters = models.JSONField(default=dict, blank=True, verbose_name=_("Filters"), help_text=_("ORM field=value filters applied to the export queryset."))
+    # Named row source (see SNAPADMIN_EXPORT_SOURCES + snapadmin.exporting). Blank
+    # (the default) uses the built-in ORM source: model.objects.filter(**filters)
+    # serialized as raw column rows. A non-blank value names a registered custom
+    # source (ES-query-backed, key-list-backed, custom document shape); the runner's
+    # crash-safe chunking / progress / cancel / resume / storage are unchanged.
+    source = models.CharField(max_length=64, blank=True, default="", verbose_name=_("Row Source"), help_text=_("Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."))
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True, verbose_name=_("Status"))
     total_rows = models.PositiveIntegerField(default=0, verbose_name=_("Total Rows"))
     processed_rows = models.PositiveIntegerField(default=0, verbose_name=_("Processed Rows"), help_text=_("Rows written so far — drives progress-percent and ETA reporting."))

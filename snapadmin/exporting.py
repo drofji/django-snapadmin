@@ -51,8 +51,10 @@ import csv
 import io
 import json
 import os
+from typing import Iterator, Protocol
 
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.core.files import File
 from django.core.files.storage import FileSystemStorage, Storage
 from django.utils import timezone
@@ -130,6 +132,96 @@ def _export_fields(model) -> list[str]:
     return [f.name for f in model._meta.fields]
 
 
+class ExportRowSource(Protocol):
+    """The row-source contract the export writer drives.
+
+    A source owns *what* rows to export and *how* each row looks; the writer owns
+    everything else — chunking, progress, cancellation, crash-safe resume and
+    storage. This lets a project export a set defined by a structured Elasticsearch
+    query, an explicit key list, or a custom document shape without subclassing the
+    job or its runner. Register one under a name in ``SNAPADMIN_EXPORT_SOURCES`` (a
+    ``{name: "dotted.path.to.factory"}`` map, where the factory is
+    ``factory(job) -> ExportRowSource``) and set ``SnapExportJob.source`` to that
+    name. Blank ``source`` (the default) uses the built-in ORM source.
+    """
+
+    def field_names(self) -> list[str]:
+        """Column order — the CSV header and the keys written from each row dict."""
+
+    def count(self) -> int:
+        """Total row count, for progress/ETA (may be an estimate)."""
+
+    def iter_batches(self, *, cursor: str | None, chunk_size: int) -> Iterator[tuple[list[dict], str]]:
+        """Yield ``(rows, next_cursor)`` starting *after* ``cursor``.
+
+        ``rows`` is a list of dicts keyed by :meth:`field_names`; ``next_cursor`` is
+        an opaque string the writer checkpoints and passes back as ``cursor`` on a
+        resume, so a source must be able to continue deterministically from it.
+        ``cursor`` is ``None`` on a fresh run. Apply any PII masking here — the
+        writer serializes the rows verbatim.
+        """
+
+
+class _DefaultOrmSource:
+    """Built-in source: ``model.objects.filter(**job.filters)`` as raw column rows,
+    paged by a primary-key cursor and PII-masked per the job's requester. This is
+    the behaviour a blank ``SnapExportJob.source`` keeps, byte-for-byte."""
+
+    def __init__(self, job) -> None:
+        model = job.target_model()
+        self._pk_attname = model._meta.pk.attname
+        self._fields = _export_fields(model)
+        self._masked = (
+            set()
+            if user_can_view_pii(job.requested_by)
+            else set(get_masked_fields(model._meta.app_label, model._meta.model_name))
+        )
+        qs = model.objects.all()
+        if job.filters:
+            qs = qs.filter(**job.filters)
+        self._qs = qs.order_by("pk")
+
+    def field_names(self) -> list[str]:
+        return self._fields
+
+    def count(self) -> int:
+        return self._qs.count()
+
+    def iter_batches(self, *, cursor: str | None, chunk_size: int) -> Iterator[tuple[list[dict], str]]:
+        while True:
+            chunk_qs = self._qs.filter(pk__gt=cursor) if cursor is not None else self._qs
+            batch = list(chunk_qs[:chunk_size].values(*self._fields))
+            if not batch:
+                return
+            if self._masked:
+                for row in batch:
+                    for name in self._masked:
+                        if name in row:
+                            row[name] = mask_value(row[name])
+            cursor = str(batch[-1][self._pk_attname])
+            yield batch, cursor
+
+
+def get_export_source(job) -> ExportRowSource:
+    """Resolve the row source for ``job``.
+
+    Blank ``job.source`` -> the built-in :class:`_DefaultOrmSource`. Otherwise the
+    name is looked up in ``SNAPADMIN_EXPORT_SOURCES`` and its dotted-path factory is
+    called with the job. An unknown name raises ``ImproperlyConfigured`` (surfaced
+    as a failed job, never a crashed worker).
+    """
+    if not job.source:
+        return _DefaultOrmSource(job)
+    registry = getattr(settings, "SNAPADMIN_EXPORT_SOURCES", None) or {}
+    dotted = registry.get(job.source)
+    if dotted is None:
+        raise ImproperlyConfigured(
+            f"Export source {job.source!r} is not registered in SNAPADMIN_EXPORT_SOURCES."
+        )
+    factory = import_string(dotted) if isinstance(dotted, str) else dotted
+    return factory(job)
+
+
 def _publish(storage: Storage, name: str, working_path: str) -> None:
     """Publish the finished working file into ``storage`` under ``name``.
 
@@ -184,24 +276,13 @@ def run_export_job(job_id) -> None:
 def _run(job) -> None:
     from snapadmin.models import SnapExportJob
 
-    model = job.target_model()
-    fields = _export_fields(model)
-    pk_attname = model._meta.pk.attname
-    # Fail-closed, like the REST serializer and GraphQL: an export is masked
-    # unless the requester (job.requested_by, which survives a worker process
-    # boundary better than "the current request") holds PII access. A purged
-    # requester (SET_NULL -> None) is treated as unprivileged.
-    masked_fields = (
-        set()
-        if user_can_view_pii(job.requested_by)
-        else set(get_masked_fields(model._meta.app_label, model._meta.model_name))
-    )
-    qs = model.objects.all()
-    if job.filters:
-        qs = qs.filter(**job.filters)
-    qs = qs.order_by("pk")
+    # The row source owns the queryset/query, the column shape and PII masking; the
+    # rest of this function owns chunking, progress, cancellation, crash-safe resume
+    # and storage — identically for the built-in ORM source and any custom one.
+    source = get_export_source(job)
+    fields = source.field_names()
 
-    job.total_rows = qs.count()
+    job.total_rows = source.count()
     if not job.file_name:
         job.file_name = f"export_{job.pk}.{job.export_format}"
     if job.started_at is None:
@@ -244,29 +325,24 @@ def _run(job) -> None:
         if is_csv and not resuming:
             byte_len += _write_bytes(handle, _csv_header_bytes(fields))
 
+        batches = source.iter_batches(cursor=cursor, chunk_size=chunk)
         while True:
-            # Cancellation checkpoint — re-read just the status.
+            # Cancellation checkpoint — re-read just the status *before* pulling the
+            # next batch, so a cancel stops us without writing it.
             job.refresh_from_db(fields=["status"])
             if job.status == SnapExportJob.Status.CANCELLED:
                 return
 
-            chunk_qs = qs.filter(pk__gt=cursor) if cursor is not None else qs
-            batch = list(chunk_qs[:chunk].values(*fields))
-            if not batch:
+            try:
+                batch, next_cursor = next(batches)
+            except StopIteration:
                 break
 
-            if masked_fields:
-                for row in batch:
-                    for name in masked_fields:
-                        if name in row:
-                            row[name] = mask_value(row[name])
-
             byte_len += _write_bytes(handle, _rows_bytes(batch, fields, is_csv))
-            cursor = str(batch[-1][pk_attname])
 
             # Persist the checkpoint *after* the bytes are durable, so a crash
             # can only under-count (a safe, idempotent re-process of the tail).
-            job.cursor_pk = cursor
+            job.cursor_pk = next_cursor
             job.cursor_bytes = byte_len
             job.processed_rows += len(batch)
             job.save(update_fields=["cursor_pk", "cursor_bytes", "processed_rows"])

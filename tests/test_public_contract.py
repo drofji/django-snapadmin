@@ -191,6 +191,13 @@ def test_monitoring_signatures():
     ]
 
 
+def test_exporting_signatures():
+    from snapadmin.exporting import get_export_source, run_export_job
+
+    assert _params(run_export_job) == ["job_id"]
+    assert _params(get_export_source) == ["job"]
+
+
 def test_apitoken_user_fk_is_swappable():
     """APIToken must work with a custom AUTH_USER_MODEL — never hard-code auth.User."""
     from django.conf import settings as django_settings

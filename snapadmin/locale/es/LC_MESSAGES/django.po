@@ -425,3 +425,9 @@ msgstr "Codificación no válida. Permitidas: %(encodings)s"
 
 #~ msgid "Dutch"
 #~ msgstr "Neerlandés"
+
+msgid "Row Source"
+msgstr "Fuente de filas"
+
+msgid "Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."
+msgstr "Nombre registrado en SNAPADMIN_EXPORT_SOURCES; en blanco usa la fuente ORM predeterminada."

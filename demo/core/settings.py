@@ -330,6 +330,13 @@ SNAPADMIN_EXPORT_DIR = os.getenv('SNAPADMIN_EXPORT_DIR', str(BASE_DIR / 'exports
 # rooted at SNAPADMIN_EXPORT_DIR — set this in a split deployment where the web
 # process and the Celery worker don't share a filesystem.
 SNAPADMIN_EXPORT_STORAGE = os.getenv('SNAPADMIN_EXPORT_STORAGE', '')
+# Named custom row sources for the async export: {name: "dotted.path.to.factory"},
+# factory(job) -> a source with field_names()/count()/iter_batches(). A SnapExportJob
+# with source="name" uses it instead of the default ORM source (blank source). The
+# demo registers a custom-document source that emits a compact product catalogue line.
+SNAPADMIN_EXPORT_SOURCES = {
+    'product_catalog': 'demo.apps.shop.export_sources.product_catalog_source',
+}
 
 # GraphQL security: require authentication + per-model view permission on every
 # resolver (mirrors the REST API contract). Never disable in production.

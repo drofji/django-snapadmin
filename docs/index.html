@@ -1559,6 +1559,52 @@ class BigModel(snap_models.SnapModel):
      http://localhost:8000/api/exports/
 # → {"id": "…", "status": "pending", "progress_percent": 0, "eta_seconds": null, …}</code></pre>
 
+  <h4 id="export-sources">Custom row sources — <code>SNAPADMIN_EXPORT_SOURCES</code></h4>
+  <p>By default an export streams <code>model.objects.filter(**filters)</code> as raw column rows. Three
+  shapes don't fit that: a result set defined by a <strong>structured Elasticsearch query</strong> (routing
+  it through <code>filters</code> would force the DB-fallback scan the ES query exists to avoid); an
+  <strong>explicit key list</strong> ("export exactly these records" — encoding it as a <code>__in</code>
+  filter re-evaluates a giant clause on every cursor page); or a <strong>custom document shape</strong> (not
+  raw <code>values()</code> rows). Register a source and the writer keeps everything else — the resumable
+  pk-cursor chunking, progress, cancellation and storage — while your source owns only <em>what</em> rows to
+  emit and <em>how</em> each looks:</p>
+  <pre><code># settings.py — {name: "dotted.path.to.factory"}, factory(job) -> source
+SNAPADMIN_EXPORT_SOURCES = {
+    "product_catalog": "myapp.exports.product_catalog_source",
+}
+
+# myapp/exports.py
+class ProductCatalogSource:
+    def __init__(self, job):
+        qs = Product.objects.all()
+        if job.filters:
+            qs = qs.filter(**job.filters)
+        self._qs = qs.order_by("pk")
+    def field_names(self):                 # CSV header / row-dict keys
+        return ["id", "catalog_line"]
+    def count(self):                       # drives progress / ETA
+        return self._qs.count()
+    def iter_batches(self, *, cursor, chunk_size):
+        # yield (rows, next_cursor); next_cursor is checkpointed and passed
+        # back on resume, so continue deterministically from it. Mask here.
+        while True:
+            page = self._qs.filter(pk__gt=cursor) if cursor is not None else self._qs
+            rows = list(page[:chunk_size].values("id", "name", "price"))
+            if not rows:
+                return
+            batch = [{"id": r["id"], "catalog_line": f'{r["name"]} (${r["price"]})'} for r in rows]
+            cursor = str(rows[-1]["id"])
+            yield batch, cursor
+
+def product_catalog_source(job):
+    return ProductCatalogSource(job)</code></pre>
+  <p>Create the job with <code>source="product_catalog"</code> (a field on <code>SnapExportJob</code>) and it
+  runs through your source instead of the ORM default; a blank <code>source</code> is byte-for-byte the
+  built-in export. The demo registers exactly this <code>product_catalog</code> source
+  (<code>demo/apps/shop/export_sources.py</code>). An unknown source name fails the job cleanly (never the
+  worker). Because your source owns PII masking on the rows it emits, apply masking there (see
+  <code>snapadmin.masking.mask_value</code>) if the document exposes protected fields.</p>
+
   <!-- ── API GraphQL ───────────────────────────────────────────────────────── -->
   <h2 id="api-graphql">⚛️ GraphQL API</h2>
   <p>SnapAdmin provides a dynamic GraphQL interface powered by Graphene-Django.</p>

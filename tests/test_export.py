@@ -894,3 +894,92 @@ class TestExportFilterValidationApi:
         )
         assert r.status_code == 201, r.content
         assert r.json()["processed_rows"] == 1
+
+
+# ── #FEAT10: pluggable export row sources ────────────────────────────────────
+
+@pytest.mark.django_db
+class TestPluggableExportSources:
+    def _products(self, n=5):
+        from demo.apps.shop.models import Product
+        return [Product.objects.create(name=f"P{i}", price=Decimal(i)) for i in range(n)]
+
+    def test_blank_source_uses_default_orm_source(self):
+        from snapadmin.exporting import _DefaultOrmSource, get_export_source
+        job = _job(source="")
+        assert isinstance(get_export_source(job), _DefaultOrmSource)
+
+    def test_registered_source_is_resolved(self):
+        from demo.apps.shop.export_sources import ProductCatalogSource
+        from snapadmin.exporting import get_export_source
+        job = _job(source="product_catalog")
+        assert isinstance(get_export_source(job), ProductCatalogSource)
+
+    def test_unknown_source_fails_the_job_not_the_worker(self):
+        job = _job(source="does_not_exist")
+        exporting.run_export_job(job.pk)          # must not raise
+        job.refresh_from_db()
+        assert job.status == "failed"
+        assert "does_not_exist" in job.error
+
+    def test_custom_source_csv_document_shape(self):
+        self._products(5)
+        job = _job(source="product_catalog", export_format="csv")
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed"
+        assert job.total_rows == 5
+        lines = open(exporting.output_path(job)).read().strip().splitlines()
+        assert lines[0] == "id,catalog_line"          # custom header, not the model columns
+        assert any("P0 ($0.00)" in line for line in lines[1:])
+        assert len(lines) == 6                         # header + 5 catalogue rows
+
+    def test_custom_source_json_document_shape(self):
+        self._products(3)
+        job = _job(source="product_catalog", export_format="json")
+        exporting.run_export_job(job.pk)
+        rows = [json.loads(line) for line in
+                open(exporting.output_path(job)).read().strip().splitlines()]
+        assert len(rows) == 3
+        assert set(rows[0]) == {"id", "catalog_line"}
+
+    def test_custom_source_honours_filters(self):
+        products = self._products(5)
+        job = _job(source="product_catalog", export_format="json",
+                   filters={"pk": products[2].pk})
+        exporting.run_export_job(job.pk)
+        rows = [json.loads(line) for line in
+                open(exporting.output_path(job)).read().strip().splitlines()]
+        assert len(rows) == 1
+        assert rows[0]["id"] == products[2].pk
+
+    @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
+    def test_custom_source_resumes_from_cursor(self, monkeypatch):
+        self._products(5)
+        job = _job(source="product_catalog", export_format="csv")
+
+        # Interrupt after the first checkpoint save (chunk of 2 written).
+        real_save = SnapExportJob.save
+        calls = {"n": 0}
+
+        def stop_after_first_checkpoint(self, *a, **kw):
+            fields = kw.get("update_fields") or []
+            real_save(self, *a, **kw)
+            if "cursor_pk" in fields:
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    raise RuntimeError("boom")
+
+        monkeypatch.setattr(SnapExportJob, "save", stop_after_first_checkpoint)
+        exporting.run_export_job(job.pk)             # crashes → failed
+        job.refresh_from_db()
+        assert job.status == "failed"
+        assert int(job.cursor_pk) > 0
+
+        monkeypatch.setattr(SnapExportJob, "save", real_save)
+        exporting.run_export_job(job.pk)             # resumes, does not restart
+        job.refresh_from_db()
+        assert job.status == "completed"
+        lines = open(exporting.output_path(job)).read().strip().splitlines()
+        assert lines[0] == "id,catalog_line"         # header written exactly once
+        assert len(lines) == 6                        # no duplicated rows on resume

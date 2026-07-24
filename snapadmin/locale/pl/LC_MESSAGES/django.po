@@ -414,3 +414,9 @@ msgstr "Nieprawidłowe kodowanie. Dozwolone: %(encodings)s"
 
 #~ msgid "Dutch"
 #~ msgstr "Niderlandzki"
+
+msgid "Row Source"
+msgstr "Źródło wierszy"
+
+msgid "Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."
+msgstr "Nazwa zarejestrowana w SNAPADMIN_EXPORT_SOURCES; puste używa domyślnego źródła ORM."

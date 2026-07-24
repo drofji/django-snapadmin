@@ -422,3 +422,9 @@ msgstr "Ongeldige codering. Toegestaan: %(encodings)s"
 
 #~ msgid "Dutch"
 #~ msgstr "Nederlands"
+
+msgid "Row Source"
+msgstr "Rijbron"
+
+msgid "Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."
+msgstr "Geregistreerde SNAPADMIN_EXPORT_SOURCES-naam; leeg gebruikt de standaard ORM-bron."

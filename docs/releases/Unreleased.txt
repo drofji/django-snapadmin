@@ -89,6 +89,22 @@ Null checks and membership lists in the auto-generated REST filters
   project-wide default); it is not in the library default set. All of these are additive — existing query
   parameters are unchanged.
 
+Pluggable async-export row sources (SNAPADMIN_EXPORT_SOURCES)
+  The async export job was hard-wired to one row source — ``model.objects.filter(**filters)`` serialized as
+  raw column rows. Three shapes a large-scale integrator needs couldn't be expressed: a result set defined
+  by a structured Elasticsearch query (routing it through ``filters`` would force the DB-fallback scan the ES
+  query exists to avoid), an explicit key list (encoding it as a ``__in`` filter re-evaluates a giant clause
+  on every cursor page), and a custom document shape (not raw ``values()`` rows). A new
+  ``SNAPADMIN_EXPORT_SOURCES = {name: "dotted.path.to.factory"}`` registry plus a ``source`` field on
+  ``SnapExportJob`` let a project register a custom source — an object with ``field_names()``, ``count()`` and
+  ``iter_batches(*, cursor, chunk_size)`` — without subclassing the job or its runner. The writer keeps
+  everything else: the resumable primary-key-cursor chunking, progress/ETA, single-flight claim,
+  cancellation, crash-safe checkpointing and configurable storage all work unchanged for a custom source, as
+  proven by the resume test. A blank ``source`` (the default) is byte-for-byte the built-in ORM export, so
+  existing jobs are unaffected. An unknown source name fails the job cleanly rather than crashing the worker.
+  This adds one database migration (``SnapExportJob.source``). The demo registers a ``product_catalog``
+  source that emits a compact catalogue line per product.
+
 Feature-adoption audit — snapadmin_info --section features
   ``snapadmin_info`` gains a "Feature adoption" section: a commerce-readiness ✓/✗ checklist of which
   business-important SnapAdmin capabilities are actually turned on or in use in your project vs. sitting

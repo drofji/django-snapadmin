@@ -415,3 +415,9 @@ msgstr "Неверная кодировка. Разрешены: %(encodings)s"
 
 #~ msgid "Dutch"
 #~ msgstr "Нидерландский"
+
+msgid "Row Source"
+msgstr "Источник строк"
+
+msgid "Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."
+msgstr "Имя из SNAPADMIN_EXPORT_SOURCES; пусто — используется стандартный ORM-источник."

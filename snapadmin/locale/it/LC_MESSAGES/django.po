@@ -424,3 +424,9 @@ msgstr "Codifica non valida. Consentite: %(encodings)s"
 
 #~ msgid "Dutch"
 #~ msgstr "Olandese"
+
+msgid "Row Source"
+msgstr "Sorgente righe"
+
+msgid "Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."
+msgstr "Nome registrato in SNAPADMIN_EXPORT_SOURCES; vuoto usa la sorgente ORM predefinita."
