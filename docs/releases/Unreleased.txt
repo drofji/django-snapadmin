@@ -89,6 +89,15 @@ Null checks and membership lists in the auto-generated REST filters
   project-wide default); it is not in the library default set. All of these are additive — existing query
   parameters are unchanged.
 
+Top-level re-exports — from snapadmin import SnapModel, SnapCharField, …
+  The most common public names — ``SnapModel``, every ``Snap*Field`` type, the ``EsStorageMode`` enum, the
+  ``APIToken`` model, the ``SnapEsUnavailable``/``SnapPurgeError`` exceptions and the ``Snap*Validator``
+  classes — are now importable directly from the package root, so ``from snapadmin import SnapModel,
+  SnapCharField`` works alongside the existing deep paths (``from snapadmin.models import SnapModel``), which
+  are unchanged. The re-exports are lazy (PEP 562), so importing ``snapadmin`` — or a console script such as
+  ``snapadmin-demo`` that runs before Django is configured — never eagerly imports the Django-backed
+  modules. A new ``docs/index.html`` module map documents what each top-level module owns.
+
 Pluggable async-export row sources (SNAPADMIN_EXPORT_SOURCES)
   The async export job was hard-wired to one row source — ``model.objects.filter(**filters)`` serialized as
   raw column rows. Three shapes a large-scale integrator needs couldn't be expressed: a result set defined

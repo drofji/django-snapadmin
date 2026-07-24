@@ -1,3 +1,12 @@
+"""
+Server-rendered views for SnapAdmin.
+
+``DashboardView`` is the staff-gated landing dashboard (system/health/version
+summary, rendered from :mod:`snapadmin.diagnostics`-style data), and
+``StaffRequiredMixin`` is the shared ``AccessMixin`` that restricts a view to staff
+users. The REST/GraphQL API surfaces live under :mod:`snapadmin.api`; this module is
+the small HTML side.
+"""
 
 import os
 import platform

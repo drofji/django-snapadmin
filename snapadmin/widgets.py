@@ -1,3 +1,12 @@
+"""
+Custom Django form widgets used by SnapAdmin's admin forms.
+
+``SmartModelSelectorWidget`` renders the app/model picker (backed by the registered
+``SnapModel`` set) used where a field references a model by ``app_label.Model``. These
+are admin-form building blocks; the field types that opt into them live in
+:mod:`snapadmin.fields`.
+"""
+
 from django import forms
 from django.apps import apps
 from django.template.loader import render_to_string

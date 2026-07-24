@@ -1,3 +1,16 @@
+"""
+Admin base classes and registration for SnapAdmin.
+
+Resolves the admin ``ModelAdmin``/inline/widget base lazily: django-unfold's themed
+classes when ``unfold`` is installed *and* in ``INSTALLED_APPS`` (``UNFOLD_INSTALLED``
+is then ``True``), otherwise Django's built-in admin — so the package renders either
+way. Also registers the package's own models (``APIToken``, ``ErrorEvent``) and exposes
+the public inline bases (``SnapTabularInline``/``SnapStackedInline``). The auto
+generated per-model ``ModelAdmin`` is built by ``register_admin`` /
+``register_all_admins`` in :mod:`snapadmin.models`; this module owns the shared base
+classes those build on.
+"""
+
 from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
 from django.utils.html import format_html

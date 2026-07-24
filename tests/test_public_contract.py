@@ -324,3 +324,55 @@ def test_feature_toggle_setting_names_still_read():
 )
 def test_url_names_reversible(name, args):
     assert reverse(name, args=args)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Blessed top-level re-exports (#STRUCT1): ``from snapadmin import SnapModel`` etc.
+# must stay available and identical to the deep import path they alias.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_BLESSED_REEXPORTS = {
+    "snapadmin.models": [
+        "SnapModel", "EsStorageMode", "APIToken", "SnapEsUnavailable", "SnapPurgeError",
+    ],
+    "snapadmin.fields": [
+        "SnapField", "SnapCharField", "SnapTextField", "SnapEmailField", "SnapSlugField",
+        "SnapURLField", "SnapUUIDField", "SnapIntegerField", "SnapPositiveIntegerField",
+        "SnapPositiveSmallIntegerField", "SnapPositiveBigIntegerField", "SnapSmallIntegerField",
+        "SnapBigIntegerField", "SnapFloatField", "SnapDecimalField", "SnapDateField",
+        "SnapDateTimeField", "SnapTimeField", "SnapDurationField", "SnapFileField",
+        "SnapImageField", "SnapBooleanField", "SnapJSONField", "SnapGenericIPAddressField",
+        "SnapForeignKey", "SnapOneToOneField", "SnapManyToManyField", "SnapRichTextField",
+        "SnapPhoneField", "SnapColorField", "SnapFunctionField", "SnapStatusBadgeField",
+        "SnapStatusBadgeFieldChoice",
+    ],
+    "snapadmin.validators": ["SnapPhoneValidator", "SnapColorValidator", "SnapFileValidator"],
+}
+
+
+def test_blessed_reexports_alias_the_deep_paths():
+    import importlib
+
+    import snapadmin
+
+    for module_path, names in _BLESSED_REEXPORTS.items():
+        module = importlib.import_module(module_path)
+        for name in names:
+            top = getattr(snapadmin, name)              # from snapadmin import <name>
+            deep = getattr(module, name)                # from <module> import <name>
+            assert top is deep, f"snapadmin.{name} is not {module_path}.{name}"
+
+
+def test_blessed_reexports_listed_in_all_and_dir():
+    import snapadmin
+
+    expected = {n for names in _BLESSED_REEXPORTS.values() for n in names}
+    assert expected <= set(snapadmin.__all__)
+    assert expected <= set(dir(snapadmin))
+
+
+def test_unknown_top_level_attr_raises():
+    import snapadmin
+
+    with pytest.raises(AttributeError):
+        snapadmin.ThisNameIsNotExported

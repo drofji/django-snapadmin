@@ -1,3 +1,14 @@
+"""
+Auto-generated GraphQL API for SnapAdmin.
+
+Builds a Graphene schema from the registered ``SnapModel`` subclasses — one
+``DjangoObjectType`` and query field per model — with the same guarantees as the
+REST layer: authentication and per-model ``view`` permission enforced on every
+resolved relation (``SNAPADMIN_GRAPHQL_REQUIRE_AUTH``), and PII masking applied to
+resolved field values unless the caller holds PII access. Served at ``/graphql/``
+(GraphiQL gated by ``SNAPADMIN_GRAPHIQL_ENABLED``). Graphene is an optional extra;
+this module is imported only when the GraphQL feature is enabled.
+"""
 
 import graphene
 from graphene_django import DjangoObjectType

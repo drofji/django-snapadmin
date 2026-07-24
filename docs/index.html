@@ -1801,6 +1801,31 @@ urlpatterns = [*router.urls, path("", include("snapadmin.urls"))]</code></pre>
 yourproject/templates/snapadmin/email/error_alert.html    # rebrand the spike-alert email
 yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily digest</code></pre>
 
+  <h3 id="module-map">7. Package layout — the module map</h3>
+  <p>Everything is importable from its own module (<code>from snapadmin.backup import run_backup</code>);
+  the most common names are also re-exported from the top level
+  (<code>from snapadmin import SnapModel, SnapCharField</code>). The re-exports are lazy, so importing
+  <code>snapadmin</code> — or a console script that runs before Django is configured — never eagerly
+  loads the Django-backed modules.</p>
+  <table>
+    <thead><tr><th>Module</th><th>Owns</th></tr></thead>
+    <tbody>
+      <tr><td><code>models</code></td><td><code>SnapModel</code>, the ES query layer (<code>EsManager</code>/<code>EsQuerySet</code>, <code>es_filter</code>/<code>es_aggregate</code>/<code>es_count</code>/<code>es_scan</code>), <code>APIToken</code>, the admin-registration helpers, and the <code>EsStorageMode</code> enum / <code>SnapPurgeError</code>/<code>SnapEsUnavailable</code> exceptions.</td></tr>
+      <tr><td><code>fields</code></td><td>Every <code>Snap*Field</code> type — the declarative field layer with its snap-only kwargs (stripped from <code>deconstruct()</code> so they add no migration).</td></tr>
+      <tr><td><code>validators</code></td><td><code>SnapPhoneValidator</code> / <code>SnapColorValidator</code> / <code>SnapFileValidator</code> (deconstructible).</td></tr>
+      <tr><td><code>admin</code>, <code>widgets</code>, <code>views</code></td><td>The admin base classes (Unfold-optional), form widgets, and the staff-gated dashboard view.</td></tr>
+      <tr><td><code>api/</code></td><td>The REST + GraphQL surface: <code>views</code>, <code>serializers</code>, <code>filters</code>, <code>authentication</code>, <code>exports</code>, <code>graphql</code>, <code>health</code>, <code>users</code>.</td></tr>
+      <tr><td><code>exporting</code>, <code>reindexing</code>, <code>etl</code></td><td>The async export writer (+ pluggable <a href="#export-sources">row sources</a>), the resumable bulk ES reindex, and the ETL upsert/prune helpers.</td></tr>
+      <tr><td><code>monitoring</code>, <code>health</code>, <code>backup</code>, <code>audit</code>, <code>masking</code></td><td>Error monitoring &amp; digests, subsystem health alerts, 3-2-1 backups, the audit trail, and PII masking.</td></tr>
+      <tr><td><code>diagnostics/</code></td><td>The auto-discovered collectors behind <code>snapadmin_info</code> (version, features, database, elasticsearch, celery, inventory, …).</td></tr>
+      <tr><td><code>licensing</code></td><td>The curated dependency-licence map behind <code>snapadmin_license_check</code>.</td></tr>
+      <tr><td><code>quickstart/</code>, <code>integrate/</code></td><td>The stdlib-only console scripts <code>snapadmin-demo</code> and <code>snapadmin-init</code> — they never import Django at import time.</td></tr>
+      <tr><td><code>checks</code>, <code>apps</code>, <code>urls</code>, <code>logging_config</code></td><td>System checks, the <code>AppConfig</code>, URL routes, and structlog setup.</td></tr>
+    </tbody>
+  </table>
+  <p><strong>No module ever moves or is renamed</strong> — a deep import path is a permanent contract.
+  Structure improves additively only: new modules, blessed top-level re-exports, docstrings.</p>
+
   <!-- ── Elasticsearch ──────────────────────────────────────────────────────── -->
   <h2 id="elasticsearch">🔍 Elasticsearch Integration</h2>
   <p>SnapAdmin supports three Elasticsearch storage modes via <code>EsStorageMode</code>. Choose the mode per model based on your use case.</p>

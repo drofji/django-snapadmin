@@ -1,3 +1,13 @@
+"""
+Reusable, ``deconstructible`` field validators for SnapAdmin.
+
+``SnapPhoneValidator`` (E.164 / common national phone formats), ``SnapColorValidator``
+(``#RGB``/``#RRGGBB`` hex) and ``SnapFileValidator`` (extension + size limits). Each is
+``@deconstructible`` so it round-trips through a field's ``deconstruct()`` unchanged and
+never forces a spurious migration. They back the corresponding ``Snap*Field`` types but
+are public for direct use on any Django field.
+"""
+
 import os
 import re
 import typing

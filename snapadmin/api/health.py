@@ -1,3 +1,12 @@
+"""
+Public health-check endpoint (``GET /api/health/``).
+
+An unauthenticated readiness/liveness probe that reports database reachability (and
+overall status) as JSON with an appropriate HTTP status code, for a load balancer or
+container orchestrator. The richer operator-facing diagnostics — Elasticsearch,
+Celery, per-model inventory — live in :mod:`snapadmin.diagnostics` behind the
+``snapadmin_info`` command; this endpoint stays deliberately small and dependency-free.
+"""
 
 from django.db import connections
 from django.db.utils import OperationalError
