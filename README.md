@@ -15,6 +15,7 @@ model is mirrored there — plain listings stay on the database.
 📚 **[Full Documentation](https://drofji.github.io/django-snapadmin/)** — configuration guide, API reference, examples
 📦 **[Django Packages](https://djangopackages.org/packages/p/django-snapadmin/)** — compare SnapAdmin against other Django admin packages
 📝 **[Changelog](https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md)** · 🔒 **[Security policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md)**
+🧭 **[llms.txt](https://drofji.github.io/django-snapadmin/llms.txt)** — machine-readable map of the docs for AI coding assistants ([`llmstxt.org`](https://llmstxt.org/) format)
 
 ---
 

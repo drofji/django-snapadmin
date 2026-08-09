@@ -37,6 +37,9 @@ include = [
     "docs/releases/**/*.txt",
     "docs/migrations/**/*.md",
     { path = "CHANGELOG.md", format = ["sdist", "wheel"] },
+    # Machine-readable docs map for AI assistants (llmstxt.org). Also served from
+    # GitHub Pages at /llms.txt; the root copy travels with the sdist.
+    { path = "llms.txt", format = ["sdist", "wheel"] },
     { path = "THIRD_PARTY_NOTICES.md", format = ["sdist", "wheel"] },
     { path = "SECURITY.md", format = ["sdist"] },
 ]

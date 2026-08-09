@@ -6,3 +6,27 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+Added
+-----
+
+* **Machine-readable entry points for AI coding assistants.** Assistants had no good way into
+  SnapAdmin: the only documentation surface was a single 220 KB HTML page, which large language
+  models parse poorly, and nothing in the installed package explained the library's shape. Two
+  layers now fix that, and both are pinned by tests so they cannot quietly go stale.
+
+  ``llms.txt`` — the `llmstxt.org <https://llmstxt.org/>`_ format — is a plain-Markdown map of the
+  documentation: what SnapAdmin is, the three-step quickstart, the handful of facts an assistant
+  should not have to infer (snap-only field kwargs add no migration, import paths are the public
+  contract, the Unfold theme is optional, misconfiguration shows up as ``snapadmin.W001``–``W007``),
+  then annotated links into every section of the documentation. It is published at
+  https://drofji.github.io/django-snapadmin/llms.txt for assistants with web access, and a
+  byte-identical copy ships in the source distribution at the repository root.
+
+  The ``snapadmin`` package docstring is now a full quickstart and module map — the three-step
+  example, what each module and management command is for, the ``SNAPADMIN_*`` setting families and
+  the optional extras. Unlike ``llms.txt`` this layer reaches **every** install: it is what
+  ``help(snapadmin)`` prints and what any tool reading the installed package finds, with no network
+  and no repository access.
+
+  Nothing about the library's behaviour changes — this is documentation that machines can read.

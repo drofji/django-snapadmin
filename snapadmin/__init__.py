@@ -1,5 +1,9 @@
 """SnapAdmin — declarative Django admin + REST/GraphQL API package.
 
+Define a model's fields once and get a themed Django admin, a REST API with
+Swagger docs, a GraphQL endpoint and optional Elasticsearch search. Every
+surface is a single settings toggle.
+
 The most common public names are re-exported here for convenience, so
 ``from snapadmin import SnapModel, SnapCharField`` works alongside the original
 deep paths (``from snapadmin.models import SnapModel``), which keep working
@@ -7,6 +11,134 @@ unchanged. The re-exports are **lazy** (PEP 562 ``__getattr__``): importing
 ``snapadmin`` — or a console-script subpackage like ``snapadmin.quickstart`` that
 runs before any Django settings exist — does not import the Django-backed
 ``models``/``fields`` modules until one of these names is actually accessed.
+
+Quickstart
+----------
+Three steps take a model from nothing to a full admin + API::
+
+    # 1. models.py — declare the fields, with admin/API behaviour inline
+    from snapadmin import fields as snap, models as snap_models
+
+    class Product(snap_models.SnapModel):
+        name      = snap.SnapCharField(max_length=200, searchable=True, show_in_list=True)
+        price     = snap.SnapDecimalField(max_digits=10, decimal_places=2, filterable=True)
+        available = snap.SnapBooleanField(default=True, filterable=True)
+
+        # Optional: mirror rows to Elasticsearch, auto-purge after a year
+        # es_storage_mode = snap_models.EsStorageMode.DUAL
+        # data_retention_days = 365
+
+    # 2. settings.py — every surface is a toggle
+    SNAPADMIN_REST_API_ENABLED = True
+    SNAPADMIN_GRAPHQL_ENABLED = True
+    SNAPADMIN_SWAGGER_ENABLED = True
+
+    # 3. admin.py — register every SnapModel in the project
+    from snapadmin.models import SnapModel
+    SnapModel.register_all_admins()
+
+``snapadmin`` must be in ``INSTALLED_APPS`` and ``snapadmin.urls`` included in
+the root URLconf. Two console scripts help before that point:
+``snapadmin-demo`` runs a throwaway demo project, ``snapadmin-init`` inspects an
+existing project read-only and prints the snippets to paste.
+
+Module map
+----------
+Import paths are the public contract — modules are never moved or renamed.
+
+Declaring models
+    ``snapadmin.models``
+        ``SnapModel`` (the declarative base and ``register_all_admins()``),
+        ``EsStorageMode``, ``APIToken``, ``ErrorEvent``, the ES manager/queryset.
+    ``snapadmin.fields``
+        Every ``Snap*Field``. Snap-only kwargs (``searchable``, ``filterable``,
+        ``show_in_list``, ``masked``, …) drive the admin and API and are
+        stripped before Django sees them, so they add no migration.
+    ``snapadmin.validators``
+        ``deconstructible`` validators: phone, colour, file type/size.
+
+Admin surface
+    ``snapadmin.admin``
+        Admin base classes and the auto-registration machinery. Uses Unfold's
+        themed classes when the ``[theme]`` extra is installed, stock Django
+        admin otherwise.
+    ``snapadmin.widgets`` · ``snapadmin.nesting`` · ``snapadmin.sanitize``
+        Form widgets, nested-app grouping in the sidebar, HTML sanitization for
+        wysiwyg values.
+    ``snapadmin.views`` · ``snapadmin.urls``
+        The system dashboard and the URLconf to ``include()``.
+
+APIs
+    ``snapadmin.api.views`` · ``snapadmin.api.serializers`` · ``snapadmin.api.filters``
+        The generated REST surface (per-model CRUD, filtering, pagination).
+    ``snapadmin.api.graphql``
+        The generated Graphene schema.
+    ``snapadmin.api.authentication`` · ``snapadmin.sso``
+        API-token auth and SSO redirect handling.
+    ``snapadmin.api.exports`` · ``snapadmin.exporting``
+        Async row exports; pluggable sources via ``SNAPADMIN_EXPORT_SOURCES``.
+    ``snapadmin.api.users`` · ``snapadmin.api.health`` · ``snapadmin.api.reindex``
+    ``snapadmin.api.offline``
+        Optional endpoints, each behind its own setting.
+
+Operations
+    ``snapadmin.audit`` · ``snapadmin.masking``
+        Change logging and PII masking.
+    ``snapadmin.backup``
+        3-2-1 backups (local / network / SFTP / FTP).
+    ``snapadmin.monitoring`` · ``snapadmin.health`` · ``snapadmin.logging_config``
+        Error capture and digests, health checks, structlog wiring.
+    ``snapadmin.reindexing`` · ``snapadmin.etl`` · ``snapadmin.db``
+        Elasticsearch reindexing, ETL helpers, database routing.
+    ``snapadmin.tasks``
+        Celery tasks and Beat schedules (``[celery]`` extra).
+    ``snapadmin.checks``
+        Django system checks — ``snapadmin.W001``…``W007`` catch misconfiguration
+        at startup, so read them before debugging behaviour.
+
+Tooling
+    ``snapadmin.diagnostics``
+        Collectors behind ``manage.py snapadmin_info`` — runtime, database, API,
+        Elasticsearch and the feature-adoption inventory.
+    ``snapadmin.licensing``
+        Dependency-licence data behind ``manage.py snapadmin_license_check``.
+    ``snapadmin.quickstart`` · ``snapadmin.integrate``
+        The ``snapadmin-demo`` and ``snapadmin-init`` console scripts. Both are
+        stdlib-only and import no Django at module level.
+
+Management commands
+    ``snapadmin_info``, ``snapadmin_license_check``, ``snapadmin_reindex``,
+    ``snapadmin_audit_export``, ``snapadmin_health_alert``, ``db_backup``,
+    ``purge_expired_data``, ``send_error_digest``.
+
+Settings
+--------
+Everything is namespaced ``SNAPADMIN_*`` and every feature is off-by-default
+unless noted. The families: ``SNAPADMIN_REST_API_*`` / ``SNAPADMIN_API_*``
+(REST surface, throttling, pagination, guards), ``SNAPADMIN_GRAPHQL_*``,
+``SNAPADMIN_SWAGGER_ENABLED``, ``SNAPADMIN_ES_*`` (Elasticsearch routing and
+fallback), ``SNAPADMIN_BACKUP_*``, ``SNAPADMIN_ERROR_*`` and
+``SNAPADMIN_HEALTH_ALERT_*`` (monitoring and alerts), ``SNAPADMIN_AUDIT_*`` and
+``SNAPADMIN_MASKED_FIELDS`` (audit and PII), ``SNAPADMIN_EXPORT_*``,
+``SNAPADMIN_SSO_*``, plus layout keys (``SNAPADMIN_URL_PREFIX``,
+``SNAPADMIN_APP_LABELS``, ``SNAPADMIN_HIDDEN_APPS``, ``SNAPADMIN_NESTED_APPS``).
+The full reference with defaults is the "Environment Variables Reference"
+section of the documentation.
+
+Optional extras
+---------------
+The base install carries only permissive licences (MIT/BSD/Apache) and is safe
+for commercial use. ``pip install django-snapadmin[<extra>]``:
+``theme`` (Unfold UI), ``elasticsearch``, ``celery``, ``backup`` (SFTP),
+``extra-settings``, ``wysiwyg`` (CKEditor 5 — GPL/commercial, hence optional),
+``autocomplete-filter``, or ``all``. Each is imported lazily and raises a
+pointed ``ImproperlyConfigured`` only when its feature is actually used.
+
+Further reading
+---------------
+Full docs: https://drofji.github.io/django-snapadmin/ — and
+https://drofji.github.io/django-snapadmin/llms.txt for a machine-readable map
+of it.
 """
 
 from importlib import import_module

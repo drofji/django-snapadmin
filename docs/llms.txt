@@ -1,0 +1,90 @@
+# SnapAdmin (django-snapadmin)
+
+> Declarative Django admin and API generator. Define a model's fields once with `Snap*Field` and get a themed Django admin, a REST API with Swagger docs, a GraphQL endpoint, and optional Elasticsearch search. Every surface is a single `SNAPADMIN_*` settings toggle. Requires Python >= 3.10 and Django >= 5.2; the package is beta, so pin an exact version.
+
+Install with `pip install django-snapadmin`, add `snapadmin` to `INSTALLED_APPS`, include `snapadmin.urls` in the root URLconf, then:
+
+```python
+# models.py
+from snapadmin import fields as snap, models as snap_models
+
+class Product(snap_models.SnapModel):
+    name      = snap.SnapCharField(max_length=200, searchable=True, show_in_list=True)
+    price     = snap.SnapDecimalField(max_digits=10, decimal_places=2, filterable=True)
+    available = snap.SnapBooleanField(default=True, filterable=True)
+
+# settings.py
+SNAPADMIN_REST_API_ENABLED = True
+SNAPADMIN_GRAPHQL_ENABLED = True
+SNAPADMIN_SWAGGER_ENABLED = True
+
+# admin.py
+from snapadmin.models import SnapModel
+SnapModel.register_all_admins()
+```
+
+Key facts an agent should not have to infer:
+
+- Snap-only field kwargs (`searchable`, `filterable`, `show_in_list`, `masked`, …) configure the admin and API and are stripped before Django sees them — they add no migration.
+- Module import paths are the public contract and are never moved or renamed; `from snapadmin import SnapModel` and `from snapadmin.models import SnapModel` both work (the top-level re-exports are lazy).
+- The Unfold theme is optional (`[theme]` extra). Without it SnapAdmin renders on the stock Django admin.
+- Startup misconfiguration surfaces as Django system checks `snapadmin.W001`–`W007` — read those before debugging behaviour.
+- Run `python manage.py snapadmin_info` for a diagnostic report of what is enabled in a live project.
+
+## Getting started
+
+- [Installation](https://drofji.github.io/django-snapadmin/#installation): requirements, `INSTALLED_APPS` ordering (Unfold apps must precede `django.contrib.admin`), and the optional extras table.
+- [Quick start with snapadmin-demo](https://drofji.github.io/django-snapadmin/#snapadmin-demo): console script that fetches and runs a throwaway demo project.
+- [Integrate an existing project with snapadmin-init](https://drofji.github.io/django-snapadmin/#snapadmin-init): read-only inspection of a project that prints ready-to-paste snippets; it never edits source.
+- [Integrating with your project](https://drofji.github.io/django-snapadmin/#integrating): wiring SnapAdmin into an existing Django codebase alongside plain `models.Model`.
+- [Ecosystem compatibility](https://drofji.github.io/django-snapadmin/#compatibility): which Django versions, databases and third-party admin packages are supported.
+
+## Declaring models
+
+- [SnapModel reference](https://drofji.github.io/django-snapadmin/#snap-model): the declarative base, `register_all_admins()`, `es_storage_mode`, `data_retention_days`.
+- [Snap fields](https://drofji.github.io/django-snapadmin/#snap-fields): every `Snap*Field` and its snap-only kwargs.
+- [Advanced layout](https://drofji.github.io/django-snapadmin/#advanced-layout): fieldsets, inlines, ordering and grouping of the generated admin form.
+- [Status badges](https://drofji.github.io/django-snapadmin/#status-badges): `SnapStatusBadgeField` and coloured choice rendering in list views.
+- [Admin registration](https://drofji.github.io/django-snapadmin/#admin-registration): auto-registration, per-model opt-out, and hooking custom `ModelAdmin` behaviour.
+- [Extending and overriding](https://drofji.github.io/django-snapadmin/#extending): replacing generated serializers, viewsets, admin classes and templates.
+
+## APIs
+
+- [REST API](https://drofji.github.io/django-snapadmin/#api-rest): generated CRUD routes, filtering, pagination, throttling, and the delete/write guards.
+- [GraphQL API](https://drofji.github.io/django-snapadmin/#api-graphql): the generated Graphene schema and the GraphiQL playground.
+- [Token management](https://drofji.github.io/django-snapadmin/#api-tokens): `APIToken`, hashed storage, and authenticating API calls.
+
+## Operations
+
+- [Elasticsearch integration](https://drofji.github.io/django-snapadmin/#elasticsearch): storage modes, query routing, reindexing, and database fallback.
+- [Celery and periodic tasks](https://drofji.github.io/django-snapadmin/#celery): background tasks and the Beat schedules SnapAdmin registers.
+- [GDPR data retention](https://drofji.github.io/django-snapadmin/#gdpr): `data_retention_days`, PII masking, and the purge command.
+- [Error monitoring and email alerts](https://drofji.github.io/django-snapadmin/#error-monitoring): error capture, thresholds, cooldowns and digests.
+- [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups): local, network, SFTP and FTP targets with rotation.
+- [Structured logging](https://drofji.github.io/django-snapadmin/#logging): the structlog wiring SnapAdmin expects.
+- [Diagnostics — snapadmin_info](https://drofji.github.io/django-snapadmin/#snapadmin-info): the runtime/database/API/feature-adoption report.
+- [Licence audit — snapadmin_license_check](https://drofji.github.io/django-snapadmin/#license-check): dependency licences and their tiers.
+- [Offline mode](https://drofji.github.io/django-snapadmin/#offline): running with no outbound network access.
+
+## Configuration reference
+
+- [Environment variables reference](https://drofji.github.io/django-snapadmin/#env-vars): every `SNAPADMIN_*` setting with its default. Start here for any "which setting turns X on" question.
+- [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config): SSO, multi-database routing and hardening options.
+- [Internationalization](https://drofji.github.io/django-snapadmin/#i18n): the ten shipped locales and how to add strings.
+- [Theming and styles](https://drofji.github.io/django-snapadmin/#theming): overriding the Unfold theme and SnapAdmin's own CSS.
+- [Large-dataset performance](https://drofji.github.io/django-snapadmin/#performance) and [optimizations guide](https://drofji.github.io/django-snapadmin/#optimizations): estimated counts, pagination caps, and query-routing trade-offs.
+
+## Project
+
+- [README](https://github.com/drofji/django-snapadmin/blob/main/README.md): the same overview with the extras table and screenshots.
+- [Changelog](https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md): user-visible changes per release.
+- [Migration guides](https://drofji.github.io/django-snapadmin/#migration-guides): upgrade steps between versions with breaking changes.
+- [AI assistants](https://drofji.github.io/django-snapadmin/#ai-assistants): how this file and the in-package module map are meant to be used, and the tests that keep both honest.
+- [Security policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md): supported versions, reporting, and the production-hardening checklist.
+- [Third-party notices](https://github.com/drofji/django-snapadmin/blob/main/THIRD_PARTY_NOTICES.md): dependency licences; the base install is permissive-only (MIT/BSD/Apache) and safe for commercial use.
+- [Source](https://github.com/drofji/django-snapadmin) · [PyPI](https://pypi.org/project/django-snapadmin/)
+
+## Optional
+
+- [Demo app model overview](https://drofji.github.io/django-snapadmin/#demo-models): the models the bundled demo declares, useful as worked examples.
+- [Seed command](https://drofji.github.io/django-snapadmin/#demo-seed): populating the demo with sample data.

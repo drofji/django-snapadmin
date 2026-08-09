@@ -278,6 +278,10 @@
     <ul>
       <li><a href="#migration-guides">Migration Guides</a></li>
     </ul>
+    <div class="section-label">🧭 AI Assistants</div>
+    <ul>
+      <li><a href="#ai-assistants">llms.txt &amp; Module Map</a></li>
+    </ul>
   </nav>
 </aside>
 
@@ -2966,6 +2970,45 @@ for order in Order.objects.select_related("customer"):   # 1 query, total
   <pre><code>python manage.py seed_demo          # default: 20 products, 10 customers, 5 orders
 python manage.py seed_demo --no-index  # skip ES indexing (no ES cluster needed)</code></pre>
   <p>The command is idempotent — running it multiple times adds more data without duplicating existing records.</p>
+
+  <!-- ── AI Assistants ─────────────────────────────────────────────────────── -->
+  <h2 id="ai-assistants">🧭 AI Assistants — <code>llms.txt</code> &amp; the module map</h2>
+  <p>
+    If you build with an AI coding assistant, SnapAdmin ships two entry points written for machines
+    rather than browsers. Both are kept in sync with the code by the test suite, so an assistant
+    reading them will not be taught something that has since been renamed or removed.
+  </p>
+
+  <h3><code>llms.txt</code> — a map of this documentation</h3>
+  <p>
+    <a href="https://drofji.github.io/django-snapadmin/llms.txt"><code>llms.txt</code></a> follows the
+    <a href="https://llmstxt.org/">llmstxt.org</a> convention: plain Markdown, no navigation chrome,
+    no JavaScript. It states what SnapAdmin is, carries the three-step quickstart, lists the facts an
+    assistant should not have to infer — snap-only field kwargs add no migration, import paths are the
+    public contract, the Unfold theme is optional, misconfiguration surfaces as
+    <code>snapadmin.W001</code>–<code>W007</code> — and then links every section of this page with a
+    line describing what it covers.
+  </p>
+  <p>
+    Point your assistant at the URL, or paste the file into its context. A byte-identical copy sits at
+    the repository root and travels inside the source distribution, so it is available offline too.
+  </p>
+
+  <h3>The module map — available from any install</h3>
+  <p>
+    The <code>snapadmin</code> package docstring is a quickstart plus a map of the package: what each
+    module and management command is for, the <code>SNAPADMIN_*</code> setting families, and the
+    optional extras. Unlike <code>llms.txt</code> this needs no network and no repository access — it
+    is what an assistant finds when it reads the installed package, and what you get from:
+  </p>
+  <pre><code>python -c "import snapadmin; help(snapadmin)"</code></pre>
+  <div class="callout callout-info">
+    <strong>Kept honest by tests.</strong>
+    <code>tests/test_ai_entry_points.py</code> asserts that every module the map names actually
+    imports, that every documentation anchor <code>llms.txt</code> links to still exists on this page,
+    that the two copies of <code>llms.txt</code> match, and that the documented extras match
+    <code>pyproject.toml</code>. A rename that breaks the map fails CI instead of shipping.
+  </div>
 
   <!-- ── Migration Guides ──────────────────────────────────────────────────── -->
   <h2 id="migration-guides">🔄 Migration Guides</h2>

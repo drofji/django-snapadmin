@@ -10,7 +10,13 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 
 ## Unreleased
 
-_Nothing yet._
+### Added
+- **`llms.txt`** — a machine-readable map of the documentation for AI coding assistants, in the
+  [llmstxt.org](https://llmstxt.org/) format. Published at
+  <https://drofji.github.io/django-snapadmin/llms.txt> and shipped in the source distribution.
+- **A quickstart and module map in the `snapadmin` package docstring** — the three-step example,
+  what every module and management command does, the `SNAPADMIN_*` setting families and the optional
+  extras, available offline from any install via `help(snapadmin)`.
 
 ## 0.1.0b5 — 2026-07-24
 
