@@ -114,7 +114,7 @@ class TestPurgeExpiredDataCommand:
         from io import StringIO
         from django.core.management import call_command
         out = StringIO()
-        call_command("purge_expired_data", *args, stdout=out)
+        call_command("snapadmin_purge_expired_data", *args, stdout=out)
         return out.getvalue()
 
     def test_command_runs_without_error(self):

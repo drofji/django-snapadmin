@@ -30,6 +30,11 @@ elasticsearch>=8.12.0
 # SSH/SFTP offsite backups (SNAPADMIN_BACKUP_SFTP_*)
 paramiko>=3.0.0
 
+# S3-compatible storage for media/static/exports (SNAPADMIN_STORAGE_BACKEND=s3).
+# Uncomment when you point the demo at AWS S3, Hetzner Object Storage, MinIO or
+# Backblaze B2; the default local-disk setup needs neither. BSD-3-Clause.
+# django-storages[s3]>=1.14
+
 # Testing
 pytest>=8.0.0
 pytest-django>=4.8.0

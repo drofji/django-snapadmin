@@ -80,9 +80,9 @@ MAPPED_COMMANDS = [
     "snapadmin_reindex",
     "snapadmin_audit_export",
     "snapadmin_health_alert",
-    "db_backup",
-    "purge_expired_data",
-    "send_error_digest",
+    "snapadmin_db_backup",
+    "snapadmin_purge_expired_data",
+    "snapadmin_send_error_digest",
 ]
 
 

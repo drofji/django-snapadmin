@@ -65,6 +65,13 @@ Admin surface
     ``snapadmin.widgets`` · ``snapadmin.nesting`` · ``snapadmin.sanitize``
         Form widgets, nested-app grouping in the sidebar, HTML sanitization for
         wysiwyg values.
+    ``snapadmin.auth_admin`` · ``snapadmin.extra_settings_admin``
+        Re-register third-party/built-in admins with the Unfold theme so they
+        match the rest of the site: Django's ``User``/``Group``
+        (``SNAPADMIN_THEME_AUTH_ADMIN``, on by default — without it Unfold's
+        password-hash template renders the password row empty) and
+        django-extra-settings' ``Setting``. No-ops without the ``[theme]`` extra,
+        and neither ever replaces an admin class a project customised itself.
     ``snapadmin.views`` · ``snapadmin.urls``
         The system dashboard and the URLconf to ``include()``.
 
@@ -102,14 +109,19 @@ Tooling
         Elasticsearch and the feature-adoption inventory.
     ``snapadmin.licensing``
         Dependency-licence data behind ``manage.py snapadmin_license_check``.
-    ``snapadmin.quickstart`` · ``snapadmin.integrate``
-        The ``snapadmin-demo`` and ``snapadmin-init`` console scripts. Both are
-        stdlib-only and import no Django at module level.
+    ``snapadmin.quickstart`` · ``snapadmin.integrate`` · ``snapadmin.manage_cli``
+        The console scripts: ``snapadmin-demo``, ``snapadmin-init``, and shims that
+        forward ``snapadmin-info`` / ``snapadmin-license-check`` (either spelling) to
+        the ``manage.py`` command of the same name. All stdlib-only, importing no
+        Django at module level — they run before a project exists.
 
 Management commands
     ``snapadmin_info``, ``snapadmin_license_check``, ``snapadmin_reindex``,
-    ``snapadmin_audit_export``, ``snapadmin_health_alert``, ``db_backup``,
-    ``purge_expired_data``, ``send_error_digest``.
+    ``snapadmin_audit_export``, ``snapadmin_health_alert``, ``snapadmin_db_backup``,
+    ``snapadmin_purge_expired_data``, ``snapadmin_send_error_digest``. The last
+    three were once unprefixed (``db_backup``, ``purge_expired_data``,
+    ``send_error_digest``); those names still work as deprecated aliases that print
+    a rename notice.
 
 Settings
 --------
@@ -121,7 +133,8 @@ fallback), ``SNAPADMIN_BACKUP_*``, ``SNAPADMIN_ERROR_*`` and
 ``SNAPADMIN_HEALTH_ALERT_*`` (monitoring and alerts), ``SNAPADMIN_AUDIT_*`` and
 ``SNAPADMIN_MASKED_FIELDS`` (audit and PII), ``SNAPADMIN_EXPORT_*``,
 ``SNAPADMIN_SSO_*``, plus layout keys (``SNAPADMIN_URL_PREFIX``,
-``SNAPADMIN_APP_LABELS``, ``SNAPADMIN_HIDDEN_APPS``, ``SNAPADMIN_NESTED_APPS``).
+``SNAPADMIN_APP_LABELS``, ``SNAPADMIN_HIDDEN_APPS``, ``SNAPADMIN_NESTED_APPS``,
+``SNAPADMIN_THEME_AUTH_ADMIN``).
 The full reference with defaults is the "Environment Variables Reference"
 section of the documentation.
 

@@ -1,22 +1,20 @@
 """
-tests/test_landing.py — demo landing page at ``/`` (#DEMO8/#DEMO9)
+tests/test_landing.py — demo landing page at ``/`` (#DEMO8/#DEMO9, merged by #UX2)
 
-The landing page is a *separate*, public-safe view from the staff-only
-``DashboardView`` (which moved to ``/dashboard/``). Anonymous visitors get a
-login form on the same URL; authenticated visitors get their session, demo
-record counts and enabled/disabled service facts — never host/infra details;
-staff additionally get admin + dashboard links.
+``LandingView`` is what a **non-staff** visitor sees at ``/`` — a public-safe page,
+separate from the staff-only ``DashboardView``. Anonymous visitors get a login form on
+the same URL; authenticated non-staff visitors get their session, demo record counts
+and enabled/disabled service facts — never host/infra details.
+
+Since #UX2, ``/`` itself is routed by ``RootView`` (see ``test_root_view.py``): a
+**staff** visitor at ``/`` now sees the dashboard, not this page — the dashboard is the
+more presentable entry point, so login/landing content is reserved for anonymous and
+non-staff visitors. This file keeps exercising ``LandingView`` directly through
+``reverse("landing")`` for the anonymous and non-staff cases, which is unchanged.
 """
 
 import pytest
 from django.urls import reverse
-
-
-@pytest.fixture
-def staff_user(db, django_user_model):
-    return django_user_model.objects.create_user(
-        username="staffer", password="pw12345", is_staff=True
-    )
 
 
 @pytest.fixture
@@ -99,12 +97,6 @@ class TestAuthenticatedLanding:
         html = client.get(reverse("landing")).content.decode()
         assert "Open Admin" not in html
 
-    def test_staff_sees_admin_and_dashboard_links(self, client, staff_user):
-        client.force_login(staff_user)
-        html = client.get(reverse("landing")).content.decode()
-        assert "Open Admin" in html
-        assert reverse("dashboard") in html
-
     def test_authenticated_post_redirects_without_relogin(self, client, plain_user):
         client.force_login(plain_user)
         r = client.post(reverse("landing"), {})
@@ -130,10 +122,13 @@ def test_logout_returns_to_landing(client, plain_user):
     assert not client.get(reverse("landing")).context["user"].is_authenticated
 
 
-# ── Dashboard moved but still staff-gated at its new path ─────────────────────
+# ── Dashboard alias ───────────────────────────────────────────────────────────
 
 @pytest.mark.django_db
-def test_dashboard_moved_off_root(client, admin_user):
-    # `/` is now the landing page, not the dashboard.
+def test_dashboard_still_reachable_at_its_own_path(client, admin_user):
+    # /dashboard/ is a direct alias to the same view RootView routes staff to at
+    # `/` — bookmarks and links built with reverse("dashboard") keep working.
     assert reverse("dashboard") == "/dashboard/"
     assert reverse("landing") == "/"
+    client.force_login(admin_user)
+    assert client.get(reverse("dashboard")).status_code == 200

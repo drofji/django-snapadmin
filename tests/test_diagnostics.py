@@ -172,13 +172,15 @@ class TestRenderer:
         assert "    - raw" in lines
         assert all("Hidden" not in line for line in lines)
 
-    def test_render_value_scalar_leaf(self):
-        assert render._render_value("x", depth=1) == ["  x"]
+    def test_render_value_takes_containers_only(self):
+        """Scalars are formatted inline by their parent — a bare leaf never reaches it."""
+        assert render._render_value(["x"], depth=1) == ["  - x"]
 
     def test_format_scalar_variants(self):
         assert render._format_scalar(True) == "✓"
         assert render._format_scalar(False) == "✗"
         assert render._format_scalar(None) == "—"
+        assert render._format_scalar("") == "—"
         assert render._format_scalar("txt") == "txt"
 
     def test_humanise(self):

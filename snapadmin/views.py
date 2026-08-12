@@ -16,8 +16,19 @@ from django.conf import settings
 from django.urls import reverse
 from django.db import connections
 from django.db.utils import OperationalError
+from django.utils.text import capfirst
+from django.utils.translation import gettext_lazy as _
 
 from snapadmin import __version__
+
+#: Display label per service-probe state. The raw state stays on the context as
+#: ``status`` because the template turns it into a CSS class (``status-online``);
+#: only ``status_label`` is shown to the reader.
+SERVICE_STATUS_LABELS = {
+    "online": _("online"),
+    "offline": _("offline"),
+    "disabled": _("disabled"),
+}
 
 
 class StaffRequiredMixin(AccessMixin):
@@ -63,20 +74,21 @@ class DashboardView(StaffRequiredMixin, TemplateView):
 
         # Dashboard Quick Links
         links = [
-            {"name": "Admin Panel", "url": reverse("admin:index"), "icon": "admin_panel_settings"},
+            {"name": _("Admin Panel"), "url": reverse("admin:index"), "icon": "admin_panel_settings"},
         ]
 
         if getattr(settings, "SNAPADMIN_REST_API_ENABLED", True):
-            links.append({"name": "REST API Root", "url": "/api/", "icon": "api"})
+            links.append({"name": _("REST API Root"), "url": "/api/", "icon": "api"})
             if getattr(settings, "SNAPADMIN_SWAGGER_ENABLED", True):
-                links.append({"name": "Swagger Docs", "url": reverse("swagger-ui"), "icon": "menu_book"})
+                links.append({"name": _("Swagger Docs"), "url": reverse("swagger-ui"), "icon": "menu_book"})
 
         if getattr(settings, "SNAPADMIN_GRAPHQL_ENABLED", True):
-            links.append({"name": "GraphQL API", "url": "/api/graphql/", "icon": "account_tree"})
+            links.append({"name": _("GraphQL API"), "url": "/api/graphql/", "icon": "account_tree"})
 
         # Registered Models
         from snapadmin.models import SnapModel
         from django.apps import apps
+        from django.contrib import admin
         from django.db.models import Count
         registered_models = []
 
@@ -89,6 +101,14 @@ class DashboardView(StaffRequiredMixin, TemplateView):
         from snapadmin.models import EsStorageMode
         for model in apps.get_models():
             if issubclass(model, SnapModel) and model is not SnapModel:
+                # A model can opt out of the admin entirely (admin_enabled = False),
+                # in which case it has no changelist to link to — reverse() would
+                # raise NoReverseMatch and take the whole dashboard down with it.
+                # Such a model isn't "managed" in any admin sense, so it is simply
+                # not a dashboard card.
+                if model not in admin.site._registry:
+                    continue
+
                 count = 0
                 try:
                     count = model.objects.count() if model._meta.managed else 0
@@ -96,8 +116,13 @@ class DashboardView(StaffRequiredMixin, TemplateView):
                     pass
 
                 es_mode = getattr(model, "es_storage_mode", EsStorageMode.DB_ONLY)
+                # capfirst on the *plural* name, not .title(): a card counts many
+                # rows, and .title() both force-evaluates the lazy translation and
+                # upper-cases every word — which mangles non-English names
+                # ("журналы аудита" → "Журналы Аудита").
+                label = capfirst(model._meta.verbose_name_plural)
                 model_info = {
-                    "name": model._meta.verbose_name.title(),
+                    "name": label,
                     "app": model._meta.app_label,
                     "count": count,
                     "url": reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_changelist"),
@@ -107,7 +132,7 @@ class DashboardView(StaffRequiredMixin, TemplateView):
                 registered_models.append(model_info)
 
                 if model._meta.app_label != 'snapadmin':
-                    chart_data["labels"].append(model._meta.verbose_name.title())
+                    chart_data["labels"].append(str(label))
                     chart_data["counts"].append(count)
 
         context.update({
@@ -138,8 +163,9 @@ class DashboardView(StaffRequiredMixin, TemplateView):
             pass
 
         services.append({
-            "name": f"Database ({db_name})",
+            "name": _("Database (%(name)s)") % {"name": db_name},
             "status": db_status,
+            "status_label": SERVICE_STATUS_LABELS[db_status],
             "is_live": db_status == "online"
         })
 
@@ -154,9 +180,14 @@ class DashboardView(StaffRequiredMixin, TemplateView):
                     es_status = "online"
             except Exception:
                 pass
-            services.append({"name": "Elasticsearch", "status": es_status})
         else:
-            services.append({"name": "Elasticsearch", "status": "disabled"})
+            es_status = "disabled"
+        # "Elasticsearch" is a product name — never translated.
+        services.append({
+            "name": "Elasticsearch",
+            "status": es_status,
+            "status_label": SERVICE_STATUS_LABELS[es_status],
+        })
 
         return services
 
@@ -168,7 +199,8 @@ class DashboardView(StaffRequiredMixin, TemplateView):
                 is_docker = any('docker' in line for line in cgroup_file)
 
         return {
-            "mode": "Docker" if is_docker else "Local",
+            # "Docker" is a product name; "Local" is prose and gets translated.
+            "mode": "Docker" if is_docker else _("Local"),
             "os": f"{platform.system()} {platform.release()}",
             "hostname": platform.node(),
             "processor": platform.processor(),
@@ -184,7 +216,7 @@ class DashboardView(StaffRequiredMixin, TemplateView):
                 "name": name,
                 "task": info.get("task"),
                 "schedule": str(info.get("schedule")),
-                "description": info.get("description", "No description provided.")
+                "description": info.get("description") or _("No description provided.")
             })
 
         return jobs

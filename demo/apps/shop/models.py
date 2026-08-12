@@ -7,6 +7,15 @@ from snapadmin import validators
 from snapadmin.admin import SnapTabularInline, SnapStackedInline
 import uuid
 
+# ── api_write_fields, on every model below ───────────────────────────────────
+# Each model declares the exact set of fields an API client may supply on
+# create/update — the mass-assignment allowlist. Leaving it unset makes every
+# non-excluded field writable and raises snapadmin.W004 at startup; the demo
+# ships the guard turned on so it *demonstrates* the safe posture instead of
+# tripping the warning. Read-only models (ExchangeRate) need no allowlist: they
+# answer 405 to write verbs, so there is nothing to mass-assign.
+
+
 class Category(snap_models.SnapModel):
     # searchable=True → adds "name" to admin search box
     name = snap_fields.SnapCharField(max_length=100, verbose_name=_("Name"), searchable=True, show_in_form=True)
@@ -14,12 +23,16 @@ class Category(snap_models.SnapModel):
     slug = snap_fields.SnapSlugField(verbose_name=_("Slug"), show_in_form=True, row="basic")
     is_active = snap_fields.SnapBooleanField(default=True, verbose_name=_("Active"), show_in_form=True, row="basic")
 
+    api_write_fields = ["name", "slug", "is_active"]
+
     class Meta:
         verbose_name = _("Category")
         verbose_name_plural = _("Categories")
 
 class Tag(snap_models.SnapModel):
     name = snap_fields.SnapCharField(max_length=50, verbose_name=_("Tag Name"), searchable=True, show_in_form=True)
+
+    api_write_fields = ["name"]
 
     class Meta:
         verbose_name = _("Tag")
@@ -129,6 +142,8 @@ class Product(snap_models.SnapModel):
     # index, then run Product.es_reindex_all().
     es_index_settings = {"number_of_shards": 1}
 
+    api_write_fields = ["category", "tags", "name", "price", "available", "description"]
+
     class Meta:
         verbose_name = _("Product")
         verbose_name_plural = _("Products")
@@ -165,6 +180,8 @@ class Customer(snap_models.SnapModel):
     # (overrides the default of 100) to keep the IndexedDB snapshot small.
     offline_cache_limit = 50
 
+    api_write_fields = ["first_name", "last_name", "origin", "email", "active"]
+
     class Meta:
         verbose_name = _("Customer")
         verbose_name_plural = _("Customers")
@@ -182,6 +199,8 @@ class CustomerProfile(snap_models.SnapModel):
     newsletter = snap_fields.SnapBooleanField(default=False, verbose_name=_("Newsletter Opt-in"), show_in_form=True, filterable=True)
     bio = snap_fields.SnapTextField(blank=True, verbose_name=_("Bio"), show_in_form=True)
 
+    api_write_fields = ["customer", "newsletter", "bio"]
+
     class Meta:
         verbose_name = _("Customer Profile")
         verbose_name_plural = _("Customer Profiles")
@@ -193,6 +212,10 @@ class Order(snap_models.SnapModel):
     created_at = snap_fields.SnapDateTimeField(auto_now_add=True, verbose_name=_("Created At"))
 
     snap_inlines = []  # populated below after OrderItemInline is defined
+
+    # created_at is auto_now_add (never client-supplied), so the allowlist is
+    # just the two fields an order actually carries.
+    api_write_fields = ["customer", "total"]
 
     class Meta:
         verbose_name = _("Order")
@@ -214,6 +237,8 @@ class SearchLog(snap_models.SnapModel):
     # timestamp → date. Declare es_mapping only for fields needing an override.
     es_auto_mapping = True
 
+    api_write_fields = ["query", "results_count"]
+
     class Meta:
         managed = False  # No DB table — required for ES_ONLY models
         verbose_name = _("Search Log")
@@ -224,7 +249,7 @@ class AuditLog(snap_models.SnapModel):
     """
     Demonstrates GDPR data retention.
     Records older than data_retention_days are auto-deleted by the purge_expired_data
-    Celery task. Run manually: python demo/manage.py purge_expired_data --dry-run
+    Celery task. Run manually: python demo/manage.py snapadmin_purge_expired_data --dry-run
     """
     action = snap_fields.SnapCharField(max_length=100, verbose_name=_("Action"), searchable=True, show_in_list=True, show_in_form=True)
     user_email = snap_fields.SnapEmailField(verbose_name=_("User Email"), show_in_list=True, show_in_form=True)
@@ -287,6 +312,8 @@ class OrderItem(snap_models.SnapModel):
     product = snap_fields.SnapForeignKey(Product, on_delete=django_models.CASCADE, verbose_name=_("Product"), show_in_form=True)
     quantity = snap_fields.SnapPositiveIntegerField(default=1, verbose_name=_("Quantity"), show_in_form=True)
     price = snap_fields.SnapDecimalField(max_digits=10, decimal_places=2, verbose_name=_("Price at purchase"), show_in_form=True)
+
+    api_write_fields = ["order", "product", "quantity", "price"]
 
     class Meta:
         verbose_name = _("Order Item")
@@ -377,6 +404,19 @@ class Showcase(snap_models.SnapModel):
     # A per-field api_filter_lookups entry (or the project-wide SNAPADMIN_API_TEXT_LOOKUPS
     # setting) still overrides this.
     api_default_text_lookups = ["exact", "startswith", "in"]
+
+    # Every stored column is client-writable here — this model exists to exercise
+    # the field types — but the allowlist is still spelled out, so adding a field
+    # never silently widens the API's write surface.
+    api_write_fields = [
+        "char_field", "text_field", "wysiwyg_field",
+        "integer_field", "positive_integer", "float_field", "decimal_field", "big_int",
+        "date_field", "datetime_field", "time_field", "duration_field",
+        "email_field", "slug_field", "url_field", "uuid_field", "ip_field",
+        "image_field", "file_field", "boolean_field", "json_field",
+        "rich_text_field", "phone_field", "color_field",
+        "small_int_field", "pos_small_int_field", "pos_big_int_field",
+    ]
 
     class Meta:
         verbose_name = _("Showcase")

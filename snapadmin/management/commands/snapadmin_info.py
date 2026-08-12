@@ -24,6 +24,12 @@ from snapadmin.diagnostics.render import render_report
 class Command(BaseCommand):
     help = "Show SnapAdmin configuration, connected services and health in one report."
 
+    # Django's automatic pre-command run prints every check message in full, which pushed the
+    # report the user asked for off the top of the terminal. The checks still run — the
+    # `checks` diagnostics collector runs them and reports a per-severity count as its own
+    # section (full text under --verbose, and always for errors).
+    requires_system_checks = []
+
     def add_arguments(self, parser):
         parser.add_argument(
             "--json",

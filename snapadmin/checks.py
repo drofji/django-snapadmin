@@ -156,24 +156,63 @@ def check_nesting_active_site(app_configs, **kwargs):
     )]
 
 
-def check_api_write_fields(app_configs, **kwargs):
-    if not getattr(settings, "SNAPADMIN_REST_API_ENABLED", True):
-        return []
-    warnings = []
+#: Model labels listed inline in a grouped warning before it truncates.
+MODEL_LIST_CAP = 20
+
+
+def _format_labels(labels: list[str]) -> str:
+    """Render model labels as one compact, comma-separated clause.
+
+    These checks are per-model but their advice is not: repeating an identical
+    multi-line block (message *and* hint) once per model buried the actual signal
+    under a wall of text on every ``manage.py`` run — 11 demo models produced 11
+    copies. One warning listing the models reads in a glance and stays greppable.
+    Very large projects would still overflow a terminal, so the list truncates.
+    """
+    if len(labels) <= MODEL_LIST_CAP:
+        return ", ".join(labels)
+    shown = ", ".join(labels[:MODEL_LIST_CAP])
+    return f"{shown} (+{len(labels) - MODEL_LIST_CAP} more)"
+
+
+def _api_writable_models():
+    """SnapModels whose auto-generated API still accepts writes.
+
+    A model served read-only (``api_read_only``) or with an explicit
+    ``api_http_method_names`` allowlist that excludes every write verb has no
+    mass-assignment surface, so the write-field checks skip it.
+    """
+    write_verbs = {"post", "put", "patch"}
     for model in apps.get_models():
         if not SnapModel.is_concrete_subclass(model):
             continue
-        if getattr(model, "api_write_fields", None) is None:
-            warnings.append(Warning(
-                f"{model._meta.label} has no api_write_fields set — every field not "
-                "listed in api_exclude_fields is writable through the auto-generated "
-                "API (create/update).",
-                hint="Set api_write_fields = [...] on the model to restrict which "
-                     "fields accept client-supplied values (a mass-assignment guard). "
-                     "Leave unset only for models where every field is safe to write.",
-                id="snapadmin.W004",
-            ))
-    return warnings
+        if getattr(model, "api_read_only", False):
+            continue
+        methods = getattr(model, "api_http_method_names", None)
+        if methods is not None and not write_verbs.intersection(m.lower() for m in methods):
+            continue
+        yield model
+
+
+def check_api_write_fields(app_configs, **kwargs):
+    if not getattr(settings, "SNAPADMIN_REST_API_ENABLED", True):
+        return []
+    unguarded = sorted(
+        model._meta.label
+        for model in _api_writable_models()
+        if getattr(model, "api_write_fields", None) is None
+    )
+    if not unguarded:
+        return []
+    return [Warning(
+        f"{len(unguarded)} model(s) have no api_write_fields set — on these, every field "
+        "not listed in api_exclude_fields is writable through the auto-generated API "
+        f"(create/update): {_format_labels(unguarded)}.",
+        hint="Set api_write_fields = [...] on the model to restrict which "
+             "fields accept client-supplied values (a mass-assignment guard). "
+             "Leave unset only for models where every field is safe to write.",
+        id="snapadmin.W004",
+    )]
 
 
 def check_api_read_only(app_configs, **kwargs):
@@ -187,26 +226,26 @@ def check_api_read_only(app_configs, **kwargs):
     """
     if not getattr(settings, "SNAPADMIN_REST_API_ENABLED", True):
         return []
-    warnings = []
-    for model in apps.get_models():
-        if not SnapModel.is_concrete_subclass(model):
-            continue
-        if getattr(model, "api_write_fields", None) != []:
-            continue
-        if getattr(model, "api_read_only", False):
-            continue
-        if getattr(model, "api_http_method_names", None) is not None:
-            continue
-        warnings.append(Warning(
-            f"{model._meta.label} sets api_write_fields = [] (no field is writable) but "
-            "still exposes create/update/delete through the API — a REST create inserts a "
-            "blank row and an update is a silent no-op, rather than a clean 405.",
-            hint="Set api_read_only = True to serve this model read-only "
-                 "(list/retrieve/count/export) and answer 405 to POST/PUT/PATCH/DELETE, "
-                 "or set api_http_method_names to an explicit allowlist.",
-            id="snapadmin.W007",
-        ))
-    return warnings
+    inert = sorted(
+        model._meta.label
+        for model in apps.get_models()
+        if SnapModel.is_concrete_subclass(model)
+        and getattr(model, "api_write_fields", None) == []
+        and not getattr(model, "api_read_only", False)
+        and getattr(model, "api_http_method_names", None) is None
+    )
+    if not inert:
+        return []
+    return [Warning(
+        f"{len(inert)} model(s) set api_write_fields = [] (no field is writable) but "
+        "still expose create/update/delete through the API — a REST create inserts a "
+        "blank row and an update is a silent no-op, rather than a clean 405: "
+        f"{_format_labels(inert)}.",
+        hint="Set api_read_only = True to serve these models read-only "
+             "(list/retrieve/count/export) and answer 405 to POST/PUT/PATCH/DELETE, "
+             "or set api_http_method_names to an explicit allowlist.",
+        id="snapadmin.W007",
+    )]
 
 
 def check_unfold_theme(app_configs, **kwargs):

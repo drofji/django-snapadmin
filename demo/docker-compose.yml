@@ -102,11 +102,18 @@ services:
       - static_files:/app/.staticfiles
       - media_files:/app/.media
     restart: unless-stopped
+    # Probes /api/health/, which checks the database and answers 503 when it is
+    # unreachable. /admin/ is the wrong target: it answers 302 (redirect to login)
+    # even with the database down, so a broken instance would report as healthy.
+    # Anonymous callers get only {"status": "healthy"} — no infrastructure detail —
+    # so the endpoint is safe for a load balancer or an external uptime monitor.
+    # start_period covers migrate + collectstatic + seed on the first boot.
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8000/admin/" ]
+      test: [ "CMD", "curl", "-fsS", "http://localhost:8000/api/health/" ]
       interval: 30s
-      timeout: 10s
-      retries: 5
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     labels:
       - "autoheal=true"
 
@@ -139,6 +146,11 @@ services:
     <<: *app-common
     command: celery -A demo.core beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
     restart: unless-stopped
+    # The image declares an HTTP HEALTHCHECK for the web container; Beat serves no
+    # HTTP, so it would inherit a probe it can never pass and sit "unhealthy"
+    # forever. Disable it explicitly rather than leaving the inherited one to fail.
+    healthcheck:
+      disable: true
     depends_on:
       - app
 

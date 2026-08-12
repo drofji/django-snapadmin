@@ -1,3 +1,22 @@
+/* SnapAdmin — theme-agnostic admin styles.
+
+   Loaded on every SnapModel admin page, whichever theme is active. It must
+   therefore contain only rules that are safe next to a themed admin: shared
+   design tokens, SnapAdmin's own widgets, and cosmetics that no theme owns.
+
+   The opinionated *layout* rewrite (labels above fields, forced field widths,
+   uniform input padding) lives in `admin-stock.css` and is loaded ONLY when
+   django-unfold is absent. It exists because Django's built-in admin has no
+   modern form layout — but applying it on top of a theme actively breaks that
+   theme, which is exactly what used to happen here: the rules were written
+   against a `.unfold` body class that current Unfold no longer emits, so the
+   copies in `admin-unfold.css` were dead while the unscoped originals in this
+   file were fighting Unfold's own two-column rows, its `max-w-2xl` field
+   widths and the `pr-8` gutter its select chevron sits in.
+
+   Rule of thumb for this file: no `!important` layout, nothing that assumes
+   Django's stock admin markup, nothing a theme would reasonably style itself. */
+
 :root {
     --primary-color: #0c4b33;
     --accent-bg: rgba(100, 100, 100, 0.08);
@@ -10,6 +29,7 @@
     opacity: 0.3;
 }
 
+/* SnapAdmin's monospace primary-key badge in list views. */
 th.field-formatted_id a,
 td.field-formatted_id a {
     display: inline-block;
@@ -31,6 +51,7 @@ td.field-formatted_id a:hover {
     box-shadow: 0 2px 4px rgba(0,0,0,0.05);
 }
 
+/* Whole changelist rows are clickable (see snapadmin/js/admin.js). */
 #changelist-form table tbody tr {
     cursor: pointer;
 }
@@ -43,41 +64,34 @@ td.field-formatted_id a:hover {
     background-color: rgba(0, 0, 0, 0.03) !important;
 }
 
-div.fieldBox.flex-container {
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: flex-start !important;
-    gap: 5px;
-}
-
-div.fieldBox.flex-container label {
-    float: none !important;
-    margin: 0 !important;
-    font-weight: 600;
-}
+/* ── Select2 ───────────────────────────────────────────────────────────────
+   SnapAdmin vendors Select2 for its own widgets, so its legibility fixes
+   belong here rather than in a theme layer. Only colours and sizing of the
+   dropdown are touched — never the arrow, which each theme draws itself. */
 
 .django-select2-container,
 .select2-container--default,
 .select2-container {
-    max-width: 100% !important;
-}
-.select2-container--admin-autocomplete {
-    min-width: 100% !important;
-    width: 100% !important;
-}
-.select2-container--default .select2-selection--single,
-.django-select2-container .select2-selection--single {
-    height: 38px !important;
-    border: 1px solid #d1d5db !important;
-    border-radius: var(--radius) !important;
-    display: flex !important;
-    align-items: center !important;
+    max-width: 100%;
 }
 
-/* Select2 dropdown: keep the highlighted option readable.
-   The default theme sets white text but the blue background was
-   overridden, leaving white text on a light grey row. Give the
-   highlighted/selected option a solid background so it stays legible. */
+.select2-container--admin-autocomplete {
+    min-width: 100%;
+    width: 100%;
+}
+
+.select2-container--default .select2-selection--single,
+.django-select2-container .select2-selection--single {
+    height: 38px;
+    border: 1px solid #d1d5db;
+    border-radius: var(--radius);
+    display: flex;
+    align-items: center;
+}
+
+/* The default theme sets white text on the highlighted option but the blue
+   background was overridden, leaving white on light grey. Give the highlighted
+   and selected options a solid background so they stay legible. */
 .select2-container--default .select2-results__option--highlighted[aria-selected],
 .select2-container--default .select2-results__option--highlighted {
     background-color: var(--primary-color) !important;
@@ -93,171 +107,41 @@ div.fieldBox.flex-container label {
     color: #333 !important;
 }
 
-/* Fix field sizing and borders - Apply globally to admin fields */
-.vTextField,
-.vURLField,
-.vEmailField,
-.vIntegerField,
-.vDecimalField,
-.vTimeField,
-.vDateField,
-textarea,
-select {
-    max-width: 100% !important;
-    width: 100% !important;
-    box-sizing: border-box !important;
-    border: 1px solid #d1d5db !important;
-    border-radius: var(--radius) !important;
+.select2-selection__rendered {
+    padding-left: 12px;
+    color: #333;
 }
 
-/* Force labels above fields globally in admin.
-   Scope to div.form-row only: tabular inlines render their row as
-   <tr class="form-row">, and forcing flex-column there collapses the
-   <td> cells into a single column. */
-div.form-row {
-    display: flex !important;
-    flex-direction: column !important;
-    align-items: stretch !important;
-    max-width: 100% !important;
-    margin: 0 !important;
-    border: 0 !important;
-}
+/* ── CKEditor 5 (optional [wysiwyg] extra) ─────────────────────────────────
+   No admin theme styles the editor shell, so sizing it is ours in both modes. */
 
-div.form-row > div {
-    width: 100% !important;
-    max-width: 100% !important;
-    margin: 0 !important;
-    box-sizing: border-box !important;
-}
-
-div.form-row label {
-    display: block !important;
-    padding: 0 0 6px 0 !important;
-    margin: 0 !important;
-    width: 100% !important;
-    float: none !important;
-    text-align: left !important;
-    font-weight: 600 !important;
-}
-
-/* WYSIWYG sizing */
 .ck-editor {
-    width: 100% !important;
-    max-width: 100% !important;
+    width: 100%;
+    max-width: 100%;
 }
 
 .ck-content {
     min-height: 200px;
 }
 
-/* Horizontal field rows */
+/* ── Horizontal field rows (SnapField `row="..."`) ─────────────────────────
+   `div.fields` is Django's stock fieldset markup; themes with their own row
+   layout (Unfold) never emit it, so this is inert there rather than fighting. */
+
 .snap-field-row > div.fields {
-    display: flex !important;
-    flex-direction: row !important;
-    gap: 20px !important;
-    flex-wrap: wrap !important;
-    align-items: flex-end !important;
-    width: 100% !important;
+    display: flex;
+    flex-direction: row;
+    gap: 20px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    width: 100%;
 }
 
 .snap-field-row > div.fields > div {
-    flex: 1 !important;
-    min-width: 150px !important;
-    max-width: 100% !important;
-    border-bottom: none !important;
-    margin: 0 !important;
-    padding: 0 !important;
-}
-
-.select2-selection__rendered {
-    padding-left: 12px !important;
-    color: #333 !important;
-}
-
-.actions {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 15px;
-    background: #f8f9fa;
-    border: 0 !important;
-    margin-bottom: 15px;
-}
-
-.actions label {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-weight: 600;
-    color: #444;
-}
-
-.actions .button {
-    height: 36px;
-    padding: 0 20px !important;
-    background: var(--primary-color) !important;
-    color: #ffffff !important;
-    border-radius: var(--radius) !important;
-    border: none !important;
-    font-weight: bold;
-    transition: filter 0.2s;
-}
-
-.actions .button:hover {
-    filter: brightness(1.1);
-}
-
-.actions .action-counter {
-    margin-left: auto;
-    color: #666;
-    font-size: 13px;
-    background: #eee;
-    padding: 4px 12px;
-    border-radius: 20px;
-}
-
-#changelist-filter li {
-    display: flex;
-    justify-content: center;
-    padding: 3px 0 !important;
-}
-
-@media (max-width: 768px) {
-    .actions {
-        flex-direction: column;
-        align-items: stretch;
-    }
-    .actions .action-counter {
-        margin-left: 0;
-        text-align: center;
-    }
-}
-
-/* Improve spacing between border and field content */
-input[type="text"],
-input[type="number"],
-input[type="email"],
-input[type="url"],
-input[type="password"],
-input[type="date"],
-input[type="datetime-local"],
-input[type="time"],
-textarea,
-select {
-    padding: 12px 16px !important;
-}
-
-/* Light theme: keep select dropdown options readable.
-   The selected option was rendering as white text on a light
-   highlight, making it nearly invisible. */
-select option {
-    color: #333 !important;
-    background-color: #fff !important;
-}
-
-select option:checked,
-select option:hover,
-select option:focus {
-    color: #111 !important;
-    background-color: #ececf0 !important;
+    flex: 1;
+    min-width: 150px;
+    max-width: 100%;
+    border-bottom: none;
+    margin: 0;
+    padding: 0;
 }

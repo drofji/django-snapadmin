@@ -87,7 +87,50 @@ def test_dashboard_version_read_from_package_metadata(admin_client):
 # Dashboard context - ES storage mode per model
 # ─────────────────────────────────────────────────────────────────────────────
 
-class TestDashboardEsMode:
+class TestDashboardSkipsUnregisteredModels:
+    """A model with admin_enabled = False must not crash the dashboard.
+
+    ``get_context_data`` used to call ``reverse(f"admin:{app}_{model}_changelist")``
+    for every concrete SnapModel unconditionally — but a model can opt out of the
+    admin entirely (``admin_enabled = False``, a documented setting), in which case
+    no such URL exists and the ``reverse()`` call raised ``NoReverseMatch``, taking
+    the whole dashboard down for every model, not just the unregistered one.
+
+    Simulated by temporarily unregistering a real demo model rather than defining a
+    throwaway one: Django model classes can never be de-registered from the global
+    app registry once created, so a test-local model class here would leak into
+    ``apps.get_models()`` for the rest of the session and could pollute unrelated
+    tests that enumerate demo models (as happened during development of this test).
+    """
+
+    @pytest.mark.django_db
+    def test_unregistered_model_does_not_crash_the_dashboard(self, admin_client):
+        from django.contrib import admin
+        from django.test import RequestFactory
+        from django.contrib.auth.models import User
+
+        from demo.apps.shop.models import Category
+        from snapadmin.views import DashboardView
+
+        admin.site.unregister(Category)
+        try:
+            factory = RequestFactory()
+            request = factory.get("/")
+            request.user = User.objects.create_superuser("dashcrash", password="x")
+            view = DashboardView()
+            view.request = request
+            view.kwargs = {}
+            view.args = []
+
+            ctx = view.get_context_data()  # must not raise NoReverseMatch
+
+            assert str(Category._meta.verbose_name_plural).lower() not in {
+                str(m["name"]).lower() for m in ctx["registered_models"]
+            }
+        finally:
+            Category.register_admin()
+            assert Category in admin.site._registry
+
     @pytest.mark.django_db
     def test_registered_models_have_es_mode(self, admin_client):
         from django.test import RequestFactory
@@ -122,7 +165,7 @@ class TestDashboardEsMode:
         view.args = []
         ctx = view.get_context_data()
 
-        product_entry = next((m for m in ctx["registered_models"] if m["name"].lower() == "product"), None)
+        product_entry = next((m for m in ctx["registered_models"] if str(m["name"]).lower() == "products"), None)
         assert product_entry is not None
         assert product_entry["es_mode"] == "dual"
 
@@ -141,7 +184,7 @@ class TestDashboardEsMode:
         view.args = []
         ctx = view.get_context_data()
 
-        audit = next((m for m in ctx["registered_models"] if m["name"].lower() == "audit log"), None)
+        audit = next((m for m in ctx["registered_models"] if str(m["name"]).lower() == "audit logs"), None)
         assert audit is not None
         assert audit["retention_days"] == 90
 

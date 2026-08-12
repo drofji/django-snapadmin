@@ -2351,11 +2351,17 @@ class SnapModel(models.Model):
 
         BASE_JS = ["admin/js/vendor/jquery/jquery.js", "admin/js/jquery.init.js", "snapadmin/js/jquery_bridge.js", "snapadmin/js/select2.min.js", "snapadmin/js/admin.js", "snapadmin/js/connectivity.js"]
         BASE_CSS = ["snapadmin/css/select2.min.css", "snapadmin/css/admin.css"]
-        if UNFOLD_INSTALLED:
-            # Unfold-specific overrides are opt-in: only layered on when the
-            # Unfold theme is actually installed. Loaded after admin.css so its
-            # `.unfold`-scoped rules win the cascade.
-            BASE_CSS.append("snapadmin/css/admin-unfold.css")
+        # The two theme layers are mutually exclusive, and that is the whole
+        # scoping mechanism: neither sheet carries a theme prefix, so exactly
+        # one of them must reach the page. `admin-stock.css` gives Django's
+        # built-in admin a modern form layout; loading it next to a theme
+        # overrides the theme's own layout instead of complementing it.
+        # `admin-unfold.css` fills the few gaps Unfold leaves. Both come after
+        # `admin.css` so they win the cascade over the shared cosmetics.
+        BASE_CSS.append(
+            "snapadmin/css/admin-unfold.css" if UNFOLD_INSTALLED
+            else "snapadmin/css/admin-stock.css"
+        )
         extra_js = [cls.js_admin_files] if isinstance(cls.js_admin_files, str) else list(cls.js_admin_files)
         extra_css = [cls.css_admin_files] if isinstance(cls.css_admin_files, str) else list(cls.css_admin_files)
         final_js = list(dict.fromkeys(BASE_JS + extra_js))

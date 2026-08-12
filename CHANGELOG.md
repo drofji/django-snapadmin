@@ -17,6 +17,46 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 - **A quickstart and module map in the `snapadmin` package docstring** — the three-step example,
   what every module and management command does, the `SNAPADMIN_*` setting families and the optional
   extras, available offline from any install via `help(snapadmin)`.
+- **`snapadmin-info` and `snapadmin-license-check` as console scripts** — all four spellings
+  (`snapadmin-info`, `snapadmin_info`, `python manage.py snapadmin_info`, likewise for the licence
+  check) now work; the shim finds your `manage.py` and forwards arguments and exit code.
+- **A copy-pasteable container health check** — `HEALTHCHECK` in the demo image and compose service,
+  plus a docs section with the exact values for Docker, Compose, Coolify/Dokploy/Caprover and
+  Kubernetes.
+- **Remote S3-compatible storage in the demo** from one variable (`SNAPADMIN_STORAGE_BACKEND=s3`) —
+  AWS S3, Hetzner Object Storage, MinIO and Backblaze B2, with signed URLs and no-overwrite defaults.
+- **A `checks` section in `snapadmin_info`** — per-severity system-check counts, with `--health-check`
+  failing on any error.
+
+### Changed
+- **Every management command is `snapadmin_*`-prefixed.** `db_backup`, `purge_expired_data` and
+  `send_error_digest` become `snapadmin_db_backup`, `snapadmin_purge_expired_data` and
+  `snapadmin_send_error_digest` — generic names can silently collide with a command of your own.
+  The old names keep working as deprecated aliases (rename notice on stderr, stdout untouched).
+  Celery task names are unchanged.
+- **`snapadmin_info` output is readable at a glance** — system checks no longer print above the
+  report, uniform records render as an aligned table (model inventory: 55 lines → 13 for 11 models),
+  and runs of booleans collapse to one `✓ on` / `✗ off` pair.
+- **`snapadmin.W004`/`W007` emit one grouped warning** naming the affected models, instead of one
+  near-identical block per model. Check ids are unchanged. W004 no longer fires for models that
+  answer 405 to every write (`api_read_only`, or an `api_http_method_names` with no write verb).
+
+### Fixed
+- **`GET /api/health/` reports `unhealthy` (503) when the database is down even if Elasticsearch is
+  also unreachable.** The Elasticsearch branch could overwrite the status with the still-serving
+  `degraded`, so probes kept routing to an instance that could not answer a query.
+- **The dashboard chart renders in French** — a translated label containing an apostrophe broke the
+  inline `<script>`, so no chart appeared.
+- **The themed `User`/`Group` admin no longer depends on `INSTALLED_APPS` order**, which could
+  silently skip the theming entirely.
+- **The dashboard no longer crashes when a model sets `admin_enabled = False`** — one opted-out model
+  took down the whole page with `NoReverseMatch`.
+- **SnapAdmin's stylesheet no longer overrides the Unfold theme's own form layout** — the themed
+  layer was scoped to a class current Unfold never emits, so it was dead while stock-admin layout
+  rules applied everywhere. Styling now ships as one shared sheet plus exactly one theme layer.
+- **The built-in `User` admin has a working password field under the theme again** — Unfold's
+  templates were rendering against Django's stock forms, leaving the password row empty with no way
+  to change it.
 
 ## 0.1.0b5 — 2026-07-24
 

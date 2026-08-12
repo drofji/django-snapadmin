@@ -5,6 +5,8 @@ Django system checks that catch common SnapAdmin misconfiguration early with an
 actionable hint, and stay quiet when a feature is unconfigured or correct.
 """
 
+import re
+
 import pytest
 from django.core.management import call_command
 from django.test import override_settings
@@ -152,26 +154,98 @@ class TestSsoProviders:
 
 # ── API write-fields allowlist ─────────────────────────────────────────────────
 
+#: Every model the demo app declares — the set that must stay out of W004.
+DEMO_MODELS = [
+    "AuditLog", "Category", "Customer", "CustomerProfile", "ExchangeRate",
+    "Order", "OrderItem", "Product", "SearchLog", "Showcase", "Tag",
+]
+
+
+def _w004_message() -> str:
+    """The grouped W004 message, or "" when the check is silent."""
+    result = checks.check_api_write_fields(None)
+    return result[0].msg if result else ""
+
+
 class TestApiWriteFields:
     @override_settings(SNAPADMIN_REST_API_ENABLED=False)
     def test_disabled_api_returns_no_warnings(self):
         assert checks.check_api_write_fields(None) == []
 
-    def test_model_without_write_fields_warns(self):
-        result = checks.check_api_write_fields(None)
-        assert result  # every demo SnapModel leaves api_write_fields unset
-        assert {w.id for w in result} == {"snapadmin.W004"}
+    def test_demo_models_are_all_guarded(self):
+        """The demo dogfoods the allowlist, so no demo model is ever named in W004.
 
-    def test_warns_once_per_unconfigured_model(self):
+        Asserted per-model rather than as ``result == []`` because other test
+        modules define throwaway SnapModels under the ``demo`` app label, and those
+        stay in the app registry for the rest of the session.
+        """
+        msg = _w004_message()
+        for name in DEMO_MODELS:
+            assert f"demo.{name}" not in msg
+
+    def test_silent_when_every_model_is_guarded(self, monkeypatch):
+        """No writable model left unguarded → no warning at all.
+
+        Patched rather than relying on the real registry: throwaway SnapModels
+        defined by other test modules linger under the ``demo`` app label.
+        """
+        monkeypatch.setattr(checks, "_api_writable_models", lambda: iter(()))
+        assert checks.check_api_write_fields(None) == []
+
+    def test_model_without_write_fields_warns(self, monkeypatch):
         from demo.apps.shop.models import Product
+        monkeypatch.delattr(Product, "api_write_fields")
         result = checks.check_api_write_fields(None)
-        assert any("demo.Product" in w.msg for w in result)
+        assert [w.id for w in result] == ["snapadmin.W004"]
+        assert "demo.Product" in result[0].msg
+
+    def test_warns_once_for_many_unguarded_models(self, monkeypatch):
+        """#CHK1: one grouped warning, not one block per model."""
+        from demo.apps.shop.models import Category, Customer, Product
+        for model in (Product, Customer, Category):
+            monkeypatch.delattr(model, "api_write_fields")
+        result = checks.check_api_write_fields(None)
+        assert len(result) == 1
+        assert re.match(r"^\d+ model\(s\) have no api_write_fields set", result[0].msg)
+        for label in ("demo.Category", "demo.Customer", "demo.Product"):
+            assert label in result[0].msg
+
+    def test_read_only_model_needs_no_allowlist(self):
+        """ExchangeRate is api_read_only — writes 405, so there is nothing to guard."""
+        from demo.apps.shop.models import ExchangeRate
+
+        assert getattr(ExchangeRate, "api_write_fields", None) is None
+        assert ExchangeRate not in list(checks._api_writable_models())
+
+    def test_read_verb_allowlist_model_needs_no_allowlist(self, monkeypatch):
+        from demo.apps.shop.models import Product
+        monkeypatch.delattr(Product, "api_write_fields")
+        monkeypatch.setattr(Product, "api_http_method_names", ["get", "head"], raising=False)
+        assert "demo.Product" not in _w004_message()
+
+    def test_write_verb_allowlist_still_needs_a_guard(self, monkeypatch):
+        from demo.apps.shop.models import Product
+        monkeypatch.delattr(Product, "api_write_fields")
+        monkeypatch.setattr(Product, "api_http_method_names", ["get", "PATCH"], raising=False)
+        result = checks.check_api_write_fields(None)
+        assert "demo.Product" in result[0].msg
 
     def test_model_with_write_fields_set_does_not_warn(self, monkeypatch):
         from demo.apps.shop.models import Product
         monkeypatch.setattr(Product, "api_write_fields", ["name"], raising=False)
         result = checks.check_api_write_fields(None)
         assert not any("demo.Product" in w.msg for w in result)
+
+
+class TestFormatLabels:
+    def test_short_list_is_listed_in_full(self):
+        assert checks._format_labels(["a.A", "b.B"]) == "a.A, b.B"
+
+    def test_long_list_is_truncated_with_a_count(self):
+        labels = [f"app.Model{i:03d}" for i in range(checks.MODEL_LIST_CAP + 5)]
+        rendered = checks._format_labels(labels)
+        assert rendered.endswith("(+5 more)")
+        assert labels[checks.MODEL_LIST_CAP] not in rendered
 
 
 # ── field-read-only but still write-exposed (W007) ───────────────────────────
@@ -204,6 +278,16 @@ class TestApiReadOnlyNudge:
         monkeypatch.setattr(Product, "api_http_method_names", ["get"], raising=False)
         result = checks.check_api_read_only(None)
         assert not any("demo.Product" in w.msg for w in result)
+
+    def test_warns_once_for_many_models(self, monkeypatch):
+        """#CHK1: W007 groups too — one warning naming every affected model."""
+        from demo.apps.shop.models import Customer, Product
+        for model in (Product, Customer):
+            monkeypatch.setattr(model, "api_write_fields", [], raising=False)
+        result = checks.check_api_read_only(None)
+        assert len(result) == 1
+        assert result[0].msg.startswith("2 model(s)")
+        assert "demo.Customer" in result[0].msg and "demo.Product" in result[0].msg
 
 
 # ── optional Unfold theme ────────────────────────────────────────────────────

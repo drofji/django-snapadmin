@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-07-18 14:12+0000\n"
+"POT-Creation-Date: 2026-08-09 19:28+0000\n"
 "Language: nl\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -240,6 +240,15 @@ msgstr "Filters"
 msgid "ORM field=value filters applied to the export queryset."
 msgstr "ORM-filters veld=waarde toegepast op de export-queryset."
 
+msgid "Row Source"
+msgstr "Rijbron"
+
+msgid ""
+"Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."
+msgstr ""
+"Geregistreerde SNAPADMIN_EXPORT_SOURCES-naam; leeg gebruikt de standaard ORM-"
+"bron."
+
 msgid "Total Rows"
 msgstr "Totaal aantal rijen"
 
@@ -288,7 +297,9 @@ msgstr "Exporttaken"
 
 msgid ""
 "Primary key of the last indexed row; blank means start from the beginning."
-msgstr "Primaire sleutel van de laatst geïndexeerde rij; leeg betekent vanaf het begin beginnen."
+msgstr ""
+"Primaire sleutel van de laatst geïndexeerde rij; leeg betekent vanaf het "
+"begin beginnen."
 
 msgid "Reindex Job"
 msgstr "Herindexeringstaak"
@@ -361,6 +372,9 @@ msgstr "Dynamische schemagenerering mogelijk gemaakt door Graphene."
 msgid "Built with <strong>SnapAdmin</strong> v%(version)s"
 msgstr "Gemaakt met <strong>SnapAdmin</strong> v%(version)s"
 
+msgid "Record Count"
+msgstr "Aantal records"
+
 msgid "Language"
 msgstr "Taal"
 
@@ -393,6 +407,37 @@ msgstr "Kon de bestandscodering niet verifiëren."
 msgid "Invalid encoding. Allowed: %(encodings)s"
 msgstr "Ongeldige codering. Toegestaan: %(encodings)s"
 
+msgid "online"
+msgstr "online"
+
+msgid "offline"
+msgstr "offline"
+
+msgid "disabled"
+msgstr "uitgeschakeld"
+
+msgid "Admin Panel"
+msgstr "Beheerpaneel"
+
+msgid "REST API Root"
+msgstr "REST API-hoofdmap"
+
+msgid "Swagger Docs"
+msgstr "Swagger-documentatie"
+
+msgid "GraphQL API"
+msgstr "GraphQL-API"
+
+#, python-format
+msgid "Database (%(name)s)"
+msgstr "Database (%(name)s)"
+
+msgid "Local"
+msgstr "Lokaal"
+
+msgid "No description provided."
+msgstr "Geen beschrijving opgegeven."
+
 #~ msgid "English"
 #~ msgstr "Engels"
 
@@ -422,9 +467,3 @@ msgstr "Ongeldige codering. Toegestaan: %(encodings)s"
 
 #~ msgid "Dutch"
 #~ msgstr "Nederlands"
-
-msgid "Row Source"
-msgstr "Rijbron"
-
-msgid "Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."
-msgstr "Geregistreerde SNAPADMIN_EXPORT_SOURCES-naam; leeg gebruikt de standaard ORM-bron."

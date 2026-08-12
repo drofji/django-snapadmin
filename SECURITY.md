@@ -106,7 +106,10 @@ Key protections:
   client-supplied value on REST create/update — every other field is forced read-only through the
   API (it may still be returned in responses). Left unset, every non-excluded field stays writable,
   matching pre-existing behaviour; the `snapadmin.W004` system check flags any model that hasn't made
-  the choice explicitly, so the exposure is a deliberate decision rather than an oversight.
+  the choice explicitly, so the exposure is a deliberate decision rather than an oversight. W004 emits
+  one grouped warning naming every unguarded model, and skips models served read-only
+  (`api_read_only`, or an `api_http_method_names` allowlist without a write verb) — those have no
+  mass-assignment surface.
 - **`api_read_only` / `api_http_method_names`** remove write verbs entirely for a model, not just at
   the field level. `api_read_only = True` serves a model read-only over the dynamic REST API
   (list/retrieve/count/export) and answers `405` to POST/PUT/PATCH/DELETE — the whole create/update/

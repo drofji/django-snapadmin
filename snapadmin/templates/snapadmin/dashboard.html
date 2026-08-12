@@ -275,6 +275,7 @@
                 <h1>SnapAdmin</h1>
             </div>
             <div style="display: flex; align-items: center; gap: 1rem;">
+                {% block header_actions_extra %}{% endblock %}
                 {% include "snapadmin/language_switcher.html" %}
                 <a href="https://github.com/drofji/snapadmin" target="_blank" rel="noopener" aria-label="{% translate 'SnapAdmin on GitHub (opens in a new tab)' %}" style="color: var(--text-primary); display: inline-flex;">
                     <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -285,6 +286,7 @@
         </header>
 
         <main id="main-content" role="main">
+        {% block dashboard_extra_top %}{% endblock %}
         <nav class="section" aria-label="{% translate 'System entry points' %}">
             <div class="section-title" role="heading" aria-level="2"><i class="material-icons" aria-hidden="true">link</i> {% translate "System Entry Points" %}</div>
             <div class="grid">
@@ -358,7 +360,7 @@
                     {% for service in services %}
                     <div class="status-item">
                         <span>{{ service.name }}</span>
-                        <span class="status-badge status-{{ service.status }}">{{ service.status }}</span>
+                        <span class="status-badge status-{{ service.status }}">{{ service.status_label }}</span>
                     </div>
                     {% endfor %}
                 </div>
@@ -385,6 +387,7 @@
                 </div>
             </div>
         </div>
+        {% block dashboard_extra_bottom %}{% endblock %}
         </main>
 
         <footer class="footer">
@@ -392,15 +395,23 @@
         </footer>
     </div>
 
+    {# Serialised through json_script rather than |safe: a model verbose_name is
+       developer-supplied text and must not be pasted raw into a <script> body. #}
+    {{ chart_data|json_script:"snap-chart-data" }}
+    {# escapejs, not a bare literal: a translated label can carry an apostrophe
+       (fr: "Nombre d'enregistrements"), which would close the JS string and
+       break the whole script block. #}
+    {% translate "Record Count" as record_count_label %}
     <script>
+        const snapChartData = JSON.parse(document.getElementById('snap-chart-data').textContent);
         const ctx = document.getElementById('statsChart').getContext('2d');
         new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: {{ chart_data.labels|safe }},
+                labels: snapChartData.labels,
                 datasets: [{
-                    label: 'Record Count',
-                    data: {{ chart_data.counts|safe }},
+                    label: '{{ record_count_label|escapejs }}',
+                    data: snapChartData.counts,
                     backgroundColor: '#3b82f6',
                     borderRadius: 8,
                 }]

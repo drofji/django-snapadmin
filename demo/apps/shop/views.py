@@ -4,9 +4,13 @@ from django.contrib.auth.forms import AuthenticationForm
 from django.http import Http404
 from django.shortcuts import redirect, render
 from django.urls import NoReverseMatch, reverse
+from django.utils.text import capfirst
+from django.utils.translation import gettext_lazy as _
+from django.views import View
 from django.views.generic import TemplateView
 
 from demo.apps.shop.models import Product
+from snapadmin.views import DashboardView
 
 
 def trigger_error(request):
@@ -121,13 +125,15 @@ class LandingView(TemplateView):
             except Exception:
                 count = None
             stats.append({
-                "name": model._meta.verbose_name_plural.title(),
+                # capfirst, not .title(): .title() upper-cases every word, which
+                # mangles translated names ("журналы аудита" → "Журналы Аудита").
+                "name": capfirst(model._meta.verbose_name_plural),
                 "count": count,
                 "url": LandingView._safe_reverse(
                     f"admin:{model._meta.app_label}_{model._meta.model_name}_changelist"
                 ),
             })
-        return sorted(stats, key=lambda s: s["name"])
+        return sorted(stats, key=lambda s: str(s["name"]))
 
     @staticmethod
     def _service_flags():
@@ -142,13 +148,71 @@ class LandingView(TemplateView):
             return bool(getattr(settings, name, default))
 
         celery_eager = flag("CELERY_TASK_ALWAYS_EAGER", False)
+        # Product names (REST API, GraphQL, Swagger UI, Elasticsearch, Celery,
+        # Redis) stay as they are; only the descriptive labels are translated.
         return [
             {"key": "rest", "label": "REST API", "enabled": flag("SNAPADMIN_REST_API_ENABLED")},
             {"key": "graphql", "label": "GraphQL", "enabled": flag("SNAPADMIN_GRAPHQL_ENABLED")},
             {"key": "swagger", "label": "Swagger UI", "enabled": flag("SNAPADMIN_SWAGGER_ENABLED")},
-            {"key": "user_api", "label": "User API", "enabled": flag("SNAPADMIN_USER_API_ENABLED", False)},
-            {"key": "audit", "label": "Audit log", "enabled": flag("SNAPADMIN_AUDIT_LOG_ENABLED")},
+            {"key": "user_api", "label": _("User API"), "enabled": flag("SNAPADMIN_USER_API_ENABLED", False)},
+            {"key": "audit", "label": _("Audit log"), "enabled": flag("SNAPADMIN_AUDIT_LOG_ENABLED")},
             {"key": "es", "label": "Elasticsearch", "enabled": flag("ELASTICSEARCH_ENABLED", False)},
             # Celery counts as "enabled" (real broker) only when not running eagerly.
             {"key": "celery", "label": "Celery / Redis", "enabled": not celery_eager},
         ]
+
+
+class StaffDashboardView(DashboardView):
+    """The package dashboard, with the demo's session bar and service checklist folded in.
+
+    Renders through ``demo/root_dashboard.html``, which ``{% extends %}`` the package's
+    ``snapadmin/dashboard.html`` and fills the two block hooks that template exposes for
+    exactly this purpose — ``header_actions_extra`` (session/logout) and
+    ``dashboard_extra_bottom`` (the enabled/disabled surface checklist ``LandingView``
+    used to show). The package template and ``DashboardView`` itself are untouched; a
+    project overriding its own dashboard would follow the same pattern.
+    """
+
+    template_name = "demo/root_dashboard.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        services = LandingView._service_flags()
+        context["demo_services"] = services
+        context["demo_services_enabled_count"] = sum(1 for s in services if s["enabled"])
+        return context
+
+
+class RootView(View):
+    """Site root (``/``): the dashboard for staff, the landing page for everyone else.
+
+    Before this view, ``/`` was always :class:`LandingView` and the polished
+    :class:`~snapadmin.views.DashboardView` layout only appeared at ``/dashboard/`` — a
+    fragmented entry point when the dashboard is by far the more presentable page.
+    ``/dashboard/`` keeps working as a direct alias (bookmarks, links in the admin, and
+    the reverse URL other views build all stay valid).
+
+    * **Staff** (or anyone, when ``SNAPADMIN_DASHBOARD_PUBLIC`` opts the dashboard into
+      being world-readable) → :class:`StaffDashboardView`.
+    * **Anonymous or non-staff authenticated** → :class:`LandingView` unchanged — the
+      login form, or the visitor's own session facts. They cannot see the dashboard
+      itself, so nothing is lost by keeping their experience as it was.
+    """
+
+    def get(self, request, *args, **kwargs):
+        if self._wants_dashboard(request):
+            return StaffDashboardView.as_view()(request, *args, **kwargs)
+        return LandingView.as_view()(request, *args, **kwargs)
+
+    def post(self, request, *args, **kwargs):
+        # Only the anonymous login form posts here; an authenticated visitor's
+        # POST (e.g. a stray resubmit) is handled the same way LandingView
+        # always handled it.
+        return LandingView.as_view()(request, *args, **kwargs)
+
+    @staticmethod
+    def _wants_dashboard(request) -> bool:
+        if getattr(settings, "SNAPADMIN_DASHBOARD_PUBLIC", False):
+            return True
+        user = request.user
+        return user.is_authenticated and user.is_staff

@@ -1,0 +1,463 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-08-09 19:38+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+msgid "Name"
+msgstr "Naam"
+
+msgid "Slug"
+msgstr "Slug"
+
+msgid "Active"
+msgstr "Actief"
+
+msgid "Category"
+msgstr "Categorie"
+
+msgid "Categories"
+msgstr "Categorieën"
+
+msgid "Tag Name"
+msgstr "Tagnaam"
+
+msgid "Tag"
+msgstr "Tag"
+
+msgid "Tags"
+msgstr "Tags"
+
+msgid "Price"
+msgstr "Prijs"
+
+msgid "Available"
+msgstr "Beschikbaar"
+
+msgid "In Stock"
+msgstr "Op voorraad"
+
+msgid "Description"
+msgstr "Beschrijving"
+
+msgid "General"
+msgstr "Algemeen"
+
+msgid "Advanced"
+msgstr "Geavanceerd"
+
+msgid "Product"
+msgstr "Product"
+
+msgid "Products"
+msgstr "Producten"
+
+msgid "First Name"
+msgstr "Voornaam"
+
+msgid "Last Name"
+msgstr "Achternaam"
+
+msgid "Origin"
+msgstr "Herkomst"
+
+msgid "Email"
+msgstr "E-mail"
+
+msgid "Is Active"
+msgstr "Is actief"
+
+msgid "Status"
+msgstr "Status"
+
+msgid "Customer"
+msgstr "Klant"
+
+msgid "Customers"
+msgstr "Klanten"
+
+msgid "Newsletter Opt-in"
+msgstr "Nieuwsbriefinschrijving"
+
+msgid "Bio"
+msgstr "Biografie"
+
+msgid "Customer Profile"
+msgstr "Klantprofiel"
+
+msgid "Customer Profiles"
+msgstr "Klantprofielen"
+
+msgid "Total"
+msgstr "Totaal"
+
+msgid "Created At"
+msgstr "Aangemaakt op"
+
+msgid "Order"
+msgstr "Bestelling"
+
+msgid "Orders"
+msgstr "Bestellingen"
+
+msgid "Query"
+msgstr "Zoekopdracht"
+
+msgid "Results Count"
+msgstr "Aantal resultaten"
+
+msgid "Timestamp"
+msgstr "Tijdstempel"
+
+msgid "Search Log"
+msgstr "Zoeklogboek"
+
+msgid "Search Logs"
+msgstr "Zoeklogboeken"
+
+msgid "Action"
+msgstr "Actie"
+
+msgid "User Email"
+msgstr "E-mail van gebruiker"
+
+msgid "Audit Log"
+msgstr "Auditlogboek"
+
+msgid "Audit Logs"
+msgstr "Auditlogboeken"
+
+msgid "Currency"
+msgstr "Valuta"
+
+msgid "Base"
+msgstr "Basis"
+
+msgid "Rate"
+msgstr "Koers"
+
+msgid "Last Synced"
+msgstr "Laatst gesynchroniseerd"
+
+msgid "Last Seen In Feed"
+msgstr "Laatst gezien in de feed"
+
+msgid "Exchange Rate"
+msgstr "Wisselkoers"
+
+msgid "Exchange Rates"
+msgstr "Wisselkoersen"
+
+msgid "Quantity"
+msgstr "Aantal"
+
+msgid "Price at purchase"
+msgstr "Prijs bij aankoop"
+
+msgid "Order Item"
+msgstr "Bestelregel"
+
+msgid "Order Items"
+msgstr "Bestelregels"
+
+msgid "Char Field"
+msgstr "Tekstveld"
+
+msgid "Text Content"
+msgstr "Tekstinhoud"
+
+msgid "Text Field"
+msgstr "Tekstgebied"
+
+msgid "WYSIWYG Field"
+msgstr "WYSIWYG-veld"
+
+msgid "Integer Field"
+msgstr "Geheel-getalveld"
+
+msgid "Numbers"
+msgstr "Getallen"
+
+msgid "Positive Int"
+msgstr "Positief geheel getal"
+
+msgid "Float Field"
+msgstr "Floatveld"
+
+msgid "Decimal Field"
+msgstr "Decimaalveld"
+
+msgid "Big Int"
+msgstr "Groot geheel getal"
+
+msgid "Date Field"
+msgstr "Datumveld"
+
+msgid "Dates & Times"
+msgstr "Datums & tijden"
+
+msgid "DateTime Field"
+msgstr "Datum-tijdveld"
+
+msgid "Time Field"
+msgstr "Tijdveld"
+
+msgid "Duration Field"
+msgstr "Duurveld"
+
+msgid "Email Field"
+msgstr "E-mailveld"
+
+msgid "Specialized"
+msgstr "Gespecialiseerd"
+
+msgid "Slug Field"
+msgstr "Slugveld"
+
+msgid "URL Field"
+msgstr "URL-veld"
+
+msgid "UUID Field"
+msgstr "UUID-veld"
+
+msgid "IP Address"
+msgstr "IP-adres"
+
+msgid "Image Field"
+msgstr "Afbeeldingsveld"
+
+msgid "Assets"
+msgstr "Bestanden"
+
+msgid "File Field"
+msgstr "Bestandsveld"
+
+msgid "Boolean Field"
+msgstr "Booleaans veld"
+
+msgid "JSON Field"
+msgstr "JSON-veld"
+
+msgid "Rich Text"
+msgstr "Opgemaakte tekst"
+
+msgid "Extended"
+msgstr "Uitgebreid"
+
+msgid "Phone Number"
+msgstr "Telefoonnummer"
+
+msgid "Color"
+msgstr "Kleur"
+
+msgid "Small Integer"
+msgstr "Klein geheel getal"
+
+msgid "Pos. Small Integer"
+msgstr "Pos. klein geheel getal"
+
+msgid "Pos. Big Integer"
+msgstr "Pos. groot geheel getal"
+
+msgid "Computed Summary"
+msgstr "Berekende samenvatting"
+
+msgid "Showcase"
+msgstr "Etalage"
+
+msgid "SnapAdmin Custom Dashboard"
+msgstr "Aangepast SnapAdmin-dashboard"
+
+msgid "Total orders"
+msgstr "Totaal aantal bestellingen"
+
+msgid "Active customers"
+msgstr "Actieve klanten"
+
+msgid "Revenue"
+msgstr "Omzet"
+
+msgid "Recent activity"
+msgstr "Recente activiteit"
+
+msgid ""
+"No activity yet — run “python manage.py seed_demo” to populate the demo data."
+msgstr "Nog geen activiteit — voer “python manage.py seed_demo” uit om de demogegevens te vullen."
+
+msgid "System monitor"
+msgstr "Systeemmonitor"
+
+msgid "Disk usage"
+msgstr "Schijfgebruik"
+
+#, python-format
+msgid "Products in stock (%(product_available)s of %(product_total)s)"
+msgstr "Producten op voorraad (%(product_available)s van %(product_total)s)"
+
+msgid "Sign in to explore the demo"
+msgstr "Meld u aan om de demo te verkennen"
+
+msgid "Username"
+msgstr "Gebruikersnaam"
+
+msgid "Password"
+msgstr "Wachtwoord"
+
+msgid "Sign in"
+msgstr "Aanmelden"
+
+msgid "This is a demo environment for django-snapadmin."
+msgstr "Dit is een demo-omgeving voor django-snapadmin."
+
+msgid "Signed in as"
+msgstr "Aangemeld als"
+
+msgid "Log out"
+msgstr "Afmelden"
+
+msgid "Overview"
+msgstr "Overzicht"
+
+msgid "Stats"
+msgstr "Statistieken"
+
+msgid "API &amp; Services"
+msgstr "API &amp; diensten"
+
+msgid "Admin"
+msgstr "Beheer"
+
+msgid "Demo models"
+msgstr "Demomodellen"
+
+msgid "Services enabled"
+msgstr "Ingeschakelde diensten"
+
+msgid "Staff access"
+msgstr "Stafftoegang"
+
+msgid ""
+"Welcome. Use the tabs above to see demo record counts, which\n"
+"            optional SnapAdmin surfaces are enabled, and — for staff — links "
+"into the\n"
+"            admin and the full system dashboard."
+msgstr "Welkom. Gebruik de tabbladen hierboven om het aantal demorecords te zien, welke optionele SnapAdmin-onderdelen zijn ingeschakeld en — voor staf — links naar het beheer en het volledige systeemdashboard."
+
+msgid "Record counts"
+msgstr "Aantal records"
+
+msgid "No demo models found."
+msgstr "Geen demomodellen gevonden."
+
+msgid "Optional surfaces"
+msgstr "Optionele onderdelen"
+
+msgid "ON"
+msgstr "AAN"
+
+msgid "OFF"
+msgstr "UIT"
+
+msgid "Admin & tools"
+msgstr "Beheer & hulpmiddelen"
+
+msgid "Open Admin"
+msgstr "Beheer openen"
+
+msgid "System dashboard"
+msgstr "Systeemdashboard"
+
+msgid "API docs (Swagger)"
+msgstr "API-documentatie (Swagger)"
+
+msgid ""
+"Your account does not have staff access, so the Django admin\n"
+"              and the system dashboard aren't available. Ask an "
+"administrator to grant\n"
+"              staff status."
+msgstr "Uw account heeft geen staftoegang, dus het Django-beheer en het systeemdashboard zijn niet beschikbaar. Vraag een beheerder om u de stafstatus te geven."
+
+#, python-format
+msgid "Order #%(pk)s — %(customer)s"
+msgstr "Bestelling #%(pk)s — %(customer)s"
+
+#, python-format
+msgid "Customer %(name)s registered"
+msgstr "Klant %(name)s geregistreerd"
+
+msgid "User API"
+msgstr "Gebruikers-API"
+
+msgid "Audit log"
+msgstr "Auditlogboek"
+
+msgid "Sync all Product records from DB to Elasticsearch (DUAL mode demo)"
+msgstr "Alle Product-records van de DB naar Elasticsearch synchroniseren (DUAL-modus demo)"
+
+msgid "GDPR — delete records older than data_retention_days on each model"
+msgstr "AVG — records ouder dan data_retention_days per model verwijderen"
+
+msgid ""
+"Compute and log daily business stats (products, customers, orders, revenue)"
+msgstr "Dagelijkse bedrijfsstatistieken berekenen en loggen (producten, klanten, bestellingen, omzet)"
+
+msgid "Remove expired API tokens"
+msgstr "Verlopen API-tokens verwijderen"
+
+msgid "Email the grouped 24h error digest and purge expired ErrorEvents"
+msgstr "De gegroepeerde 24-uurs foutsamenvatting e-mailen en verlopen ErrorEvents opruimen"
+
+msgid "Probe subsystem health (DB/ES) and email an alert when one is down"
+msgstr "De status van subsystemen (DB/ES) controleren en een waarschuwing mailen bij uitval"
+
+msgid "3-2-1 DB backups to local / network / remote FTP when due"
+msgstr "3-2-1-databaseback-ups naar lokaal / netwerk / externe FTP wanneer nodig"
+
+msgid "Settings"
+msgstr "Instellingen"
+
+msgid "My site"
+msgstr "Mijn site"
+
+msgid "Navigation"
+msgstr "Navigatie"
+
+msgid "Dashboard"
+msgstr "Dashboard"
+
+msgid "Users"
+msgstr "Gebruikers"
+
+msgid "Business Logic"
+msgstr "Bedrijfslogica"
+
+msgid "System & Logs"
+msgstr "Systeem & logboeken"
+
+msgid "Error Events"
+msgstr "Foutgebeurtenissen"
+
+msgid "Security"
+msgstr "Beveiliging"
+
+msgid "API Tokens"
+msgstr "API-tokens"
+
+msgid "Basic Info"
+msgstr "Basisinformatie"
+
+msgid "Advanced Settings"
+msgstr "Geavanceerde instellingen"

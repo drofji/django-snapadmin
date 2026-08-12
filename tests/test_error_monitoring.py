@@ -436,13 +436,13 @@ class TestDigestEntryPoints:
     def test_command_sends_digest(self):
         _make_events(2)
         out = StringIO()
-        call_command("send_error_digest", stdout=out)
+        call_command("snapadmin_send_error_digest", stdout=out)
         assert "Digest sent: 2 errors in 1 groups" in out.getvalue()
         assert len(mail.outbox) == 1
 
     def test_command_reports_not_sent(self):
         out = StringIO()
-        call_command("send_error_digest", "--hours", "12", stdout=out)
+        call_command("snapadmin_send_error_digest", "--hours", "12", stdout=out)
         assert "Digest not sent (no_errors)" in out.getvalue()
         assert mail.outbox == []
 

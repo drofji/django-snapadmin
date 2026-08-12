@@ -1,0 +1,42 @@
+{% extends "snapadmin/dashboard.html" %}
+{% load i18n %}
+
+{% comment %}
+Fills the block hooks snapadmin/dashboard.html exposes for exactly this: folding a
+project's own session/facts into the shared dashboard shell without touching the
+package template. Used at "/" (RootView) for staff visitors — see
+demo/apps/shop/views.py:StaffDashboardView.
+{% endcomment %}
+
+{% block header_actions_extra %}
+{% if request.user.is_authenticated %}
+<span style="color: var(--text-secondary); font-size: 0.875rem;">
+    {% translate "Signed in as" %} <strong style="color: var(--text-primary);">{{ request.user.get_username }}</strong>
+</span>
+<form method="post" action="{% url 'logout' %}" style="margin: 0;">
+    {% csrf_token %}
+    <button type="submit" style="background: none; border: 1px solid var(--border-color); border-radius: 0.5rem; padding: 0.4rem 0.9rem; font: inherit; color: var(--text-primary); cursor: pointer;">
+        {% translate "Log out" %}
+    </button>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block dashboard_extra_bottom %}
+<div class="section">
+    <div class="section-title" role="heading" aria-level="2">
+        <i class="material-icons" aria-hidden="true">toggle_on</i> {% translate "Optional surfaces" %}
+        <span style="font-weight: 400; text-transform: none; letter-spacing: normal;">({{ demo_services_enabled_count }}/{{ demo_services|length }} {% translate "enabled" %})</span>
+    </div>
+    <div class="grid">
+        {% for svc in demo_services %}
+        <div class="status-item" style="border-bottom: none; background: var(--bg-color); border-radius: 0.5rem; padding: 0.75rem 1rem;">
+            <span>{{ svc.label }}</span>
+            <span class="status-badge status-{% if svc.enabled %}online{% else %}disabled{% endif %}">
+                {% if svc.enabled %}{% translate "ON" %}{% else %}{% translate "OFF" %}{% endif %}
+            </span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

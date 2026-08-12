@@ -530,18 +530,18 @@ class TestRunBackups:
 class TestBackupEntryPoints:
     def test_command_due_mode(self, backup_env):
         out = StringIO()
-        call_command("db_backup", stdout=out)
+        call_command("snapadmin_db_backup", stdout=out)
         assert "Backup complete" in out.getvalue()
         assert "local:" in out.getvalue() and "network:" in out.getvalue()
 
     def test_command_disabled_reports_reason(self, sqlite_db):
         out = StringIO()
-        call_command("db_backup", stdout=out)
+        call_command("snapadmin_db_backup", stdout=out)
         assert "No backup performed (disabled)" in out.getvalue()
 
     def test_command_single_destination(self, backup_env):
         out = StringIO()
-        call_command("db_backup", "--destination", "local", stdout=out)
+        call_command("snapadmin_db_backup", "--destination", "local", stdout=out)
         assert "local:" in out.getvalue()
         assert "network:" not in out.getvalue()
 
@@ -551,7 +551,7 @@ class TestBackupEntryPoints:
     )
     def test_command_force_covers_all_configured(self, backup_env, fake_ftp, fake_sftp):
         out = StringIO()
-        call_command("db_backup", "--force", stdout=out)
+        call_command("snapadmin_db_backup", "--force", stdout=out)
         assert "local:" in out.getvalue()
         assert "network:" in out.getvalue()
         assert "remote: ftp://backup.example.com" in out.getvalue()
@@ -564,7 +564,7 @@ class TestBackupEntryPoints:
         )
         out = StringIO()
         with pytest.raises(CommandError, match="Some backup destinations failed"):
-            call_command("db_backup", "--force", stdout=out)
+            call_command("snapadmin_db_backup", "--force", stdout=out)
         assert "network: error: share offline" in out.getvalue()
 
     def test_celery_task(self, backup_env):

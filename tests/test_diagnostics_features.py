@@ -178,9 +178,14 @@ class TestFeaturesInCommand:
         return out.getvalue()
 
     def test_section_renders_checklist(self):
+        """#CLI7: 16 booleans render as two wrapped on/off runs, not 16 lines."""
         text = self._run(sections=["features"])
         assert "Feature adoption" in text
-        assert "Rest api:" in text  # a rendered capability line
+        assert "✓ on" in text and "✗ off" in text
+        assert "Rest api" in text                       # a listed capability
+        assert "Rest api:" not in text                  # …not as its own key/value line
+        # Two group lines plus their wrapped continuations — far fewer than one per flag.
+        assert len(text.strip().splitlines()) < 16
 
     def test_json_carries_features(self):
         payload = json.loads(self._run(as_json=True, sections=["features"]))

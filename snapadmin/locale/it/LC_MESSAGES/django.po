@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-07-18 14:12+0000\n"
+"POT-Creation-Date: 2026-08-09 19:28+0000\n"
 "Language: it\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -239,6 +239,15 @@ msgstr "Filtri"
 msgid "ORM field=value filters applied to the export queryset."
 msgstr "Filtri ORM campo=valore applicati al queryset di esportazione."
 
+msgid "Row Source"
+msgstr "Sorgente righe"
+
+msgid ""
+"Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."
+msgstr ""
+"Nome registrato in SNAPADMIN_EXPORT_SOURCES; vuoto usa la sorgente ORM "
+"predefinita."
+
 msgid "Total Rows"
 msgstr "Righe totali"
 
@@ -288,7 +297,9 @@ msgstr "Attività di esportazione"
 
 msgid ""
 "Primary key of the last indexed row; blank means start from the beginning."
-msgstr "Chiave primaria dell'ultima riga indicizzata; vuoto significa iniziare dall'inizio."
+msgstr ""
+"Chiave primaria dell'ultima riga indicizzata; vuoto significa iniziare "
+"dall'inizio."
 
 msgid "Reindex Job"
 msgstr "Attività di reindicizzazione"
@@ -361,6 +372,9 @@ msgstr "Generazione dinamica dello schema basata su Graphene."
 msgid "Built with <strong>SnapAdmin</strong> v%(version)s"
 msgstr "Realizzato con <strong>SnapAdmin</strong> v%(version)s"
 
+msgid "Record Count"
+msgstr "Numero di record"
+
 msgid "Language"
 msgstr "Lingua"
 
@@ -395,6 +409,37 @@ msgstr "Impossibile verificare la codifica del file."
 msgid "Invalid encoding. Allowed: %(encodings)s"
 msgstr "Codifica non valida. Consentite: %(encodings)s"
 
+msgid "online"
+msgstr "online"
+
+msgid "offline"
+msgstr "offline"
+
+msgid "disabled"
+msgstr "disattivato"
+
+msgid "Admin Panel"
+msgstr "Pannello di amministrazione"
+
+msgid "REST API Root"
+msgstr "Radice dell'API REST"
+
+msgid "Swagger Docs"
+msgstr "Documentazione Swagger"
+
+msgid "GraphQL API"
+msgstr "API GraphQL"
+
+#, python-format
+msgid "Database (%(name)s)"
+msgstr "Database (%(name)s)"
+
+msgid "Local"
+msgstr "Locale"
+
+msgid "No description provided."
+msgstr "Nessuna descrizione fornita."
+
 #~ msgid "English"
 #~ msgstr "Inglese"
 
@@ -424,9 +469,3 @@ msgstr "Codifica non valida. Consentite: %(encodings)s"
 
 #~ msgid "Dutch"
 #~ msgstr "Olandese"
-
-msgid "Row Source"
-msgstr "Sorgente righe"
-
-msgid "Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."
-msgstr "Nome registrato in SNAPADMIN_EXPORT_SOURCES; vuoto usa la sorgente ORM predefinita."

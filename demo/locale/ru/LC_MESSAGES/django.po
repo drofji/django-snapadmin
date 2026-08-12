@@ -1,0 +1,465 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-08-09 19:33+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=4; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
+"n%10<=4 && (n%100<12 || n%100>14) ? 1 : n%10==0 || (n%10>=5 && n%10<=9) || "
+"(n%100>=11 && n%100<=14)? 2 : 3);\n"
+msgid "Name"
+msgstr "Имя"
+
+msgid "Slug"
+msgstr "Слаг"
+
+msgid "Active"
+msgstr "Активен"
+
+msgid "Category"
+msgstr "Категория"
+
+msgid "Categories"
+msgstr "Категории"
+
+msgid "Tag Name"
+msgstr "Название тега"
+
+msgid "Tag"
+msgstr "Тег"
+
+msgid "Tags"
+msgstr "Теги"
+
+msgid "Price"
+msgstr "Цена"
+
+msgid "Available"
+msgstr "Доступен"
+
+msgid "In Stock"
+msgstr "В наличии"
+
+msgid "Description"
+msgstr "Описание"
+
+msgid "General"
+msgstr "Общее"
+
+msgid "Advanced"
+msgstr "Дополнительно"
+
+msgid "Product"
+msgstr "Товар"
+
+msgid "Products"
+msgstr "Товары"
+
+msgid "First Name"
+msgstr "Имя"
+
+msgid "Last Name"
+msgstr "Фамилия"
+
+msgid "Origin"
+msgstr "Источник"
+
+msgid "Email"
+msgstr "Эл. почта"
+
+msgid "Is Active"
+msgstr "Активен"
+
+msgid "Status"
+msgstr "Статус"
+
+msgid "Customer"
+msgstr "Клиент"
+
+msgid "Customers"
+msgstr "Клиенты"
+
+msgid "Newsletter Opt-in"
+msgstr "Подписка на рассылку"
+
+msgid "Bio"
+msgstr "Биография"
+
+msgid "Customer Profile"
+msgstr "Профиль клиента"
+
+msgid "Customer Profiles"
+msgstr "Профили клиентов"
+
+msgid "Total"
+msgstr "Итого"
+
+msgid "Created At"
+msgstr "Создано"
+
+msgid "Order"
+msgstr "Заказ"
+
+msgid "Orders"
+msgstr "Заказы"
+
+msgid "Query"
+msgstr "Запрос"
+
+msgid "Results Count"
+msgstr "Количество результатов"
+
+msgid "Timestamp"
+msgstr "Отметка времени"
+
+msgid "Search Log"
+msgstr "Журнал поиска"
+
+msgid "Search Logs"
+msgstr "Журналы поиска"
+
+msgid "Action"
+msgstr "Действие"
+
+msgid "User Email"
+msgstr "Эл. почта пользователя"
+
+msgid "Audit Log"
+msgstr "Журнал аудита"
+
+msgid "Audit Logs"
+msgstr "Журналы аудита"
+
+msgid "Currency"
+msgstr "Валюта"
+
+msgid "Base"
+msgstr "База"
+
+msgid "Rate"
+msgstr "Курс"
+
+msgid "Last Synced"
+msgstr "Последняя синхронизация"
+
+msgid "Last Seen In Feed"
+msgstr "Последний раз в фиде"
+
+msgid "Exchange Rate"
+msgstr "Курс валюты"
+
+msgid "Exchange Rates"
+msgstr "Курсы валют"
+
+msgid "Quantity"
+msgstr "Количество"
+
+msgid "Price at purchase"
+msgstr "Цена на момент покупки"
+
+msgid "Order Item"
+msgstr "Позиция заказа"
+
+msgid "Order Items"
+msgstr "Позиции заказа"
+
+msgid "Char Field"
+msgstr "Строковое поле"
+
+msgid "Text Content"
+msgstr "Текстовое содержимое"
+
+msgid "Text Field"
+msgstr "Текстовое поле"
+
+msgid "WYSIWYG Field"
+msgstr "Поле WYSIWYG"
+
+msgid "Integer Field"
+msgstr "Целочисленное поле"
+
+msgid "Numbers"
+msgstr "Числа"
+
+msgid "Positive Int"
+msgstr "Положительное целое"
+
+msgid "Float Field"
+msgstr "Поле с плавающей точкой"
+
+msgid "Decimal Field"
+msgstr "Десятичное поле"
+
+msgid "Big Int"
+msgstr "Большое целое"
+
+msgid "Date Field"
+msgstr "Поле даты"
+
+msgid "Dates & Times"
+msgstr "Даты и время"
+
+msgid "DateTime Field"
+msgstr "Поле даты и времени"
+
+msgid "Time Field"
+msgstr "Поле времени"
+
+msgid "Duration Field"
+msgstr "Поле длительности"
+
+msgid "Email Field"
+msgstr "Поле эл. почты"
+
+msgid "Specialized"
+msgstr "Специальные"
+
+msgid "Slug Field"
+msgstr "Поле слага"
+
+msgid "URL Field"
+msgstr "Поле URL"
+
+msgid "UUID Field"
+msgstr "Поле UUID"
+
+msgid "IP Address"
+msgstr "IP-адрес"
+
+msgid "Image Field"
+msgstr "Поле изображения"
+
+msgid "Assets"
+msgstr "Файлы"
+
+msgid "File Field"
+msgstr "Файловое поле"
+
+msgid "Boolean Field"
+msgstr "Логическое поле"
+
+msgid "JSON Field"
+msgstr "Поле JSON"
+
+msgid "Rich Text"
+msgstr "Форматированный текст"
+
+msgid "Extended"
+msgstr "Расширенные"
+
+msgid "Phone Number"
+msgstr "Номер телефона"
+
+msgid "Color"
+msgstr "Цвет"
+
+msgid "Small Integer"
+msgstr "Малое целое"
+
+msgid "Pos. Small Integer"
+msgstr "Полож. малое целое"
+
+msgid "Pos. Big Integer"
+msgstr "Полож. большое целое"
+
+msgid "Computed Summary"
+msgstr "Вычисляемая сводка"
+
+msgid "Showcase"
+msgstr "Витрина"
+
+msgid "SnapAdmin Custom Dashboard"
+msgstr "Пользовательская панель SnapAdmin"
+
+msgid "Total orders"
+msgstr "Всего заказов"
+
+msgid "Active customers"
+msgstr "Активные клиенты"
+
+msgid "Revenue"
+msgstr "Выручка"
+
+msgid "Recent activity"
+msgstr "Последние действия"
+
+msgid ""
+"No activity yet — run “python manage.py seed_demo” to populate the demo data."
+msgstr "Пока нет активности — выполните «python manage.py seed_demo», чтобы наполнить демо-данные."
+
+msgid "System monitor"
+msgstr "Мониторинг системы"
+
+msgid "Disk usage"
+msgstr "Использование диска"
+
+#, python-format
+msgid "Products in stock (%(product_available)s of %(product_total)s)"
+msgstr "Товаров в наличии (%(product_available)s из %(product_total)s)"
+
+msgid "Sign in to explore the demo"
+msgstr "Войдите, чтобы посмотреть демо"
+
+msgid "Username"
+msgstr "Имя пользователя"
+
+msgid "Password"
+msgstr "Пароль"
+
+msgid "Sign in"
+msgstr "Войти"
+
+msgid "This is a demo environment for django-snapadmin."
+msgstr "Это демонстрационная среда django-snapadmin."
+
+msgid "Signed in as"
+msgstr "Вы вошли как"
+
+msgid "Log out"
+msgstr "Выйти"
+
+msgid "Overview"
+msgstr "Обзор"
+
+msgid "Stats"
+msgstr "Статистика"
+
+msgid "API &amp; Services"
+msgstr "API и сервисы"
+
+msgid "Admin"
+msgstr "Админка"
+
+msgid "Demo models"
+msgstr "Демо-модели"
+
+msgid "Services enabled"
+msgstr "Включённых сервисов"
+
+msgid "Staff access"
+msgstr "Доступ персонала"
+
+msgid ""
+"Welcome. Use the tabs above to see demo record counts, which\n"
+"            optional SnapAdmin surfaces are enabled, and — for staff — links "
+"into the\n"
+"            admin and the full system dashboard."
+msgstr "Добро пожаловать. На вкладках выше — количество демо-записей, список включённых необязательных возможностей SnapAdmin и (для персонала) ссылки в админку и на полную системную панель."
+
+msgid "Record counts"
+msgstr "Количество записей"
+
+msgid "No demo models found."
+msgstr "Демо-модели не найдены."
+
+msgid "Optional surfaces"
+msgstr "Необязательные возможности"
+
+msgid "ON"
+msgstr "ВКЛ"
+
+msgid "OFF"
+msgstr "ВЫКЛ"
+
+msgid "Admin & tools"
+msgstr "Админка и инструменты"
+
+msgid "Open Admin"
+msgstr "Открыть админку"
+
+msgid "System dashboard"
+msgstr "Системная панель"
+
+msgid "API docs (Swagger)"
+msgstr "Документация API (Swagger)"
+
+msgid ""
+"Your account does not have staff access, so the Django admin\n"
+"              and the system dashboard aren't available. Ask an "
+"administrator to grant\n"
+"              staff status."
+msgstr "У вашей учётной записи нет доступа персонала, поэтому админка Django и системная панель недоступны. Попросите администратора выдать статус персонала."
+
+#, python-format
+msgid "Order #%(pk)s — %(customer)s"
+msgstr "Заказ №%(pk)s — %(customer)s"
+
+#, python-format
+msgid "Customer %(name)s registered"
+msgstr "Клиент %(name)s зарегистрирован"
+
+msgid "User API"
+msgstr "API пользователей"
+
+msgid "Audit log"
+msgstr "Журнал аудита"
+
+msgid "Sync all Product records from DB to Elasticsearch (DUAL mode demo)"
+msgstr "Синхронизировать все записи Product из БД в Elasticsearch (демо режима DUAL)"
+
+msgid "GDPR — delete records older than data_retention_days on each model"
+msgstr "GDPR — удалять записи старше data_retention_days для каждой модели"
+
+msgid ""
+"Compute and log daily business stats (products, customers, orders, revenue)"
+msgstr "Рассчитывать и записывать ежедневную бизнес-статистику (товары, клиенты, заказы, выручка)"
+
+msgid "Remove expired API tokens"
+msgstr "Удалять просроченные токены API"
+
+msgid "Email the grouped 24h error digest and purge expired ErrorEvents"
+msgstr "Отправлять сгруппированную сводку ошибок за 24 часа и удалять устаревшие ErrorEvent"
+
+msgid "Probe subsystem health (DB/ES) and email an alert when one is down"
+msgstr "Проверять состояние подсистем (БД/ES) и отправлять письмо при сбое"
+
+msgid "3-2-1 DB backups to local / network / remote FTP when due"
+msgstr "Резервные копии БД по схеме 3-2-1: локально / в сеть / на удалённый FTP по расписанию"
+
+msgid "Settings"
+msgstr "Настройки"
+
+msgid "My site"
+msgstr "Мой сайт"
+
+msgid "Navigation"
+msgstr "Навигация"
+
+msgid "Dashboard"
+msgstr "Панель"
+
+msgid "Users"
+msgstr "Пользователи"
+
+msgid "Business Logic"
+msgstr "Бизнес-логика"
+
+msgid "System & Logs"
+msgstr "Система и журналы"
+
+msgid "Error Events"
+msgstr "События ошибок"
+
+msgid "Security"
+msgstr "Безопасность"
+
+msgid "API Tokens"
+msgstr "Токены API"
+
+msgid "Basic Info"
+msgstr "Основные сведения"
+
+msgid "Advanced Settings"
+msgstr "Дополнительные настройки"

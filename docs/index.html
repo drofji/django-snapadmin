@@ -556,6 +556,131 @@ SNAPADMIN_IMAGE_KEEP_DAYS=5 demo/scripts/docker_build.sh  # widen the window</co
   <p>The pruner can also run standalone (e.g. in CI), with a dry-run mode:</p>
   <pre><code>python -m demo.scripts.docker_retention prune --image snapadmin-test --dry-run</code></pre>
 
+  <h3 id="healthcheck">Container health check — Docker, Coolify, Dokploy, Kubernetes</h3>
+  <p>SnapAdmin serves an unauthenticated probe at <code>GET /api/health/</code>. Point your platform's
+  health check at it — it is the one endpoint that actually reports whether this instance can serve:</p>
+  <table>
+    <tr><th>Overall status</th><th>HTTP</th><th>Meaning</th></tr>
+    <tr><td><code>healthy</code></td><td><code>200</code></td><td>Database reachable; the instance can serve.</td></tr>
+    <tr><td><code>degraded</code></td><td><code>200</code></td><td>An <em>optional</em> subsystem (Elasticsearch) is down. Still serving — taking the instance out of rotation would make the outage worse. Alert on the body, don't restart on it.</td></tr>
+    <tr><td><code>unhealthy</code></td><td><code>503</code></td><td>The database is unreachable. Restart or replace this instance.</td></tr>
+  </table>
+
+  <div class="callout callout-warn">
+    <strong>Don't probe <code>/admin/</code>.</strong>
+    It answers <code>302</code> (redirect to login) even with the database down, so a broken instance
+    reports as healthy. Probing the login page only tells you a web server is listening.
+  </div>
+
+  <p>An <strong>anonymous</strong> caller receives only <code>{"status": "healthy"}</code> — the
+  per-service breakdown is reserved for an authenticated session or token — so the endpoint is safe
+  to expose to a load balancer or an external uptime monitor.</p>
+
+  <p><strong>Dockerfile</strong> (the demo image ships exactly this, and bundles <code>curl</code> for it):</p>
+  <pre><code>HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl -fsS http://localhost:8000/api/health/ || exit 1</code></pre>
+
+  <p><strong>Docker Compose</strong> — use this when the image has no <code>HEALTHCHECK</code> of its own,
+  or to override it per environment:</p>
+  <pre><code>services:
+  app:
+    healthcheck:
+      test: [ "CMD", "curl", "-fsS", "http://localhost:8000/api/health/" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s     # covers migrate + collectstatic on first boot</code></pre>
+
+  <p><strong>Coolify / Dokploy / Caprover</strong> — these expose the same Docker fields in their UI.
+  The values to enter:</p>
+  <table>
+    <tr><th>Field</th><th>Value</th><th>Why</th></tr>
+    <tr><td>Path</td><td><code>/api/health/</code></td><td>The trailing slash matters — Django's <code>APPEND_SLASH</code> would otherwise answer <code>301</code> first.</td></tr>
+    <tr><td>Port</td><td><code>8000</code></td><td>Whatever Gunicorn binds inside the container, not the published port.</td></tr>
+    <tr><td>Method / expected status</td><td><code>GET</code> / <code>200</code></td><td>Anything else means the database is unreachable.</td></tr>
+    <tr><td>Interval</td><td><code>30s</code></td><td>Every probe opens a database cursor; much below this is pointless load.</td></tr>
+    <tr><td>Timeout</td><td><code>5s</code></td><td>The check does no heavy work; a slow answer is itself a symptom.</td></tr>
+    <tr><td>Retries</td><td><code>3</code></td><td>Survives a single blip without flapping the container.</td></tr>
+    <tr><td>Start period / grace</td><td><code>60s</code></td><td>Migrations, <code>collectstatic</code> and any seeding run before the first request is served. Raise it if your start-up work is longer — a too-short grace period restart-loops a container that was simply still booting.</td></tr>
+  </table>
+
+  <p><strong>Kubernetes</strong> — the same endpoint works for both probes; give the liveness probe a
+  longer failure threshold so a brief database blip restarts nothing:</p>
+  <pre><code>readinessProbe:
+  httpGet: { path: /api/health/, port: 8000 }
+  initialDelaySeconds: 15
+  periodSeconds: 10
+  failureThreshold: 3
+livenessProbe:
+  httpGet: { path: /api/health/, port: 8000 }
+  initialDelaySeconds: 60
+  periodSeconds: 30
+  failureThreshold: 6</code></pre>
+
+  <h3 id="remote-storage">Static, media and backups on remote storage</h3>
+  <p>Local disk is fine for one container. The moment there are two, <strong>media must move
+  off the local filesystem</strong>: a file uploaded through instance A is a 404 on instance B, and a
+  container restart loses it. The demo settings switch Django 5+ <code>STORAGES</code> from a single
+  environment variable, and the same block is what you would copy into your own project.</p>
+
+  <table>
+    <tr><th>What you have</th><th>Protocol</th><th>How to use it</th></tr>
+    <tr><td>AWS S3</td><td>S3</td><td><code>SNAPADMIN_STORAGE_BACKEND=s3</code>, leave <code>AWS_S3_ENDPOINT_URL</code> <em>empty</em> — boto3 derives it from the region.</td></tr>
+    <tr><td>Hetzner Object Storage</td><td>S3-compatible</td><td>Same, with <code>AWS_S3_ENDPOINT_URL=https://fsn1.your-objectstorage.com</code> and <code>AWS_S3_REGION_NAME=fsn1</code> (or <code>hel1</code>/<code>nbg1</code> — use the bucket's own location).</td></tr>
+    <tr><td>MinIO / self-hosted</td><td>S3-compatible</td><td>Same, plus <code>AWS_S3_ADDRESSING_STYLE=path</code> when you have no wildcard DNS.</td></tr>
+    <tr><td>Backblaze B2</td><td>S3-compatible</td><td>Same, endpoint <code>https://s3.&lt;region&gt;.backblazeb2.com</code>.</td></tr>
+    <tr><td>Hetzner Storage Box</td><td><strong>SFTP / CIFS / WebDAV — not S3</strong></td><td>Mount it on the host and keep <code>STORAGE_BACKEND=local</code>, pointing the media volume at the mount. For <em>backups only</em> you need no mount at all — see below.</td></tr>
+  </table>
+
+  <pre><code># .env — any S3-compatible provider, same variables
+SNAPADMIN_STORAGE_BACKEND=s3
+AWS_ACCESS_KEY_ID=…
+AWS_SECRET_ACCESS_KEY=…
+AWS_STORAGE_BUCKET_NAME=my-bucket
+AWS_S3_ENDPOINT_URL=https://fsn1.your-objectstorage.com   # empty for real AWS
+AWS_S3_REGION_NAME=fsn1
+AWS_QUERYSTRING_AUTH=True        # signed, time-limited URLs — correct for a private bucket
+AWS_S3_FILE_OVERWRITE=False      # never let one upload silently replace another
+AWS_DEFAULT_ACL=                 # modern buckets disable ACLs; sending one fails the PUT
+SNAPADMIN_STATIC_ON_S3=False     # static is public+immutable; WhiteNoise is usually enough</code></pre>
+
+  <p>It needs <code>pip install "django-storages[s3]"</code> (BSD-3-Clause). Nothing is imported
+  while <code>STORAGE_BACKEND=local</code> — <code>STORAGES</code> holds a dotted path Django resolves
+  lazily — so the dependency stays optional.</p>
+
+  <div class="callout callout-warn">
+    <strong>Async exports need the same bucket.</strong>
+    When the web process and the Celery worker do not share a filesystem, a finished export is only
+    downloadable from the instance that wrote it. Point
+    <code>SNAPADMIN_EXPORT_STORAGE=storages.backends.s3.S3Storage</code> at the same bucket.
+  </div>
+
+  <p><strong>Database backups</strong> are a separate mechanism — SnapAdmin writes dumps to its own
+  destinations rather than through Django's storage layer, so a Storage Box works directly:</p>
+  <table>
+    <tr><th>Destination</th><th>Setting</th><th>Fits</th></tr>
+    <tr><td>Offsite over SSH</td><td><code>SNAPADMIN_BACKUP_SFTP_*</code></td><td>Hetzner Storage Box, any SSH host. No mount needed; needs the <code>[backup]</code> extra.</td></tr>
+    <tr><td>Offsite over FTP/FTPS</td><td><code>SNAPADMIN_BACKUP_FTP_*</code></td><td>Storage Box also speaks FTPS.</td></tr>
+    <tr><td>Another machine on the network</td><td><code>SNAPADMIN_BACKUP_NETWORK_DIR</code></td><td>Any mounted share — NFS, or a Storage Box mounted over CIFS.</td></tr>
+  </table>
+  <pre><code># Mount a Storage Box over CIFS, then point the network destination at it
+//u123456.your-storagebox.de/backup  /mnt/box  cifs  credentials=/etc/box.cred,uid=1000  0 0
+SNAPADMIN_BACKUP_NETWORK_DIR=/mnt/box/snapadmin</code></pre>
+  <div class="callout callout-info">
+    <strong>No S3 backup destination yet.</strong>
+    Database dumps cannot be shipped straight to an S3 bucket — use SFTP/FTPS, or a mounted share.
+    Media and exports <em>do</em> go to S3 through the storage layer above.
+  </div>
+
+  <div class="callout callout-info">
+    <strong>Worker and Beat containers have no HTTP port.</strong>
+    Probe a Celery worker with <code>celery -A yourproject inspect ping -t 10</code> — it succeeds only
+    while the worker is actually consuming, so a hung worker fails it. Beat exposes nothing meaningful
+    to probe; rely on <code>restart: unless-stopped</code> plus the
+    <a href="#error-monitoring">health-alert email</a>, which is the practical signal that it stopped
+    firing. The demo's compose file wires both.
+  </div>
+
   <!-- ── Integrate into an existing project (snapadmin-init) ──────────────── -->
   <h2 id="snapadmin-init">🩺 Integrate an existing project — <code>snapadmin-init</code></h2>
   <p>Adding SnapAdmin to a project you already have means editing <code>INSTALLED_APPS</code> (with a
@@ -1091,7 +1216,10 @@ for row in Product.objects.all().iterator(chunk_size=2000):
     api_write_fields = ["owner"]   # is_locked / balance never accept a client value</code></pre>
   <p>Leaving it unset (the default) keeps every non-excluded field writable, matching prior behaviour
   — the <code>snapadmin.W004</code> system check warns on any model that hasn't made the choice
-  explicitly, so the exposure is deliberate rather than an oversight.</p>
+  explicitly, so the exposure is deliberate rather than an oversight. The warning is <strong>grouped</strong>:
+  one message names every unguarded model rather than repeating an identical block per model, and a
+  model served read-only (<code>api_read_only</code>, or an <code>api_http_method_names</code> allowlist
+  with no write verb) is skipped entirely — it has no mass-assignment surface to guard.</p>
 
   <h3 id="api-read-only">Read-only models &amp; verb allowlists — <code>api_read_only</code> / <code>api_http_method_names</code></h3>
   <p><code>api_write_fields</code> controls <em>which fields</em> a write may touch;
@@ -2045,6 +2173,24 @@ reindex_products_to_elasticsearch.delay()</code></pre>
   <code>demo/apps/shop/tasks.py</code>; the dotted names are explicit task names, not import paths).
   They are <em>demo</em> tasks, not part of the package.</p>
 
+  <h3 id="command-rename">Every management command is <code>snapadmin_*</code>-prefixed</h3>
+  <p>Three commands used to ship without the prefix the rest use. Beyond the inconsistency, names
+  that generic can <strong>collide with a command of your own</strong> — Django resolves duplicates
+  silently by <code>INSTALLED_APPS</code> order, so whichever app wins, wins quietly. They were
+  renamed:</p>
+  <table>
+    <tr><th>Old name</th><th>Use instead</th></tr>
+    <tr><td><code>db_backup</code></td><td><code>snapadmin_db_backup</code></td></tr>
+    <tr><td><code>purge_expired_data</code></td><td><code>snapadmin_purge_expired_data</code></td></tr>
+    <tr><td><code>send_error_digest</code></td><td><code>snapadmin_send_error_digest</code></td></tr>
+  </table>
+  <p>A command name lives in crontabs, Dockerfiles and CI, so <strong>the old names still work</strong>
+  — same arguments, same behaviour, plus one rename notice on stderr (stdout stays clean, so a piped
+  cron job is unaffected). They will be removed in a future release; update your schedules when
+  convenient. <strong>Celery task names never changed</strong> —
+  <code>snapadmin.purge_expired_data</code> and friends were already prefixed, so no Beat entry needs
+  touching.</p>
+
   <h3>Celery Setup</h3>
   <pre><code># myproject/celery.py
 from celery import Celery
@@ -2140,26 +2286,38 @@ logger.error("payment_failed", reason="card_declined")</code></pre>
   configuration and probes services only; it changes nothing, and <strong>secrets (database passwords,
   broker credentials, token values) are never printed</strong>.</p>
 
-  <pre><code>python manage.py snapadmin_info                   # full text report
-python manage.py snapadmin_info --json            # machine-readable (monitoring / CI)
-python manage.py snapadmin_info --section version # one section (repeatable)
-python manage.py snapadmin_info --brief           # top-level values only
-python manage.py snapadmin_info --health-check    # probes only; non-zero exit on failure</code></pre>
+  <pre><code>snapadmin-info                   # full text report
+snapadmin-info --json            # machine-readable (monitoring / CI)
+snapadmin-info --section version # one section (repeatable)
+snapadmin-info --brief           # top-level values only
+snapadmin-info --health-check    # probes only; non-zero exit on failure</code></pre>
+
+  <div class="callout callout-info">
+    <strong>Every spelling works.</strong>
+    This is a <code>manage.py</code> command, but the package also installs shell shims so that
+    <code>snapadmin-info</code>, <code>snapadmin_info</code> and
+    <code>python manage.py snapadmin_info</code> are all the same thing — the shim walks up from the
+    current directory to find your <code>manage.py</code>, forwards the arguments and returns the
+    exit code. Run it anywhere inside your project. With no project in sight it says so and points at
+    <code>snapadmin-demo</code>, instead of failing as a missing binary. Same for
+    <code>snapadmin-license-check</code> / <code>snapadmin_license_check</code>.
+  </div>
 
   <h3>Flags</h3>
   <table>
     <thead><tr><th>Flag</th><th>Effect</th></tr></thead>
     <tbody>
       <tr><td><code>--json</code></td><td>Emit the raw report as JSON — one object per section — for a monitoring endpoint or CI step.</td></tr>
-      <tr><td><code>--section NAME</code></td><td>Limit to one section (repeatable). Names: <code>version</code>, <code>features</code>, <code>database</code>, <code>elasticsearch</code>, <code>celery</code>, <code>inventory</code>.</td></tr>
+      <tr><td><code>--section NAME</code></td><td>Limit to one section (repeatable). Names: <code>checks</code>, <code>version</code>, <code>features</code>, <code>database</code>, <code>elasticsearch</code>, <code>celery</code>, <code>inventory</code>.</td></tr>
       <tr><td><code>--brief</code></td><td>Show only the top-level scalar values of each section, hiding nested detail.</td></tr>
-      <tr><td><code>--verbose</code></td><td>Include extra per-section detail (e.g. the list of online Celery workers).</td></tr>
-      <tr><td><code>--health-check</code></td><td>Run only the health probes (database, Elasticsearch, REST API, GraphQL — each skipped when its feature toggle is off) and <strong>exit non-zero</strong> if any fails — usable as a readiness/liveness check.</td></tr>
+      <tr><td><code>--verbose</code></td><td>Include extra per-section detail — the online Celery workers, per-capability adoption counts, and the full text of every system-check message.</td></tr>
+      <tr><td><code>--health-check</code></td><td>Run only the health probes (system checks, database, Elasticsearch, REST API, GraphQL — each skipped when its feature toggle is off) and <strong>exit non-zero</strong> if any fails — usable as a readiness/liveness check.</td></tr>
     </tbody>
   </table>
 
   <h3>Sections</h3>
   <ul>
+    <li><strong>System checks</strong> — a per-severity <em>count</em> of Django's system checks, not their text. Django normally prints every message in full before any management command runs, which buried this report behind a screen of advisory text, so <code>snapadmin_info</code> opts out of that pass and summarises here instead: <code>--verbose</code> prints the messages, and <strong>errors are always listed</strong> because they block a working deployment (they also make <code>--health-check</code> fail). Run <code>manage.py check</code> for the full text with hints.</li>
     <li><strong>Version &amp; Status</strong> — SnapAdmin version, the Django/Python runtime, and every <code>SNAPADMIN_*</code> feature toggle at its effective value.</li>
     <li><strong>Feature adoption</strong> — a commerce-readiness <code>✓</code>/<code>✗</code> checklist of which business-important capabilities are actually on or in use in <em>this</em> project: backups, retention-based deletion, audit trail, PII masking, the REST/GraphQL APIs, API tokens, Elasticsearch, background tasks, health/error alerting, rate limiting, the read-only / write-allowlist / delete guards and SSO. Where a capability is adopted per-model or per-field (retention, masking, read-only models, …), <code>--verbose</code> adds a one-line count. Unlike the toggle list above, the signal here is <em>adoption</em> — a model actually declaring retention, a masked field actually configured — so you can see at a glance what is protected and what is left open.</li>
     <li><strong>Database</strong> — engine, name, host, port and user (never the password), reachability, table count and — where the backend exposes it — on-disk size.</li>
@@ -2169,21 +2327,22 @@ python manage.py snapadmin_info --health-check    # probes only; non-zero exit o
   </ul>
 
   <h3>Sample output</h3>
-  <pre><code>📦 Version &amp; Status
+  <p>The report is written to be read at a glance: a run of booleans collapses into one
+  <code>on</code> line and one <code>off</code> line, and a uniform list of records — the model
+  inventory — becomes an aligned table instead of repeating every key name once per row.</p>
+  <pre><code>🩺 System checks
+  Warnings: 2
+  Ok: ✓
+  Detail: run `manage.py check` for the full text
+📦 Version &amp; Status
   Version: 0.1.0b5
   Status: pre-release
   Django: 6.0.6
   Python: 3.12.4
 🧩 Feature adoption
-  Rest api: ✓
-  Graphql: ✓
-  Audit trail: ✓
-  Backups: ✗
-  Retention purge: ✓
-  Pii masking: ✓
-  Api tokens: ✓
-  Read only models: ✓
-  Sso: ✗
+  ✓ on   Rest api · Graphql · Audit trail · Retention purge · Pii masking · Api tokens ·
+         Read only models · Write allowlist
+  ✗ off  Backups · Elasticsearch · Health alerts · Delete guard · Sso
 🗄 Database
   Engine: postgresql
   Name: snapadmin_db
@@ -2201,7 +2360,13 @@ python manage.py snapadmin_info --health-check    # probes only; non-zero exit o
   Workers online: 1
 📊 Models &amp; Security
   Models:
-    Total: 8
+    Total: 3
+    Items:
+      Model            Es mode  Retention days  Write restricted  Masked
+      ───────────────  ───────  ──────────────  ────────────────  ──────
+      shop.AuditLog    DB_ONLY  90              ✓                 ✗
+      shop.Customer    DB_ONLY  —               ✓                 ✓
+      shop.Product     DUAL     —               ✓                 ✗
   Masked fields: 2</code></pre>
 
   <div class="callout callout-info">
@@ -2233,11 +2398,15 @@ python manage.py snapadmin_info --health-check    # probes only; non-zero exit o
     <code>pip-audit</code> for a CVE scan and never claims "no known vulnerabilities".
   </div>
 
-  <pre><code>python manage.py snapadmin_license_check                   # full report
-python manage.py snapadmin_license_check --json            # machine-readable (CI)
-python manage.py snapadmin_license_check --critical-only   # only 🟡/🔴 licences
-python manage.py snapadmin_license_check --compatible-with MIT   # per-package compatibility
-python manage.py snapadmin_license_check --verbose         # + uncurated deps + notes</code></pre>
+  <pre><code>snapadmin-license-check                   # full report
+snapadmin-license-check --json            # machine-readable (CI)
+snapadmin-license-check --critical-only   # only 🟡/🔴 licences
+snapadmin-license-check --compatible-with MIT   # per-package compatibility
+snapadmin-license-check --verbose         # + uncurated deps + notes</code></pre>
+
+  <p>As with <a href="#snapadmin-info"><code>snapadmin-info</code></a>, the dashed shim, the
+  underscored <code>snapadmin_license_check</code> and
+  <code>python manage.py snapadmin_license_check</code> are the same command.</p>
 
   <h3>Tiers</h3>
   <table>
@@ -2321,8 +2490,8 @@ Vulnerability scan: no vulnerability scanner installed — `pip install pip-audi
 }
 
 # Manually via management command:
-python manage.py purge_expired_data           # live run — deletes records
-python manage.py purge_expired_data --dry-run  # preview only — no deletes
+python manage.py snapadmin_purge_expired_data           # live run — deletes records
+python manage.py snapadmin_purge_expired_data --dry-run  # preview only — no deletes
 
 # Programmatically, per model (returns the number purged):
 AuditLog.purge_expired()              # delete now
@@ -2387,8 +2556,8 @@ SNAPADMIN_ERROR_RETENTION_DAYS = 30           # ErrorEvents older than this are 
 }
 
 # ...or plain cron, without Celery:
-0 8 * * *  python manage.py send_error_digest
-python manage.py send_error_digest --hours 12   # custom window</code></pre>
+0 8 * * *  python manage.py snapadmin_send_error_digest
+python manage.py snapadmin_send_error_digest --hours 12   # custom window</code></pre>
 
   <h3>Settings reference</h3>
   <table>
@@ -2515,9 +2684,9 @@ SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = 168       # weekly</code></pre>
 }
 
 # ...or plain cron, without Celery:
-30 * * * *  python manage.py db_backup            # ships only what is due
-python manage.py db_backup --force                # all configured destinations, now
-python manage.py db_backup --destination remote   # one destination, now</code></pre>
+30 * * * *  python manage.py snapadmin_db_backup            # ships only what is due
+python manage.py snapadmin_db_backup --force                # all configured destinations, now
+python manage.py snapadmin_db_backup --destination remote   # one destination, now</code></pre>
 
   <div class="callout callout-success">
     <strong>Failure isolation &amp; retention</strong>
@@ -2589,28 +2758,44 @@ path("i18n/", include("django.conf.urls.i18n")),</code></pre>
 
   <!-- ── Theming & Styles ───────────────────────────────────────────────────── -->
   <h2 id="theming">🎨 Theming &amp; Styles</h2>
-  <p>SnapAdmin ships its admin styling as two layers, so an install that doesn't use Unfold is never forced to adopt Unfold's assumptions.</p>
+  <p>SnapAdmin ships its admin styling as three layers: one shared sheet plus <strong>exactly one</strong> theme layer, so an install that doesn't use Unfold gets a modern form layout, and an install that does is never fought by one.</p>
 
   <table>
     <tr><th>Stylesheet</th><th>Scope</th><th>When it loads</th></tr>
     <tr>
       <td><code>snapadmin/css/admin.css</code></td>
-      <td>Theme-agnostic core — field sizing, Select2 widgets, action bar, and the shared <code>:root</code> design tokens</td>
+      <td>Theme-agnostic core — the shared <code>:root</code> design tokens, SnapAdmin's own widgets (Select2 legibility, the CKEditor shell, the <code>formatted_id</code> badge) and changelist cosmetics</td>
       <td>Always, on every SnapModel admin page</td>
     </tr>
     <tr>
+      <td><code>snapadmin/css/admin-stock.css</code></td>
+      <td>The form-layout rewrite for Django's built-in admin — labels above full-width fields, consistent borders and padding, a padded <code>filter_horizontal</code> picker, spaced date/time shortcuts, a styled action bar</td>
+      <td><strong>Only when <code>django-unfold</code> is <em>absent</em></strong></td>
+    </tr>
+    <tr>
       <td><code>snapadmin/css/admin-unfold.css</code></td>
-      <td>Unfold-specific overrides — all <code>.unfold</code>-scoped rules, dark-mode borders, and the Add-button visibility fix</td>
+      <td>The few gaps Unfold leaves — Add-button visibility, the CKEditor shell inside Unfold's field column, and a guarantee that a themed <code>&lt;select&gt;</code> shows exactly one arrow</td>
       <td><strong>Only when <code>django-unfold</code> is installed</strong></td>
     </tr>
   </table>
 
-  <p>The Unfold layer is opt-in. SnapAdmin appends it automatically — after the core sheet, so its <code>.unfold</code> rules win the cascade — only when Unfold is detected. A plain Django admin install gets the core sheet alone. The shared design tokens (<code>--primary-color</code>, <code>--radius</code>, …) are defined once in the core sheet and referenced by both layers.</p>
+  <p>The two theme layers are <strong>mutually exclusive, and that is the scoping mechanism</strong> — neither carries a theme prefix, so exactly one of them ever reaches the page. Shared design tokens (<code>--primary-color</code>, <code>--radius</code>, …) are defined once in the core sheet and referenced by both.</p>
+
+  <div class="callout callout-warn">
+    <strong>Why the split is strict</strong>
+    The stock-admin layout rewrite is not additive: applied on top of a theme it overrides that theme's own form layout. SnapAdmin used to scope those rules to a <code>.unfold</code> ancestor class — which current Unfold does not put on the page — so the scoped copies were dead while unscoped ones overrode Unfold's two-column rows, its field widths and the gutter its select chevron sits in. If you add your own admin CSS via <code>css_admin_files</code>, keep layout rules out of anything a theme loads.
+  </div>
 
   <div class="callout callout-info">
     <strong>No flag to set</strong>
-    The split keys off whether Unfold is importable, so there is nothing to configure — drop Unfold from <code>INSTALLED_APPS</code> and the Unfold overrides simply stop loading.
+    The split keys off whether Unfold is importable, so there is nothing to configure — drop Unfold from <code>INSTALLED_APPS</code> and the layers swap over automatically.
   </div>
+
+  <h3 id="themed-auth-admin">Django's built-in auth admin under the theme</h3>
+  <p>Unfold ships template <em>overrides</em> for <code>django.contrib.auth</code> but leaves the matching admin classes and forms to the project. Left unwired, the built-in <code>User</code> screen renders Unfold's templates against Django's forms — and the mismatch is not cosmetic: <strong>the password row comes out empty with no way to change the password</strong>, because Unfold's default password-hash template is written for Django&nbsp;&lt;&nbsp;5.1 and the "Reset password" button lives in a newer variant that only Unfold's own <code>UserChangeForm</code> selects.</p>
+  <p>SnapAdmin wires it for you from <code>SnapAdminConfig.ready()</code>: <code>User</code> and <code>Group</code> are re-registered as <code>(DjangoAdmin, unfold.admin.ModelAdmin)</code> with Unfold's <code>UserChangeForm</code>, <code>UserCreationForm</code> and <code>AdminPasswordChangeForm</code>. It is deliberately conservative — <strong>only a registration whose admin class is <em>exactly</em> Django's stock one is replaced</strong>, so if you have subclassed <code>UserAdmin</code> yourself, your class is left completely alone (wire Unfold in yourself in that case). Without the theme installed the step is a no-op.</p>
+  <pre><code># settings.py — opt out and keep Django's stock auth admin as-is
+SNAPADMIN_THEME_AUTH_ADMIN = False</code></pre>
 
   <!-- ── Large-Dataset Performance ──────────────────────────────────────────── -->
   <h2 id="performance">⚡ Large-Dataset Performance</h2>
@@ -2829,6 +3014,7 @@ for order in Order.objects.select_related("customer"):   # 1 query, total
     <tr><td><code>SNAPADMIN_URL_PREFIX</code></td><td><code>""</code></td><td>Extra path segment prepended to every SnapAdmin route (relocates the whole API/GraphQL/Swagger surface)</td></tr>
     <tr><td><code>SNAPADMIN_DASHBOARD_PUBLIC</code></td><td><code>False</code></td><td>Serve the system dashboard without the default staff gate</td></tr>
     <tr><td><code>SNAPADMIN_USER_API_ENABLED</code></td><td><code>False</code></td><td>Serve the admin-only user-management API (<code>/api/users/</code>, <code>/api/permissions/</code>)</td></tr>
+    <tr><td><code>SNAPADMIN_THEME_AUTH_ADMIN</code></td><td><code>True</code></td><td>With the optional Unfold theme installed, re-register Django's stock <code>User</code>/<code>Group</code> admins with Unfold's theme and forms (see <a href="#themed-auth-admin">Themed auth admin</a>)</td></tr>
   </table>
 
   <h3>API behaviour, auth &amp; limits</h3>
@@ -3048,19 +3234,59 @@ python manage.py seed_demo --no-index  # skip ES indexing (no ES cluster needed)
 </main>
 
 <script>
-  // Highlight active section in sidebar on scroll
-  const sections = document.querySelectorAll('h2[id], section[id]');
-  const navLinks = document.querySelectorAll('.sidebar nav a');
+  // ── Highlight the section in view, in the sidebar ─────────────────────────
+  // Several sections can sit inside the observer band at once, so the entry
+  // that happens to fire last is NOT the one the reader is looking at. The old
+  // version activated exactly that, which read as correct scrolling down and
+  // one item too low scrolling up. Track the whole visible set instead and
+  // always activate the topmost one *in document order*.
+  const sections = Array.from(document.querySelectorAll('h2[id], section[id]'));
+  const navLinks = Array.from(document.querySelectorAll('.sidebar nav a'));
+  const linkFor = new Map();
+  navLinks.forEach(l => {
+    const href = l.getAttribute('href') || '';
+    if (href.startsWith('#')) linkFor.set(href.slice(1), l);
+  });
+
+  const BAND_TOP = 0.2;                 // matches the -20% rootMargin below
+  const visible = new Set();
+  let activeId = null;
+
+  const setActive = id => {
+    if (!id || id === activeId || !linkFor.has(id)) return;
+    navLinks.forEach(l => l.classList.remove('active'));
+    linkFor.get(id).classList.add('active');
+    activeId = id;
+  };
+
+  const recompute = () => {
+    const topmost = sections.find(s => visible.has(s.id));
+    if (topmost) { setActive(topmost.id); return; }
+    // A section taller than the band fills it completely and reports as not
+    // intersecting; fall back to the last heading that has scrolled past.
+    let last = null;
+    for (const s of sections) {
+      if (s.getBoundingClientRect().top > window.innerHeight * BAND_TOP) break;
+      last = s;
+    }
+    if (last) setActive(last.id);
+  };
+
   const observer = new IntersectionObserver(entries => {
-    entries.forEach(e => {
-      if (e.isIntersecting) {
-        navLinks.forEach(l => l.classList.remove('active'));
-        const link = document.querySelector(`.sidebar a[href="#${e.target.id}"]`);
-        if (link) link.classList.add('active');
-      }
-    });
+    for (const e of entries) {
+      if (e.isIntersecting) visible.add(e.target.id);
+      else visible.delete(e.target.id);
+    }
+    recompute();
   }, { rootMargin: '-20% 0px -70% 0px' });
   sections.forEach(s => observer.observe(s));
+
+  let scrollQueued = false;
+  window.addEventListener('scroll', () => {
+    if (scrollQueued) return;
+    scrollQueued = true;
+    requestAnimationFrame(() => { scrollQueued = false; recompute(); });
+  }, { passive: true });
 
   // ── Dark / light theme (persisted, defaults to system preference) ──
   const root = document.documentElement;

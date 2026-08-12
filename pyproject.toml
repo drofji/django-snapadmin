@@ -56,6 +56,14 @@ Changelog = "https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md"
 [tool.poetry.scripts]
 snapadmin-demo = "snapadmin.quickstart.cli:main"
 snapadmin-init = "snapadmin.integrate.cli:main"
+# Shims that forward to the manage.py commands of the same name. Both spellings are
+# registered on purpose: the dashed one matches the console scripts above, the
+# underscored one matches the management-command name people read in the docs and
+# then type in a shell. Neither should be a "command not found" dead end.
+snapadmin-info = "snapadmin.manage_cli:info_main"
+snapadmin_info = "snapadmin.manage_cli:info_main"
+snapadmin-license-check = "snapadmin.manage_cli:license_check_main"
+snapadmin_license_check = "snapadmin.manage_cli:license_check_main"
 
 [tool.poetry.dependencies]
 python = ">=3.10"

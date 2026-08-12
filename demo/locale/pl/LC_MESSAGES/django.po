@@ -1,0 +1,465 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) YEAR THE PACKAGE'S COPYRIGHT HOLDER
+# This file is distributed under the same license as the PACKAGE package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: PACKAGE VERSION\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-08-09 19:39+0000\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"Language: \n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=4; plural=(n==1 ? 0 : (n%10>=2 && n%10<=4) && "
+"(n%100<12 || n%100>14) ? 1 : n!=1 && (n%10>=0 && n%10<=1) || (n%10>=5 && "
+"n%10<=9) || (n%100>=12 && n%100<=14) ? 2 : 3);\n"
+msgid "Name"
+msgstr "Nazwa"
+
+msgid "Slug"
+msgstr "Slug"
+
+msgid "Active"
+msgstr "Aktywny"
+
+msgid "Category"
+msgstr "Kategoria"
+
+msgid "Categories"
+msgstr "Kategorie"
+
+msgid "Tag Name"
+msgstr "Nazwa tagu"
+
+msgid "Tag"
+msgstr "Tag"
+
+msgid "Tags"
+msgstr "Tagi"
+
+msgid "Price"
+msgstr "Cena"
+
+msgid "Available"
+msgstr "Dostępny"
+
+msgid "In Stock"
+msgstr "W magazynie"
+
+msgid "Description"
+msgstr "Opis"
+
+msgid "General"
+msgstr "Ogólne"
+
+msgid "Advanced"
+msgstr "Zaawansowane"
+
+msgid "Product"
+msgstr "Produkt"
+
+msgid "Products"
+msgstr "Produkty"
+
+msgid "First Name"
+msgstr "Imię"
+
+msgid "Last Name"
+msgstr "Nazwisko"
+
+msgid "Origin"
+msgstr "Pochodzenie"
+
+msgid "Email"
+msgstr "E-mail"
+
+msgid "Is Active"
+msgstr "Jest aktywny"
+
+msgid "Status"
+msgstr "Status"
+
+msgid "Customer"
+msgstr "Klient"
+
+msgid "Customers"
+msgstr "Klienci"
+
+msgid "Newsletter Opt-in"
+msgstr "Zgoda na newsletter"
+
+msgid "Bio"
+msgstr "Biografia"
+
+msgid "Customer Profile"
+msgstr "Profil klienta"
+
+msgid "Customer Profiles"
+msgstr "Profile klientów"
+
+msgid "Total"
+msgstr "Suma"
+
+msgid "Created At"
+msgstr "Utworzono"
+
+msgid "Order"
+msgstr "Zamówienie"
+
+msgid "Orders"
+msgstr "Zamówienia"
+
+msgid "Query"
+msgstr "Zapytanie"
+
+msgid "Results Count"
+msgstr "Liczba wyników"
+
+msgid "Timestamp"
+msgstr "Znacznik czasu"
+
+msgid "Search Log"
+msgstr "Dziennik wyszukiwania"
+
+msgid "Search Logs"
+msgstr "Dzienniki wyszukiwania"
+
+msgid "Action"
+msgstr "Akcja"
+
+msgid "User Email"
+msgstr "E-mail użytkownika"
+
+msgid "Audit Log"
+msgstr "Dziennik audytu"
+
+msgid "Audit Logs"
+msgstr "Dzienniki audytu"
+
+msgid "Currency"
+msgstr "Waluta"
+
+msgid "Base"
+msgstr "Baza"
+
+msgid "Rate"
+msgstr "Kurs"
+
+msgid "Last Synced"
+msgstr "Ostatnia synchronizacja"
+
+msgid "Last Seen In Feed"
+msgstr "Ostatnio widziany w kanale"
+
+msgid "Exchange Rate"
+msgstr "Kurs wymiany"
+
+msgid "Exchange Rates"
+msgstr "Kursy wymiany"
+
+msgid "Quantity"
+msgstr "Ilość"
+
+msgid "Price at purchase"
+msgstr "Cena w chwili zakupu"
+
+msgid "Order Item"
+msgstr "Pozycja zamówienia"
+
+msgid "Order Items"
+msgstr "Pozycje zamówienia"
+
+msgid "Char Field"
+msgstr "Pole znakowe"
+
+msgid "Text Content"
+msgstr "Treść tekstowa"
+
+msgid "Text Field"
+msgstr "Pole tekstowe"
+
+msgid "WYSIWYG Field"
+msgstr "Pole WYSIWYG"
+
+msgid "Integer Field"
+msgstr "Pole całkowite"
+
+msgid "Numbers"
+msgstr "Liczby"
+
+msgid "Positive Int"
+msgstr "Dodatnia liczba całkowita"
+
+msgid "Float Field"
+msgstr "Pole zmiennoprzecinkowe"
+
+msgid "Decimal Field"
+msgstr "Pole dziesiętne"
+
+msgid "Big Int"
+msgstr "Duża liczba całkowita"
+
+msgid "Date Field"
+msgstr "Pole daty"
+
+msgid "Dates & Times"
+msgstr "Daty i godziny"
+
+msgid "DateTime Field"
+msgstr "Pole daty i godziny"
+
+msgid "Time Field"
+msgstr "Pole godziny"
+
+msgid "Duration Field"
+msgstr "Pole czasu trwania"
+
+msgid "Email Field"
+msgstr "Pole e-mail"
+
+msgid "Specialized"
+msgstr "Specjalistyczne"
+
+msgid "Slug Field"
+msgstr "Pole slug"
+
+msgid "URL Field"
+msgstr "Pole URL"
+
+msgid "UUID Field"
+msgstr "Pole UUID"
+
+msgid "IP Address"
+msgstr "Adres IP"
+
+msgid "Image Field"
+msgstr "Pole obrazu"
+
+msgid "Assets"
+msgstr "Pliki"
+
+msgid "File Field"
+msgstr "Pole pliku"
+
+msgid "Boolean Field"
+msgstr "Pole logiczne"
+
+msgid "JSON Field"
+msgstr "Pole JSON"
+
+msgid "Rich Text"
+msgstr "Tekst sformatowany"
+
+msgid "Extended"
+msgstr "Rozszerzone"
+
+msgid "Phone Number"
+msgstr "Numer telefonu"
+
+msgid "Color"
+msgstr "Kolor"
+
+msgid "Small Integer"
+msgstr "Mała liczba całkowita"
+
+msgid "Pos. Small Integer"
+msgstr "Dodatnia mała liczba całkowita"
+
+msgid "Pos. Big Integer"
+msgstr "Dodatnia duża liczba całkowita"
+
+msgid "Computed Summary"
+msgstr "Wyliczone podsumowanie"
+
+msgid "Showcase"
+msgstr "Witryna"
+
+msgid "SnapAdmin Custom Dashboard"
+msgstr "Niestandardowy pulpit SnapAdmin"
+
+msgid "Total orders"
+msgstr "Łączna liczba zamówień"
+
+msgid "Active customers"
+msgstr "Aktywni klienci"
+
+msgid "Revenue"
+msgstr "Przychód"
+
+msgid "Recent activity"
+msgstr "Ostatnia aktywność"
+
+msgid ""
+"No activity yet — run “python manage.py seed_demo” to populate the demo data."
+msgstr "Brak aktywności — uruchom „python manage.py seed_demo”, aby wypełnić dane demonstracyjne."
+
+msgid "System monitor"
+msgstr "Monitor systemu"
+
+msgid "Disk usage"
+msgstr "Wykorzystanie dysku"
+
+#, python-format
+msgid "Products in stock (%(product_available)s of %(product_total)s)"
+msgstr "Produkty w magazynie (%(product_available)s z %(product_total)s)"
+
+msgid "Sign in to explore the demo"
+msgstr "Zaloguj się, aby poznać demo"
+
+msgid "Username"
+msgstr "Nazwa użytkownika"
+
+msgid "Password"
+msgstr "Hasło"
+
+msgid "Sign in"
+msgstr "Zaloguj się"
+
+msgid "This is a demo environment for django-snapadmin."
+msgstr "To jest środowisko demonstracyjne django-snapadmin."
+
+msgid "Signed in as"
+msgstr "Zalogowano jako"
+
+msgid "Log out"
+msgstr "Wyloguj się"
+
+msgid "Overview"
+msgstr "Przegląd"
+
+msgid "Stats"
+msgstr "Statystyki"
+
+msgid "API &amp; Services"
+msgstr "API i usługi"
+
+msgid "Admin"
+msgstr "Administracja"
+
+msgid "Demo models"
+msgstr "Modele demonstracyjne"
+
+msgid "Services enabled"
+msgstr "Włączone usługi"
+
+msgid "Staff access"
+msgstr "Dostęp personelu"
+
+msgid ""
+"Welcome. Use the tabs above to see demo record counts, which\n"
+"            optional SnapAdmin surfaces are enabled, and — for staff — links "
+"into the\n"
+"            admin and the full system dashboard."
+msgstr "Witamy. Skorzystaj z zakładek powyżej, aby zobaczyć liczbę rekordów demonstracyjnych, które opcjonalne powierzchnie SnapAdmin są włączone oraz — dla personelu — odnośniki do panelu administracyjnego i pełnego pulpitu systemowego."
+
+msgid "Record counts"
+msgstr "Liczba rekordów"
+
+msgid "No demo models found."
+msgstr "Nie znaleziono modeli demonstracyjnych."
+
+msgid "Optional surfaces"
+msgstr "Opcjonalne powierzchnie"
+
+msgid "ON"
+msgstr "WŁ"
+
+msgid "OFF"
+msgstr "WYŁ"
+
+msgid "Admin & tools"
+msgstr "Administracja i narzędzia"
+
+msgid "Open Admin"
+msgstr "Otwórz administrację"
+
+msgid "System dashboard"
+msgstr "Pulpit systemowy"
+
+msgid "API docs (Swagger)"
+msgstr "Dokumentacja API (Swagger)"
+
+msgid ""
+"Your account does not have staff access, so the Django admin\n"
+"              and the system dashboard aren't available. Ask an "
+"administrator to grant\n"
+"              staff status."
+msgstr "Twoje konto nie ma dostępu personelu, więc panel administracyjny Django i pulpit systemowy są niedostępne. Poproś administratora o nadanie statusu personelu."
+
+#, python-format
+msgid "Order #%(pk)s — %(customer)s"
+msgstr "Zamówienie nr %(pk)s — %(customer)s"
+
+#, python-format
+msgid "Customer %(name)s registered"
+msgstr "Klient %(name)s zarejestrowany"
+
+msgid "User API"
+msgstr "API użytkowników"
+
+msgid "Audit log"
+msgstr "Dziennik audytu"
+
+msgid "Sync all Product records from DB to Elasticsearch (DUAL mode demo)"
+msgstr "Synchronizuj wszystkie rekordy Product z bazy do Elasticsearch (demo trybu DUAL)"
+
+msgid "GDPR — delete records older than data_retention_days on each model"
+msgstr "RODO — usuwanie rekordów starszych niż data_retention_days w każdym modelu"
+
+msgid ""
+"Compute and log daily business stats (products, customers, orders, revenue)"
+msgstr "Obliczanie i zapisywanie dziennych statystyk biznesowych (produkty, klienci, zamówienia, przychód)"
+
+msgid "Remove expired API tokens"
+msgstr "Usuwanie wygasłych tokenów API"
+
+msgid "Email the grouped 24h error digest and purge expired ErrorEvents"
+msgstr "Wysyłanie zbiorczego podsumowania błędów z 24 h i usuwanie przeterminowanych ErrorEvents"
+
+msgid "Probe subsystem health (DB/ES) and email an alert when one is down"
+msgstr "Sprawdzanie stanu podsystemów (baza/ES) i wysyłanie alertu e-mail przy awarii"
+
+msgid "3-2-1 DB backups to local / network / remote FTP when due"
+msgstr "Kopie zapasowe bazy 3-2-1 lokalnie / w sieci / na zdalny FTP, gdy nadejdzie termin"
+
+msgid "Settings"
+msgstr "Ustawienia"
+
+msgid "My site"
+msgstr "Moja witryna"
+
+msgid "Navigation"
+msgstr "Nawigacja"
+
+msgid "Dashboard"
+msgstr "Pulpit"
+
+msgid "Users"
+msgstr "Użytkownicy"
+
+msgid "Business Logic"
+msgstr "Logika biznesowa"
+
+msgid "System & Logs"
+msgstr "System i dzienniki"
+
+msgid "Error Events"
+msgstr "Zdarzenia błędów"
+
+msgid "Security"
+msgstr "Bezpieczeństwo"
+
+msgid "API Tokens"
+msgstr "Tokeny API"
+
+msgid "Basic Info"
+msgstr "Podstawowe informacje"
+
+msgid "Advanced Settings"
+msgstr "Ustawienia zaawansowane"

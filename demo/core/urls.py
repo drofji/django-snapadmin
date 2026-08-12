@@ -4,12 +4,14 @@ from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
 from snapadmin.views import DashboardView
-from demo.apps.shop.views import LandingView, product_search, trigger_error
+from demo.apps.shop.views import RootView, product_search, trigger_error
 
 urlpatterns = [
-    # Public landing page (login form for anonymous, session + demo facts for
-    # authenticated). The staff-only system dashboard lives at /dashboard/.
-    path('', LandingView.as_view(), name='landing'),
+    # Root: the polished system dashboard for staff (or anyone, if
+    # SNAPADMIN_DASHBOARD_PUBLIC opts it in), the login form / session facts page
+    # for everyone else. See demo/apps/shop/views.py:RootView. /dashboard/ stays a
+    # working direct alias to the dashboard for bookmarks and admin links.
+    path('', RootView.as_view(), name='landing'),
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
     path('logout/', auth_views.LogoutView.as_view(next_page='landing'), name='logout'),
     path('admin/', admin.site.urls),

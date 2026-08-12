@@ -177,3 +177,99 @@ class TestDashboardLocalised:
         assert resp.status_code in (302, 200)
         html = admin_client.get("/dashboard/").content.decode()
         assert "Verwaltete Modelle" in html        # "Managed Models" in German
+
+
+# ── #I18N2: the dashboard's own dynamic strings ──────────────────────────────
+
+@pytest.mark.django_db
+class TestDashboardDynamicStringsLocalised:
+    """The dashboard builds much of its content in Python, not in the template.
+
+    Quick links, service names, status badges, the environment mode and the cron
+    fallback text were plain English literals, so a Russian dashboard rendered
+    half in Russian (template strings) and half in English (view strings).
+    """
+
+    def _context(self, locale):
+        from django.contrib.auth.models import User
+        from django.test import RequestFactory
+
+        from snapadmin.views import DashboardView
+
+        request = RequestFactory().get("/dashboard/")
+        request.user = User.objects.create_superuser(f"i18n-{locale}", password="x")
+        view = DashboardView()
+        view.request, view.args, view.kwargs = request, [], {}
+        with translation.override(locale):
+            ctx = view.get_context_data()
+            # Force the lazy strings while the override is still active.
+            return {
+                "links": [str(link["name"]) for link in ctx["links"]],
+                "services": [(str(s["name"]), str(s["status_label"])) for s in ctx["services"]],
+                "mode": str(ctx["env_details"]["mode"]),
+                "models": [str(m["name"]) for m in ctx["registered_models"]],
+            }
+
+    def test_quick_links_translated(self):
+        assert "Панель администратора" in self._context("ru")["links"]
+        assert "Admin-Bereich" in self._context("de")["links"]
+
+    def test_service_name_and_status_translated(self):
+        services = dict(self._context("ru")["services"])
+        assert any(name.startswith("База данных (") for name in services)
+        assert services["Elasticsearch"] == "отключено"     # ES is off in the test settings
+
+    def test_environment_mode_translated(self):
+        assert self._context("ru")["mode"] in ("Локально", "Docker")
+
+    def test_model_cards_use_the_translated_plural_name(self):
+        """capfirst(verbose_name_plural), not verbose_name.title().
+
+        ``.title()`` upper-cased every word, so "журналы аудита" rendered as the
+        mangled "Журналы Аудита"; it also force-evaluated the lazy string.
+        """
+        names = self._context("ru")["models"]
+        assert "Журналы аудита" in names
+        assert "Журналы Аудита" not in names
+
+    def test_cron_fallback_description_translated(self):
+        from django.test import override_settings
+
+        from snapadmin.views import DashboardView
+
+        schedule = {"nameless": {"task": "demo.tasks.noop", "schedule": 60}}
+        with override_settings(CELERY_BEAT_SCHEDULE=schedule), translation.override("ru"):
+            jobs = DashboardView()._get_cron_jobs()
+            assert str(jobs[0]["description"]) == "Описание не указано."
+
+    def test_chart_label_survives_an_apostrophe_in_the_translation(self, admin_client):
+        """fr renders "Nombre d'enregistrements" into a single-quoted JS literal.
+
+        Django marks a ``{% translate %}`` result safe, so the apostrophe went in
+        raw, closed the string early and broke the whole inline <script> — the
+        chart silently never rendered for French users.
+        """
+        html = admin_client.get("/dashboard/", HTTP_ACCEPT_LANGUAGE="fr").content.decode()
+        assert "Nombre d\\u0027enregistrements" in html
+        assert "label: 'Nombre d'enregistrements'" not in html
+
+    def test_chart_data_is_json_serialisable(self):
+        """It is rendered through json_script, so no lazy proxies may survive."""
+        import json
+
+        from django.contrib.auth.models import User
+        from django.test import RequestFactory
+
+        from snapadmin.views import DashboardView
+
+        request = RequestFactory().get("/dashboard/")
+        request.user = User.objects.create_superuser("chartjson", password="x")
+        view = DashboardView()
+        view.request, view.args, view.kwargs = request, [], {}
+        with translation.override("ru"):
+            json.dumps(view.get_context_data()["chart_data"])
+
+    def test_chart_labels_are_not_pasted_raw_into_the_script(self, admin_client):
+        html = admin_client.get("/dashboard/").content.decode()
+        assert 'id="snap-chart-data"' in html
+        assert 'type="application/json"' in html

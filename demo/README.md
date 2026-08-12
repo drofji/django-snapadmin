@@ -24,6 +24,7 @@ demo/
     management/commands/  seed_demo, seed_large, benchmark_list_view, sync_exchange_rates
     migrations/, templates/
   templates/     project-level template overrides (Unfold admin index)
+  locale/        the demo project's own translation catalogs (10 languages)
   manage.py      run from the repo root: `python demo/manage.py <command>`
   requirements.txt   demo/dev dependencies (the package's own deps live in ../pyproject.toml)
   dist.env       annotated template — copy to demo/.env and fill in
@@ -61,6 +62,21 @@ docker compose up --build        # db + redis + app + celery worker + beat
 Add Elasticsearch with `docker compose --profile es up --build`. See the
 top-of-file comments in [`../docker-compose.yml`](../docker-compose.yml) for the
 full profile matrix and the Traefik overlays.
+
+**Health check.** The web container probes `GET /api/health/`, both from the image's own
+`HEALTHCHECK` (see [`Dockerfile`](Dockerfile)) and from the compose service. That endpoint
+checks the database and answers **503** when it is unreachable; `degraded` (Elasticsearch
+down, database fine) stays **200**, because pulling a still-serving instance out of the
+load balancer would make the outage worse. Do **not** probe `/admin/` instead — it answers
+`302` (redirect to login) even with the database down, so a broken instance would report as
+healthy. An anonymous caller only ever sees `{"status": …}`, never the per-service
+breakdown, so the endpoint is safe to expose. `start_period: 60s` covers migrate +
+collectstatic + seed on the first boot.
+
+The same values work in Coolify, Dokploy and Kubernetes — path `/api/health/` (keep the
+trailing slash), port `8000`, interval `30s`, timeout `5s`, retries `3`, grace `60s`. See
+[Container health check](https://drofji.github.io/django-snapadmin/#healthcheck) in the
+docs for the per-platform fields and the Kubernetes probe pair.
 
 **Self-healing.** `restart: unless-stopped` only restarts a container that *exits* —
 a process that hangs while its healthcheck reports `unhealthy` is never restarted on
@@ -152,6 +168,33 @@ system dashboard, PII masking (`SNAPADMIN_MASKED_FIELDS`), the immutable audit
 trail, per-model API field-exposure/write allowlists, API pagination and
 throttling, and the validated async export. Treat `demo/` as a reference for how
 to wire those into a real project, not just a feature tour.
+
+## Translations
+
+The demo ships its own catalogs in `demo/locale/` for all ten languages the
+switcher offers (`en, ru, de, de_CH, fr, fr_CH, es, it, pl, nl`). They cover
+everything the *demo* declares — model `verbose_name`s, the landing page, the
+admin dashboard panel, the Unfold navigation titles, the Celery beat
+descriptions — because SnapAdmin's own catalogs (inside the package) only cover
+the package's strings. Without them a non-English visitor gets a page half in
+their language and half in English.
+
+`en` is the source language, so its catalog stays header-only. When you add or
+change a translatable string in `demo/`, regenerate in the same change —
+`makemessages -a` does not work in this repo layout, so pass the locale
+explicitly and keep the location comments out:
+
+```bash
+for loc in ru de de_CH es fr fr_CH it nl pl; do
+  python demo/manage.py makemessages -l $loc --no-location \
+      --ignore=snapadmin --ignore=.venv --ignore=tests --ignore=docs
+done
+python demo/manage.py compilemessages --ignore=.venv
+```
+
+`tests/test_demo_i18n.py` fails on any empty `msgstr`, on a locale whose msgid
+set diverges from `ru`, on a `ß` in `de_CH`, and on a dropped `%(...)s`
+placeholder — so a catalog cannot silently go stale.
 
 ## Tests
 

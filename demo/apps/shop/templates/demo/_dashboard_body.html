@@ -1,12 +1,14 @@
-{% extends "unfold/layouts/base_simple.html" %}
 {% load i18n %}
-
-{% block content %}
+{% comment %}
+Partial — MUST NOT extend a layout. It is rendered inside admin/index.html's
+content block by the demo_dashboard inclusion tag; extending an Unfold layout
+here would emit the whole admin shell (sidebar, header, menu) a second time.
+{% endcomment %}
 <div class="px-4 py-8 mx-auto max-w-7xl sm:px-6 lg:px-8">
     <div class="flex flex-col gap-8">
         <div>
             <h1 class="text-2xl font-semibold text-gray-900 dark:text-white">
-                SnapAdmin Custom Dashboard
+                {% translate "SnapAdmin Custom Dashboard" %}
             </h1>
         </div>
 
@@ -21,11 +23,11 @@
                         <div class="flex-1 w-0 ml-5">
                             <dl>
                                 <dt class="text-sm font-medium text-gray-500 truncate dark:text-gray-400">
-                                    TOTAL ORDERS
+                                    {% translate "Total orders" %}
                                 </dt>
                                 <dd>
                                     <div class="text-lg font-medium text-gray-900 dark:text-white">
-                                        --
+                                        {{ total_orders }}
                                     </div>
                                 </dd>
                             </dl>
@@ -43,11 +45,11 @@
                         <div class="flex-1 w-0 ml-5">
                             <dl>
                                 <dt class="text-sm font-medium text-gray-500 truncate dark:text-gray-400">
-                                    ACTIVE CUSTOMERS
+                                    {% translate "Active customers" %}
                                 </dt>
                                 <dd>
                                     <div class="text-lg font-medium text-gray-900 dark:text-white">
-                                        --
+                                        {{ active_customers }}
                                     </div>
                                 </dd>
                             </dl>
@@ -65,11 +67,11 @@
                         <div class="flex-1 w-0 ml-5">
                             <dl>
                                 <dt class="text-sm font-medium text-gray-500 truncate dark:text-gray-400">
-                                    REVENUE
+                                    {% translate "Revenue" %}
                                 </dt>
                                 <dd>
                                     <div class="text-lg font-medium text-gray-900 dark:text-white">
-                                        5,678
+                                        {{ revenue|floatformat:2 }}
                                     </div>
                                 </dd>
                             </dl>
@@ -82,49 +84,48 @@
         <div class="grid grid-cols-1 gap-8 lg:grid-cols-2">
             <!-- Recent Activity -->
             <div class="p-6 bg-white rounded-lg shadow dark:bg-gray-800">
-                <h2 class="mb-4 text-lg font-medium text-gray-900 dark:text-white">Recent Activity</h2>
+                <h2 class="mb-4 text-lg font-medium text-gray-900 dark:text-white">{% translate "Recent activity" %}</h2>
                 <ul class="divide-y divide-gray-200 dark:divide-gray-700">
+                    {% for row in recent_activity %}
                     <li class="py-3">
                         <div class="flex items-center space-x-4">
-                            <div class="flex-shrink-0 w-2 h-2 bg-blue-500 rounded-full"></div>
+                            <div class="flex-shrink-0 w-2 h-2 {{ row.dot }} rounded-full"></div>
                             <div class="flex-1 min-w-0">
-                                <p class="text-sm text-gray-900 truncate dark:text-white">New order #890 by John Doe</p>
+                                <p class="text-sm text-gray-900 truncate dark:text-white">{{ row.text }}</p>
                             </div>
-                            <div class="text-xs text-gray-500">2 mins ago</div>
+                            {% if row.when %}
+                            <div class="text-xs text-gray-500">{{ row.when|timesince }}</div>
+                            {% endif %}
                         </div>
                     </li>
-                    <li class="py-3">
-                        <div class="flex items-center space-x-4">
-                            <div class="flex-shrink-0 w-2 h-2 bg-green-500 rounded-full"></div>
-                            <div class="flex-1 min-w-0">
-                                <p class="text-sm text-gray-900 truncate dark:text-white">Customer Jane Smith registered</p>
-                            </div>
-                            <div class="text-xs text-gray-500">15 mins ago</div>
-                        </div>
+                    {% empty %}
+                    <li class="py-3 text-sm text-gray-500 dark:text-gray-400">
+                        {% translate "No activity yet — run “python manage.py seed_demo” to populate the demo data." %}
                     </li>
+                    {% endfor %}
                 </ul>
             </div>
 
             <!-- System Info -->
             <div class="p-6 bg-white rounded-lg shadow dark:bg-gray-800">
-                <h2 class="mb-4 text-lg font-medium text-gray-900 dark:text-white">System Monitor</h2>
+                <h2 class="mb-4 text-lg font-medium text-gray-900 dark:text-white">{% translate "System monitor" %}</h2>
                 <div class="space-y-4">
                     <div>
                         <div class="flex justify-between mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">
-                            <span>Disk Usage</span>
-                            <span>45%</span>
+                            <span>{% translate "Disk usage" %}</span>
+                            <span>{{ disk_percent }}%</span>
                         </div>
                         <div class="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
-                            <div class="bg-blue-600 h-2 rounded-full" style="width: 45%"></div>
+                            <div class="bg-blue-600 h-2 rounded-full" style="width: {{ disk_percent }}%"></div>
                         </div>
                     </div>
                     <div>
                         <div class="flex justify-between mb-1 text-sm font-medium text-gray-700 dark:text-gray-300">
-                            <span>Memory</span>
-                            <span>28%</span>
+                            <span>{% blocktranslate %}Products in stock ({{ product_available }} of {{ product_total }}){% endblocktranslate %}</span>
+                            <span>{{ availability_percent }}%</span>
                         </div>
                         <div class="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
-                            <div class="bg-purple-600 h-2 rounded-full" style="width: 28%"></div>
+                            <div class="bg-purple-600 h-2 rounded-full" style="width: {{ availability_percent }}%"></div>
                         </div>
                     </div>
                 </div>
@@ -132,4 +133,3 @@
         </div>
     </div>
 </div>
-{% endblock %}

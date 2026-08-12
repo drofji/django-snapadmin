@@ -1,5 +1,11 @@
 {% extends "unfold/layouts/base.html" %}
+{% load demo_dashboard %}
 
+{% comment %}
+The panel is pulled in as a *partial* via the inclusion tag. Never include a
+template that itself extends a layout here — the admin shell (sidebar, header,
+menu) would be rendered a second time inside this content block.
+{% endcomment %}
 {% block content %}
-    {% include "demo/dashboard.html" %}
+    {% demo_dashboard %}
 {% endblock %}

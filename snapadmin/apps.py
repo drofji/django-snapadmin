@@ -4,9 +4,9 @@ Django ``AppConfig`` for SnapAdmin.
 ``SnapAdminConfig.ready()`` wires the package's startup work: connecting the
 ``post_migrate`` hook that ensures Elasticsearch indices/mappings, installing the
 nested-app shim, registering the ``snapadmin.*`` system checks, and applying the
-optional Unfold re-styling of the extra_settings admin. Every optional integration
-it touches is guarded so a missing/half-installed package degrades rather than
-crashing ``django.setup()``.
+optional Unfold re-styling of the extra_settings admin and of Django's built-in
+``auth`` admin. Every optional integration it touches is guarded so a missing/
+half-installed package degrades rather than crashing ``django.setup()``.
 """
 
 from django.apps import AppConfig, apps
@@ -68,3 +68,6 @@ class SnapAdminConfig(AppConfig):
 
         from snapadmin.extra_settings_admin import apply_unfold_styling
         apply_unfold_styling()
+
+        from snapadmin.auth_admin import apply_unfold_auth_admin
+        apply_unfold_auth_admin()

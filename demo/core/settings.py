@@ -55,7 +55,10 @@ INSTALLED_APPS = [
     'django_filters',               # REQUIRED
     'graphene_django',              # REQUIRED for GraphQL
     'admin_auto_filters',           # Optional extra: django-snapadmin[autocomplete-filter] (LGPL; core doesn't use it)
-    'rangefilter',                  # REQUIRED
+    # NOT required by snapadmin: the range filters on filterable date/number fields come from
+    # unfold.contrib.filters (or Django's own list filters without the theme) — the package never
+    # imports django-admin-rangefilter. Kept listed only so the demo exercises it. See #DEP2.
+    'rangefilter',
     'snapadmin',                    # REQUIRED
 
     # Celery result/beat storage (Django DB backend)
@@ -172,15 +175,74 @@ STATIC_URL = 'static/'
 STATICFILES_DIRS = []
 STATIC_ROOT = BASE_DIR / ".staticfiles"
 
-# WhiteNoise: compress collected static files (gzip/brotli). No manifest, so a
-# missing reference never 500s the page.
-STORAGES = {
-    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
-    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
-}
-
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+# ------------------------------------------------------------------------------
+# FILE STORAGE — local disk by default, S3-compatible object storage optionally
+# ------------------------------------------------------------------------------
+# Anything deployed on more than one container needs media (and often static) off
+# the local filesystem: a file uploaded through instance A is a 404 on instance B,
+# and a container restart loses it. This block switches Django 5+ STORAGES between
+# the local default and any S3-compatible endpoint — AWS S3, Hetzner Object
+# Storage, MinIO, Backblaze B2 — with the same variables; only the endpoint URL
+# and region differ. See demo/dist.env for the per-provider values.
+#
+# Needs the (BSD-licensed, optional) django-storages package:
+#     pip install "django-storages[s3]"
+# Nothing is imported here — STORAGES takes a dotted path that Django resolves
+# lazily — so leaving STORAGE_BACKEND=local keeps the dependency unnecessary.
+#
+# Hetzner Storage Box is NOT S3: it speaks SFTP/CIFS/WebDAV. Mount it and keep
+# STORAGE_BACKEND=local, pointing MEDIA_ROOT at the mount — or, for backups only,
+# use SNAPADMIN_BACKUP_SFTP_* which talks to it directly.
+STORAGE_BACKEND = os.getenv('SNAPADMIN_STORAGE_BACKEND', 'local').strip().lower()
+
+if STORAGE_BACKEND == 's3':
+    AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID', '')
+    AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY', '')
+    AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME', '')
+    # Empty for real AWS; set it for every other S3-compatible provider.
+    AWS_S3_ENDPOINT_URL = os.getenv('AWS_S3_ENDPOINT_URL', '') or None
+    AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME', '') or None
+    # A CDN/custom domain in front of the bucket. Without it, django-storages
+    # builds URLs against the bucket endpoint itself.
+    AWS_S3_CUSTOM_DOMAIN = os.getenv('AWS_S3_CUSTOM_DOMAIN', '') or None
+    # False → plain public URLs. Keep True for a private bucket so every link is
+    # a time-limited signed URL (the safe default for user uploads).
+    AWS_QUERYSTRING_AUTH = os.getenv('AWS_QUERYSTRING_AUTH', 'True') == 'True'
+    AWS_QUERYSTRING_EXPIRE = int(os.getenv('AWS_QUERYSTRING_EXPIRE', '3600'))
+    # Never overwrite an existing key: Django suffixes the name instead. Silent
+    # overwrites are how one upload destroys another's file.
+    AWS_S3_FILE_OVERWRITE = os.getenv('AWS_S3_FILE_OVERWRITE', 'False') == 'True'
+    # Most modern buckets disable ACLs entirely; sending one then fails the PUT.
+    AWS_DEFAULT_ACL = os.getenv('AWS_DEFAULT_ACL', '') or None
+    AWS_S3_ADDRESSING_STYLE = os.getenv('AWS_S3_ADDRESSING_STYLE', 'virtual')
+
+    STORAGES = {"default": {"BACKEND": "storages.backends.s3.S3Storage"}}
+
+    # Static files are a separate decision: they are public, immutable and already
+    # compressed by WhiteNoise, so serving them from the app is usually fine and
+    # one less thing to break. Opt in when you want a CDN in front of them.
+    if os.getenv('SNAPADMIN_STATIC_ON_S3', 'False') == 'True':
+        # `location` keys the objects under static/ in the bucket. Without it they
+        # land in the bucket root while STATIC_URL below still points at /static/,
+        # so every {% static %} URL would 404.
+        STORAGES["staticfiles"] = {
+            "BACKEND": "storages.backends.s3.S3StaticStorage",
+            "OPTIONS": {"location": "static"},
+        }
+        if AWS_S3_CUSTOM_DOMAIN:
+            STATIC_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/static/"
+    else:
+        STORAGES["staticfiles"] = {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"}
+else:
+    # WhiteNoise: compress collected static files (gzip/brotli). No manifest, so a
+    # missing reference never 500s the page.
+    STORAGES = {
+        "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+        "staticfiles": {"BACKEND": "whitenoise.storage.CompressedStaticFilesStorage"},
+    }
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
@@ -199,6 +261,13 @@ SNAPADMIN_GRAPHQL_ENABLED = os.getenv('SNAPADMIN_GRAPHQL_ENABLED', 'True') == 'T
 SNAPADMIN_URL_PREFIX = os.getenv('SNAPADMIN_URL_PREFIX', '')
 # Dashboard is staff-gated by default (it exposes infra details). True = public.
 SNAPADMIN_DASHBOARD_PUBLIC = os.getenv('SNAPADMIN_DASHBOARD_PUBLIC', 'False') == 'True'
+# When django-unfold is installed, SnapAdmin re-registers Django's stock User and
+# Group admins with Unfold's theme + forms, so the built-in auth screens match the
+# rest of the site (and the password row keeps its "Reset password" button — with
+# Django's own forms, Unfold's template renders it empty). Only a registration that
+# is *exactly* Django's is replaced, so a custom UserAdmin is never touched.
+# False = leave the auth admin alone.
+SNAPADMIN_THEME_AUTH_ADMIN = os.getenv('SNAPADMIN_THEME_AUTH_ADMIN', 'True') == 'True'
 
 # --- API capacity & abuse protection -----------------------------------------
 # These bound how much work one request can cost and how fast callers may issue
@@ -539,40 +608,40 @@ CELERY_BEAT_SCHEDULE = {
     "reindex-products-to-es": {
         "task": "demo.tasks.reindex_products_to_elasticsearch",
         "schedule": crontab(hour=0, minute=0),  # daily midnight
-        "description": "Sync all Product records from DB to Elasticsearch (DUAL mode demo)",
+        "description": _("Sync all Product records from DB to Elasticsearch (DUAL mode demo)"),
     },
     "purge-expired-data": {
         "task": "snapadmin.purge_expired_data",
         "schedule": crontab(hour=1, minute=0),  # daily 1am
-        "description": "GDPR - delete records older than data_retention_days on each model",
+        "description": _("GDPR — delete records older than data_retention_days on each model"),
     },
     "generate-daily-stats": {
         "task": "demo.tasks.generate_daily_stats",
         "schedule": crontab(hour=2, minute=0),  # daily 2am
-        "description": "Compute and log daily business stats (products, customers, orders, revenue)",
+        "description": _("Compute and log daily business stats (products, customers, orders, revenue)"),
     },
     "purge-expired-tokens": {
         "task": "snapadmin.purge_expired_tokens",
         "schedule": crontab(hour=3, minute=0),  # daily 3am
-        "description": "Remove expired API tokens",
+        "description": _("Remove expired API tokens"),
     },
     "send-error-digest": {
         "task": "snapadmin.send_error_digest",
         # Send time is env-configurable: SNAPADMIN_ERROR_DIGEST_HOUR / _MINUTE
         "schedule": crontab(hour=SNAPADMIN_ERROR_DIGEST_HOUR, minute=SNAPADMIN_ERROR_DIGEST_MINUTE),
-        "description": "Email the grouped 24h error digest and purge expired ErrorEvents",
+        "description": _("Email the grouped 24h error digest and purge expired ErrorEvents"),
     },
     "send-health-alert": {
         "task": "snapadmin.send_health_alert",
         "schedule": crontab(minute="*/5"),  # every 5 minutes
-        "description": "Probe subsystem health (DB/ES) and email an alert when one is down",
+        "description": _("Probe subsystem health (DB/ES) and email an alert when one is down"),
     },
     "run-db-backups": {
         "task": "snapadmin.run_db_backups",
         # Hourly check — each destination fires only when its own
         # SNAPADMIN_BACKUP_*_EVERY_HOURS interval has elapsed.
         "schedule": crontab(minute=30),
-        "description": "3-2-1 DB backups to local / network / remote FTP when due",
+        "description": _("3-2-1 DB backups to local / network / remote FTP when due"),
     },
 }
 

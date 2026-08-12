@@ -137,7 +137,7 @@ class TestPurgeCommandEsOnly:
 
         out = StringIO()
         with patch.object(SearchLog, "data_retention_days", 30, create=True):
-            call_command("purge_expired_data", "--dry-run", stdout=out)
+            call_command("snapadmin_purge_expired_data", "--dry-run", stdout=out)
 
         output = out.getvalue()
         assert "SearchLog" in output
