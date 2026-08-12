@@ -81,8 +81,50 @@ def _strip_auto_validator(deconstructed, auto_instance):
 
 
 class SnapField:
-    """
-    Mixin that adds SnapAdmin metadata to any Django model field.
+    """Mixin that adds SnapAdmin metadata to any Django model field.
+
+    Every ``Snap*Field`` is its Django counterpart plus this mixin, so it accepts
+    all the usual Django kwargs *and* the ones below, which describe how the field
+    should behave in the admin, the API and search::
+
+        from snapadmin import fields as snap, models as snap_models
+
+        class Product(snap_models.SnapModel):
+            name  = snap.SnapCharField(max_length=200, searchable=True, show_in_list=True)
+            price = snap.SnapDecimalField(max_digits=10, decimal_places=2, filterable=True)
+
+    ``show_in_list``
+        Include the field as a column on the admin changelist. Default ``True``.
+    ``show_in_form``
+        Include the field on the add/change form. Default ``False``.
+    ``searchable``
+        Add to the admin search box, the REST ``?search=`` filter and — on a model
+        mirrored to Elasticsearch — the search mapping. Default ``False``.
+    ``filterable``
+        Add a sidebar filter in the admin and a ``?field=`` query filter in the API.
+        Default ``False``.
+    ``editable``
+        Allow changes through the form and the API. Default ``True``.
+    ``required``
+        ``True`` yields ``null=False, blank=False``; the default ``False`` yields
+        ``null=True, blank=True``. Set it instead of the two Django kwargs so the
+        database and the mirrored ES document stay in agreement.
+    ``updatable``
+        Allow the value to change after creation. ``False`` makes it write-once.
+    ``autocomplete``
+        Render a relation as an autocomplete widget instead of a full dropdown.
+    ``tab`` / ``row``
+        Lay the field out in a named form tab, or group it onto one row.
+    ``wysiwyg`` / ``safe_html``
+        Rich-text editing (needs the ``[wysiwyg]`` extra); ``safe_html=True`` opts
+        the value out of HTML sanitisation, for trusted content only.
+    ``allowed_extensions`` / ``allowed_encodings`` / ``max_size_bytes``
+        Upload validation on file and image fields.
+
+    **None of these add a database migration.** They are stripped in
+    :meth:`handleDjangoKwargs` before Django sees the field and are absent from
+    ``deconstruct()``, so adding or changing one leaves ``makemigrations`` with
+    nothing to detect.
     """
 
     def _initializeSnapLogic(self, **kwargs) -> dict:
@@ -216,6 +258,8 @@ class SnapNotDatabaseField(SnapField):
     pass
 
 class SnapCharField(models.CharField, SnapField):
+    """Django ``CharField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     # No special null handling: like every other Snap field, `required=False`
     # (the default) yields null=True / blank=True, and `required=True` yields
     # null=False / blank=False. This keeps CharField data parity with the rest
@@ -225,11 +269,15 @@ class SnapCharField(models.CharField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapTextField(models.TextField, SnapField):
+    """Django ``TextField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapEmailField(models.EmailField, SnapField):
+    """Django ``EmailField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
@@ -251,6 +299,8 @@ class SnapUUIDField(models.UUIDField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapIntegerField(models.IntegerField, SnapField):
+    """Django ``IntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
@@ -266,6 +316,8 @@ class SnapFloatField(models.FloatField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapDecimalField(models.DecimalField, SnapField):
+    """Django ``DecimalField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
@@ -281,6 +333,8 @@ class SnapDateField(models.DateField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapDateTimeField(models.DateTimeField, SnapField):
+    """Django ``DateTimeField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
@@ -296,6 +350,8 @@ class SnapDurationField(models.DurationField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapFileField(models.FileField, SnapField):
+    """Django ``FileField`` with upload validation. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         allowed_extensions = kwargs.pop(SnapFieldAttributeEnum.ALLOWED_EXTENSIONS, None)
@@ -331,6 +387,8 @@ class SnapFileField(models.FileField, SnapField):
         return name, path, args, kwargs
 
 class SnapImageField(models.ImageField, SnapField):
+    """Django ``ImageField`` with upload validation. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         allowed_extensions = kwargs.pop(SnapFieldAttributeEnum.ALLOWED_EXTENSIONS, None)
@@ -355,11 +413,15 @@ class SnapImageField(models.ImageField, SnapField):
         return name, path, args, kwargs
 
 class SnapBooleanField(models.BooleanField, SnapField):
+    """Django ``BooleanField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapJSONField(models.JSONField, SnapField):
+    """Django ``JSONField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
@@ -370,16 +432,22 @@ class SnapGenericIPAddressField(models.GenericIPAddressField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapForeignKey(models.ForeignKey, SnapField):
+    """Django ``ForeignKey`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, to, on_delete=models.CASCADE, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(to=to, on_delete=on_delete, **self.handleDjangoKwargs(**kwargs))
 
 class SnapOneToOneField(models.OneToOneField, SnapField):
+    """Django ``OneToOneField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, to, on_delete=models.CASCADE, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(to=to, on_delete=on_delete, **self.handleDjangoKwargs(**kwargs))
 
 class SnapManyToManyField(models.ManyToManyField, SnapField):
+    """Django ``ManyToManyField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, to, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         kwargs.pop(DjangoFieldAttributeEnum.NULL, None)
@@ -441,6 +509,20 @@ class SnapColorField(models.CharField, SnapField):
         return _strip_auto_validator(super().deconstruct(), self._snap_auto_validator)
 
 class SnapFunctionField(SnapNotDatabaseField):
+    """A computed, display-only column — no database column, no migration.
+
+    ``func`` receives the model instance and returns what the admin should show::
+
+        class Order(snap_models.SnapModel):
+            total = snap.SnapFunctionField(
+                func=lambda obj: f"{obj.quantity * obj.unit_price:.2f}",
+                verbose_name="Total",
+            )
+
+    Pass ``safe_html=True`` only for markup you generate yourself; the returned
+    value is escaped otherwise.
+    """
+
     def __init__(self, func, verbose_name=None, show_in_list=True,
                  show_in_form=True, safe_html=False, *args, **kwargs):
         if not callable(func):
@@ -457,6 +539,12 @@ class SnapFunctionField(SnapNotDatabaseField):
         return mark_safe(value) if self.safe_html else value
 
 class SnapStatusBadgeFieldChoice:
+    """One coloured badge variant for :class:`SnapStatusBadgeField`.
+
+    ``status_string`` is matched against the source field's value; the three
+    colours style the badge drawn for it.
+    """
+
     def __init__(self, status_string: str, text_html_color: str = "#333333",
                  background_html_color: str = "#F5F5F5", border_html_color: str = "#A9A9A9"):
         self.status_string = status_string
@@ -480,6 +568,23 @@ class SnapStatusBadgeFieldChoice:
         return format_html('<a style="{}">{}</a>', style_string, field_display)
 
 class SnapStatusBadgeField(SnapFunctionField):
+    """Render another field's value as a coloured status badge in the changelist.
+
+    Display-only, so it adds no database column and no migration::
+
+        class Order(snap_models.SnapModel):
+            status = snap.SnapCharField(max_length=20)
+            status_badge = snap.SnapStatusBadgeField(
+                field_name="status",
+                choices=[
+                    snap.SnapStatusBadgeFieldChoice("paid", "#065f46", "#d1fae5"),
+                    snap.SnapStatusBadgeFieldChoice("refunded", "#991b1b", "#fee2e2"),
+                ],
+            )
+
+    A value with no matching choice renders unstyled.
+    """
+
     def __init__(self, *args, field_name: str, choices: typing.List[SnapStatusBadgeFieldChoice],
                  verbose_name: str = None, style_arguments: dict = None, **kwargs):
         self.field_name = field_name

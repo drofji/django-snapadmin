@@ -62,6 +62,27 @@ Added
   S3** (SFTP/CIFS/WebDAV — mount it, or use ``SNAPADMIN_BACKUP_SFTP_*`` for backups, which needs no
   mount). Database backups still have no S3 destination; that is stated explicitly in the docs.
 
+* **A written API-stability and compatibility policy**, in
+  `SECURITY.md <https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md>`_. Upgrading for a
+  security fix should not mean guessing what counts as a promise, so the policy states exactly what
+  the public API is (import paths, ``SnapModel`` attributes and ``Snap*Field`` kwargs, ``SNAPADMIN_*``
+  settings, management command names, REST/GraphQL routes and URL names, documented template block
+  hooks) and what it is not (underscore-prefixed names, internals, admin HTML and CSS class names,
+  log wording, migration contents). Most of that surface is already pinned by
+  ``tests/test_public_contract.py``, so a breaking change fails the suite instead of reaching PyPI.
+
+  It also sets out what happens from ``1.0``: semantic versioning, additions in a minor, removals
+  only in a major, and a deprecated name kept working for at least one full minor release while
+  saying so — a ``DeprecationWarning`` for a Python name, a stderr notice for a management command.
+  Until then the ``0.x`` beta series may still break compatibility, but never silently.
+
+* **Every name on the public contract now has a docstring**, with a usage example on the ones you
+  actually type: ``SnapModel``, the ``SnapField`` mixin (the full kwarg list with its defaults),
+  ``SnapFunctionField``, ``SnapStatusBadgeField``, the generated REST viewsets, the token
+  authentication class and the error-monitor middleware. This is the documentation layer that
+  reaches an installed package — what ``help()`` and an IDE tooltip show, with no network — and a
+  new test keeps it from rotting: a public name added without a docstring fails the suite.
+
 * **The README says how SnapAdmin relates to Unfold, Jazzmin and Grappelli.** It appears next to
   them in package directories and nothing explained why another layer exists. A short section after
   the three-step example makes the distinction concrete: those are themes that restyle the admin you

@@ -27,6 +27,10 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   AWS S3, Hetzner Object Storage, MinIO and Backblaze B2, with signed URLs and no-overwrite defaults.
 - **A `checks` section in `snapadmin_info`** — per-severity system-check counts, with `--health-check`
   failing on any error.
+- **A written API-stability and compatibility policy** in `SECURITY.md` — what counts as public API,
+  what does not, and the semver/deprecation rules that take effect at `1.0`.
+- **A docstring on every name in the public contract**, with usage examples on the ones you type, and
+  a test that fails when a public name is added without one.
 - **README positioning against Unfold, Jazzmin and Grappelli** — those restyle the admin you write;
   SnapAdmin generates it (and the API, GraphQL and search) from the same field declarations, using
   Unfold as its optional theme.

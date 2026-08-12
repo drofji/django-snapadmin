@@ -18,6 +18,50 @@ receive backported patches — upgrade to the newest version to get security fix
 | Latest release on PyPI (currently `0.1.0b5`) | ✅ |
 | Any older alpha/beta | ❌ (upgrade) |
 
+## API stability and compatibility policy
+
+Upgrading for a security fix should never mean rewriting your code, so it has to be clear what
+counts as a promise and what does not.
+
+**The public API is:**
+
+- **Import paths** — everything importable from `snapadmin.*` without a leading underscore, and the
+  blessed top-level re-exports (`from snapadmin import SnapModel, SnapCharField, …`).
+- **`SnapModel` class attributes and `Snap*Field` keyword arguments**, and their defaults.
+- **`SNAPADMIN_*` settings** — names, defaults and meaning.
+- **Management command names** and their documented flags.
+- **REST and GraphQL routes and their URL names**, as reversed by `reverse()`.
+- **Template block hooks** documented as extension points in the shipped templates.
+
+**The public API is not:** anything named with a leading underscore, module internals not listed
+above, the exact HTML or CSS class names of admin pages, log message wording, or the contents of
+migrations.
+
+Most of this surface is pinned by `tests/test_public_contract.py`, so a breaking change fails the
+suite rather than reaching PyPI quietly.
+
+**While in the `0.x` beta series (now):** breaking changes are possible but never silent. Each one
+is called out in [`CHANGELOG.md`](CHANGELOG.md) and the release notes, with a migration guide when
+manual steps are involved. Pin an exact version in production.
+
+**From `1.0` onward:** the project follows semantic versioning.
+
+| Change | Allowed in |
+|---|---|
+| New settings, fields, commands, routes | any minor (`1.x.0`) |
+| Bug fixes with no API change | any patch (`1.x.y`) |
+| Deprecating a public name (keeps working, warns) | any minor |
+| Removing or renaming a public name | a major (`2.0.0`) only |
+
+A deprecated name keeps working for **at least one full minor release**, and says so, before it can
+be removed: a `DeprecationWarning` for a Python name, a notice on stderr for a management command
+(so a cron job piping stdout still surfaces it). Both name the replacement. A security fix that
+cannot be made backward-compatible is the one exception, and is documented as such in the advisory.
+
+Currently deprecated, still working: the unprefixed `db_backup`, `purge_expired_data` and
+`send_error_digest` commands — use `snapadmin_db_backup`, `snapadmin_purge_expired_data` and
+`snapadmin_send_error_digest`.
+
 ## Reporting a vulnerability
 
 **Please do not open a public GitHub issue for security problems.** Report privately:

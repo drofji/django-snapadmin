@@ -22,6 +22,22 @@ from snapadmin.monitoring import record_error
 
 
 class SnapErrorMonitorMiddleware:
+    """Records unhandled exceptions and 5xx responses into the error monitor.
+
+    Add it to ``MIDDLEWARE`` to feed the spike alerts, the daily digest and the
+    admin's error log::
+
+        MIDDLEWARE = [
+            ...,
+            "snapadmin.middleware.SnapErrorMonitorMiddleware",
+        ]
+
+    It only observes: ``process_exception`` records the exception and returns
+    ``None``, leaving Django's own error handling untouched. A 5xx returned
+    without raising is recorded too, and a flag keeps the two paths from counting
+    the same failure twice.
+    """
+
     def __init__(self, get_response):
         self.get_response = get_response
 

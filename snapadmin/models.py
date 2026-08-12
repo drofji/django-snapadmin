@@ -752,6 +752,17 @@ class PIIMaskingAdminMixin:
 
 
 class SnapSaveMixin:
+    """``ModelAdmin`` mixin that writes an audit-trail entry on every admin save.
+
+    Applied automatically to the admins :meth:`SnapModel.register_all_admins`
+    generates. Add it to a hand-written ``ModelAdmin`` to get the same trail::
+
+        class OrderAdmin(SnapSaveMixin, admin.ModelAdmin):
+            ...
+
+    A create records the initial field values; an edit records only what changed.
+    """
+
     def save_model(self, request, obj, form, change):
         if not change:
             super().save_model(request, obj, form, change)
@@ -845,6 +856,41 @@ class SnapSaveMixin:
 # ===========================================================================
 
 class SnapModel(models.Model):
+    """Abstract base model that generates the admin, the API and the search mapping.
+
+    Subclass it instead of ``django.db.models.Model`` and declare ``Snap*Field``
+    fields; the class attributes below then decide what SnapAdmin builds from them::
+
+        from snapadmin import fields as snap, models as snap_models
+
+        class Product(snap_models.SnapModel):
+            name  = snap.SnapCharField(max_length=200, searchable=True)
+            price = snap.SnapDecimalField(max_digits=10, decimal_places=2, filterable=True)
+
+            api_write_fields = ["name", "price"]   # everything else is read-only via the API
+
+    One call in ``admin.py`` registers every subclass in the project::
+
+        SnapModel.register_all_admins()
+
+    The model is abstract and adds no columns of its own, so subclassing it costs
+    no migration. The attributes are grouped as:
+
+    * **Admin** — ``admin_enabled``, ``admin_sections``, ``admin_tabs``,
+      ``snap_inlines``, ``admin_mixins`` (compose with third-party ``ModelAdmin``
+      classes rather than replacing them), ``js_admin_files``/``css_admin_files``.
+    * **API** — ``api_exclude_fields`` (never leaves the server),
+      ``api_write_fields`` (mass-assignment allowlist), ``api_read_only`` /
+      ``api_http_method_names`` (HTTP-method policy), ``api_filter_lookups`` /
+      ``api_default_text_lookups`` / ``api_json_filters`` (generated query filters).
+    * **Elasticsearch** — ``es_index_enabled``, ``es_storage_mode``,
+      ``es_index_name``, ``es_mapping``.
+    * **Compliance** — ``data_retention_days`` for the GDPR purge.
+
+    Each attribute is documented inline where it is declared below, and in full at
+    https://drofji.github.io/django-snapadmin/#snap-model.
+    """
+
     admin_enabled = True
     js_admin_files = []
     css_admin_files = []

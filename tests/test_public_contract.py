@@ -98,6 +98,20 @@ def test_public_name_importable(dotted_path):
     assert import_string(dotted_path) is not None
 
 
+@pytest.mark.parametrize("dotted_path", PUBLIC_IMPORTS)
+def test_public_name_documented(dotted_path):
+    """Everything on the public contract carries a docstring.
+
+    This is the only documentation that reaches an installed package — it is what
+    ``help()`` and an IDE tooltip show, with no network and no repository access.
+    A new public name arrives undocumented by default, so the bar is enforced here
+    rather than left to review.
+    """
+    obj = import_string(dotted_path)
+    doc = (getattr(obj, "__doc__", None) or "").strip()
+    assert doc, f"{dotted_path} is public but has no docstring"
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SnapModel class-attribute defaults: users configure models by overriding
 # these — renaming one or changing a default silently changes behaviour

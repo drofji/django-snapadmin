@@ -110,6 +110,13 @@ class APITokenViewSet(
     mixins.ListModelMixin,
     viewsets.GenericViewSet,
 ):
+    """Self-service CRUD for the caller's own API tokens (``/api/tokens/``).
+
+    List, create and delete only — a token cannot be edited. The plaintext key is
+    returned **once**, in the create response; only its hash is stored. A regular
+    user sees their own tokens; a superuser sees every token.
+    """
+
     permission_classes = [permissions.IsAuthenticated, IsTokenOwnerOrAdmin]
 
     def get_queryset(self):
@@ -154,6 +161,23 @@ class _PerModelHttpMethods:
 
 
 class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
+    """The generated REST endpoint every ``SnapModel`` is served through.
+
+    One viewset backs every model, resolving the target from the URL::
+
+        GET    /api/models/<app_label>/<model_name>/
+        POST   /api/models/<app_label>/<model_name>/
+        GET    /api/models/<app_label>/<model_name>/<pk>/
+        PATCH  /api/models/<app_label>/<model_name>/<pk>/
+        DELETE /api/models/<app_label>/<model_name>/<pk>/
+
+    Serializer, filters, ordering and search are built from the model's field
+    declarations; Django model permissions are enforced per action. The model's
+    own ``api_read_only`` / ``api_http_method_names`` narrow the allowed verbs,
+    ``api_write_fields`` gates what a client may assign, and ``api_exclude_fields``
+    keeps a column out of every response.
+    """
+
     permission_classes = [permissions.IsAuthenticated, TokenModelPermission]
     pagination_class = SnapDynamicPagination
     throttle_classes = [SnapAnonRateThrottle, SnapUserRateThrottle]
@@ -566,6 +590,14 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
 
 
 class ModelSchemaView(SnapAPIAuthMixin, APIView):
+    """Introspection endpoint listing every model the API exposes.
+
+    ``GET /api/models/schema/`` returns each ``SnapModel``'s endpoint URL and its
+    fields with types and flags — enough for a client to build a form or a table
+    without hardcoding the model. Fields named in ``api_exclude_fields`` are
+    omitted here too.
+    """
+
     permission_classes = [permissions.IsAuthenticated]
 
     @extend_schema(summary="List all available model API endpoints")

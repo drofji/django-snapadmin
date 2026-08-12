@@ -54,6 +54,17 @@ class SnapAPIAuthMixin:
 
 
 class APITokenAuthentication(authentication.BaseAuthentication):
+    """DRF authentication against :class:`snapadmin.models.APIToken`.
+
+    Reads a token from the ``Authorization`` header and resolves it to the
+    owning user::
+
+        Authorization: Token <key>
+
+    Only the token's hash is stored, so the key itself is shown once at creation
+    and never again. An expired, revoked or unknown key fails authentication.
+    """
+
     keyword = "Token"
 
     def authenticate(self, request):
