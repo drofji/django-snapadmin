@@ -94,6 +94,21 @@ class TestAliasStillRuns:
         assert "renamed" not in out.getvalue()
         assert "renamed" in err.getvalue()
 
+    def test_no_color_strips_the_ansi_escapes(self):
+        """``--no-color`` reaches the notice too, which a log file depends on.
+
+        The notice is written before ``BaseCommand.execute()`` applies the flag, so
+        it has to honour it itself — otherwise ``2>> deploy.log`` collects escape
+        sequences. The default stderr wrapper also styles as ERROR, so the plain
+        path has to neutralise ``style_func``, not merely skip ``self.style``.
+        """
+        out, err = StringIO(), StringIO()
+        call_command("purge_expired_data", "--dry-run", "--no-color", stdout=out, stderr=err)
+
+        written = err.getvalue()
+        assert "renamed" in written
+        assert "\033" not in written
+
     def test_send_error_digest_alias_runs(self):
         out, err = StringIO(), StringIO()
         call_command("send_error_digest", stdout=out, stderr=err)

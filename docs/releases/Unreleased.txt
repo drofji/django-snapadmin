@@ -190,6 +190,17 @@ Removed
 Fixed
 -----
 
+* **``snapadmin_info --health-check`` honours ``SILENCED_SYSTEM_CHECKS``.** The new ``checks``
+  section ran Django's system checks without filtering silenced messages, so a check you had
+  deliberately silenced still counted as an error: the section reported ``ok: false`` and
+  ``--health-check`` exited non-zero forever, on a configuration ``manage.py check`` itself calls
+  clean. A readiness probe wired to it would never come up.
+
+* **``SNAPADMIN_SWAGGER_ENABLED`` now follows ``SNAPADMIN_REST_API_ENABLED`` by default.** It
+  defaulted to ``True`` independently, so switching the REST API off still left the OpenAPI views
+  wired — and with the REST API off there is nothing for them to document. Setting it explicitly
+  still wins, in either direction.
+
 * **A database outage is reported as ``unhealthy`` again when Elasticsearch is also down.**
   ``GET /api/health/`` evaluated the two subsystems in order and let the Elasticsearch branch
   overwrite the overall status unconditionally, so a dead database (``unhealthy`` → ``503``) was

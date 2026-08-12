@@ -41,7 +41,14 @@ def _describe(message: checks.CheckMessage) -> str:
 @register("checks", title="System checks", icon="🩺", order=5, health_probe=True)
 def collect(*, verbose: bool) -> dict:
     """Collect the Django system-check summary."""
-    messages = checks.run_checks(include_deployment_checks=False)
+    # Honour SILENCED_SYSTEM_CHECKS, as Django's own `check` command does. Without
+    # this, a deliberately silenced ERROR keeps `ok` False forever and
+    # `snapadmin_info --health-check` fails on a configuration Django calls clean.
+    messages = [
+        message
+        for message in checks.run_checks(include_deployment_checks=False)
+        if not message.is_silenced()
+    ]
 
     data: dict = {}
     blocking: list[checks.CheckMessage] = []

@@ -66,6 +66,12 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   filters without the theme). Install it directly if your own admin code uses it.
 
 ### Fixed
+- **`snapadmin_info --health-check` honours `SILENCED_SYSTEM_CHECKS`** — a silenced check used to
+  keep it failing forever on a configuration `manage.py check` calls clean.
+- **`SNAPADMIN_SWAGGER_ENABLED` follows `SNAPADMIN_REST_API_ENABLED` by default** — switching the
+  REST API off left the OpenAPI views wired with nothing to document. An explicit setting still wins.
+- **`--no-color` reaches the deprecated commands' rename notice**, so a piped log no longer collects
+  ANSI escapes.
 - **`GET /api/health/` reports `unhealthy` (503) when the database is down even if Elasticsearch is
   also unreachable.** The Elasticsearch branch could overwrite the status with the still-serving
   `degraded`, so probes kept routing to an instance that could not answer a query.

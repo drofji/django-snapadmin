@@ -37,13 +37,19 @@ def deprecated_alias(base: type[BaseCommand], *, old: str, new: str) -> type[Bas
             # the same redirect first so call_command(stderr=…) captures it too.
             if options.get("stderr"):
                 self.stderr = OutputWrapper(options["stderr"])
-            self.stderr.write(
-                self.style.WARNING(
-                    f"`manage.py {old}` has been renamed to `manage.py {new}`. "
-                    f"The old name still works but will be removed in a future release — "
-                    f"update your crontab, Celery Beat entries and deploy scripts."
-                )
+            notice = (
+                f"`manage.py {old}` has been renamed to `manage.py {new}`. "
+                f"The old name still works but will be removed in a future release — "
+                f"update your crontab, Celery Beat entries and deploy scripts."
             )
+            # --no-color is applied by BaseCommand.execute(), which has not run yet,
+            # so honour it here: a notice appended to a log file must not carry ANSI
+            # escapes. The stderr wrapper styles as ERROR by default, so plain output
+            # needs its style_func neutralised too, not just an unstyled string.
+            if options.get("no_color"):
+                self.stderr.write(notice, style_func=lambda message: message)
+            else:
+                self.stderr.write(self.style.WARNING(notice))
             return super().execute(*args, **options)
 
     Alias.__name__ = f"Deprecated{base.__name__}"

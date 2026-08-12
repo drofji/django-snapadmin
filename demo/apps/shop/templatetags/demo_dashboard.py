@@ -43,7 +43,12 @@ def _availability_percent(total: int, available: int) -> int:
 
 
 def _recent_activity() -> list[dict[str, Any]]:
-    """The newest orders and customers, newest first, as display rows."""
+    """The newest orders and customers as display rows.
+
+    Timestamped rows come first, newest first. ``Customer`` carries no creation
+    timestamp, so those rows have nothing to sort or display a time by and sit
+    after the orders, newest primary key first — the closest honest proxy.
+    """
     from demo.apps.shop.models import Customer, Order
 
     rows: list[dict[str, Any]] = []
@@ -62,6 +67,9 @@ def _recent_activity() -> list[dict[str, Any]]:
             "text": _("Customer %(name)s registered") % {"name": customer},
             "when": None,
         })
+    # Sort only among the rows that can be compared; the undated ones keep their
+    # relative order and fall to the end.
+    rows.sort(key=lambda row: (row["when"] is None, -(row["when"].timestamp() if row["when"] else 0)))
     return rows
 
 

@@ -179,7 +179,7 @@ class TestMissingExtraIsExplained:
     def test_rest_api_names_the_extra_and_the_off_switch(self, settings):
         settings.SNAPADMIN_REST_API_ENABLED = True
         message = str(self._error_for("SNAPADMIN_REST_API_ENABLED"))
-        assert "pip install django-snapadmin[api]" in message
+        assert "pip install djangorestframework drf-spectacular django-filter" in message
         assert "SNAPADMIN_REST_API_ENABLED = False" in message
 
     def test_graphql_names_its_own_extra(self, settings):
@@ -188,7 +188,7 @@ class TestMissingExtraIsExplained:
         settings.SNAPADMIN_SWAGGER_ENABLED = False
         settings.SNAPADMIN_GRAPHQL_ENABLED = True
         message = str(self._error_for("SNAPADMIN_GRAPHQL_ENABLED"))
-        assert "pip install django-snapadmin[graphql]" in message
+        assert "pip install graphene-django" in message
         assert "SNAPADMIN_GRAPHQL_ENABLED = False" in message
 
     def test_swagger_names_the_api_extra(self, settings):
@@ -196,7 +196,7 @@ class TestMissingExtraIsExplained:
         settings.SNAPADMIN_SWAGGER_ENABLED = True
         settings.SNAPADMIN_GRAPHQL_ENABLED = False
         message = str(self._error_for("SNAPADMIN_SWAGGER_ENABLED"))
-        assert "pip install django-snapadmin[api]" in message
+        assert "pip install djangorestframework drf-spectacular django-filter" in message
         assert "SNAPADMIN_SWAGGER_ENABLED = False" in message
 
     def test_everything_off_imports_cleanly_without_the_stack(self, settings):

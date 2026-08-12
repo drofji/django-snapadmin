@@ -12,8 +12,23 @@ def reverse_lazy_lambda(viewname):
     from django.urls import reverse_lazy
     return reverse_lazy(viewname)
 
+
+def env_bool(name, default):
+    """Read a boolean environment variable, accepting the spellings people type.
+
+    A bare ``os.getenv(name, 'True') == 'True'`` treats ``true``, ``TRUE``, ``1``
+    and ``yes`` as *false*, which is merely annoying for a feature flag and unsafe
+    for a security one: ``AWS_QUERYSTRING_AUTH=true`` would silently turn off URL
+    signing and publish permanently readable media links.
+    """
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ('1', 'true', 'yes', 'on')
+
+
 SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-dummy-key-for-tests')
-DEBUG = os.getenv('DEBUG', 'True') == 'True'
+DEBUG = env_bool('DEBUG', True)
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '*').split(',')
 
 # Refuse to boot a production configuration on a known-insecure key: a
@@ -206,11 +221,11 @@ if STORAGE_BACKEND == 's3':
     AWS_S3_CUSTOM_DOMAIN = os.getenv('AWS_S3_CUSTOM_DOMAIN', '') or None
     # False → plain public URLs. Keep True for a private bucket so every link is
     # a time-limited signed URL (the safe default for user uploads).
-    AWS_QUERYSTRING_AUTH = os.getenv('AWS_QUERYSTRING_AUTH', 'True') == 'True'
+    AWS_QUERYSTRING_AUTH = env_bool('AWS_QUERYSTRING_AUTH', True)
     AWS_QUERYSTRING_EXPIRE = int(os.getenv('AWS_QUERYSTRING_EXPIRE', '3600'))
     # Never overwrite an existing key: Django suffixes the name instead. Silent
     # overwrites are how one upload destroys another's file.
-    AWS_S3_FILE_OVERWRITE = os.getenv('AWS_S3_FILE_OVERWRITE', 'False') == 'True'
+    AWS_S3_FILE_OVERWRITE = env_bool('AWS_S3_FILE_OVERWRITE', False)
     # Most modern buckets disable ACLs entirely; sending one then fails the PUT.
     AWS_DEFAULT_ACL = os.getenv('AWS_DEFAULT_ACL', '') or None
     AWS_S3_ADDRESSING_STYLE = os.getenv('AWS_S3_ADDRESSING_STYLE', 'virtual')
@@ -220,7 +235,7 @@ if STORAGE_BACKEND == 's3':
     # Static files are a separate decision: they are public, immutable and already
     # compressed by WhiteNoise, so serving them from the app is usually fine and
     # one less thing to break. Opt in when you want a CDN in front of them.
-    if os.getenv('SNAPADMIN_STATIC_ON_S3', 'False') == 'True':
+    if env_bool('SNAPADMIN_STATIC_ON_S3', False):
         # `location` keys the objects under static/ in the bucket. Without it they
         # land in the bucket root while STATIC_URL below still points at /static/,
         # so every {% static %} URL would 404.
@@ -249,21 +264,21 @@ LOGIN_REDIRECT_URL = '/admin/'
 # ------------------------------------------------------------------------------
 # Feature toggles — each API surface can be switched off independently via .env
 # (SNAPADMIN_REST_API_ENABLED=False removes all /api/ CRUD routes, etc.).
-SNAPADMIN_REST_API_ENABLED = os.getenv('SNAPADMIN_REST_API_ENABLED', 'True') == 'True'
-SNAPADMIN_SWAGGER_ENABLED = os.getenv('SNAPADMIN_SWAGGER_ENABLED', 'True') == 'True'
-SNAPADMIN_GRAPHQL_ENABLED = os.getenv('SNAPADMIN_GRAPHQL_ENABLED', 'True') == 'True'
+SNAPADMIN_REST_API_ENABLED = env_bool('SNAPADMIN_REST_API_ENABLED', True)
+SNAPADMIN_SWAGGER_ENABLED = env_bool('SNAPADMIN_SWAGGER_ENABLED', True)
+SNAPADMIN_GRAPHQL_ENABLED = env_bool('SNAPADMIN_GRAPHQL_ENABLED', True)
 # Optional extra segment prepended to every snapadmin route (REST/Swagger/GraphQL),
 # for projects whose mount point already collides (e.g. they own /api/). Empty = no-op.
 SNAPADMIN_URL_PREFIX = os.getenv('SNAPADMIN_URL_PREFIX', '')
 # Dashboard is staff-gated by default (it exposes infra details). True = public.
-SNAPADMIN_DASHBOARD_PUBLIC = os.getenv('SNAPADMIN_DASHBOARD_PUBLIC', 'False') == 'True'
+SNAPADMIN_DASHBOARD_PUBLIC = env_bool('SNAPADMIN_DASHBOARD_PUBLIC', False)
 # When django-unfold is installed, SnapAdmin re-registers Django's stock User and
 # Group admins with Unfold's theme + forms, so the built-in auth screens match the
 # rest of the site (and the password row keeps its "Reset password" button — with
 # Django's own forms, Unfold's template renders it empty). Only a registration that
 # is *exactly* Django's is replaced, so a custom UserAdmin is never touched.
 # False = leave the auth admin alone.
-SNAPADMIN_THEME_AUTH_ADMIN = os.getenv('SNAPADMIN_THEME_AUTH_ADMIN', 'True') == 'True'
+SNAPADMIN_THEME_AUTH_ADMIN = env_bool('SNAPADMIN_THEME_AUTH_ADMIN', True)
 
 # --- API capacity & abuse protection -----------------------------------------
 # These bound how much work one request can cost and how fast callers may issue
@@ -312,7 +327,7 @@ SNAPADMIN_EXPORT_LIMIT_MAX = int(os.getenv('SNAPADMIN_EXPORT_LIMIT_MAX', '0'))
 # Smart ES query routing: `?search=` API requests on DUAL models run on
 # Elasticsearch (fuzzy, relevance-ranked) instead of DB icontains. Global
 # kill-switch; per-model opt-out via `es_query_routing = False`.
-SNAPADMIN_ES_QUERY_ROUTING = os.getenv('SNAPADMIN_ES_QUERY_ROUTING', 'True') == 'True'
+SNAPADMIN_ES_QUERY_ROUTING = env_bool('SNAPADMIN_ES_QUERY_ROUTING', True)
 # Max hits fetched from ES per routed search / ES_ONLY listing.
 SNAPADMIN_ES_SEARCH_LIMIT = int(os.getenv('SNAPADMIN_ES_SEARCH_LIMIT', '1000'))
 # Project-wide default for the ES query layer's database fallback. True (default)
@@ -321,10 +336,10 @@ SNAPADMIN_ES_SEARCH_LIMIT = int(os.getenv('SNAPADMIN_ES_SEARCH_LIMIT', '1000'))
 # to make those methods raise SnapEsUnavailable instead — the safe posture on a
 # large, DB-unindexable table where the fallback scan is worse than a clear
 # failure. Overridable per call via db_fallback=True/False.
-SNAPADMIN_ES_DB_FALLBACK = os.getenv('SNAPADMIN_ES_DB_FALLBACK', 'True') == 'True'
+SNAPADMIN_ES_DB_FALLBACK = env_bool('SNAPADMIN_ES_DB_FALLBACK', True)
 
 # Expose the X-Snap-Query-Backend header on list responses (elasticsearch|database).
-SNAPADMIN_QUERY_BACKEND_HEADER = os.getenv('SNAPADMIN_QUERY_BACKEND_HEADER', 'True') == 'True'
+SNAPADMIN_QUERY_BACKEND_HEADER = env_bool('SNAPADMIN_QUERY_BACKEND_HEADER', True)
 
 # Project-wide deletion veto for the dynamic model API: dotted path to a
 # Callable[[request, obj], bool]. Returning False makes DELETE respond 403.
@@ -336,12 +351,12 @@ SNAPADMIN_API_DELETE_GUARD = os.getenv('SNAPADMIN_API_DELETE_GUARD') or None
 # (POST /api/es/reindex/, IsAdminUser). Off by default; the endpoint 404s while
 # disabled. When async is on, the reindex is offloaded to the
 # snapadmin.run_es_reindex Celery task (needs Celery + a broker).
-SNAPADMIN_REINDEX_API_ENABLED = os.getenv('SNAPADMIN_REINDEX_API_ENABLED', 'False') == 'True'
-SNAPADMIN_REINDEX_API_ASYNC = os.getenv('SNAPADMIN_REINDEX_API_ASYNC', 'False') == 'True'
+SNAPADMIN_REINDEX_API_ENABLED = env_bool('SNAPADMIN_REINDEX_API_ENABLED', False)
+SNAPADMIN_REINDEX_API_ASYNC = env_bool('SNAPADMIN_REINDEX_API_ASYNC', False)
 # Default for `snapadmin_reindex --tune` when neither --tune nor --no-tune is
 # passed. False (default) keeps today's behaviour (tuning off); set True to make
 # a mass load relax the index (refresh off, replicas 0) unless --no-tune overrides.
-SNAPADMIN_REINDEX_TUNE_DEFAULT = os.getenv('SNAPADMIN_REINDEX_TUNE_DEFAULT', 'False') == 'True'
+SNAPADMIN_REINDEX_TUNE_DEFAULT = env_bool('SNAPADMIN_REINDEX_TUNE_DEFAULT', False)
 
 # Read-replica routing: alias (from DATABASES) that auto-generated read-only
 # API list/retrieve querysets are pinned to via .using(). Writes always stay on
@@ -374,20 +389,20 @@ SNAPADMIN_APP_LABELS = {}    # {"auth": "Administration"} → rename a group's h
 # Audit trail (issue #7 — DORA / ISO 27001). Records every admin create/update/
 # delete as an immutable SnapadminAuditLog (who/what/when + before/after diff).
 # Export for a SIEM with `manage.py snapadmin_audit_export`.
-SNAPADMIN_AUDIT_LOG_ENABLED = os.getenv('SNAPADMIN_AUDIT_LOG_ENABLED', 'True') == 'True'
+SNAPADMIN_AUDIT_LOG_ENABLED = env_bool('SNAPADMIN_AUDIT_LOG_ENABLED', True)
 SNAPADMIN_AUDIT_RETENTION_DAYS = int(os.getenv('SNAPADMIN_AUDIT_RETENTION_DAYS', '365'))
 
 # Large-dataset performance (issue #5). Replace the changelist's expensive
 # COUNT(*) with PostgreSQL's fast planner estimate on unfiltered listings of
 # tables larger than the threshold; exact count everywhere else. Off → always
 # exact. Only affects huge PG tables — small/filtered/other-DB views unchanged.
-SNAPADMIN_ESTIMATED_COUNT = os.getenv('SNAPADMIN_ESTIMATED_COUNT', 'True') == 'True'
+SNAPADMIN_ESTIMATED_COUNT = env_bool('SNAPADMIN_ESTIMATED_COUNT', True)
 SNAPADMIN_ESTIMATED_COUNT_THRESHOLD = int(os.getenv('SNAPADMIN_ESTIMATED_COUNT_THRESHOLD', '100000'))
 
 # Async background export (issue #6). POST /api/exports/ enqueues a Celery job
 # that streams a model's rows to CSV/JSON in resumable chunks; poll, cancel and
 # download via the API. Requires Celery + a broker (runs inline under eager mode).
-SNAPADMIN_EXPORT_ENABLED = os.getenv('SNAPADMIN_EXPORT_ENABLED', 'True') == 'True'
+SNAPADMIN_EXPORT_ENABLED = env_bool('SNAPADMIN_EXPORT_ENABLED', True)
 SNAPADMIN_EXPORT_CHUNK_SIZE = int(os.getenv('SNAPADMIN_EXPORT_CHUNK_SIZE', '1000'))
 SNAPADMIN_EXPORT_DIR = os.getenv('SNAPADMIN_EXPORT_DIR', str(BASE_DIR / 'exports'))
 # Dotted path to a django.core.files.storage.Storage subclass export files are
@@ -405,13 +420,13 @@ SNAPADMIN_EXPORT_SOURCES = {
 
 # GraphQL security: require authentication + per-model view permission on every
 # resolver (mirrors the REST API contract). Never disable in production.
-SNAPADMIN_GRAPHQL_REQUIRE_AUTH = os.getenv('SNAPADMIN_GRAPHQL_REQUIRE_AUTH', 'True') == 'True'
+SNAPADMIN_GRAPHQL_REQUIRE_AUTH = env_bool('SNAPADMIN_GRAPHQL_REQUIRE_AUTH', True)
 # GraphiQL playground — defaults to DEBUG; keep it out of production.
-SNAPADMIN_GRAPHIQL_ENABLED = os.getenv('SNAPADMIN_GRAPHIQL_ENABLED', str(DEBUG)) == 'True'
+SNAPADMIN_GRAPHIQL_ENABLED = env_bool('SNAPADMIN_GRAPHIQL_ENABLED', DEBUG)
 
 # Admin-only user management API (/api/users/, /api/permissions/).
 # Off by default; the demo enables it so the endpoints show up in Swagger.
-SNAPADMIN_USER_API_ENABLED = os.getenv('SNAPADMIN_USER_API_ENABLED', 'True') == 'True'
+SNAPADMIN_USER_API_ENABLED = env_bool('SNAPADMIN_USER_API_ENABLED', True)
 
 # API authentication classes (dotted paths). Package default (unset) is
 # SnapAdmin token auth only; the demo also enables SessionAuthentication so the
@@ -441,7 +456,7 @@ EMAIL_HOST = os.getenv('EMAIL_HOST', 'localhost')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
 EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
-EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
+EMAIL_USE_TLS = env_bool('EMAIL_USE_TLS', True)
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'snapadmin@localhost')
 
 # ------------------------------------------------------------------------------
@@ -449,12 +464,12 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'snapadmin@localhost')
 # ------------------------------------------------------------------------------
 # Records every unhandled exception / 5xx as an ErrorEvent (visible in the
 # admin) and emails a spike alert when the 15-minute threshold is crossed.
-SNAPADMIN_ERROR_MONITOR_ENABLED = os.getenv('SNAPADMIN_ERROR_MONITOR_ENABLED', 'True') == 'True'
+SNAPADMIN_ERROR_MONITOR_ENABLED = env_bool('SNAPADMIN_ERROR_MONITOR_ENABLED', True)
 if SNAPADMIN_ERROR_MONITOR_ENABLED:
     MIDDLEWARE.append('snapadmin.middleware.SnapErrorMonitorMiddleware')
 
 # Spike alert: N errors within the window → one email per cooldown.
-SNAPADMIN_ERROR_ALERT_ENABLED = os.getenv('SNAPADMIN_ERROR_ALERT_ENABLED', 'True') == 'True'
+SNAPADMIN_ERROR_ALERT_ENABLED = env_bool('SNAPADMIN_ERROR_ALERT_ENABLED', True)
 SNAPADMIN_ERROR_ALERT_THRESHOLD = int(os.getenv('SNAPADMIN_ERROR_ALERT_THRESHOLD', '20'))
 SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES = int(os.getenv('SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES', '15'))
 SNAPADMIN_ERROR_ALERT_EMAILS = [
@@ -462,7 +477,7 @@ SNAPADMIN_ERROR_ALERT_EMAILS = [
 ]
 
 # Daily digest: grouped report of the last 24h, capped at MAX_GROUPS groups.
-SNAPADMIN_ERROR_DIGEST_ENABLED = os.getenv('SNAPADMIN_ERROR_DIGEST_ENABLED', 'True') == 'True'
+SNAPADMIN_ERROR_DIGEST_ENABLED = env_bool('SNAPADMIN_ERROR_DIGEST_ENABLED', True)
 SNAPADMIN_ERROR_DIGEST_EMAILS = [
     e.strip() for e in os.getenv('SNAPADMIN_ERROR_DIGEST_EMAILS', '').split(',') if e.strip()
 ]
@@ -475,7 +490,7 @@ SNAPADMIN_ERROR_DIGEST_MINUTE = int(os.getenv('SNAPADMIN_ERROR_DIGEST_MINUTE', '
 # `snapadmin_info --health-check` on a schedule (the send-health-alert Beat entry below,
 # or `manage.py snapadmin_health_alert` from cron). Recipients fall back to
 # SNAPADMIN_ERROR_ALERT_EMAILS; a persistent outage emails at most once per cooldown window.
-SNAPADMIN_HEALTH_ALERT_ENABLED = os.getenv('SNAPADMIN_HEALTH_ALERT_ENABLED', 'True') == 'True'
+SNAPADMIN_HEALTH_ALERT_ENABLED = env_bool('SNAPADMIN_HEALTH_ALERT_ENABLED', True)
 SNAPADMIN_HEALTH_ALERT_EMAILS = [
     e.strip() for e in os.getenv('SNAPADMIN_HEALTH_ALERT_EMAILS', '').split(',') if e.strip()
 ]
@@ -491,7 +506,7 @@ SNAPADMIN_ERROR_RETENTION_DAYS = int(os.getenv('SNAPADMIN_ERROR_RETENTION_DAYS',
 # ------------------------------------------------------------------------------
 # Three destinations, each with its own frequency: LOCAL dir on this server,
 # NETWORK dir (a mounted share on another server), REMOTE offsite FTP.
-SNAPADMIN_BACKUP_ENABLED = os.getenv('SNAPADMIN_BACKUP_ENABLED', 'False') == 'True'
+SNAPADMIN_BACKUP_ENABLED = env_bool('SNAPADMIN_BACKUP_ENABLED', False)
 SNAPADMIN_BACKUP_KEEP = int(os.getenv('SNAPADMIN_BACKUP_KEEP', '7'))
 
 SNAPADMIN_BACKUP_LOCAL_DIR = os.getenv('SNAPADMIN_BACKUP_LOCAL_DIR', str(BASE_DIR / 'backups'))
@@ -505,7 +520,7 @@ SNAPADMIN_BACKUP_FTP_PORT = int(os.getenv('SNAPADMIN_BACKUP_FTP_PORT', '21'))
 SNAPADMIN_BACKUP_FTP_USER = os.getenv('SNAPADMIN_BACKUP_FTP_USER', '')
 SNAPADMIN_BACKUP_FTP_PASSWORD = os.getenv('SNAPADMIN_BACKUP_FTP_PASSWORD', '')
 SNAPADMIN_BACKUP_FTP_DIR = os.getenv('SNAPADMIN_BACKUP_FTP_DIR', '/')
-SNAPADMIN_BACKUP_FTP_TLS = os.getenv('SNAPADMIN_BACKUP_FTP_TLS', 'False') == 'True'
+SNAPADMIN_BACKUP_FTP_TLS = env_bool('SNAPADMIN_BACKUP_FTP_TLS', False)
 SNAPADMIN_BACKUP_REMOTE_EVERY_HOURS = int(os.getenv('SNAPADMIN_BACKUP_REMOTE_EVERY_HOURS', '168'))
 
 # Copy 3 (alternative) — SFTP over SSH; needs the optional paramiko dependency.
@@ -523,7 +538,7 @@ SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = int(os.getenv('SNAPADMIN_BACKUP_SFTP_EVERY_H
 # Read from the environment so the docker-compose `--profile es` stack (which sets
 # ELASTICSEARCH_ENABLED=True / ELASTICSEARCH_URL in .env) actually activates ES in
 # the demo. Defaults keep ES off for local dev and the test suite.
-ELASTICSEARCH_ENABLED = os.getenv('ELASTICSEARCH_ENABLED', 'False') == 'True'
+ELASTICSEARCH_ENABLED = env_bool('ELASTICSEARCH_ENABLED', False)
 ELASTICSEARCH_URL = os.getenv('ELASTICSEARCH_URL', 'http://localhost:9200')
 
 # Extra kwargs merged into the Elasticsearch(...) constructor: api_key,
