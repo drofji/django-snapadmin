@@ -27,6 +27,11 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   AWS S3, Hetzner Object Storage, MinIO and Backblaze B2, with signed URLs and no-overwrite defaults.
 - **A `checks` section in `snapadmin_info`** — per-severity system-check counts, with `--health-check`
   failing on any error.
+- **README positioning against Unfold, Jazzmin and Grappelli** — those restyle the admin you write;
+  SnapAdmin generates it (and the API, GraphQL and search) from the same field declarations, using
+  Unfold as its optional theme.
+- **An honest scale note in the README** — no benchmark numbers are quoted; it points at the demo's
+  `seed_large` and `benchmark_list_view` commands so you measure on your own data.
 
 ### Changed
 - **Every management command is `snapadmin_*`-prefixed.** `db_backup`, `purge_expired_data` and

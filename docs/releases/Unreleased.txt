@@ -62,6 +62,18 @@ Added
   S3** (SFTP/CIFS/WebDAV — mount it, or use ``SNAPADMIN_BACKUP_SFTP_*`` for backups, which needs no
   mount). Database backups still have no S3 destination; that is stated explicitly in the docs.
 
+* **The README says how SnapAdmin relates to Unfold, Jazzmin and Grappelli.** It appears next to
+  them in package directories and nothing explained why another layer exists. A short section after
+  the three-step example makes the distinction concrete: those are themes that restyle the admin you
+  write, while SnapAdmin generates that admin — plus the REST API, the GraphQL schema and the search
+  mapping — from the same field declarations, and uses Unfold as its *optional* theme rather than
+  competing with it. It also says plainly when a theme is the better choice.
+
+* **An honest answer to "how fast is it?"** No benchmark numbers have been published, so the README
+  quotes none; it points at the two commands the demo already ships — ``seed_large`` (100,000 rows)
+  and ``benchmark_list_view`` (changelist query count and wall time, with and without the automatic
+  ``list_select_related``) — so the figure you act on is measured on your own data.
+
 * **New ``checks`` diagnostics section.** ``snapadmin_info`` reports a per-severity count of Django's
   system checks, and ``--health-check`` fails when any of them is an error — a misconfigured
   deployment now shows up in a readiness probe.

@@ -97,6 +97,32 @@ SnapModel.register_all_admins()
 
 ---
 
+## 🧭 How this differs from Unfold, Jazzmin and Grappelli
+
+Those are **themes**: they restyle the admin you have written. You still write the `ModelAdmin` —
+the `list_display`, the `search_fields`, the filters — and they make it look modern.
+
+SnapAdmin **generates** that admin from your field declarations, and generates the REST API,
+the GraphQL schema and the search mapping from the same ones. It is not an alternative theme;
+it sits a layer above, and it uses **Unfold as its optional theme** (`[theme]` extra). Keep your
+theme, keep your hand-written `ModelAdmin` where you want one — SnapAdmin never replaces an admin
+class you registered yourself.
+
+| | Themes (Unfold · Jazzmin · Grappelli) | SnapAdmin |
+|---|---|---|
+| Admin look | ✅ their whole point | Unfold's, when you install `[theme]` |
+| Who writes the `ModelAdmin` | you | generated from the field kwargs |
+| REST API + OpenAPI/Swagger | — | generated from the same fields |
+| GraphQL schema | — | generated from the same fields |
+| Elasticsearch indexing/search | — | generated from the same fields |
+| Ops (audit log, GDPR purge, backups, health) | — | built in, each one setting away |
+
+If all you want is a better-looking admin, use a theme — it is less machinery. SnapAdmin earns its
+place when the same models also have to be an API, a search index and an auditable system of record,
+and you would rather declare that once than maintain four descriptions of the same fields.
+
+---
+
 ## 🖥 The four commands
 
 | Command | Answers | What it does |
@@ -309,6 +335,24 @@ there is no bad automatic change to undo.
 - [Large-dataset tuning](https://drofji.github.io/django-snapadmin/#performance) — automatic `list_select_related` (no admin N+1), estimated counts, paging caps
 - [ETL helpers](https://drofji.github.io/django-snapadmin/#integrating) — `upsert_from_source()` and `stale_sync()` with a wipe guard
 - [Structured logging](https://drofji.github.io/django-snapadmin/#logging) via `structlog`; the UI is [translated into 10 locales](https://drofji.github.io/django-snapadmin/#i18n)
+
+### How fast is it?
+
+**There are no published benchmark numbers, so this README will not quote any.** What ships instead
+is the means to measure it on your own hardware and data shape, which is the only figure worth
+acting on:
+
+```bash
+python demo/manage.py seed_large              # 100,000 customers and orders, batched bulk_create
+python demo/manage.py benchmark_list_view     # admin changelist: query count + wall time
+```
+
+`benchmark_list_view` runs the changelist queryset with and without SnapAdmin's automatic
+`list_select_related`, touching a foreign key on every row, so the N+1 it removes shows up in the
+query count rather than in prose. What is designed in — rather than measured — is documented under
+[large-dataset tuning](https://drofji.github.io/django-snapadmin/#performance): estimated counts in
+place of `COUNT(*)` on large tables, paging caps, and streaming exports and `es_scan()` that hold
+memory flat regardless of result size.
 
 ---
 
