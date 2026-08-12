@@ -35,7 +35,6 @@ Everything a plain `pip install django-snapadmin` pulls in. **All permissive (MI
 | drf-spectacular | BSD-3-Clause | 🟢 | OpenAPI schema + Swagger/ReDoc |
 | django-filter | BSD-3-Clause | 🟢 | REST filtering backend |
 | graphene-django | MIT | 🟢 | Dynamic GraphQL schema |
-| django-admin-rangefilter | MIT | 🟢 | Admin date-range filters |
 | structlog | MIT or Apache-2.0 | 🟢 | Structured logging |
 | colorama | BSD-3-Clause | 🟢 | Coloured console output |
 | nh3 | MIT | 🟢 | HTML sanitisation (wysiwyg stored-XSS defence) |

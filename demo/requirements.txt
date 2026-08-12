@@ -2,7 +2,6 @@
 
 # Core dependencies (also in pyproject.toml)
 Django>=5.2
-django-admin-rangefilter>=0.13.3
 django-unfold>=0.40.0
 django-ckeditor-5>=0.0.12
 django-admin-autocomplete-filter>=0.7.1

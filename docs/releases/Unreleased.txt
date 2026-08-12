@@ -112,6 +112,20 @@ Changed
   ``api_write_fields``, so a fresh ``snapadmin-demo`` run starts with a clean ``manage.py check``
   and the demo *demonstrates* the mass-assignment guard instead of tripping its warning.
 
+Removed
+-------
+
+* **``django-admin-rangefilter`` is no longer a dependency.** It was installed by every
+  ``pip install django-snapadmin`` and the package never imported it — the range filters SnapAdmin
+  generates for ``filterable`` date and number fields come from ``unfold.contrib.filters`` under the
+  theme, and from Django's own list filters without it. One fewer package, one fewer licence to
+  audit, for everyone.
+
+  **If your own admin code imports it** (``from rangefilter.filters import …``) or lists
+  ``"rangefilter"`` in ``INSTALLED_APPS``, it was only ever reaching you transitively: install it
+  directly with ``pip install django-admin-rangefilter``. Nothing in SnapAdmin changes behaviour —
+  no generated filter, admin screen or setting is affected.
+
 Fixed
 -----
 

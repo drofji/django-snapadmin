@@ -41,6 +41,11 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   near-identical block per model. Check ids are unchanged. W004 no longer fires for models that
   answer 405 to every write (`api_read_only`, or an `api_http_method_names` with no write verb).
 
+### Removed
+- **`django-admin-rangefilter` is no longer a dependency** — it was installed for every user and the
+  package never imported it (range filters come from `unfold.contrib.filters`, or Django's own list
+  filters without the theme). Install it directly if your own admin code uses it.
+
 ### Fixed
 - **`GET /api/health/` reports `unhealthy` (503) when the database is down even if Elasticsearch is
   also unreachable.** The Elasticsearch branch could overwrite the status with the still-serving

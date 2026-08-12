@@ -76,7 +76,7 @@ add the new stack — order matters, Unfold and its contrib apps must precede `d
     "django.contrib.admin",
     "django.contrib.auth",
     # … other django.contrib.* …
-    "rangefilter",            # keep — SnapAdmin still uses it
+    "rangefilter",            # keep only if your own admin uses it — SnapAdmin does not
 -   "drofji_autoadmin",
 +   "rest_framework",
 +   "drf_spectacular",

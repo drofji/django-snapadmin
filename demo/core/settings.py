@@ -55,10 +55,6 @@ INSTALLED_APPS = [
     'django_filters',               # REQUIRED
     'graphene_django',              # REQUIRED for GraphQL
     'admin_auto_filters',           # Optional extra: django-snapadmin[autocomplete-filter] (LGPL; core doesn't use it)
-    # NOT required by snapadmin: the range filters on filterable date/number fields come from
-    # unfold.contrib.filters (or Django's own list filters without the theme) — the package never
-    # imports django-admin-rangefilter. Kept listed only so the demo exercises it. See #DEP2.
-    'rangefilter',
     'snapadmin',                    # REQUIRED
 
     # Celery result/beat storage (Django DB backend)
