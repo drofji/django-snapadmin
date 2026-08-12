@@ -36,7 +36,6 @@ Everything a plain `pip install django-snapadmin` pulls in. **All permissive (MI
 | django-filter | BSD-3-Clause | 🟢 | REST filtering backend |
 | graphene-django | MIT | 🟢 | Dynamic GraphQL schema |
 | structlog | MIT or Apache-2.0 | 🟢 | Structured logging |
-| colorama | BSD-3-Clause | 🟢 | Coloured console output |
 | nh3 | MIT | 🟢 | HTML sanitisation (wysiwyg stored-XSS defence) |
 
 ## Optional extras (installed only when you ask for them)

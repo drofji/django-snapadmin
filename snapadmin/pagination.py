@@ -25,7 +25,6 @@ from django.core.paginator import Paginator
 from django.db import connections
 from django.db.models import QuerySet
 from django.utils.functional import cached_property
-from rest_framework.pagination import PageNumberPagination
 
 DEFAULT_THRESHOLD = 100_000
 
@@ -79,24 +78,50 @@ class EstimatedCountPaginator(Paginator):
         return super().count
 
 
-class SnapDynamicPagination(PageNumberPagination):
-    """Always-on ``list`` pagination for :class:`DynamicModelViewSet`.
+def _build_snap_dynamic_pagination() -> type:
+    """Define :class:`SnapDynamicPagination` against DRF's paginator.
 
-    Applied directly on the viewset (not via DRF's ``DEFAULT_PAGINATION_CLASS``)
-    so every project gets it regardless of its own ``REST_FRAMEWORK`` settings —
-    without this, a project that installs snapadmin and sets no pagination
-    default gets an unbounded ``list`` that serializes an entire table in one
-    response. ``SNAPADMIN_API_PAGE_SIZE`` (default 25) sets the page size;
-    ``SNAPADMIN_API_MAX_PAGE_SIZE`` (default 500) caps what a client can request
-    via ``?page_size=``.
+    Built on first access rather than at import time: this module is reached from
+    ``snapadmin.models`` for :class:`EstimatedCountPaginator`, which is pure Django
+    and drives the *admin*. Importing DRF up here would make the REST stack a hard
+    requirement of loading a model — see the module docstring.
     """
+    from rest_framework.pagination import PageNumberPagination
 
-    page_size_query_param = "page_size"
+    class SnapDynamicPagination(PageNumberPagination):
+        """Always-on ``list`` pagination for :class:`DynamicModelViewSet`.
 
-    @property
-    def page_size(self) -> int:
-        return int(getattr(settings, "SNAPADMIN_API_PAGE_SIZE", 25))
+        Applied directly on the viewset (not via DRF's ``DEFAULT_PAGINATION_CLASS``)
+        so every project gets it regardless of its own ``REST_FRAMEWORK`` settings —
+        without this, a project that installs snapadmin and sets no pagination
+        default gets an unbounded ``list`` that serializes an entire table in one
+        response. ``SNAPADMIN_API_PAGE_SIZE`` (default 25) sets the page size;
+        ``SNAPADMIN_API_MAX_PAGE_SIZE`` (default 500) caps what a client can request
+        via ``?page_size=``.
+        """
 
-    @property
-    def max_page_size(self) -> int:
-        return int(getattr(settings, "SNAPADMIN_API_MAX_PAGE_SIZE", 500))
+        page_size_query_param = "page_size"
+
+        @property
+        def page_size(self) -> int:
+            return int(getattr(settings, "SNAPADMIN_API_PAGE_SIZE", 25))
+
+        @property
+        def max_page_size(self) -> int:
+            return int(getattr(settings, "SNAPADMIN_API_MAX_PAGE_SIZE", 500))
+
+    return SnapDynamicPagination
+
+
+def __getattr__(name: str):
+    """Resolve ``SnapDynamicPagination`` on first access (PEP 562).
+
+    Keeps ``from snapadmin.pagination import SnapDynamicPagination`` working —
+    the import path is public API — while leaving DRF unimported for a project
+    that only uses the admin.
+    """
+    if name == "SnapDynamicPagination":
+        cls = _build_snap_dynamic_pagination()
+        globals()[name] = cls          # subsequent lookups skip __getattr__
+        return cls
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -109,7 +109,6 @@ _CURATED: tuple[LicenseInfo, ...] = (
     LicenseInfo("django-filter", "BSD-3-Clause"),
     LicenseInfo("graphene-django", "MIT"),
     LicenseInfo("structlog", "MIT OR Apache-2.0"),
-    LicenseInfo("colorama", "BSD-3-Clause"),
     LicenseInfo("nh3", "MIT"),
     # ── Optional extras ──
     LicenseInfo("django-unfold", "MIT", extra="theme"),

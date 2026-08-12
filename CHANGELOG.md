@@ -50,7 +50,17 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   near-identical block per model. Check ids are unchanged. W004 no longer fires for models that
   answer 405 to every write (`api_read_only`, or an `api_http_method_names` with no write verb).
 
+- **Loading a model no longer imports the REST framework** — `SnapDynamicPagination` is built on
+  first access, and `snapadmin.urls` imports DRF, drf-spectacular and graphene only inside the
+  branches that need them. Groundwork: those packages are still dependencies of every install;
+  moving them behind `[api]`/`[graphql]` extras is left to its own release.
+- **A feature enabled without its dependencies raises an actionable error** naming both the extra to
+  install and the setting to switch off, instead of an `ImportError` from inside a URLconf. A
+  missing `graphene-django` with GraphQL enabled now raises instead of silently logging a warning.
+
 ### Removed
+- **`colorama` is no longer a dependency** — nothing in the package imported it; the console colour
+  is plain ANSI escapes.
 - **`django-admin-rangefilter` is no longer a dependency** — it was installed for every user and the
   package never imported it (range filters come from `unfold.contrib.filters`, or Django's own list
   filters without the theme). Install it directly if your own admin code uses it.

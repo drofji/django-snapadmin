@@ -5,24 +5,9 @@ URL configuration for the SnapAdmin REST API.
 """
 
 import structlog
+from django.core.exceptions import ImproperlyConfigured
 from django.urls import path, include
 from django.conf import settings
-from rest_framework.routers import DefaultRouter
-from drf_spectacular.views import (
-    SpectacularAPIView,
-    SpectacularSwaggerView,
-    SpectacularRedocView,
-)
-
-from snapadmin.api.views import (
-    APITokenViewSet,
-    DynamicModelViewSet,
-    ModelSchemaView,
-    SSOProviderView,
-)
-from snapadmin.api.health import HealthCheckView
-from snapadmin.api.offline import OfflineModelsView, OfflineModelDataView
-from snapadmin.api.reindex import ESReindexView
 
 REST_API_ENABLED = getattr(settings, "SNAPADMIN_REST_API_ENABLED", True)
 SWAGGER_ENABLED = getattr(settings, "SNAPADMIN_SWAGGER_ENABLED", True)
@@ -40,22 +25,52 @@ URL_PREFIX = getattr(settings, "SNAPADMIN_URL_PREFIX", "")
 
 logger = structlog.get_logger(__name__)
 
-router = DefaultRouter()
-router.register(r"tokens", APITokenViewSet, basename="api-token")
 
-if REST_API_ENABLED:
-    from snapadmin.api.exports import ExportJobViewSet
+def _missing_extra(feature: str, setting: str, extra: str, exc: ImportError) -> ImproperlyConfigured:
+    """Build the error raised when a feature is switched on but its extra is absent.
 
-    router.register(r"exports", ExportJobViewSet, basename="api-export")
+    A bare ``ImportError`` here reads as a broken installation; it is really a
+    two-part configuration answer — install the extra, or turn the feature off —
+    so say both.
+    """
+    return ImproperlyConfigured(
+        f"{feature} is enabled ({setting} = True) but its dependencies are not installed: {exc}. "
+        f"Install them with `pip install django-snapadmin[{extra}]`, "
+        f"or set {setting} = False to switch the feature off."
+    )
 
-if REST_API_ENABLED and USER_API_ENABLED:
-    from snapadmin.api.users import SnapUserViewSet
-
-    router.register(r"users", SnapUserViewSet, basename="api-user")
 
 urlpatterns = []
 
 if REST_API_ENABLED:
+    # Imported here, not at module level: with the feature off, a project needs
+    # neither DRF nor these modules, and including snapadmin.urls must not demand
+    # them. The same applies to Swagger and GraphQL below.
+    try:
+        from rest_framework.routers import DefaultRouter
+
+        from snapadmin.api.views import (
+            APITokenViewSet,
+            DynamicModelViewSet,
+            ModelSchemaView,
+            SSOProviderView,
+        )
+        from snapadmin.api.exports import ExportJobViewSet
+        from snapadmin.api.health import HealthCheckView
+        from snapadmin.api.offline import OfflineModelsView, OfflineModelDataView
+        from snapadmin.api.reindex import ESReindexView
+    except ImportError as exc:
+        raise _missing_extra("The REST API", "SNAPADMIN_REST_API_ENABLED", "api", exc) from exc
+
+    router = DefaultRouter()
+    router.register(r"tokens", APITokenViewSet, basename="api-token")
+    router.register(r"exports", ExportJobViewSet, basename="api-export")
+
+    if USER_API_ENABLED:
+        from snapadmin.api.users import SnapUserViewSet
+
+        router.register(r"users", SnapUserViewSet, basename="api-user")
+
     urlpatterns += [
         # Token management
         path("", include(router.urls)),
@@ -132,6 +147,17 @@ if REST_API_ENABLED:
     ]
 
 if SWAGGER_ENABLED:
+    try:
+        from drf_spectacular.views import (
+            SpectacularAPIView,
+            SpectacularSwaggerView,
+            SpectacularRedocView,
+        )
+    except ImportError as exc:
+        raise _missing_extra(
+            "The OpenAPI schema and docs", "SNAPADMIN_SWAGGER_ENABLED", "api", exc
+        ) from exc
+
     urlpatterns += [
         # OpenAPI schema & interactive docs
         path("schema/",  SpectacularAPIView.as_view(),      name="api-schema"),
@@ -142,7 +168,12 @@ if SWAGGER_ENABLED:
 if GRAPHQL_ENABLED:
     try:
         from snapadmin.api.graphql import SnapGraphQLView, schema
+    except ImportError as exc:
+        # A missing package is a configuration answer, not a runtime hiccup: say
+        # how to fix it rather than degrading to a silently absent endpoint.
+        raise _missing_extra("GraphQL", "SNAPADMIN_GRAPHQL_ENABLED", "graphql", exc) from exc
 
+    try:
         # GraphiQL playground: enabled only alongside DEBUG unless overridden —
         # keep the interactive explorer out of production by default.
         GRAPHIQL_ENABLED = getattr(
@@ -153,6 +184,8 @@ if GRAPHQL_ENABLED:
             path("graphql", SnapGraphQLView.as_view(graphiql=GRAPHIQL_ENABLED, schema=schema)),
         ]
     except Exception as e:
+        # Schema construction can fail on a project's own models; that stays a
+        # warning so the rest of the URLconf still loads, as before.
         logger.warning("graphql_setup_failed", error=str(e))
 
 # Relocate the whole surface under SNAPADMIN_URL_PREFIX when set. Wrapping the

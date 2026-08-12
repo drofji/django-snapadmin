@@ -145,8 +145,36 @@ Changed
   ``api_write_fields``, so a fresh ``snapadmin-demo`` run starts with a clean ``manage.py check``
   and the demo *demonstrates* the mass-assignment guard instead of tripping its warning.
 
+Changed
+-------
+
+* **Loading a model no longer pulls in the REST framework.** ``snapadmin.models`` imports
+  ``snapadmin.pagination`` for its estimated-count paginator — a pure-Django class that speeds up the
+  *admin* changelist on large tables — and that module also defines the DRF paginator the API uses.
+  Because the DRF import sat at the top, importing a model dragged in the whole REST stack, so an
+  admin-only project paid for an API it never mounts. ``SnapDynamicPagination`` is now built on first
+  access; the import path is unchanged and still public.
+
+  Likewise ``snapadmin.urls`` now imports DRF, drf-spectacular and graphene **inside** the branches
+  that need them, so including it with ``SNAPADMIN_REST_API_ENABLED = False`` no longer requires the
+  REST stack to be installed. **This is groundwork.** Those packages are still ordinary
+  dependencies of every install — moving them behind ``[api]`` / ``[graphql]`` extras changes the
+  default dependency graph and is deliberately left to its own release.
+
+* **A feature enabled without its dependencies now says what to do about it.** Where a missing
+  package used to surface as an ``ImportError`` from inside a URLconf — which reads as a broken
+  installation — the error now states both halves of the answer: install the extra
+  (``pip install django-snapadmin[api]``), or switch the feature off
+  (``SNAPADMIN_REST_API_ENABLED = False``). GraphQL previously degraded further still, logging a
+  warning and leaving the endpoint quietly absent; a missing ``graphene-django`` now raises. A schema
+  that fails to build on your own models is still a warning, as before.
+
 Removed
 -------
+
+* **``colorama`` is no longer a dependency.** It was installed by every base install and nothing in
+  the package imported it — SnapAdmin's coloured console output is written with plain ANSI escapes.
+  Install it directly if your own code relies on it.
 
 * **``django-admin-rangefilter`` is no longer a dependency.** It was installed by every
   ``pip install django-snapadmin`` and the package never imported it — the range filters SnapAdmin
