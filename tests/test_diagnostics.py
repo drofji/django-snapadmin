@@ -16,6 +16,7 @@ import pytest
 from django.core.management import CommandError, call_command
 from django.test import override_settings
 
+from snapadmin import __version__ as snapadmin_version
 from snapadmin.diagnostics import (
     collect,
     get_collector,
@@ -206,6 +207,44 @@ class TestVersionCollector:
         monkeypatch.setattr("snapadmin.diagnostics.version.__version__", "1.0.0")
         data = get_collector("version").collect(verbose=False)
         assert data["status"] == "stable"
+
+    def test_no_demo_tree_keys_in_a_normal_project(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        data = get_collector("version").collect(verbose=False)
+        assert "demo_tree" not in data
+
+    def test_reports_a_stamped_demo_tree(self, tmp_path, monkeypatch):
+        from snapadmin.quickstart import stamp
+
+        demo = tmp_path / "demo"
+        demo.mkdir()
+        stamp.write_stamp(demo, snapadmin_version, ["manage.py"])
+        monkeypatch.chdir(demo)
+        data = get_collector("version").collect(verbose=False)
+        assert data["demo_tree"] == str(demo.resolve())
+        assert data["demo_tree_version"] == snapadmin_version
+        assert "demo_tree_notice" not in data
+
+    def test_reports_drift_when_the_tree_is_from_another_release(self, tmp_path, monkeypatch):
+        from snapadmin.quickstart import stamp
+
+        demo = tmp_path / "demo"
+        demo.mkdir()
+        stamp.write_stamp(demo, "0.0.1a1", ["manage.py"])
+        monkeypatch.chdir(demo)
+        data = get_collector("version").collect(verbose=False)
+        assert data["demo_tree_version"] == "0.0.1a1"
+        assert "snapadmin-demo" in data["demo_tree_notice"]
+
+    def test_unstamped_version_falls_back_to_unknown(self, tmp_path, monkeypatch):
+        from snapadmin.quickstart import stamp
+
+        demo = tmp_path / "demo"
+        demo.mkdir()
+        (demo / stamp.STAMP_NAME).write_text('{"files": []}')
+        monkeypatch.chdir(demo)
+        data = get_collector("version").collect(verbose=False)
+        assert data["demo_tree_version"] == "unknown"
 
     @override_settings(DEBUG=True)
     def test_flag_none_default_follows_debug_true(self):

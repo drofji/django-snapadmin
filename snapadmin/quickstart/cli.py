@@ -19,6 +19,7 @@ from snapadmin.quickstart import (
     extract,
     fetch,
     run,
+    stamp,
     wizard,
 )
 
@@ -74,6 +75,24 @@ def _config_from_args(args: argparse.Namespace) -> dict | None:
     return config
 
 
+def _report_existing_tree(demo_dir: Path, version: str) -> None:
+    """Say what happens to a demo tree that is already there, before touching it.
+
+    A tree extracted by an older release keeps serving that release's models and templates —
+    ``pip install -U`` does not touch it — so the version it came from is worth stating out loud
+    rather than leaving the user to wonder why fixed problems are still on screen.
+    """
+    if not demo_dir.is_dir():
+        return
+    previous = stamp.stamped_version(demo_dir)
+    if previous == version:
+        print(f"Refreshing the existing demo tree at {demo_dir} (already v{version}).")
+    elif previous:
+        print(f"Refreshing the existing demo tree at {demo_dir}: v{previous} → v{version}.")
+    else:
+        print(f"Refreshing the existing demo tree at {demo_dir} (unstamped — version unknown) → v{version}.")
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
@@ -82,8 +101,9 @@ def main(argv: list[str] | None = None) -> int:
 
         print(f"Downloading SnapAdmin demo v{version} …")
         archive = fetch.download_demo(version, clear_cache=args.clear_cache)
+        _report_existing_tree(Path(args.path).resolve() / "demo", version)
         print("Extracting demo/ …")
-        demo_dir = extract.extract_demo(archive, Path(args.path), assume_yes=args.yes)
+        demo_dir = extract.extract_demo(archive, Path(args.path), version=version, assume_yes=args.yes)
 
         if config is not None:
             env_path = wizard.write_env(config, demo_dir / ".env")

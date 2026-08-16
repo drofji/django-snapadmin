@@ -62,6 +62,9 @@ dist/
 .env.local
 .env.*.local
 
+# Provenance stamp written by snapadmin-demo into a tree it extracts (never into the repo's own demo/)
+.snapadmin-demo.json
+
 # Node / frontend (if any)
 node_modules/
 npm-debug.log

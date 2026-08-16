@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from snapadmin.quickstart import QuickstartError, TagNotFoundError, cli, extract, fetch, run
+from snapadmin.quickstart import QuickstartError, TagNotFoundError, cli, extract, fetch, run, stamp
 
 
 def _patch_pipeline(monkeypatch, **over):
@@ -36,6 +36,7 @@ class TestMain:
         assert code == 0
         assert captured["download"]["clear_cache"] is True
         assert captured["extract"]["assume_yes"] is True
+        assert captured["extract"]["version"] == "1.0.0"
         assert captured["run"] == {"skip_install": True, "no_serve": True, "mode": "runserver"}
         assert captured["path"] == "/tmp/z"
 
@@ -119,6 +120,43 @@ class TestConfigWiring:
         )
         cli.main(["--mode", "docker", "--skip-install", "--no-serve"])
         assert captured["mode"] == "docker"
+
+
+class TestExistingTreeReport:
+    """A tree left over from an older release is announced before it is touched (#CHK2b)."""
+
+    def test_silent_when_there_is_no_tree_yet(self, tmp_path, capsys):
+        cli._report_existing_tree(tmp_path / "demo", "2.0")
+        assert capsys.readouterr().out == ""
+
+    def test_names_both_versions_when_the_tree_is_older(self, tmp_path, capsys):
+        demo = tmp_path / "demo"
+        demo.mkdir()
+        stamp.write_stamp(demo, "1.0", ["manage.py"])
+        cli._report_existing_tree(demo, "2.0")
+        assert "v1.0 → v2.0" in capsys.readouterr().out
+
+    def test_says_so_when_the_tree_is_already_current(self, tmp_path, capsys):
+        demo = tmp_path / "demo"
+        demo.mkdir()
+        stamp.write_stamp(demo, "2.0", ["manage.py"])
+        cli._report_existing_tree(demo, "2.0")
+        assert "already v2.0" in capsys.readouterr().out
+
+    def test_flags_an_unstamped_tree(self, tmp_path, capsys):
+        demo = tmp_path / "demo"
+        demo.mkdir()
+        cli._report_existing_tree(demo, "2.0")
+        assert "unstamped" in capsys.readouterr().out
+
+    def test_main_reports_the_tree_it_is_about_to_replace(self, monkeypatch, tmp_path, capsys):
+        demo = tmp_path / "demo"
+        demo.mkdir()
+        stamp.write_stamp(demo, "0.1.0b5", ["manage.py"])
+        _patch_pipeline(monkeypatch, extract=lambda a, p, **kw: demo)
+        monkeypatch.setattr(fetch, "resolve_version", lambda v: "0.1.0b6")
+        assert cli.main(["--path", str(tmp_path), "--skip-install", "--no-serve", "--yes"]) == 0
+        assert "v0.1.0b5 → v0.1.0b6" in capsys.readouterr().out
 
 
 class TestDunderMain:

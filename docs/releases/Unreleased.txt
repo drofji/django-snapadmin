@@ -6,3 +6,27 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+Added
+-----
+
+* **``snapadmin-demo`` now stamps the tree it extracts, and refreshes it properly.** Upgrading the
+  package (``pip install -U django-snapadmin``) never touched an already-extracted ``demo/``
+  directory: it kept serving the models, templates and settings of the release it came from, so
+  problems fixed in the installed release stayed on screen with nothing to explain why. Each
+  extraction now leaves a ``.snapadmin-demo.json`` stamp — the release it came from plus the list of
+  files that extraction wrote. Re-running ``snapadmin-demo`` names both versions before it touches
+  anything (*"Refreshing the existing demo tree at …: v0.1.0b5 → v0.1.0b6"*) and, because extraction
+  overlays a tree rather than replacing it, deletes the files the new release no longer ships — a
+  template removed upstream used to linger and keep rendering. Only files recorded in the previous
+  stamp are candidates for deletion, so anything you added yourself (a ``.env``, your own app, your
+  database) is never touched, and the deletions go through the same confirmation as an overwrite.
+
+Changed
+-------
+
+* **``snapadmin_info`` reports demo-tree drift.** Run from inside a tree extracted by
+  ``snapadmin-demo``, the *Version & Status* section now also lists which release that tree came
+  from and, when it disagrees with the installed package, says so in one line instead of leaving
+  the mismatch to be discovered as unexplained behaviour. A normal project sees no change — the
+  lines appear only when a stamp is present.

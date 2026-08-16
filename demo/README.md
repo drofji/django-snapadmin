@@ -9,6 +9,10 @@ develop against the package in editable mode.
 > **Just want to run it, without cloning?** `pip install django-snapadmin && snapadmin-demo`
 > downloads this directory from the matching release tag and runs it for you. The instructions below
 > are for developing against the demo from a clone.
+>
+> An extracted copy is **not** upgraded by `pip install -U django-snapadmin` — it keeps the models
+> and templates of the release it came from. Re-run `snapadmin-demo` to refresh it; it names the
+> release the existing copy came from and removes files the newer one no longer ships.
 
 ## Layout
 

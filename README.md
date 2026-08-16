@@ -32,6 +32,11 @@ That downloads a ready-made demo project, migrates it, seeds sample data and ser
 <http://localhost:8000>. Log in at `/admin/` with **`admin` / `admin`** and click around. Delete
 `~/.cache/snapadmin-demo/` when you're done.
 
+> **Upgraded SnapAdmin later?** `pip install -U django-snapadmin` upgrades the package but not the
+> `demo/` directory it once extracted — that tree keeps its old models and templates. Re-run
+> `snapadmin-demo` to refresh it; it tells you which release the existing tree came from and
+> removes files the new release no longer ships (never files you added).
+
 ---
 
 ## 🧠 The idea, in three steps

@@ -7,7 +7,7 @@ import tarfile
 
 import pytest
 
-from snapadmin.quickstart import QuickstartError, extract
+from snapadmin.quickstart import QuickstartError, extract, stamp
 
 TOP = "django-snapadmin-1.0"
 
@@ -81,7 +81,7 @@ class TestExtractDemo:
         (dest / "demo").mkdir(parents=True)
         (dest / "demo" / "manage.py").write_text("old")
         with pytest.raises(QuickstartError, match="not replaced"):
-            extract.extract_demo(archive, dest, confirm=lambda paths: False)
+            extract.extract_demo(archive, dest, confirm=lambda replaced, removed: False)
         assert (dest / "demo" / "manage.py").read_text() == "old"
 
     def test_overwrite_confirmed(self, tmp_path):
@@ -89,8 +89,83 @@ class TestExtractDemo:
         dest = tmp_path / "out"
         (dest / "demo").mkdir(parents=True)
         (dest / "demo" / "manage.py").write_text("old")
-        extract.extract_demo(archive, dest, confirm=lambda paths: True)
+        extract.extract_demo(archive, dest, confirm=lambda replaced, removed: True)
         assert (dest / "demo" / "manage.py").read_text() == "new"
+
+
+class TestVersionStamp:
+    def test_stamps_the_extracted_tree(self, tmp_path):
+        archive = _make_tarball(
+            tmp_path / "src.tar.gz",
+            files={"demo/manage.py": "m", "demo/core/settings.py": "s"},
+        )
+        demo = extract.extract_demo(archive, tmp_path / "out", version="0.1.0b6", assume_yes=True)
+        assert stamp.stamped_version(demo) == "0.1.0b6"
+        assert stamp.read_stamp(demo)["files"] == ["core/settings.py", "manage.py"]
+
+    def test_unversioned_extraction_writes_no_stamp(self, tmp_path):
+        archive = _make_tarball(tmp_path / "src.tar.gz", files={"demo/manage.py": "m"})
+        demo = extract.extract_demo(archive, tmp_path / "out", assume_yes=True)
+        assert stamp.read_stamp(demo) is None
+
+
+class TestRefreshPruning:
+    def _first_release(self, tmp_path):
+        archive = _make_tarball(
+            tmp_path / "v1.tar.gz",
+            files={"demo/manage.py": "m", "demo/templates/dashboard.html": "old panel"},
+        )
+        return extract.extract_demo(archive, tmp_path / "out", version="1.0", assume_yes=True)
+
+    def test_removes_a_file_the_new_release_dropped(self, tmp_path, capsys):
+        demo = self._first_release(tmp_path)
+        newer = _make_tarball(tmp_path / "v2.tar.gz", files={"demo/manage.py": "m2"})
+        extract.extract_demo(newer, tmp_path / "out", version="2.0", assume_yes=True)
+        assert not (demo / "templates" / "dashboard.html").exists()
+        assert (demo / "manage.py").read_text() == "m2"
+        assert stamp.stamped_version(demo) == "2.0"
+        assert "Removed 1 file" in capsys.readouterr().out
+
+    def test_keeps_files_the_user_added(self, tmp_path):
+        demo = self._first_release(tmp_path)
+        (demo / ".env").write_text("SECRET=1")
+        newer = _make_tarball(tmp_path / "v2.tar.gz", files={"demo/manage.py": "m2"})
+        extract.extract_demo(newer, tmp_path / "out", version="2.0", assume_yes=True)
+        assert (demo / ".env").read_text() == "SECRET=1"
+
+    def test_pruning_needs_the_same_confirmation_as_an_overwrite(self, tmp_path):
+        demo = self._first_release(tmp_path)
+        newer = _make_tarball(tmp_path / "v2.tar.gz", files={"demo/other.py": "x"})
+        seen: dict = {}
+        with pytest.raises(QuickstartError, match="not replaced"):
+            extract.extract_demo(
+                newer,
+                tmp_path / "out",
+                version="2.0",
+                confirm=lambda replaced, removed: seen.update(replaced=replaced, removed=removed) or False,
+            )
+        assert seen["replaced"] == []
+        assert seen["removed"] == [demo / "manage.py", demo / "templates" / "dashboard.html"]
+        assert (demo / "templates" / "dashboard.html").exists()
+
+    def test_a_file_replaced_by_a_directory_upstream(self, tmp_path):
+        """The orphan goes before the new tree is written, or the mkdir would collide."""
+        demo = self._first_release(tmp_path)
+        newer = _make_tarball(
+            tmp_path / "v2.tar.gz",
+            files={"demo/manage.py": "m2", "demo/templates/dashboard.html/index.html": "panel"},
+            dirs=["demo/templates/dashboard.html"],
+        )
+        extract.extract_demo(newer, tmp_path / "out", version="2.0", assume_yes=True)
+        assert (demo / "templates" / "dashboard.html" / "index.html").read_text() == "panel"
+
+    def test_an_unstamped_tree_is_never_pruned(self, tmp_path):
+        dest = tmp_path / "out"
+        (dest / "demo").mkdir(parents=True)
+        (dest / "demo" / "leftover.py").write_text("not ours")
+        archive = _make_tarball(tmp_path / "src.tar.gz", files={"demo/manage.py": "m"})
+        extract.extract_demo(archive, dest, version="2.0", assume_yes=True)
+        assert (dest / "demo" / "leftover.py").exists()
 
 
 class TestPromptOverwrite:
@@ -106,3 +181,11 @@ class TestPromptOverwrite:
         monkeypatch.setattr("builtins.input", lambda prompt="": "n")
         extract._prompt_overwrite([tmp_path / f"f{i}" for i in range(25)])
         assert "and 5 more" in capsys.readouterr().out
+
+    def test_lists_deletions_separately(self, monkeypatch, tmp_path, capsys):
+        monkeypatch.setattr("builtins.input", lambda prompt="": "y")
+        assert extract._prompt_overwrite([], [tmp_path / "gone.html"]) is True
+        out = capsys.readouterr().out
+        assert "older demo release" in out
+        assert "gone.html" in out
+        assert "already exist" not in out

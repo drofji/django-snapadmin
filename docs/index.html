@@ -460,10 +460,35 @@ snapadmin-demo</code></pre>
     It fetches and runs the project's own demo release over HTTPS from the official repository, and
     (unless <code>--skip-install</code>) <code>pip install</code>s the demo requirements into the
     current environment — <strong>run it in a fresh virtualenv</strong>. Tar members are sanitised
-    (no path traversal, symlinks skipped) and you are asked before any existing file is overwritten.
-    It is stdlib-only and never imports Django in-process — it drives <code>manage.py</code> as a
-    subprocess.
+    (no path traversal, symlinks skipped) and you are asked before any existing file is overwritten
+    or, on a refresh, deleted. It is stdlib-only and never imports Django in-process — it drives
+    <code>manage.py</code> as a subprocess.
   </div>
+
+  <h3>Refreshing an existing demo tree</h3>
+  <p><code>pip install -U django-snapadmin</code> upgrades the <em>package</em>. The
+  <code>demo/</code> directory it extracted earlier is an ordinary directory and is
+  <strong>not</strong> upgraded with it — it keeps serving the models, templates and settings of the
+  release it came from, which is a reliable way to chase problems the installed release already
+  fixed. Re-run <code>snapadmin-demo</code> to bring the tree up to date:</p>
+
+  <pre><code>pip install -U django-snapadmin
+snapadmin-demo --skip-install --no-serve   # refresh the tree in place</code></pre>
+
+  <p>Each extraction leaves a small <code>.snapadmin-demo.json</code> stamp at the root of the tree —
+  the release it came from and the list of files that extraction wrote. On the next run that stamp
+  gives you:</p>
+  <ul>
+    <li>a line naming both versions before anything is touched
+      (<em>“Refreshing the existing demo tree at … : v0.1.0b5 → v0.1.0b6”</em>);</li>
+    <li><strong>deletion of files the new release dropped.</strong> Extraction overlays a tree, so
+      without this a template removed upstream would linger and keep rendering. Only files listed in
+      the previous stamp are candidates — anything you added yourself (a <code>.env</code>, your own
+      app, an edited settings file that still exists upstream) is never in that list and is never
+      deleted;</li>
+    <li>a drift line in <code>manage.py snapadmin_info</code> when the tree and the installed package
+      disagree, so the report says so instead of leaving you to guess.</li>
+  </ul>
 
   <h3>Flags</h3>
   <table>
@@ -2322,7 +2347,7 @@ snapadmin-info --health-check    # probes only; non-zero exit on failure</code><
   <h3>Sections</h3>
   <ul>
     <li><strong>System checks</strong> — a per-severity <em>count</em> of Django's system checks, not their text. Django normally prints every message in full before any management command runs, which buried this report behind a screen of advisory text, so <code>snapadmin_info</code> opts out of that pass and summarises here instead: <code>--verbose</code> prints the messages, and <strong>errors are always listed</strong> because they block a working deployment (they also make <code>--health-check</code> fail). Run <code>manage.py check</code> for the full text with hints.</li>
-    <li><strong>Version &amp; Status</strong> — SnapAdmin version, the Django/Python runtime, and every <code>SNAPADMIN_*</code> feature toggle at its effective value.</li>
+    <li><strong>Version &amp; Status</strong> — SnapAdmin version, the Django/Python runtime, and every <code>SNAPADMIN_*</code> feature toggle at its effective value. Run from inside a tree extracted by <a href="#snapadmin-demo"><code>snapadmin-demo</code></a>, it also reports which release that tree came from, and says so plainly when the tree is older (or newer) than the installed package — a mismatch that otherwise shows up only as behaviour you thought was already fixed.</li>
     <li><strong>Feature adoption</strong> — a commerce-readiness <code>✓</code>/<code>✗</code> checklist of which business-important capabilities are actually on or in use in <em>this</em> project: backups, retention-based deletion, audit trail, PII masking, the REST/GraphQL APIs, API tokens, Elasticsearch, background tasks, health/error alerting, rate limiting, the read-only / write-allowlist / delete guards and SSO. Where a capability is adopted per-model or per-field (retention, masking, read-only models, …), <code>--verbose</code> adds a one-line count. Unlike the toggle list above, the signal here is <em>adoption</em> — a model actually declaring retention, a masked field actually configured — so you can see at a glance what is protected and what is left open.</li>
     <li><strong>Database</strong> — engine, name, host, port and user (never the password), reachability, table count and — where the backend exposes it — on-disk size.</li>
     <li><strong>Elasticsearch</strong> — collapses to <code>disabled</code> when off; otherwise cluster reachability, status and index count, plus the <code>DB_ONLY</code> / <code>DUAL</code> / <code>ES_ONLY</code> tally of your models.</li>

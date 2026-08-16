@@ -114,6 +114,9 @@ Tooling
         forward ``snapadmin-info`` / ``snapadmin-license-check`` (either spelling) to
         the ``manage.py`` command of the same name. All stdlib-only, importing no
         Django at module level — they run before a project exists.
+        ``snapadmin-demo`` stamps the tree it extracts (``snapadmin.quickstart.stamp``),
+        so re-running it refreshes that tree — dropping files the new release removed —
+        and ``snapadmin_info`` can report a tree left behind by an older release.
 
 Management commands
     ``snapadmin_info``, ``snapadmin_license_check``, ``snapadmin_reindex``,

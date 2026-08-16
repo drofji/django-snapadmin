@@ -10,6 +10,18 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 
 ## Unreleased
 
+### Added
+- **`snapadmin-demo` refreshes an existing demo tree instead of layering over it.** Every extraction
+  now leaves a `.snapadmin-demo.json` stamp (the release it came from and the files it wrote). A
+  re-run names both versions before touching anything and deletes the files the new release no
+  longer ships — files you added yourself are never in the stamp and are never deleted. `pip install
+  -U django-snapadmin` upgrades the package but not an extracted `demo/` directory, which used to
+  keep serving old models and templates with nothing to say so.
+
+### Changed
+- **`snapadmin_info` reports a demo tree that has drifted from the installed release** in its
+  *Version & Status* section. Projects without an extracted demo tree see no change.
+
 ## 0.1.0b6 — 2026-08-13
 
 A first-run polish release, from installing 0.1.0b5 into a fresh project and walking the demo.
