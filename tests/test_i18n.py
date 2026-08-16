@@ -138,6 +138,103 @@ class TestCatalogCompleteness:
         assert "%(ext)s" in msg and "%(allowed)s" in msg
 
 
+# ── the theme's own strings (#I18N4) ─────────────────────────────────────────
+
+class TestThemeStrings:
+    """django-unfold ships no catalogs, so SnapAdmin translates its UI strings.
+
+    Without this layer a themed admin renders its shell ("All applications",
+    "Apply Filters", "No results found", the command palette) in English while the
+    page's own labels are translated — the "half the page is in the wrong language"
+    report that opened #I18N4.
+    """
+
+    #: Words that legitimately match their English source in a given language.
+    SAME_AS_SOURCE = {
+        "de": {"System"},
+        "de_CH": {"System"},
+        "es": {"General", "No"},
+        "fr": {"Action", "Date"},
+        "fr_CH": {"Action", "Date"},
+        "it": {"No"},
+        "nl": {"Filters", "Object"},
+        "pl": set(),
+        "ru": set(),
+    }
+
+    @staticmethod
+    def _sources():
+        """The declared msgids — resolved under ``en``, which is the source catalog.
+
+        The declarations are lazy, so ``str()`` under any other active language would
+        hand back the *translation* instead of the msgid the test needs.
+        """
+        from snapadmin.theme_i18n import THEME_STRINGS
+
+        with translation.override("en"):
+            return [str(s) for s in THEME_STRINGS]
+
+    def test_strings_are_declared_once(self):
+        values = self._sources()
+        assert values, "the theme string list must not be empty"
+        assert len(values) == len(set(values)), "duplicate msgid in THEME_STRINGS"
+
+    def test_declared_lazily_so_makemessages_can_extract_them(self):
+        """They must be lazy: evaluated at import they would bake in one language."""
+        from django.utils.functional import Promise
+
+        from snapadmin.theme_i18n import THEME_STRINGS
+
+        assert all(isinstance(s, Promise) for s in THEME_STRINGS)
+
+    def test_the_module_needs_no_theme_installed(self):
+        """It is a plain catalog declaration — importing it must not require unfold."""
+        import subprocess
+        import sys
+
+        code = (
+            "import sys, importlib.abc\n"
+            "class Block(importlib.abc.MetaPathFinder):\n"
+            "    def find_spec(self, name, path=None, target=None):\n"
+            "        if name == 'unfold' or name.startswith('unfold.'):\n"
+            "            raise ImportError(name)\n"
+            "        return None\n"
+            "sys.meta_path.insert(0, Block())\n"
+            "import django\n"
+            "from django.conf import settings\n"
+            "settings.configure(USE_I18N=True)\n"
+            "django.setup()\n"
+            "import snapadmin.theme_i18n as m\n"
+            "print(len(m.THEME_STRINGS))\n"
+        )
+        result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        assert int(result.stdout.strip()) > 0
+
+    @pytest.mark.parametrize("locale", [l for l in TARGET_LOCALES if l != "en"])
+    def test_every_theme_string_is_translated(self, locale):
+        sources = self._sources()
+        allowed = self.SAME_AS_SOURCE[locale]
+        with translation.override(locale):
+            untranslated = [
+                source for source in sources
+                if translation.gettext(source) == source and source not in allowed
+            ]
+        assert not untranslated, f"{locale} leaves theme strings in English: {untranslated}"
+
+    @pytest.mark.parametrize("locale,source,expected", [
+        ("ru", "All applications", "Все приложения"),
+        ("ru", "Apply Filters", "Применить фильтры"),
+        ("ru", "No results found", "Ничего не найдено"),
+        ("de", "Reset filters", "Filter zurücksetzen"),
+        ("fr", "Select action", "Sélectionner une action"),
+        ("pl", "Search apps and models...", "Szukaj aplikacji i modeli…"),
+    ])
+    def test_known_theme_wordings(self, locale, source, expected):
+        with translation.override(locale):
+            assert translation.gettext(source) == expected
+
+
 # ── settings wiring ──────────────────────────────────────────────────────────
 
 class TestSettings:

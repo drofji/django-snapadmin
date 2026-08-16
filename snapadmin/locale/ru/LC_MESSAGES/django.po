@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-09 19:28+0000\n"
+"POT-Creation-Date: 2026-08-16 14:54+0000\n"
 "Language: ru\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -376,6 +376,209 @@ msgstr "Провайдеры единого входа (SSO)"
 msgid "Or sign in with"
 msgstr "Или войдите через"
 
+msgid "Add new item"
+msgstr "Добавить запись"
+
+msgid "Add row"
+msgstr "Добавить строку"
+
+msgid "After you've created a user, you’ll be able to edit more user options."
+msgstr "После создания пользователя вы сможете изменить остальные настройки."
+
+msgid "All applications"
+msgstr "Все приложения"
+
+msgid "Apply Filters"
+msgstr "Применить фильтры"
+
+msgid "Cancel"
+msgstr "Отмена"
+
+msgid "Choose file to upload"
+msgstr "Выберите файл для загрузки"
+
+msgid "Click to cancel"
+msgstr "Нажмите, чтобы отменить"
+
+msgid "Click to download"
+msgstr "Нажмите, чтобы скачать"
+
+msgid "Collapse"
+msgstr "Свернуть"
+
+msgid "Current file"
+msgstr "Текущий файл"
+
+msgid "Dark"
+msgstr "Тёмная"
+
+msgid "Date"
+msgstr "Дата"
+
+msgid "Date from"
+msgstr "Дата с"
+
+msgid "Date to"
+msgstr "Дата по"
+
+msgid "Default"
+msgstr "По умолчанию"
+
+msgid "Edit"
+msgstr "Изменить"
+
+msgid "Expand row"
+msgstr "Развернуть строку"
+
+msgid "False"
+msgstr "Нет"
+
+msgid "Forgotten your password or username?"
+msgstr "Забыли пароль или имя пользователя?"
+
+msgid "From"
+msgstr "С"
+
+msgid "General"
+msgstr "Общее"
+
+msgid "Go back"
+msgstr "Назад"
+
+msgid "Image preview"
+msgstr "Предпросмотр изображения"
+
+msgid "Light"
+msgstr "Светлая"
+
+msgid "More actions"
+msgstr "Другие действия"
+
+msgid "Navigate"
+msgstr "Перейти"
+
+msgid "New"
+msgstr "Новый"
+
+msgid "Next"
+msgstr "Далее"
+
+msgid "No"
+msgstr "Нет"
+
+msgid "No data"
+msgstr "Нет данных"
+
+msgid "No results found"
+msgstr "Ничего не найдено"
+
+msgid "Non field specific"
+msgstr "Не относится к полю"
+
+msgid "Not enough data."
+msgstr "Недостаточно данных."
+
+msgid "Nothing matched your search"
+msgstr "По запросу ничего не найдено"
+
+msgid "Previous"
+msgstr "Назад"
+
+msgid "Recent searches"
+msgstr "Недавние запросы"
+
+msgid "Record picture"
+msgstr "Изображение записи"
+
+msgid "Reset filters"
+msgstr "Сбросить фильтры"
+
+msgid "Reset to default"
+msgstr "Сбросить к значениям по умолчанию"
+
+msgid "Return to site"
+msgstr "Вернуться на сайт"
+
+msgid "Row"
+msgstr "Строка"
+
+msgid "Run"
+msgstr "Выполнить"
+
+msgid "Run the selected action"
+msgstr "Выполнить выбранное действие"
+
+msgid "Search apps and models..."
+msgstr "Поиск по приложениям и моделям…"
+
+msgid "Select"
+msgstr "Выбрать"
+
+msgid "Select action"
+msgstr "Выберите действие"
+
+msgid "Select action to run"
+msgstr "Выберите действие для выполнения"
+
+msgid "Select all rows"
+msgstr "Выбрать все строки"
+
+msgid "Select currency"
+msgstr "Выберите валюту"
+
+msgid "Select format"
+msgstr "Выберите формат"
+
+msgid "Select record"
+msgstr "Выберите запись"
+
+msgid "Select value"
+msgstr "Выберите значение"
+
+msgid "System"
+msgstr "Системная"
+
+msgid "This item will be deleted."
+msgstr "Этот объект будет удалён."
+
+msgid ""
+"This page yielded into no results. Create a new item or reset your filters."
+msgstr ""
+"На этой странице нет результатов. Создайте запись или сбросьте фильтры."
+
+msgid "To"
+msgstr "По"
+
+msgid "Toggle password visibility"
+msgstr "Показать или скрыть пароль"
+
+msgid "True"
+msgstr "Да"
+
+msgid "Type to search"
+msgstr "Введите запрос"
+
+msgid "Update"
+msgstr "Обновить"
+
+msgid "Value"
+msgstr "Значение"
+
+msgid "View traceback"
+msgstr "Показать трассировку"
+
+msgid "Welcome"
+msgstr "Добро пожаловать"
+
+msgid "You can not create nested object without parent"
+msgstr "Нельзя создать вложенный объект без родительского"
+
+msgid "You have been successfully logged out from the administration"
+msgstr "Вы вышли из панели администрирования"
+
+msgid "hide warning"
+msgstr "скрыть предупреждение"
+
 msgid "Enter a valid phone number (e.g. +49151234567 or 089-123456)."
 msgstr "Введите корректный номер телефона (напр. +49151234567 или 089-123456)."
 
@@ -432,9 +635,6 @@ msgstr "Описание не указано."
 
 #~ msgid "English"
 #~ msgstr "Английский"
-
-#~ msgid "Russian"
-#~ msgstr "Русский"
 
 #~ msgid "German"
 #~ msgstr "Немецкий"

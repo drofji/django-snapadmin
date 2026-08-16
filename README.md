@@ -339,7 +339,7 @@ there is no bad automatic change to undo.
 - [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, offsite FTPS/SFTP
 - [Large-dataset tuning](https://drofji.github.io/django-snapadmin/#performance) — automatic `list_select_related` (no admin N+1), estimated counts, paging caps
 - [ETL helpers](https://drofji.github.io/django-snapadmin/#integrating) — `upsert_from_source()` and `stale_sync()` with a wipe guard
-- [Structured logging](https://drofji.github.io/django-snapadmin/#logging) via `structlog`; the UI is [translated into 10 locales](https://drofji.github.io/django-snapadmin/#i18n)
+- [Structured logging](https://drofji.github.io/django-snapadmin/#logging) via `structlog`; the UI is [translated into 10 locales](https://drofji.github.io/django-snapadmin/#i18n) — including the Unfold theme's own strings, which Unfold itself ships untranslated
 
 ### How fast is it?
 

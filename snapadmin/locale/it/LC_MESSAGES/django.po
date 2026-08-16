@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-09 19:28+0000\n"
+"POT-Creation-Date: 2026-08-16 14:54+0000\n"
 "Language: it\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -384,6 +384,211 @@ msgstr "Provider di single sign-on"
 msgid "Or sign in with"
 msgstr "Oppure accedi con"
 
+msgid "Add new item"
+msgstr "Aggiungi elemento"
+
+msgid "Add row"
+msgstr "Aggiungi riga"
+
+msgid "After you've created a user, you’ll be able to edit more user options."
+msgstr ""
+"Dopo aver creato un utente, potrai modificare altre opzioni dell’utente."
+
+msgid "All applications"
+msgstr "Tutte le applicazioni"
+
+msgid "Apply Filters"
+msgstr "Applica filtri"
+
+msgid "Cancel"
+msgstr "Annulla"
+
+msgid "Choose file to upload"
+msgstr "Scegli il file da caricare"
+
+msgid "Click to cancel"
+msgstr "Clicca per annullare"
+
+msgid "Click to download"
+msgstr "Clicca per scaricare"
+
+msgid "Collapse"
+msgstr "Comprimi"
+
+msgid "Current file"
+msgstr "File attuale"
+
+msgid "Dark"
+msgstr "Scuro"
+
+msgid "Date"
+msgstr "Data"
+
+msgid "Date from"
+msgstr "Data da"
+
+msgid "Date to"
+msgstr "Data a"
+
+msgid "Default"
+msgstr "Predefinito"
+
+msgid "Edit"
+msgstr "Modifica"
+
+msgid "Expand row"
+msgstr "Espandi riga"
+
+msgid "False"
+msgstr "Falso"
+
+msgid "Forgotten your password or username?"
+msgstr "Hai dimenticato la password o il nome utente?"
+
+msgid "From"
+msgstr "Da"
+
+msgid "General"
+msgstr "Generale"
+
+msgid "Go back"
+msgstr "Indietro"
+
+msgid "Image preview"
+msgstr "Anteprima immagine"
+
+msgid "Light"
+msgstr "Chiaro"
+
+msgid "More actions"
+msgstr "Altre azioni"
+
+msgid "Navigate"
+msgstr "Naviga"
+
+msgid "New"
+msgstr "Nuovo"
+
+msgid "Next"
+msgstr "Avanti"
+
+msgid "No"
+msgstr "No"
+
+msgid "No data"
+msgstr "Nessun dato"
+
+msgid "No results found"
+msgstr "Nessun risultato trovato"
+
+msgid "Non field specific"
+msgstr "Non specifico di un campo"
+
+msgid "Not enough data."
+msgstr "Dati insufficienti."
+
+msgid "Nothing matched your search"
+msgstr "Nessun elemento corrisponde alla ricerca"
+
+msgid "Previous"
+msgstr "Indietro"
+
+msgid "Recent searches"
+msgstr "Ricerche recenti"
+
+msgid "Record picture"
+msgstr "Immagine del record"
+
+msgid "Reset filters"
+msgstr "Reimposta filtri"
+
+msgid "Reset to default"
+msgstr "Ripristina i valori predefiniti"
+
+msgid "Return to site"
+msgstr "Torna al sito"
+
+msgid "Row"
+msgstr "Riga"
+
+msgid "Run"
+msgstr "Esegui"
+
+msgid "Run the selected action"
+msgstr "Esegui l’azione selezionata"
+
+msgid "Search apps and models..."
+msgstr "Cerca applicazioni e modelli…"
+
+msgid "Select"
+msgstr "Seleziona"
+
+msgid "Select action"
+msgstr "Seleziona azione"
+
+msgid "Select action to run"
+msgstr "Seleziona l’azione da eseguire"
+
+msgid "Select all rows"
+msgstr "Seleziona tutte le righe"
+
+msgid "Select currency"
+msgstr "Seleziona valuta"
+
+msgid "Select format"
+msgstr "Seleziona formato"
+
+msgid "Select record"
+msgstr "Seleziona record"
+
+msgid "Select value"
+msgstr "Seleziona valore"
+
+msgid "System"
+msgstr "Sistema"
+
+msgid "This item will be deleted."
+msgstr "Questo elemento verrà eliminato."
+
+msgid ""
+"This page yielded into no results. Create a new item or reset your filters."
+msgstr ""
+"Questa pagina non ha prodotto risultati. Crea un nuovo elemento o reimposta "
+"i filtri."
+
+msgid "To"
+msgstr "A"
+
+msgid "Toggle password visibility"
+msgstr "Mostra o nascondi la password"
+
+msgid "True"
+msgstr "Vero"
+
+msgid "Type to search"
+msgstr "Digita per cercare"
+
+msgid "Update"
+msgstr "Aggiorna"
+
+msgid "Value"
+msgstr "Valore"
+
+msgid "View traceback"
+msgstr "Mostra il traceback"
+
+msgid "Welcome"
+msgstr "Benvenuto"
+
+msgid "You can not create nested object without parent"
+msgstr "Non è possibile creare un oggetto annidato senza il genitore"
+
+msgid "You have been successfully logged out from the administration"
+msgstr "Sei stato disconnesso dall’amministrazione"
+
+msgid "hide warning"
+msgstr "nascondi l’avviso"
+
 msgid "Enter a valid phone number (e.g. +49151234567 or 089-123456)."
 msgstr ""
 "Inserisci un numero di telefono valido (es. +49151234567 o 089-123456)."
@@ -442,9 +647,6 @@ msgstr "Nessuna descrizione fornita."
 
 #~ msgid "English"
 #~ msgstr "Inglese"
-
-#~ msgid "Russian"
-#~ msgstr "Russo"
 
 #~ msgid "German"
 #~ msgstr "Tedesco"

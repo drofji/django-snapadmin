@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-09 19:28+0000\n"
+"POT-Creation-Date: 2026-08-16 14:54+0000\n"
 "Language: pl\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -376,6 +376,209 @@ msgstr "Dostawcy logowania jednokrotnego"
 msgid "Or sign in with"
 msgstr "Lub zaloguj się przez"
 
+msgid "Add new item"
+msgstr "Dodaj nowy element"
+
+msgid "Add row"
+msgstr "Dodaj wiersz"
+
+msgid "After you've created a user, you’ll be able to edit more user options."
+msgstr "Po utworzeniu użytkownika będzie można edytować więcej opcji."
+
+msgid "All applications"
+msgstr "Wszystkie aplikacje"
+
+msgid "Apply Filters"
+msgstr "Zastosuj filtry"
+
+msgid "Cancel"
+msgstr "Anuluj"
+
+msgid "Choose file to upload"
+msgstr "Wybierz plik do przesłania"
+
+msgid "Click to cancel"
+msgstr "Kliknij, aby anulować"
+
+msgid "Click to download"
+msgstr "Kliknij, aby pobrać"
+
+msgid "Collapse"
+msgstr "Zwiń"
+
+msgid "Current file"
+msgstr "Bieżący plik"
+
+msgid "Dark"
+msgstr "Ciemny"
+
+msgid "Date"
+msgstr "Data"
+
+msgid "Date from"
+msgstr "Data od"
+
+msgid "Date to"
+msgstr "Data do"
+
+msgid "Default"
+msgstr "Domyślnie"
+
+msgid "Edit"
+msgstr "Edytuj"
+
+msgid "Expand row"
+msgstr "Rozwiń wiersz"
+
+msgid "False"
+msgstr "Fałsz"
+
+msgid "Forgotten your password or username?"
+msgstr "Nie pamiętasz hasła lub nazwy użytkownika?"
+
+msgid "From"
+msgstr "Od"
+
+msgid "General"
+msgstr "Ogólne"
+
+msgid "Go back"
+msgstr "Wróć"
+
+msgid "Image preview"
+msgstr "Podgląd obrazu"
+
+msgid "Light"
+msgstr "Jasny"
+
+msgid "More actions"
+msgstr "Więcej akcji"
+
+msgid "Navigate"
+msgstr "Nawiguj"
+
+msgid "New"
+msgstr "Nowy"
+
+msgid "Next"
+msgstr "Dalej"
+
+msgid "No"
+msgstr "Nie"
+
+msgid "No data"
+msgstr "Brak danych"
+
+msgid "No results found"
+msgstr "Nie znaleziono wyników"
+
+msgid "Non field specific"
+msgstr "Nie dotyczy konkretnego pola"
+
+msgid "Not enough data."
+msgstr "Za mało danych."
+
+msgid "Nothing matched your search"
+msgstr "Nic nie pasuje do wyszukiwania"
+
+msgid "Previous"
+msgstr "Wstecz"
+
+msgid "Recent searches"
+msgstr "Ostatnie wyszukiwania"
+
+msgid "Record picture"
+msgstr "Obraz rekordu"
+
+msgid "Reset filters"
+msgstr "Wyczyść filtry"
+
+msgid "Reset to default"
+msgstr "Przywróć domyślne"
+
+msgid "Return to site"
+msgstr "Wróć do witryny"
+
+msgid "Row"
+msgstr "Wiersz"
+
+msgid "Run"
+msgstr "Uruchom"
+
+msgid "Run the selected action"
+msgstr "Wykonaj wybraną akcję"
+
+msgid "Search apps and models..."
+msgstr "Szukaj aplikacji i modeli…"
+
+msgid "Select"
+msgstr "Wybierz"
+
+msgid "Select action"
+msgstr "Wybierz akcję"
+
+msgid "Select action to run"
+msgstr "Wybierz akcję do wykonania"
+
+msgid "Select all rows"
+msgstr "Zaznacz wszystkie wiersze"
+
+msgid "Select currency"
+msgstr "Wybierz walutę"
+
+msgid "Select format"
+msgstr "Wybierz format"
+
+msgid "Select record"
+msgstr "Wybierz rekord"
+
+msgid "Select value"
+msgstr "Wybierz wartość"
+
+msgid "System"
+msgstr "Systemowy"
+
+msgid "This item will be deleted."
+msgstr "Ten element zostanie usunięty."
+
+msgid ""
+"This page yielded into no results. Create a new item or reset your filters."
+msgstr ""
+"Ta strona nie zwróciła wyników. Utwórz nowy element lub wyczyść filtry."
+
+msgid "To"
+msgstr "Do"
+
+msgid "Toggle password visibility"
+msgstr "Pokaż lub ukryj hasło"
+
+msgid "True"
+msgstr "Prawda"
+
+msgid "Type to search"
+msgstr "Wpisz, aby wyszukać"
+
+msgid "Update"
+msgstr "Aktualizuj"
+
+msgid "Value"
+msgstr "Wartość"
+
+msgid "View traceback"
+msgstr "Pokaż ślad stosu"
+
+msgid "Welcome"
+msgstr "Witamy"
+
+msgid "You can not create nested object without parent"
+msgstr "Nie można utworzyć obiektu zagnieżdżonego bez obiektu nadrzędnego"
+
+msgid "You have been successfully logged out from the administration"
+msgstr "Wylogowano z panelu administracyjnego"
+
+msgid "hide warning"
+msgstr "ukryj ostrzeżenie"
+
 msgid "Enter a valid phone number (e.g. +49151234567 or 089-123456)."
 msgstr "Wprowadź prawidłowy numer telefonu (np. +49151234567 lub 089-123456)."
 
@@ -432,9 +635,6 @@ msgstr "Nie podano opisu."
 
 #~ msgid "English"
 #~ msgstr "Angielski"
-
-#~ msgid "Russian"
-#~ msgstr "Rosyjski"
 
 #~ msgid "German"
 #~ msgstr "Niemiecki"

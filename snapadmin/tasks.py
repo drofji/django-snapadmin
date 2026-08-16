@@ -12,7 +12,11 @@ All tasks are namespaced under ``snapadmin.*`` (e.g. ``snapadmin.run_export``).
 Reference them by that name in ``CELERY_BEAT_SCHEDULE``.
 """
 
-from celery import shared_task
+try:  # Celery is the ``[celery]`` extra — this module must import without it.
+    from celery import shared_task
+except ImportError:  # pragma: no cover - covered by executing this file with celery hidden
+    from snapadmin.celery_compat import shared_task
+
 from django.utils import timezone
 
 from snapadmin.logging_config import get_logger

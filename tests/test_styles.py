@@ -101,12 +101,29 @@ class TestCssInjection:
         assert UNFOLD_CSS in css
         assert STOCK_CSS not in css
 
-    @pytest.mark.skipif(UNFOLD_INSTALLED, reason="Unfold installed")
-    def test_stock_layer_when_unfold_absent(self):
+    def test_stock_layer_when_unfold_absent(self, monkeypatch):
+        """What an install without the theme gets — rebuilt here rather than skipped.
+
+        This branch used to be skipped whenever Unfold was in the environment, which is
+        every developer machine and the whole CI matrix, so the layer that ships to every
+        no-theme install was asserted nowhere. Re-registering the admin under a patched
+        flag exercises the real code path instead of trusting it.
+        """
+        from django.contrib import admin as dj_admin
         from demo.apps.shop.models import Product
-        css = _media_css(Product)
-        assert STOCK_CSS in css
-        assert UNFOLD_CSS not in css
+        from snapadmin import models as snap_models
+
+        original = dj_admin.site._registry[Product]
+        monkeypatch.setattr(snap_models, "UNFOLD_INSTALLED", False)
+        dj_admin.site.unregister(Product)
+        try:
+            Product.register_admin()
+            css = _media_css(Product)
+            assert STOCK_CSS in css
+            assert UNFOLD_CSS not in css
+        finally:
+            dj_admin.site.unregister(Product)
+            dj_admin.site._registry[Product] = original
 
     @pytest.mark.skipif(not UNFOLD_INSTALLED, reason="Unfold not installed")
     def test_theme_layer_loaded_after_core(self):

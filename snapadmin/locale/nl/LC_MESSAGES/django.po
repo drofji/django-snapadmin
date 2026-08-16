@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-09 19:28+0000\n"
+"POT-Creation-Date: 2026-08-16 14:54+0000\n"
 "Language: nl\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -384,6 +384,211 @@ msgstr "Single sign-on-providers"
 msgid "Or sign in with"
 msgstr "Of meld u aan met"
 
+msgid "Add new item"
+msgstr "Nieuw item toevoegen"
+
+msgid "Add row"
+msgstr "Rij toevoegen"
+
+msgid "After you've created a user, you’ll be able to edit more user options."
+msgstr ""
+"Nadat u een gebruiker hebt aangemaakt, kunt u meer gebruikersopties bewerken."
+
+msgid "All applications"
+msgstr "Alle applicaties"
+
+msgid "Apply Filters"
+msgstr "Filters toepassen"
+
+msgid "Cancel"
+msgstr "Annuleren"
+
+msgid "Choose file to upload"
+msgstr "Kies een bestand om te uploaden"
+
+msgid "Click to cancel"
+msgstr "Klik om te annuleren"
+
+msgid "Click to download"
+msgstr "Klik om te downloaden"
+
+msgid "Collapse"
+msgstr "Inklappen"
+
+msgid "Current file"
+msgstr "Huidig bestand"
+
+msgid "Dark"
+msgstr "Donker"
+
+msgid "Date"
+msgstr "Datum"
+
+msgid "Date from"
+msgstr "Datum vanaf"
+
+msgid "Date to"
+msgstr "Datum tot"
+
+msgid "Default"
+msgstr "Standaard"
+
+msgid "Edit"
+msgstr "Bewerken"
+
+msgid "Expand row"
+msgstr "Rij uitklappen"
+
+msgid "False"
+msgstr "Onwaar"
+
+msgid "Forgotten your password or username?"
+msgstr "Wachtwoord of gebruikersnaam vergeten?"
+
+msgid "From"
+msgstr "Van"
+
+msgid "General"
+msgstr "Algemeen"
+
+msgid "Go back"
+msgstr "Terug"
+
+msgid "Image preview"
+msgstr "Voorbeeld van afbeelding"
+
+msgid "Light"
+msgstr "Licht"
+
+msgid "More actions"
+msgstr "Meer acties"
+
+msgid "Navigate"
+msgstr "Navigeren"
+
+msgid "New"
+msgstr "Nieuw"
+
+msgid "Next"
+msgstr "Volgende"
+
+msgid "No"
+msgstr "Nee"
+
+msgid "No data"
+msgstr "Geen gegevens"
+
+msgid "No results found"
+msgstr "Geen resultaten gevonden"
+
+msgid "Non field specific"
+msgstr "Niet veldspecifiek"
+
+msgid "Not enough data."
+msgstr "Onvoldoende gegevens."
+
+msgid "Nothing matched your search"
+msgstr "Niets komt overeen met uw zoekopdracht"
+
+msgid "Previous"
+msgstr "Vorige"
+
+msgid "Recent searches"
+msgstr "Recente zoekopdrachten"
+
+msgid "Record picture"
+msgstr "Afbeelding van record"
+
+msgid "Reset filters"
+msgstr "Filters herstellen"
+
+msgid "Reset to default"
+msgstr "Standaardwaarden herstellen"
+
+msgid "Return to site"
+msgstr "Terug naar de site"
+
+msgid "Row"
+msgstr "Rij"
+
+msgid "Run"
+msgstr "Uitvoeren"
+
+msgid "Run the selected action"
+msgstr "Geselecteerde actie uitvoeren"
+
+msgid "Search apps and models..."
+msgstr "Zoek applicaties en modellen…"
+
+msgid "Select"
+msgstr "Selecteren"
+
+msgid "Select action"
+msgstr "Actie selecteren"
+
+msgid "Select action to run"
+msgstr "Selecteer de uit te voeren actie"
+
+msgid "Select all rows"
+msgstr "Alle rijen selecteren"
+
+msgid "Select currency"
+msgstr "Valuta selecteren"
+
+msgid "Select format"
+msgstr "Formaat selecteren"
+
+msgid "Select record"
+msgstr "Record selecteren"
+
+msgid "Select value"
+msgstr "Waarde selecteren"
+
+msgid "System"
+msgstr "Systeem"
+
+msgid "This item will be deleted."
+msgstr "Dit item wordt verwijderd."
+
+msgid ""
+"This page yielded into no results. Create a new item or reset your filters."
+msgstr ""
+"Deze pagina leverde geen resultaten op. Maak een nieuw item aan of herstel "
+"de filters."
+
+msgid "To"
+msgstr "Tot"
+
+msgid "Toggle password visibility"
+msgstr "Wachtwoord tonen of verbergen"
+
+msgid "True"
+msgstr "Waar"
+
+msgid "Type to search"
+msgstr "Typ om te zoeken"
+
+msgid "Update"
+msgstr "Bijwerken"
+
+msgid "Value"
+msgstr "Waarde"
+
+msgid "View traceback"
+msgstr "Traceback bekijken"
+
+msgid "Welcome"
+msgstr "Welkom"
+
+msgid "You can not create nested object without parent"
+msgstr "Een genest object kan niet zonder bovenliggend object worden aangemaakt"
+
+msgid "You have been successfully logged out from the administration"
+msgstr "U bent afgemeld bij de beheeromgeving"
+
+msgid "hide warning"
+msgstr "waarschuwing verbergen"
+
 msgid "Enter a valid phone number (e.g. +49151234567 or 089-123456)."
 msgstr "Voer een geldig telefoonnummer in (bijv. +49151234567 of 089-123456)."
 
@@ -440,9 +645,6 @@ msgstr "Geen beschrijving opgegeven."
 
 #~ msgid "English"
 #~ msgstr "Engels"
-
-#~ msgid "Russian"
-#~ msgstr "Russisch"
 
 #~ msgid "German"
 #~ msgstr "Duits"

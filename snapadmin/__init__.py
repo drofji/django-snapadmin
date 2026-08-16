@@ -97,11 +97,18 @@ Operations
         Error capture and digests, health checks, structlog wiring.
     ``snapadmin.reindexing`` · ``snapadmin.etl`` · ``snapadmin.db``
         Elasticsearch reindexing, ETL helpers, database routing.
-    ``snapadmin.tasks``
-        Celery tasks and Beat schedules (``[celery]`` extra).
+    ``snapadmin.tasks`` · ``snapadmin.celery_compat``
+        Celery tasks and Beat schedules (``[celery]`` extra). The module imports
+        without Celery: the compat shim keeps the task names and runs a task
+        synchronously when called, and raises on ``.delay()`` rather than
+        pretending the work was queued.
     ``snapadmin.checks``
         Django system checks — ``snapadmin.W001``…``W007`` catch misconfiguration
         at startup, so read them before debugging behaviour.
+    ``snapadmin.theme_i18n``
+        Catalog entries for the Unfold theme's own interface strings, which
+        ``django-unfold`` ships untranslated — without them a themed admin renders
+        its shell in English around a translated page.
 
 Tooling
     ``snapadmin.diagnostics``

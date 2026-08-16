@@ -22,6 +22,32 @@ Added
   stamp are candidates for deletion, so anything you added yourself (a ``.env``, your own app, your
   database) is never touched, and the deletions go through the same confirmation as an overwrite.
 
+* **The Unfold theme's own interface is now translated.** ``django-unfold`` ships no translation
+  catalogs at all, so on a themed admin its chrome — "All applications", "Apply Filters", "No
+  results found", "Select action", "Select value", the command-palette hints, the logout screen —
+  stayed English while the page's own labels were translated. That is the mixed-language admin the
+  demo showed. Django resolves a msgid against every installed app's catalogs, so SnapAdmin now
+  answers for them: ``snapadmin/theme_i18n.py`` declares the msgids and all ten shipped catalogs
+  translate them. Nothing to configure, Unfold is not patched, and a project that translates one of
+  these strings in its own ``LOCALE_PATHS`` still wins. Scope is the admin SnapAdmin renders — the
+  shell, changelists, forms, filters and the login/logout screens; Unfold's optional contribs
+  (import/export, impersonation, object history) and its own rich-text toolbar are deliberately out.
+  The German, Spanish, French, Italian, Dutch and Polish wordings are machine-assisted; Russian was
+  written by hand. Corrections are welcome.
+
+Fixed
+-----
+
+* **``snapadmin.tasks`` no longer requires Celery to import.** Celery is an optional extra, but the
+  module opened with a bare ``from celery import shared_task``, so importing it on a base install
+  raised ``ModuleNotFoundError`` — an optional dependency behaving like a required one. The
+  decorator now falls back to a stand-in (``snapadmin/celery_compat.py``) that keeps every task
+  name: **calling** a task runs its body synchronously in the current process, while **queueing**
+  it (``delay()``, ``apply_async()``, ``retry()``) raises ``ImproperlyConfigured`` naming the
+  ``[celery]`` extra. The split is deliberate — a no-op ``delay()`` would leave a caller believing
+  work was queued when nothing would ever run it. Nothing changes when Celery is installed: the
+  real decorator is used, and the API endpoints that enqueue work still answer 503 when it is not.
+
 Changed
 -------
 

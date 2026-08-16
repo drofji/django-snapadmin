@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-09 19:28+0000\n"
+"POT-Creation-Date: 2026-08-16 14:53+0000\n"
 "Language: de_CH\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -382,6 +382,212 @@ msgstr "Single-Sign-On-Anbieter"
 msgid "Or sign in with"
 msgstr "Oder anmelden mit"
 
+msgid "Add new item"
+msgstr "Neuen Eintrag hinzufügen"
+
+msgid "Add row"
+msgstr "Zeile hinzufügen"
+
+msgid "After you've created a user, you’ll be able to edit more user options."
+msgstr ""
+"Nachdem Sie einen Benutzer angelegt haben, können Sie weitere "
+"Benutzeroptionen bearbeiten."
+
+msgid "All applications"
+msgstr "Alle Anwendungen"
+
+msgid "Apply Filters"
+msgstr "Filter anwenden"
+
+msgid "Cancel"
+msgstr "Abbrechen"
+
+msgid "Choose file to upload"
+msgstr "Datei zum Hochladen auswählen"
+
+msgid "Click to cancel"
+msgstr "Zum Abbrechen klicken"
+
+msgid "Click to download"
+msgstr "Zum Herunterladen klicken"
+
+msgid "Collapse"
+msgstr "Einklappen"
+
+msgid "Current file"
+msgstr "Aktuelle Datei"
+
+msgid "Dark"
+msgstr "Dunkel"
+
+msgid "Date"
+msgstr "Datum"
+
+msgid "Date from"
+msgstr "Datum von"
+
+msgid "Date to"
+msgstr "Datum bis"
+
+msgid "Default"
+msgstr "Standard"
+
+msgid "Edit"
+msgstr "Bearbeiten"
+
+msgid "Expand row"
+msgstr "Zeile ausklappen"
+
+msgid "False"
+msgstr "Falsch"
+
+msgid "Forgotten your password or username?"
+msgstr "Passwort oder Benutzername vergessen?"
+
+msgid "From"
+msgstr "Von"
+
+msgid "General"
+msgstr "Allgemein"
+
+msgid "Go back"
+msgstr "Zurück"
+
+msgid "Image preview"
+msgstr "Bildvorschau"
+
+msgid "Light"
+msgstr "Hell"
+
+msgid "More actions"
+msgstr "Weitere Aktionen"
+
+msgid "Navigate"
+msgstr "Navigieren"
+
+msgid "New"
+msgstr "Neu"
+
+msgid "Next"
+msgstr "Weiter"
+
+msgid "No"
+msgstr "Nein"
+
+msgid "No data"
+msgstr "Keine Daten"
+
+msgid "No results found"
+msgstr "Keine Ergebnisse gefunden"
+
+msgid "Non field specific"
+msgstr "Nicht feldspezifisch"
+
+msgid "Not enough data."
+msgstr "Nicht genügend Daten."
+
+msgid "Nothing matched your search"
+msgstr "Nichts stimmte mit Ihrer Suche überein"
+
+msgid "Previous"
+msgstr "Zurück"
+
+msgid "Recent searches"
+msgstr "Letzte Suchanfragen"
+
+msgid "Record picture"
+msgstr "Datensatzbild"
+
+msgid "Reset filters"
+msgstr "Filter zurücksetzen"
+
+msgid "Reset to default"
+msgstr "Auf Standard zurücksetzen"
+
+msgid "Return to site"
+msgstr "Zurück zur Website"
+
+msgid "Row"
+msgstr "Zeile"
+
+msgid "Run"
+msgstr "Ausführen"
+
+msgid "Run the selected action"
+msgstr "Ausgewählte Aktion ausführen"
+
+msgid "Search apps and models..."
+msgstr "Anwendungen und Modelle durchsuchen …"
+
+msgid "Select"
+msgstr "Auswählen"
+
+msgid "Select action"
+msgstr "Aktion auswählen"
+
+msgid "Select action to run"
+msgstr "Auszuführende Aktion auswählen"
+
+msgid "Select all rows"
+msgstr "Alle Zeilen auswählen"
+
+msgid "Select currency"
+msgstr "Währung auswählen"
+
+msgid "Select format"
+msgstr "Format auswählen"
+
+msgid "Select record"
+msgstr "Datensatz auswählen"
+
+msgid "Select value"
+msgstr "Wert auswählen"
+
+msgid "System"
+msgstr "System"
+
+msgid "This item will be deleted."
+msgstr "Dieses Element wird gelöscht."
+
+msgid ""
+"This page yielded into no results. Create a new item or reset your filters."
+msgstr ""
+"Diese Seite lieferte keine Ergebnisse. Legen Sie einen neuen Eintrag an oder "
+"setzen Sie die Filter zurück."
+
+msgid "To"
+msgstr "Bis"
+
+msgid "Toggle password visibility"
+msgstr "Passwortanzeige umschalten"
+
+msgid "True"
+msgstr "Wahr"
+
+msgid "Type to search"
+msgstr "Zum Suchen tippen"
+
+msgid "Update"
+msgstr "Aktualisieren"
+
+msgid "Value"
+msgstr "Wert"
+
+msgid "View traceback"
+msgstr "Traceback anzeigen"
+
+msgid "Welcome"
+msgstr "Willkommen"
+
+msgid "You can not create nested object without parent"
+msgstr "Ein verschachteltes Objekt kann nicht ohne übergeordnetes Objekt angelegt werden"
+
+msgid "You have been successfully logged out from the administration"
+msgstr "Sie wurden erfolgreich aus der Administration abgemeldet"
+
+msgid "hide warning"
+msgstr "Warnung ausblenden"
+
 msgid "Enter a valid phone number (e.g. +49151234567 or 089-123456)."
 msgstr ""
 "Geben Sie eine gültige Telefonnummer ein (z. B. +49151234567 oder "
@@ -440,9 +646,6 @@ msgstr "Keine Beschreibung angegeben."
 
 #~ msgid "English"
 #~ msgstr "Englisch"
-
-#~ msgid "Russian"
-#~ msgstr "Russisch"
 
 #~ msgid "German"
 #~ msgstr "Deutsch"

@@ -18,9 +18,20 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   -U django-snapadmin` upgrades the package but not an extracted `demo/` directory, which used to
   keep serving old models and templates with nothing to say so.
 
+- **Translations for the Unfold theme's own interface.** `django-unfold` ships no catalogs, so a
+  themed admin rendered its shell ("All applications", "Apply Filters", "No results found", the
+  command palette) in English around a translated page. SnapAdmin now supplies those strings in all
+  ten locales; nothing to configure, and your project's own catalogs still take precedence.
+
 ### Changed
 - **`snapadmin_info` reports a demo tree that has drifted from the installed release** in its
   *Version & Status* section. Projects without an extracted demo tree see no change.
+
+### Fixed
+- **`snapadmin.tasks` imports without Celery installed.** Celery is an optional extra, but the
+  module required it at import time. Task names are unchanged; calling a task runs it in-process,
+  and `.delay()` / `.apply_async()` raise `ImproperlyConfigured` pointing at
+  `pip install django-snapadmin[celery]` instead of silently doing nothing.
 
 ## 0.1.0b6 — 2026-08-13
 
