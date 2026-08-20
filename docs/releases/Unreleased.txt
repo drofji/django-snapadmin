@@ -38,6 +38,29 @@ Added
 Fixed
 -----
 
+* **``SnapStatusBadgeField`` accepts its source field and choices positionally.**
+  ``SnapStatusBadgeField("status", [...])`` now works alongside the existing
+  ``field_name=…, choices=…`` form. Both arguments used to be keyword-only, so writing the one
+  argument the field is *about* in the obvious place failed with "missing 1 required keyword-only
+  argument: 'field_name'" — a message that reads as "you forgot it" about an argument that was
+  supplied. Everything else (``verbose_name``, ``style_arguments``, ``show_in_list``) stays
+  keyword-only, and no existing call changes meaning. Declaring one wrongly now raises a
+  ``ValueError`` that names the field and shows the call to write — a missing ``field_name``, an
+  empty ``choices`` list, or an entry that is not a ``SnapStatusBadgeFieldChoice`` (passing bare
+  values is the natural slip, since the colours live on the choice object). Model modules are
+  imported at startup, so the mistake surfaces there instead of as a blank column in the changelist.
+
+* **One failing section no longer takes down the whole ``snapadmin_info`` report.** Collectors are
+  fail-soft for the failures they anticipate, but an unanticipated exception — a half-migrated
+  database, a missing optional package, a third-party integration raising on import — propagated out
+  and killed every section after it, exactly when the report was most needed. Each collector now
+  runs isolated: a crash renders as ``Title: unavailable — ExceptionType: message`` (``--json``
+  carries it as ``collector_error``) and the rest of the report continues. The message is a single
+  line rather than a traceback, and credentials inside it are redacted, since a driver's error text
+  routinely quotes the whole connection string. A crashed **health probe** reports ``ok=False``, so
+  ``--health-check`` still exits non-zero — isolating a failure must never make a broken subsystem
+  look healthy. ``KeyboardInterrupt`` still stops the command.
+
 * **``snapadmin.tasks`` no longer requires Celery to import.** Celery is an optional extra, but the
   module opened with a bare ``from celery import shared_task``, so importing it on a base install
   raised ``ModuleNotFoundError`` — an optional dependency behaving like a required one. The
@@ -50,6 +73,22 @@ Fixed
 
 Changed
 -------
+
+* **Rich-text HTML is now sanitized when it is written, not only when it is rendered.**
+  ``wysiwyg=True`` / ``SnapRichTextField`` values were cleaned by the admin changelist on the way
+  out, so the admin was safe — but the column itself held whatever was submitted, and every other
+  reader (a project template using ``|safe``, a frontend consuming the REST API, an export) got the
+  raw payload. Sanitizing now happens in the field's ``pre_save()``, which covers **every ORM write
+  path**: admin form, REST and GraphQL serializers, ``Model.save()`` and ``bulk_create()``. Render
+  still sanitizes as well, so rows written before this release stay safe to display.
+
+  **This changes what your database stores**, and it is lossy: markup outside the sanitizer's
+  allowlist (embeds, ``<iframe>``, custom attributes) is dropped rather than preserved. Existing
+  rows are never rewritten — nothing migrates your data — but new writes are cleaned. Three ways
+  out: ``safe_html=True`` on a field you vouch for (stored and rendered verbatim), the new
+  ``auto_sanitize=False`` (store exactly what was submitted; rendering is still sanitized), or a
+  wider allowlist via ``SNAPADMIN_HTML_SANITIZER``. ``QuerySet.update()`` is **not** covered:
+  Django never calls ``pre_save()`` for a bulk update, so sanitize such values yourself.
 
 * **``snapadmin_info`` reports demo-tree drift.** Run from inside a tree extracted by
   ``snapadmin-demo``, the *Version & Status* section now also lists which release that tree came

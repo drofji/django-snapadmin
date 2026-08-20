@@ -113,10 +113,16 @@ Key protections:
   wildcard bypass).
 
 ### Injection / XSS
-- **Wysiwyg (rich-text) values are sanitized** with `nh3` before being marked safe and rendered in the
-  admin changelist, preventing stored XSS from field-write → admin-session escalation. Trusted fields
-  can opt back into verbatim HTML with `safe_html=True`; a custom policy can be supplied via
-  `SNAPADMIN_HTML_SANITIZER` (a dotted path to a `Callable[[str], str]`).
+- **Wysiwyg (rich-text) values are sanitized with `nh3` on write and on render.** The field's
+  `pre_save()` cleans the value before it is stored, so every ORM write path — admin form, REST and
+  GraphQL serializers, `Model.save()`, `bulk_create()` — puts sanitized HTML in the column; the
+  changelist sanitizes again when rendering, which keeps rows written before this existed safe to
+  display. This closes the gap where a stored payload was harmless in the admin but reached every
+  other consumer (project templates using `|safe`, a frontend reading the API, exports) verbatim.
+  Trusted fields opt out with `safe_html=True`, storing on write can be disabled per field with
+  `auto_sanitize=False`, and a custom policy can be supplied via `SNAPADMIN_HTML_SANITIZER` (a dotted
+  path to a `Callable[[str], str]`). **`QuerySet.update()` is not covered** — Django does not call
+  `pre_save()` for bulk updates, so a caller writing rich text that way must sanitize it themselves.
 - Data access goes through the Django ORM / DRF serializers — no hand-built SQL from user input.
 - **`POST /api/exports/` `filters` are restricted to the target model's own fields.** The dict is
   applied as `queryset.filter(**filters)`, so an unvalidated key could otherwise traverse a

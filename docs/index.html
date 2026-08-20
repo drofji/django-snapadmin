@@ -783,19 +783,48 @@ class Product(snap_models.SnapModel):
     <tr><td><code>row</code></td><td>str</td><td>None</td><td>Group fields into a horizontal row</td></tr>
     <tr><td><code>tab</code></td><td>str</td><td>None</td><td>Place field into a specific Unfold tab</td></tr>
     <tr><td><code>wysiwyg</code></td><td>bool</td><td>False</td><td>Enable CKEditor 5 for TextFields</td></tr>
-    <tr><td><code>safe_html</code></td><td>bool</td><td>False</td><td>Render wysiwyg HTML verbatim in the changelist instead of sanitizing it — only for fully trusted content</td></tr>
+    <tr><td><code>safe_html</code></td><td>bool</td><td>False</td><td>Trust this field's HTML — stored and rendered verbatim, skipping sanitization entirely. Only for content you fully control</td></tr>
+    <tr><td><code>auto_sanitize</code></td><td>bool</td><td>True</td><td>Sanitize a wysiwyg field's HTML when it is written to the database. Set <code>False</code> to store exactly what was submitted (rendering is still sanitized)</td></tr>
     <tr><td><code>autocomplete</code></td><td>bool</td><td>False</td><td>Searchable autocomplete widget (relation fields)</td></tr>
   </table>
 
-  <p><strong>Wysiwyg HTML is sanitized by default.</strong> Rich-text fields
-  (<code>wysiwyg=True</code> / <code>SnapRichTextField</code>) store raw HTML and display it on
-  the changelist, so their value is passed through an HTML sanitizer
-  (<a href="https://pypi.org/project/nh3/"><code>nh3</code></a>) before rendering:
-  <code>&lt;script&gt;</code>, inline event handlers and unsafe URL schemes are stripped, which
-  prevents stored XSS from untrusted writers (API tokens, low-privileged staff, bulk imports).
-  Set <code>safe_html=True</code> on the field to trust its HTML and render it verbatim, or point
-  the <code>SNAPADMIN_HTML_SANITIZER</code> setting at a dotted path to your own
-  <code>Callable[[str], str]</code> to use a custom allowlist.</p>
+  <p><strong>Wysiwyg HTML is sanitized on write and on render.</strong> Rich-text fields
+  (<code>wysiwyg=True</code> / <code>SnapRichTextField</code>) hold HTML written by whoever can
+  write the field — an API token, a low-privileged staff account, a bulk import — so their value
+  goes through an HTML sanitizer (<a href="https://pypi.org/project/nh3/"><code>nh3</code></a>)
+  that strips <code>&lt;script&gt;</code>, inline event handlers and unsafe URL schemes. Sanitizing
+  happens in the field's <code>pre_save()</code>, so it covers <strong>every ORM write path</strong>
+  — admin form, REST/GraphQL serializer, <code>Model.save()</code>, <code>bulk_create()</code> — and
+  what lands in the database is already clean. The changelist sanitizes again on render, which keeps
+  rows written before this behaviour existed safe to display.</p>
+
+  <p>Two opt-outs, and one gap worth knowing:</p>
+  <ul>
+    <li><code>safe_html=True</code> — you vouch for this field's HTML; it is stored and rendered
+      verbatim.</li>
+    <li><code>auto_sanitize=False</code> — store exactly what was submitted (rendering is still
+      sanitized). Useful when another layer owns the cleaning, or when you must preserve the
+      original bytes.</li>
+    <li><code>QuerySet.update()</code> is <strong>not</strong> covered: Django never calls
+      <code>pre_save()</code> for a bulk update, so a value written that way reaches the column
+      untouched. Sanitize it yourself, or write through the instance.</li>
+  </ul>
+
+  <p>Point <code>SNAPADMIN_HTML_SANITIZER</code> at a dotted path to your own
+  <code>Callable[[str], str]</code> to replace the allowlist; it is used by both the write and the
+  render path.</p>
+
+  <div class="callout callout-warn">
+    <strong>Upgrading: this changes what gets stored</strong>
+    Before, rich-text columns kept whatever was submitted and only the changelist cleaned it on the
+    way out; anything else reading the column — your own templates with <code>|safe</code>, a
+    frontend consuming the REST API, an export — received the raw payload. New writes are now
+    cleaned before they are stored, which is <em>lossy</em>: markup outside the sanitizer's allowlist
+    (embeds, <code>&lt;iframe&gt;</code>, custom attributes) is dropped instead of preserved. Existing
+    rows are never rewritten — nothing migrates your data. If a field legitimately needs richer
+    markup, set <code>safe_html=True</code>, use <code>auto_sanitize=False</code>, or supply a
+    sanitizer with a wider allowlist.
+  </div>
 
   <h3>Available field types</h3>
   <p>Every field type below maps 1:1 to a Django field (except the computed ones) and accepts all the flags above.</p>
@@ -827,16 +856,38 @@ class Product(snap_models.SnapModel):
 
   <!-- ── Status Badges ─────────────────────────────────────────────────────── -->
   <h2 id="status-badges">🏷 Status Badges</h2>
-  <p>Render coloured pill badges for any choice/status field directly in the admin list view.</p>
+  <p>Render coloured pill badges for any choice/status field directly in the admin list view.
+  The source field's name and the choices may be written positionally or by keyword — both forms
+  are identical:</p>
   <pre><code>from snapadmin import fields as snap
 
 status_badge = snap.SnapStatusBadgeField(
-    field_name="is_active",
-    choices=[
+    "is_active",
+    [
         snap.SnapStatusBadgeFieldChoice(True, "#065F46", "#D1FAE5", "#10B981"),
         snap.SnapStatusBadgeFieldChoice(False, "#991B1B", "#FEE2E2", "#EF4444"),
-    ]
+    ],
+)
+
+# identical, and still supported
+status_badge = snap.SnapStatusBadgeField(
+    field_name="is_active",
+    choices=[...],
 )</code></pre>
+
+  <p>Everything else stays keyword-only: <code>verbose_name</code>, <code>style_arguments</code>
+  (extra CSS properties merged into every badge) and the usual <code>show_in_list</code> /
+  <code>show_in_form</code>. A value with no matching choice renders unstyled, and the field is
+  display-only — no database column, no migration.</p>
+
+  <div class="callout callout-info">
+    <strong>Mistakes are caught where you write them</strong>
+    A missing <code>field_name</code>, an empty <code>choices</code> list, or an entry that isn't a
+    <code>SnapStatusBadgeFieldChoice</code> (a bare string is the natural slip — the colours live on
+    the choice object) raises a <code>ValueError</code> naming the field and showing the call to
+    write. Model modules are imported at startup, so a typo surfaces there rather than as a blank
+    column the first time someone opens the changelist.
+  </div>
 
   <!-- ── Admin Registration ──────────────────────────────────────────────── -->
   <h2 id="admin-registration">🔧 Admin Registration</h2>
@@ -2366,6 +2417,19 @@ snapadmin-info --health-check    # probes only; non-zero exit on failure</code><
     <li><strong>Celery &amp; Broker</strong> — broker and result-backend URLs with the password redacted, the number of online workers, and the configured Beat schedule (collapses to <code>disabled</code> when Celery isn't installed).</li>
     <li><strong>Models &amp; Security</strong> — every registered <code>SnapModel</code> with its storage mode, retention window, API write-allowlist and PII-masking flags, plus API-token counts (total / active / expired — counts only, never the token value).</li>
   </ul>
+
+  <div class="callout callout-info">
+    <strong>A broken subsystem costs you one line, not the report</strong>
+    You run this command <em>because</em> something is wrong, so each section is isolated: if a
+    collector raises — a half-migrated database, an optional package missing, a third-party
+    integration throwing on import — that section prints
+    <code>Title: unavailable — ExceptionType: message</code> (in <code>--json</code>:
+    <code>"collector_error"</code>) and every other section still runs. The message is one line, never
+    a traceback, and credentials inside it are redacted — a driver's error text routinely quotes the
+    whole connection string. A crashed section that is a <strong>health probe</strong> counts as a
+    failed probe, so <code>--health-check</code> still exits non-zero: isolation never turns a broken
+    subsystem green.
+  </div>
 
   <h3>Sample output</h3>
   <p>The report is written to be read at a glance: a run of booleans collapses into one

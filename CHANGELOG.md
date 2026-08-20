@@ -24,10 +24,25 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   ten locales; nothing to configure, and your project's own catalogs still take precedence.
 
 ### Changed
+- **Rich-text HTML is sanitized on write, not only on render.** `wysiwyg=True` /
+  `SnapRichTextField` values are cleaned in `pre_save()`, so every ORM write path (admin form, REST
+  and GraphQL serializers, `save()`, `bulk_create()`) stores sanitized HTML — previously only the
+  admin changelist cleaned it on the way out, leaving every other consumer with the raw payload.
+  **This changes what is stored and is lossy** for markup outside the allowlist; existing rows are
+  not rewritten. Opt out with `safe_html=True` or the new `auto_sanitize=False`, or widen the
+  allowlist via `SNAPADMIN_HTML_SANITIZER`. `QuerySet.update()` is not covered.
 - **`snapadmin_info` reports a demo tree that has drifted from the installed release** in its
   *Version & Status* section. Projects without an extracted demo tree see no change.
 
 ### Fixed
+- **`SnapStatusBadgeField("status", [...])` — the source field and choices may be positional.** They
+  were keyword-only, so the obvious call failed with a message that read as "you forgot it". A wrong
+  or missing argument now raises a `ValueError` naming the field and the call to write, at import
+  time rather than at render time.
+- **`snapadmin_info` survives a failing section.** A collector that raises now renders as
+  `Title: unavailable — ExceptionType: message` (`collector_error` in `--json`) instead of aborting
+  the report; credentials in the message are redacted, and a crashed health probe still fails
+  `--health-check`.
 - **`snapadmin.tasks` imports without Celery installed.** Celery is an optional extra, but the
   module required it at import time. Task names are unchanged; calling a task runs it in-process,
   and `.delay()` / `.apply_async()` raise `ImproperlyConfigured` pointing at

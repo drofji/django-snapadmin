@@ -27,15 +27,22 @@ from snapadmin.diagnostics import render
 from snapadmin.diagnostics.registry import Collector, load_collectors
 
 
-def _collector(name="section", title="Section", icon="🔧", *, health_probe=False, ok=True, data=None):
+def _collector(name="section", title="Section", icon="🔧", *, health_probe=False, ok=True, data=None,
+               raises=None):
     payload = {"ok": ok} if health_probe else (data or {})
+
+    def fn(*, verbose):
+        if raises is not None:
+            raise raises
+        return payload
+
     return Collector(
         name=name,
         title=title,
         icon=icon,
         order=1,
         health_probe=health_probe,
-        fn=lambda *, verbose: payload,
+        fn=fn,
     )
 
 
@@ -47,9 +54,9 @@ def temp_collector():
     registry.load_collectors()
     created: list[str] = []
 
-    def make(name, *, health_probe=False, ok=True, data=None):
+    def make(name, *, health_probe=False, ok=True, data=None, raises=None):
         registry._REGISTRY[name] = _collector(
-            name=name, title=name.title(), health_probe=health_probe, ok=ok, data=data
+            name=name, title=name.title(), health_probe=health_probe, ok=ok, data=data, raises=raises
         )
         created.append(name)
         return registry._REGISTRY[name]
@@ -125,6 +132,69 @@ class TestCollect:
         assert "version" not in names  # non-probe stays out
 
 
+# ── collector isolation (#FIX4) ───────────────────────────────────────────────
+
+
+class TestCollectorIsolation:
+    """One broken subsystem must not take the whole report down.
+
+    ``snapadmin_info`` is what you run *because* something is wrong — a half-migrated
+    database, a missing optional package, a third-party integration throwing on import.
+    Collectors are individually fail-soft for the failures they anticipate, but an
+    unanticipated exception used to propagate out of ``collect()`` and kill every section
+    after it, including the ones that would have explained the problem.
+    """
+
+    def test_a_crashing_collector_becomes_an_error_entry(self, temp_collector):
+        temp_collector("boom", raises=RuntimeError("elastic exploded"))
+        data = get_collector("boom").collect(verbose=False)
+        assert data["collector_error"] == "RuntimeError: elastic exploded"
+
+    def test_the_other_sections_still_run(self, temp_collector):
+        temp_collector("boom", raises=RuntimeError("nope"))
+        names = [collector.name for collector, _ in collect()]
+        assert "boom" in names
+        assert "version" in names
+
+    def test_no_traceback_reaches_the_report(self, temp_collector):
+        temp_collector("boom", raises=ValueError("bad value"))
+        message = get_collector("boom").collect(verbose=False)["collector_error"]
+        assert "Traceback" not in message
+        assert "\n" not in message
+
+    def test_credentials_in_the_message_are_redacted(self, temp_collector):
+        """An OperationalError happily quotes the whole DSN, password included."""
+        temp_collector(
+            "boom",
+            raises=RuntimeError('could not connect to "postgres://admin:s3cret@db:5432/app"'),
+        )
+        message = get_collector("boom").collect(verbose=False)["collector_error"]
+        assert "s3cret" not in message
+        assert "postgres://admin:***@db:5432/app" in message
+
+    def test_a_crashed_probe_reports_not_ok(self, temp_collector):
+        temp_collector("probe_boom", health_probe=True, raises=RuntimeError("down"))
+        data = get_collector("probe_boom").collect(verbose=False)
+        assert data["ok"] is False
+        assert "RuntimeError" in data["collector_error"]
+
+    def test_a_crashed_section_that_is_not_a_probe_claims_nothing_about_health(self, temp_collector):
+        temp_collector("boom", raises=RuntimeError("down"))
+        assert "ok" not in get_collector("boom").collect(verbose=False)
+
+    def test_ctrl_c_still_stops_the_report(self, temp_collector):
+        """``KeyboardInterrupt`` is not an error to be reported — it is the user leaving."""
+        temp_collector("boom", raises=KeyboardInterrupt())
+        with pytest.raises(KeyboardInterrupt):
+            get_collector("boom").collect(verbose=False)
+
+    def test_the_failure_is_logged(self, temp_collector, caplog):
+        temp_collector("boom", raises=RuntimeError("elastic exploded"))
+        with caplog.at_level("WARNING"):
+            get_collector("boom").collect(verbose=False)
+        assert any("boom" in record.getMessage() for record in caplog.records)
+
+
 # ── renderer ──────────────────────────────────────────────────────────────────
 
 
@@ -141,6 +211,23 @@ class TestRenderer:
         col = _collector()
         text = render.render_report([(col, {"enabled": False})])
         assert text == "🔧 Section: disabled"
+
+    def test_errored_section_collapses_to_one_line(self):
+        col = _collector()
+        text = render.render_report([(col, {"collector_error": "RuntimeError: boom"})])
+        assert text == "🔧 Section: unavailable — RuntimeError: boom"
+
+    def test_errored_section_collapses_in_brief_mode_too(self):
+        col = _collector()
+        text = render.render_report([(col, {"collector_error": "RuntimeError: boom"})], brief=True)
+        assert text == "🔧 Section: unavailable — RuntimeError: boom"
+
+    def test_a_collector_reporting_its_own_error_still_renders_in_full(self):
+        """``error`` is the collectors' own fail-soft key — only a *crash* collapses a section."""
+        col = _collector()
+        text = render.render_report([(col, {"engine": "postgresql", "ok": False, "error": "refused"})])
+        assert "Engine: postgresql" in text
+        assert "Error: refused" in text
 
     def test_empty_icon_is_stripped(self):
         col = _collector(icon="")
@@ -324,6 +411,30 @@ class TestSnapadminInfoCommand:
         with pytest.raises(CommandError) as exc:
             _run(health_check=True)
         assert "db_probe" in str(exc.value)
+
+    def test_health_check_fails_when_a_probe_crashes(self, temp_collector):
+        """A probe that raises is a failing probe — isolating it must not turn it green."""
+        temp_collector("probe_boom", health_probe=True, raises=RuntimeError("subsystem down"))
+        with pytest.raises(CommandError) as exc:
+            _run(health_check=True)
+        assert "probe_boom" in str(exc.value)
+
+    def test_a_crashing_section_does_not_fail_the_health_check(self, temp_collector):
+        """Only probes speak for health; an informational section that crashes must not."""
+        temp_collector("boom", raises=RuntimeError("informational only"))
+        assert "Health check passed" in _run(health_check=True)
+
+    def test_report_survives_a_crashing_section(self, temp_collector):
+        temp_collector("boom", raises=RuntimeError("informational only"))
+        text = _run()
+        assert "unavailable — RuntimeError: informational only" in text
+        assert "Version & Status" in text
+
+    def test_json_carries_the_error(self, temp_collector):
+        temp_collector("boom", raises=RuntimeError("informational only"))
+        payload = json.loads(_run(as_json=True))
+        assert payload["boom"]["collector_error"] == "RuntimeError: informational only"
+        assert "version" in payload
 
     def test_health_check_json_omits_success_line(self, temp_collector):
         temp_collector("ok_probe", health_probe=True, ok=True)

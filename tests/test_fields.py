@@ -440,6 +440,77 @@ class TestSnapStatusBadgeField:
         assert isinstance(result, SafeString)
 
 
+class TestSnapStatusBadgeFieldArguments:
+    """How the field is called, and what it says when called wrongly (#FIX3).
+
+    ``field_name`` used to be keyword-only, so writing it positionally — the obvious way to
+    pass the one argument the field is *about* — failed with "missing 1 required keyword-only
+    argument: 'field_name'", which reads as "you forgot it" when in fact it was supplied.
+    """
+
+    CHOICES = [SnapStatusBadgeFieldChoice("paid", background_html_color="#D1FAE5")]
+
+    def _obj(self, status="paid"):
+        from types import SimpleNamespace
+        return SimpleNamespace(status=status)
+
+    def test_field_name_and_choices_may_be_positional(self):
+        field = SnapStatusBadgeField("status", self.CHOICES)
+        assert "#D1FAE5" in field.get_display_value(self._obj())
+
+    def test_positional_field_name_with_keyword_choices(self):
+        field = SnapStatusBadgeField("status", choices=self.CHOICES)
+        assert "#D1FAE5" in field.get_display_value(self._obj())
+
+    def test_keyword_form_still_works(self):
+        field = SnapStatusBadgeField(field_name="status", choices=self.CHOICES)
+        assert "#D1FAE5" in field.get_display_value(self._obj())
+
+    def test_other_options_stay_keyword(self):
+        field = SnapStatusBadgeField(
+            "status", self.CHOICES, verbose_name="State", style_arguments={"padding": "1px"},
+            show_in_list=False,
+        )
+        assert field.verbose_name == "State"
+        assert field.style_arguments == {"padding": "1px"}
+        assert field.show_in_list is False
+
+    def test_missing_field_name_says_what_to_pass(self):
+        with pytest.raises(ValueError) as exc:
+            SnapStatusBadgeField(choices=self.CHOICES)
+        message = str(exc.value)
+        assert "field_name" in message
+        assert "SnapStatusBadgeField" in message
+
+    def test_empty_field_name_is_rejected_too(self):
+        with pytest.raises(ValueError, match="field_name"):
+            SnapStatusBadgeField("", self.CHOICES)
+
+    def test_missing_choices_says_what_to_pass(self):
+        with pytest.raises(ValueError) as exc:
+            SnapStatusBadgeField("status")
+        message = str(exc.value)
+        assert "choices" in message
+        assert "SnapStatusBadgeFieldChoice" in message
+
+    def test_empty_choices_is_rejected(self):
+        with pytest.raises(ValueError, match="choices"):
+            SnapStatusBadgeField("status", [])
+
+    def test_a_wrong_choice_type_names_the_offender(self):
+        """A bare string in ``choices`` is the natural mistake — it must not fail at render time."""
+        with pytest.raises(ValueError) as exc:
+            SnapStatusBadgeField("status", ["paid"])
+        message = str(exc.value)
+        assert "choices[0]" in message
+        assert "str" in message
+
+    def test_error_arrives_at_declaration_not_at_render(self):
+        """Model definitions are imported at startup — that is where a typo should surface."""
+        with pytest.raises(ValueError):
+            SnapStatusBadgeField("status", [SnapStatusBadgeFieldChoice("paid"), None])
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # New field types (v0.1.0a2)
 # ─────────────────────────────────────────────────────────────────────────────

@@ -45,6 +45,11 @@ def _render_section(collector: Collector, data: dict, *, brief: bool) -> str:
     header = f"{collector.icon} {collector.title}".strip()
     if data.get("enabled") is False:
         return f"{header}: disabled"
+    # A collector that crashed has nothing else to show. This is not the same as a collector
+    # reporting its own ``error`` (a database that refused a connection still knows its engine
+    # and host, and those lines are the useful part), so only the crash key collapses a section.
+    if data.get("collector_error"):
+        return f"{header}: unavailable — {data['collector_error']}"
     lines = [header]
     if brief:
         for key, value in data.items():

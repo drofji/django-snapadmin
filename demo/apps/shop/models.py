@@ -59,17 +59,21 @@ class Product(snap_models.SnapModel):
     # api_filter_lookups (dates get ?field__isnull= too, but no __in).
 
     # SnapStatusBadgeField renders a color-coded pill badge in the list view
-    # True → green badge, False → red badge (no extra template needed)
+    # True → green badge, False → red badge (no extra template needed).
+    # Source field and choices read positionally here; the keyword form (see Customer
+    # below) is identical — both are supported.
     status_badge = snap_fields.SnapStatusBadgeField(
-        field_name="available",
-        verbose_name=_("In Stock"),
-        choices=[
+        "available",
+        [
             snap_fields.SnapStatusBadgeFieldChoice(True, "#065F46", "#D1FAE5", "#10B981"),
             snap_fields.SnapStatusBadgeFieldChoice(False, "#991B1B", "#FEE2E2", "#EF4444"),
-        ]
+        ],
+        verbose_name=_("In Stock"),
     )
-    # wysiwyg=True → renders a rich-text editor (CKEditor 5) in the admin form. The stored HTML
-    # is sanitized before it is shown on the changelist; pass safe_html=True to trust it verbatim.
+    # wysiwyg=True → renders a rich-text editor (CKEditor 5) in the admin form. The HTML is
+    # sanitized on the way into the database (every write path: admin, API, bulk_create) and again
+    # when the changelist renders it. Opt out per field with safe_html=True (trust it verbatim) or
+    # auto_sanitize=False (store as submitted, still sanitized on render).
     description = snap_fields.SnapTextField(verbose_name=_("Description"), wysiwyg=True, show_in_form=True)
 
     # Unfold: compress empty tab panels into collapsible sections

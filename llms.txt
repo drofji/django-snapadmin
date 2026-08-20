@@ -26,13 +26,14 @@ SnapModel.register_all_admins()
 Key facts an agent should not have to infer:
 
 - Snap-only field kwargs (`searchable`, `filterable`, `show_in_list`, `masked`, …) configure the admin and API and are stripped before Django sees them — they add no migration.
+- Rich-text fields (`wysiwyg=True` / `SnapRichTextField`) sanitize HTML in `pre_save()`, so every ORM write path stores clean markup, and again when the changelist renders. Opt out per field with `safe_html=True` or `auto_sanitize=False`; `QuerySet.update()` bypasses it because Django never calls `pre_save()` there.
 - Module import paths are the public contract and are never moved or renamed; `from snapadmin import SnapModel` and `from snapadmin.models import SnapModel` both work (the top-level re-exports are lazy).
 - The Unfold theme is optional (`[theme]` extra). Without it SnapAdmin renders on the stock Django admin.
 - `django-unfold` ships no translation catalogs, so SnapAdmin translates the theme's own interface strings in its ten catalogs (`snapadmin/theme_i18n.py` declares the msgids). A project's own `LOCALE_PATHS` still take precedence over both.
 - Optional stacks never break an import: `snapadmin.tasks` imports without Celery (calling a task runs it in-process; `.delay()` raises `ImproperlyConfigured` naming the `[celery]` extra), and the core boots with DRF/graphene absent.
 - Startup misconfiguration surfaces as Django system checks `snapadmin.W001`–`W007` — read those before debugging behaviour.
 - A `demo/` tree extracted by `snapadmin-demo` is a plain directory: `pip install -U django-snapadmin` upgrades the package but not that tree, which keeps its old models and templates. Re-run `snapadmin-demo` to refresh it — the run names the release the existing tree came from and drops files the new release no longer ships; `snapadmin_info` reports the mismatch too.
-- Run `snapadmin-info` for a diagnostic report of what is enabled in a live project. It is a `manage.py` command with shell shims, so `snapadmin-info`, `snapadmin_info` and `python manage.py snapadmin_info` are the same thing; likewise for `snapadmin-license-check`. It suppresses Django's automatic system-check dump and reports the counts in its own section instead.
+- Run `snapadmin-info` for a diagnostic report of what is enabled in a live project. It is a `manage.py` command with shell shims, so `snapadmin-info`, `snapadmin_info` and `python manage.py snapadmin_info` are the same thing; likewise for `snapadmin-license-check`. It suppresses Django's automatic system-check dump and reports the counts in its own section instead. Each section is isolated: a collector that raises renders as `Title: unavailable — …` (`collector_error` in `--json`) without aborting the report, and a crashed health probe still fails `--health-check`.
 
 ## Getting started
 

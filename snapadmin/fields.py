@@ -37,6 +37,7 @@ class SnapFieldAttributeEnum(str, Enum):
     AUTOCOMPLETE = "autocomplete"
     WYSIWYG = "wysiwyg" # Added for Unfold/CKEditor integration
     SAFE_HTML = "safe_html" # Opt out of wysiwyg HTML sanitization (trusted content)
+    AUTO_SANITIZE = "auto_sanitize" # Sanitize wysiwyg HTML on write (default: on)
     TAB = "tab" # Added for Unfold fieldset tabs
     ROW = "row" # Group fields in one row
 
@@ -144,6 +145,7 @@ class SnapField:
         self.autocomplete = kwargs[SnapFieldAttributeEnum.AUTOCOMPLETE.value]
         self.wysiwyg = kwargs.get(SnapFieldAttributeEnum.WYSIWYG.value, False)
         self.safe_html = kwargs.get(SnapFieldAttributeEnum.SAFE_HTML.value, False)
+        self.auto_sanitize = kwargs.get(SnapFieldAttributeEnum.AUTO_SANITIZE.value, True)
         self.tab = kwargs.get(SnapFieldAttributeEnum.TAB.value, None)
         self.row = kwargs.get(SnapFieldAttributeEnum.ROW.value, None)
 
@@ -268,7 +270,44 @@ class SnapCharField(models.CharField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
-class SnapTextField(models.TextField, SnapField):
+class SanitizedHtmlOnSaveMixin:
+    """Sanitize a wysiwyg field's HTML on the way into the database.
+
+    Rendering was already sanitized, but only in the admin changelist — the column itself held
+    whatever was written to it, so every other reader (a project template using ``|safe``, a
+    frontend consuming the REST API, an export) still received the raw payload. Cleaning in
+    ``pre_save`` moves the guarantee into storage and covers **every ORM write path** — admin
+    form, DRF serializer, ``Model.save()``, ``bulk_create`` — instead of one rendering path.
+
+    Deliberately narrow:
+
+    * only fields with ``wysiwyg=True`` (plain text is not HTML, and sanitizing it would mangle
+      characters like ``<`` that mean nothing but themselves);
+    * ``safe_html=True`` (content the developer vouches for) and ``auto_sanitize=False`` opt out;
+    * ``QuerySet.update()`` is **not** covered — Django never calls ``pre_save()`` for it, so a
+      caller writing rich text that way sanitizes it themselves. Documented, and pinned by a test.
+
+    This mixin comes **before** the Django field class in the bases: ``SnapField`` sits after it
+    in the MRO, so a ``pre_save`` defined there would lose to ``models.Field.pre_save``.
+    """
+
+    def pre_save(self, model_instance, add):
+        value = super().pre_save(model_instance, add)
+        if not getattr(self, "wysiwyg", False) or not getattr(self, "auto_sanitize", True):
+            return value
+        if getattr(self, "safe_html", False) or not isinstance(value, str) or not value:
+            return value
+        from snapadmin.sanitize import sanitize_html
+
+        cleaned = sanitize_html(value)
+        if cleaned != value:
+            # Keep the instance in hand consistent with the row just written; otherwise the
+            # object the caller holds still carries markup the database no longer has.
+            setattr(model_instance, self.attname, cleaned)
+        return cleaned
+
+
+class SnapTextField(SanitizedHtmlOnSaveMixin, models.TextField, SnapField):
     """Django ``TextField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
     def __init__(self, **kwargs):
@@ -468,7 +507,7 @@ class SnapPositiveBigIntegerField(models.PositiveBigIntegerField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
-class SnapRichTextField(models.TextField, SnapField):
+class SnapRichTextField(SanitizedHtmlOnSaveMixin, models.TextField, SnapField):
     """TextField with wysiwyg=True preset - no extra argument needed."""
 
     def __init__(self, **kwargs):
@@ -585,12 +624,35 @@ class SnapStatusBadgeField(SnapFunctionField):
     A value with no matching choice renders unstyled.
     """
 
-    def __init__(self, *args, field_name: str, choices: typing.List[SnapStatusBadgeFieldChoice],
+    def __init__(self, field_name: str | None = None,
+                 choices: typing.List[SnapStatusBadgeFieldChoice] | None = None, *,
                  verbose_name: str = None, style_arguments: dict = None, **kwargs):
+        # Both may be written positionally: they are what the field *is*, and passing the
+        # source field's name positionally is the obvious call. They used to be keyword-only,
+        # so doing that failed with "missing 1 required keyword-only argument: 'field_name'" —
+        # which reads as "you forgot it" about an argument that was in fact supplied.
+        if not field_name:
+            raise ValueError(
+                "SnapStatusBadgeField requires 'field_name' — the model field whose value the "
+                "badge renders, e.g. SnapStatusBadgeField('status', choices=[...])."
+            )
+        if not choices:
+            raise ValueError(
+                f"SnapStatusBadgeField('{field_name}') requires a non-empty 'choices' list of "
+                "SnapStatusBadgeFieldChoice, one per value you want styled, e.g. "
+                "choices=[SnapStatusBadgeFieldChoice('paid', '#065f46', '#d1fae5')]."
+            )
+        for index, choice in enumerate(choices):
+            if not isinstance(choice, SnapStatusBadgeFieldChoice):
+                raise ValueError(
+                    f"SnapStatusBadgeField('{field_name}'): choices[{index}] is "
+                    f"{type(choice).__name__}, expected SnapStatusBadgeFieldChoice — the colours "
+                    "live on the choice object, so a bare value cannot be styled."
+                )
         self.field_name = field_name
         self.choices = choices
         self.style_arguments = style_arguments or {}
-        super().__init__(func=self._render_badge, verbose_name=verbose_name, safe_html=True, *args, **kwargs)
+        super().__init__(func=self._render_badge, verbose_name=verbose_name, safe_html=True, **kwargs)
 
     def _render_badge(self, obj) -> str:
         field_value = getattr(obj, self.field_name, "")
