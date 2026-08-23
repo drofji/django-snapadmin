@@ -17,10 +17,10 @@ def sync_es_mappings(sender, **kwargs):
     """
     Ensure Elasticsearch indices and mappings are up-to-date for all SnapModels.
     """
-    from snapadmin.models import SnapModel
+    from snapadmin.registry import is_registered
 
     for model in apps.get_models():
-        if issubclass(model, SnapModel) and model is not SnapModel:
+        if is_registered(model):
             model._ensure_es_index_and_mapping()
 
 

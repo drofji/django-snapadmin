@@ -25,11 +25,11 @@ from drf_spectacular.utils import extend_schema
 
 def _offline_models() -> list:
     """Return the registered offline-capable SnapModel classes."""
-    from snapadmin.models import SnapModel
+    from snapadmin.registry import is_registered
 
     models = []
     for model in apps.get_models():
-        if not (issubclass(model, SnapModel) and model is not SnapModel):
+        if not is_registered(model):
             continue
         if getattr(model, "offline_mode", False):
             models.append(model)
@@ -95,13 +95,13 @@ class OfflineModelDataView(APIView):
     permission_classes = [IsAuthenticated]
 
     def _get_offline_model(self, app_label: str, model_name: str):
-        from snapadmin.models import SnapModel
+        from snapadmin.registry import is_registered
 
         try:
             model = apps.get_model(app_label, model_name)
         except LookupError:
             return None
-        if not (issubclass(model, SnapModel) and model is not SnapModel):
+        if not is_registered(model):
             return None
         if not getattr(model, "offline_mode", False):
             return None

@@ -22,7 +22,8 @@ from graphql import GraphQLError, GraphQLResolveInfo
 
 from snapadmin.logging_config import get_logger
 from snapadmin.masking import get_masked_fields, mask_value, user_can_view_pii
-from snapadmin.models import SnapModel, EsStorageMode
+from snapadmin.models import EsStorageMode
+from snapadmin.registry import is_registered
 
 logger = get_logger(__name__)
 
@@ -133,7 +134,7 @@ def get_dynamic_graphql_schema():
     query_attrs: dict = {}
 
     for model in apps.get_models():
-        if SnapModel.is_concrete_subclass(model):
+        if is_registered(model):
             try:
                 type_name = f"{model._meta.app_label.capitalize()}{model.__name__}Type"
 

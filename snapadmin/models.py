@@ -83,6 +83,7 @@ from snapadmin import fields as snapfields
 from snapadmin.fields import DjangoFieldAttributeEnum, SnapFieldAttributeEnum, SnapField
 from snapadmin.logging_config import get_logger
 from snapadmin.pagination import EstimatedCountPaginator
+from snapadmin.registry import is_registered, register
 from snapadmin.sanitize import sanitize_html
 
 logger = get_logger(__name__)
@@ -1055,9 +1056,26 @@ class SnapModel(models.Model):
         abstract = True
         ordering = ["-pk"]
 
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Enter every subclass into the SnapAdmin registry as it is declared.
+
+        Runs inside ``ModelBase.__new__``, *before* Django attaches ``_meta``, so
+        it may only record the class itself — no field or ``Meta`` inspection.
+        Abstract intermediate bases are registered alongside concrete models,
+        which is what the ``issubclass`` test this replaces already matched;
+        ``apps.get_models()`` filters the abstract ones out at every call site.
+        """
+        super().__init_subclass__(**kwargs)
+        register(cls)
+
     @classmethod
     def is_concrete_subclass(cls, model: type) -> bool:
-        return issubclass(model, SnapModel) and model is not SnapModel
+        """Whether ``model`` is a SnapAdmin model (a ``SnapModel`` subclass, not the base).
+
+        Kept as the historical name and signature; the answer now comes from
+        :mod:`snapadmin.registry`, which ``__init_subclass__`` populates.
+        """
+        return is_registered(model)
 
     @classmethod
     def get_es_index_name(cls) -> str:
@@ -2530,7 +2548,7 @@ class SnapModel(models.Model):
             pass
 
         for model in apps.get_models():
-            if issubclass(model, SnapModel) and model is not SnapModel:
+            if is_registered(model):
                 if app_label is None or model._meta.app_label == app_label:
                     model.register_admin()
 
@@ -2546,8 +2564,7 @@ def reindexable_snapmodels() -> list[type["SnapModel"]]:
     return [
         model
         for model in apps.get_models()
-        if issubclass(model, SnapModel)
-        and model is not SnapModel
+        if is_registered(model)
         and (
             getattr(model, "es_index_enabled", False)
             or getattr(model, "es_storage_mode", EsStorageMode.DB_ONLY) != EsStorageMode.DB_ONLY

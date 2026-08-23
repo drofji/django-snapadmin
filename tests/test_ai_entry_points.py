@@ -66,6 +66,7 @@ MAPPED_MODULES = [
     "snapadmin.etl",
     "snapadmin.db",
     "snapadmin.tasks",
+    "snapadmin.registry",
     "snapadmin.checks",
     "snapadmin.diagnostics",
     "snapadmin.licensing",

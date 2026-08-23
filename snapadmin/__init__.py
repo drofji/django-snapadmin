@@ -102,6 +102,10 @@ Operations
         without Celery: the compat shim keeps the task names and runs a task
         synchronously when called, and raises on ``.delay()`` rather than
         pretending the work was queued.
+    ``snapadmin.registry``
+        Which models are SnapAdmin's own. ``SnapModel`` subclasses register
+        themselves as they are declared, so every gate is a lookup instead of an
+        ``issubclass()`` walk. Internal seam — no public API of its own.
     ``snapadmin.checks``
         Django system checks — ``snapadmin.W001``…``W007`` catch misconfiguration
         at startup, so read them before debugging behaviour.

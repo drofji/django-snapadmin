@@ -25,8 +25,9 @@ from snapadmin.db import route_read
 from snapadmin.api.filters import get_api_filter_backends
 from snapadmin.logging_config import get_logger
 from snapadmin.masking import get_masked_fields, user_can_view_pii
-from snapadmin.models import APIToken, EsStorageMode, SnapModel
+from snapadmin.models import APIToken, EsStorageMode
 from snapadmin.pagination import SnapDynamicPagination
+from snapadmin.registry import is_registered
 from snapadmin.api.serializers import (
     APITokenCreateSerializer,
     APITokenSerializer,
@@ -232,7 +233,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             model = apps.get_model(app_label, model_name)
         except LookupError:
             return None
-        if not SnapModel.is_concrete_subclass(model):
+        if not is_registered(model):
             return None
         return model
 
@@ -606,7 +607,7 @@ class ModelSchemaView(SnapAPIAuthMixin, APIView):
         results = []
 
         for model in apps.get_models():
-            if not SnapModel.is_concrete_subclass(model):
+            if not is_registered(model):
                 continue
 
             app_label  = model._meta.app_label

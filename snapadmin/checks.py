@@ -16,7 +16,7 @@ from django.apps import apps
 from django.conf import settings
 from django.core.checks import Error, Info, Warning
 
-from snapadmin.models import SnapModel
+from snapadmin.registry import is_registered
 
 
 def _resolve_model(dotted: str):
@@ -184,7 +184,7 @@ def _api_writable_models():
     """
     write_verbs = {"post", "put", "patch"}
     for model in apps.get_models():
-        if not SnapModel.is_concrete_subclass(model):
+        if not is_registered(model):
             continue
         if getattr(model, "api_read_only", False):
             continue
@@ -229,7 +229,7 @@ def check_api_read_only(app_configs, **kwargs):
     inert = sorted(
         model._meta.label
         for model in apps.get_models()
-        if SnapModel.is_concrete_subclass(model)
+        if is_registered(model)
         and getattr(model, "api_write_fields", None) == []
         and not getattr(model, "api_read_only", False)
         and getattr(model, "api_http_method_names", None) is None
