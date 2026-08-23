@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-16 14:54+0000\n"
+"POT-Creation-Date: 2026-08-20 23:06+0000\n"
 "Language: ru\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -40,8 +40,20 @@ msgstr "Активен"
 msgid "Message"
 msgstr "Сообщение"
 
+msgid "Audit timeline"
+msgstr "Хронология аудита"
+
 msgid "Changes"
 msgstr "Изменения"
+
+msgid "Timeline"
+msgstr "Хронология"
+
+msgid "View the full change timeline"
+msgstr "Открыть полную хронологию изменений"
+
+msgid "Object"
+msgstr "Объект"
 
 msgid "Action"
 msgstr "Действие"
@@ -188,9 +200,6 @@ msgstr "Модель"
 msgid "Object ID"
 msgstr "ID объекта"
 
-msgid "Object"
-msgstr "Объект"
-
 msgid "Before/after field diff, if any."
 msgstr "Разница полей до/после, если есть."
 
@@ -298,6 +307,42 @@ msgstr "Задание переиндексации"
 
 msgid "Reindex Jobs"
 msgstr "Задания переиндексации"
+
+msgid "Field"
+msgstr "Поле"
+
+msgid "Before"
+msgstr "До"
+
+msgid "After"
+msgstr "После"
+
+msgid "No field-level diff was recorded for this action."
+msgstr "Для этого действия не записаны изменения по полям."
+
+msgid "Back to the audit log"
+msgstr "Назад к журналу аудита"
+
+#, python-format
+msgid "Audit entries for %(target)s"
+msgstr "Записи аудита для %(target)s"
+
+#, python-format
+msgid ""
+"Showing the %(limit)s most recent entries. Use <code>manage.py "
+"snapadmin_audit_export</code> for the full history."
+msgstr ""
+"Показаны %(limit)s последних записей. Полная история — через <code>manage.py snapadmin_audit_export</code>."
+
+msgid "anonymous"
+msgstr "аноним"
+
+#, python-format
+msgid "by %(actor)s"
+msgstr "автор: %(actor)s"
+
+msgid "No audit entries have been recorded for this object."
+msgstr "Для этого объекта не записано ни одной записи аудита."
 
 msgid "Skip to main content"
 msgstr "Перейти к основному содержимому"

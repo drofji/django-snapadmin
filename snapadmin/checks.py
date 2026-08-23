@@ -10,6 +10,7 @@ actionable hint. Everything here is advisory: a warning never blocks boot, and
 each check is a no-op when its feature is unconfigured.
 """
 
+import re
 from urllib.parse import urlparse
 
 from django.apps import apps
@@ -62,6 +63,71 @@ def check_masked_fields(app_configs, **kwargs):
                     f"SNAPADMIN_MASKED_FIELDS[{key!r}] lists unknown field {field!r}.",
                     hint=f"{key} has no field '{field}'. Check the spelling.",
                     id="snapadmin.E002",
+                ))
+    return errors
+
+
+def check_masking_rules(app_configs, **kwargs):
+    """Validate ``SNAPADMIN_MASKING_RULES`` — a typo here silently unmasks.
+
+    Unlike most misconfiguration, a rule pointing at a model or field that does
+    not exist fails *open*: nothing is masked and nothing says so. These are
+    errors, not warnings, for the same reason ``SNAPADMIN_MASKED_FIELDS`` gets
+    E001/E002.
+    """
+    from snapadmin.masking import _has_nested_quantifier
+
+    errors = []
+    rules = getattr(settings, "SNAPADMIN_MASKING_RULES", None) or {}
+    for key, fields in rules.items():
+        model = _resolve_model(key)
+        if model is None:
+            errors.append(Error(
+                f"SNAPADMIN_MASKING_RULES key {key!r} does not resolve to an installed model.",
+                hint="Use 'app_label.ModelName', e.g. 'demo.Customer'. Nothing is masked "
+                     "for a key that does not resolve.",
+                id="snapadmin.E003",
+            ))
+            continue
+        model_fields = {f.name for f in model._meta.get_fields()}
+        for field, rule in (fields or {}).items():
+            if field not in model_fields:
+                errors.append(Error(
+                    f"SNAPADMIN_MASKING_RULES[{key!r}] names unknown field {field!r}.",
+                    hint=f"{key} has no field '{field}'. Check the spelling.",
+                    id="snapadmin.E004",
+                ))
+                continue
+            if not isinstance(rule, dict):
+                errors.append(Error(
+                    f"SNAPADMIN_MASKING_RULES[{key!r}][{field!r}] is not a dict.",
+                    hint="A rule is a dict with any of 'pattern', 'replacement' and "
+                         "'permission'. This one is ignored, and the field falls back to "
+                         "the built-in masker.",
+                    id="snapadmin.E005",
+                ))
+                continue
+            pattern = rule.get("pattern")
+            if not pattern:
+                continue
+            if _has_nested_quantifier(str(pattern)):
+                errors.append(Error(
+                    f"SNAPADMIN_MASKING_RULES[{key!r}][{field!r}] pattern {pattern!r} "
+                    f"quantifies a group that is itself quantified.",
+                    hint="That shape can backtrack catastrophically, so it is refused at "
+                         "runtime and the field falls back to the built-in masker. Rewrite "
+                         "it without the nested quantifier (escape a literal '{' as '\\{').",
+                    id="snapadmin.E005",
+                ))
+                continue
+            try:
+                re.compile(str(pattern))
+            except re.error as exc:
+                errors.append(Error(
+                    f"SNAPADMIN_MASKING_RULES[{key!r}][{field!r}] pattern {pattern!r} "
+                    f"is not a valid regex: {exc}.",
+                    hint="The field falls back to the built-in masker until this compiles.",
+                    id="snapadmin.E005",
                 ))
     return errors
 
@@ -276,6 +342,7 @@ def check_unfold_theme(app_configs, **kwargs):
 ALL_CHECKS = [
     check_analytics_db_alias,
     check_masked_fields,
+    check_masking_rules,
     check_nested_apps,
     check_nesting_active_site,
     check_sso_providers,

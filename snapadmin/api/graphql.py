@@ -21,7 +21,7 @@ from django.views.decorators.csrf import csrf_exempt
 from graphql import GraphQLError, GraphQLResolveInfo
 
 from snapadmin.logging_config import get_logger
-from snapadmin.masking import get_masked_fields, mask_value, user_can_view_pii
+from snapadmin.masking import get_masked_fields, mask_field, user_can_view_pii
 from snapadmin.models import EsStorageMode
 from snapadmin.registry import is_registered
 
@@ -88,8 +88,9 @@ def _make_masked_resolver(field_name: str):
     PIIMaskingSerializerMixin`): the raw attribute is returned only when the
     requesting user may view raw PII (see
     :func:`snapadmin.masking.user_can_view_pii`), otherwise the value is passed
-    through :func:`snapadmin.masking.mask_value`. Fails closed — an absent or
-    anonymous user gets the masked value.
+    through :func:`snapadmin.masking.mask_field`, so a field's own
+    ``SNAPADMIN_MASKING_RULES`` entry applies here exactly as it does in REST.
+    Fails closed — an absent or anonymous user gets the masked value.
     """
 
     def resolve_masked(root: Model, info: GraphQLResolveInfo) -> object:
@@ -97,7 +98,8 @@ def _make_masked_resolver(field_name: str):
         user = getattr(info.context, "user", None)
         if user_can_view_pii(user):
             return value
-        return mask_value(value)
+        opts = root._meta
+        return mask_field(opts.app_label, opts.model_name, field_name, value, user)
 
     return resolve_masked
 

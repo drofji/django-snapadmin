@@ -1664,7 +1664,7 @@ stale_sync(
 DATABASES = {"default": {...}, "read_replica": {...}}
 SNAPADMIN_ANALYTICS_DB_ALIAS = "read_replica"</code></pre>
 
-  <h3>PII data masking</h3>
+  <h3 id="pii-masking">PII data masking</h3>
   <p>Declare sensitive fields once. They are obfuscated in the admin changelist, dropped from the
   admin change form, and masked in both REST API and GraphQL responses for anyone who is not a
   superuser or a holder of the <code>snapadmin.view_raw_pii</code> permission. Emails become
@@ -1682,6 +1682,39 @@ SNAPADMIN_MASKED_FIELDS = {
 }
 # Grant trusted staff raw access:
 #   assign the "snapadmin | api token | Can view unmasked PII data" permission.</code></pre>
+
+  <h4 id="masking-rules">Per-field rules — <code>SNAPADMIN_MASKING_RULES</code></h4>
+  <p>The setting above says <em>which</em> fields are sensitive; this one says <em>how</em> each is
+  obfuscated, and <em>who</em> may see it raw. A rule takes a <code>pattern</code> (a regex applied
+  with <code>re.sub</code>), a <code>replacement</code> (on its own, a flat redaction of the whole
+  value), and/or a <code>permission</code> that unlocks <strong>that one field</strong> for whoever
+  holds it — without granting the blanket <code>snapadmin.view_raw_pii</code>, which reveals every
+  masked field of every model.</p>
+  <pre><code># settings.py
+SNAPADMIN_MASKING_RULES = {
+    "customers.Profile": {
+        # keep the last four digits, star the rest → ************1111
+        "card_number": {"pattern": r"\d(?=\d{4})", "replacement": "*"},
+        # first two and last two characters only → SE…03
+        "iban": {"pattern": r"^(\w{2}).*(\w{2})$", "replacement": r"\1…\2"},
+        # never shown below the field permission
+        "billing_address": {"replacement": "[redacted]",
+                            "permission": "customers.view_profile_address"},
+    },
+}</code></pre>
+  <p>Naming a field here also declares it sensitive, so this setting works on its own —
+  <code>SNAPADMIN_MASKED_FIELDS</code> stays optional and unchanged, and a field listed only there
+  keeps the built-in masker. Rules apply on every surface that masks: the admin changelist, the REST
+  serializer, GraphQL, background exports and the audit-log diff. The matching check is
+  <code>masking.user_can_view_pii(user, "app.Model.field")</code> — the <code>field</code> argument is
+  additive, so existing calls are unaffected.</p>
+  <p style="font-size: 13px; color: var(--muted);">Patterns are compiled once and cached. One that
+  fails to compile, one whose replacement references a group it does not have, one shaped like a
+  catastrophic-backtracking bomb (a quantified group containing a quantifier, <code>(a+)+</code>), and
+  any value longer than 4096 characters all fall back to the built-in masker and log the reason —
+  every failure path degrades to <em>more</em> masking, never to raw data. A rule naming a model or
+  field that does not exist would instead fail <em>open</em>, so it is a startup error
+  (<code>snapadmin.E003</code>–<code>E005</code>) rather than a silent no-op.</p>
 
   <h3>SSO / OAuth2 login buttons</h3>
   <p>SnapAdmin only <em>renders</em> the providers you already wired into
@@ -1717,7 +1750,7 @@ SNAPADMIN_APP_LABELS  = {"auth": "Administration"}  # rename a group heading</co
     (<code>snapadmin.W006</code>) when that's detectable.
   </div>
 
-  <h3>Unalterable audit trail <span class="badge">DORA / ISO 27001</span></h3>
+  <h3 id="audit-trail">Unalterable audit trail <span class="badge">DORA / ISO 27001</span></h3>
   <p>Django's built-in <code>LogEntry</code> is minimal and editable straight from the DB. SnapAdmin
   records a richer, append-only <code>SnapadminAuditLog</code> for every admin create/update/delete —
   <strong>who</strong> (actor + IP + User-Agent), <strong>what</strong> (target object + before/after
@@ -1733,6 +1766,22 @@ python manage.py snapadmin_audit_export --since 2026-01-01 --action delete
 python manage.py snapadmin_audit_export --purge   # also prune rows past retention</code></pre>
   <p style="font-size: 13px; color: var(--muted);">For defence against direct database tampering, layer
   a DB trigger / append-only role on top — the ORM guard protects the admin and application paths.</p>
+
+  <h4 id="audit-timeline">Reading the trail — diffs and the per-object timeline</h4>
+  <p>The diff is stored as <code>{"field": {"old": …, "new": …}}</code> and rendered in the admin as a
+  field-level table: one row per field, the value before, the value after. Values keep their
+  JSON-native type, so <code>42</code> stays distinguishable from <code>"42"</code>; anything without a
+  JSON representation (<code>Decimal</code>, dates, UUIDs, related objects) is stored as text. The
+  <code>old</code>/<code>new</code> key names are part of the on-disk format and will not change.</p>
+  <p>Each entry's <strong>Object</strong> column links to that object's <strong>timeline</strong> —
+  every change ever recorded for it, newest first, each as the same diff table:</p>
+  <pre><code>/admin/snapadmin/snapadminauditlog/timeline/&lt;app_label&gt;/&lt;model&gt;/&lt;object_id&gt;/</code></pre>
+  <p>Both views mask through <code>SNAPADMIN_MASKED_FIELDS</code> and
+  <a href="#masking-rules"><code>SNAPADMIN_MASKING_RULES</code></a>, and both are gated on the audit
+  log's own view permission — the same one that already lists these rows — so reading the trail is
+  never a way around masking. A long history is capped at the 100 most recent entries per page
+  (override <code>timeline_max_entries</code> on the model admin);
+  <code>snapadmin_audit_export</code> remains the way to read all of it.</p>
 
   <h3>Large-dataset performance</h3>
   <p>Every SnapAdmin admin auto-derives <code>list_select_related</code> from the FK columns it shows,
@@ -1844,8 +1893,10 @@ def product_catalog_source(job):
   runs through your source instead of the ORM default; a blank <code>source</code> is byte-for-byte the
   built-in export. The demo registers exactly this <code>product_catalog</code> source
   (<code>demo/apps/shop/export_sources.py</code>). An unknown source name fails the job cleanly (never the
-  worker). Because your source owns PII masking on the rows it emits, apply masking there (see
-  <code>snapadmin.masking.mask_value</code>) if the document exposes protected fields.</p>
+  worker). Because your source owns PII masking on the rows it emits, apply masking there if the
+  document exposes protected fields — use <code>snapadmin.masking.mask_field(app_label, model, field,
+  value, user)</code>, the same choke point the built-in source goes through, so
+  <a href="#masking-rules">configured rules</a> apply to your rows too.</p>
 
   <!-- ── API GraphQL ───────────────────────────────────────────────────────── -->
   <h2 id="api-graphql">⚛️ GraphQL API</h2>
@@ -1853,7 +1904,7 @@ def product_catalog_source(job):
   <ul style="margin: 8px 0 14px 20px; font-size: 14px;">
     <li><strong>Auto-Schema</strong>: All <code>SnapModel</code> subclasses are automatically added to the schema.</li>
     <li><strong>Secured by default</strong>: every resolver requires authentication (admin session or API token) and the model's Django <code>view</code> permission — the same contract as REST — enforced on <strong>every relation the query traverses</strong>, not just top-level fields. Reading <code>A { relatedB { … } }</code> needs <code>view</code> on both models; a related object you may not view resolves as a <code>Permission denied.</code> error rather than leaking its data. Token <code>allowed_models</code> scopes apply on top.</li>
-    <li><strong>PII masking</strong>: fields in <code>SNAPADMIN_MASKED_FIELDS</code> are masked in GraphQL output exactly as in the REST API — raw only for superusers and <code>snapadmin.view_raw_pii</code> holders.</li>
+    <li><strong>PII masking</strong>: fields in <code>SNAPADMIN_MASKED_FIELDS</code> are masked in GraphQL output exactly as in the REST API — raw only for superusers, <code>snapadmin.view_raw_pii</code> holders, and (per field) holders of a permission named in <a href="#masking-rules"><code>SNAPADMIN_MASKING_RULES</code></a>, whose rules apply here too.</li>
     <li><strong>Unified Fetching</strong>: the <code>search</code> argument routes to Elasticsearch for <code>DUAL</code>/<code>ES_ONLY</code> models; <code>first</code>/<code>offset</code> paginate.</li>
     <li><strong>Endpoint</strong>: <code>/api/graphql/</code>; GraphiQL follows <code>DEBUG</code> (override with <code>SNAPADMIN_GRAPHIQL_ENABLED</code>).</li>
   </ul>
@@ -3265,6 +3316,7 @@ for order in Order.objects.select_related("customer"):   # 1 query, total
   <h3>Audit trail, GDPR &amp; large tables</h3>
   <table>
     <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>SNAPADMIN_MASKING_RULES</code></td><td><code>{}</code></td><td>Per-field masking rules (regex / redaction) and per-field PII permissions</td></tr>
     <tr><td><code>SNAPADMIN_AUDIT_LOG_ENABLED</code></td><td><code>True</code></td><td>Record admin create/update/delete as an immutable audit trail</td></tr>
     <tr><td><code>SNAPADMIN_AUDIT_RETENTION_DAYS</code></td><td><code>365</code></td><td>Retention window for <code>snapadmin_audit_export --purge</code></td></tr>
     <tr><td><code>SNAPADMIN_ESTIMATED_COUNT</code></td><td><code>True</code></td><td>Use PostgreSQL's fast row estimate for huge, unfiltered changelists</td></tr>
@@ -3380,7 +3432,8 @@ python manage.py seed_demo --no-index  # skip ES indexing (no ES cluster needed)
     no JavaScript. It states what SnapAdmin is, carries the three-step quickstart, lists the facts an
     assistant should not have to infer — snap-only field kwargs add no migration, import paths are the
     public contract, the Unfold theme is optional, misconfiguration surfaces as
-    <code>snapadmin.W001</code>–<code>W007</code> — and then links every section of this page with a
+    <code>snapadmin.W001</code>–<code>W007</code> and <code>snapadmin.E001</code>–<code>E005</code> —
+    and then links every section of this page with a
     line describing what it covers.
   </p>
   <p>

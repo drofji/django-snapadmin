@@ -727,19 +727,22 @@ class PIIMaskingAdminMixin:
       in an editable input.
 
     Privileged users (superusers, ``snapadmin.view_raw_pii`` holders) see raw
-    values in both views. Uses :mod:`snapadmin.masking`.
+    values in both views. Uses :mod:`snapadmin.masking`, so a field configured
+    in ``SNAPADMIN_MASKING_RULES`` is obfuscated by its own rule here too.
     """
 
     def _snap_masked_fields(self) -> list[str]:
         from snapadmin.masking import get_masked_fields
         return get_masked_fields(self.model._meta.app_label, self.model._meta.model_name)
 
-    @staticmethod
-    def _snap_mask_column(field_name):
-        from snapadmin.masking import mask_value
+    def _snap_mask_column(self, field_name, user=None):
+        from snapadmin.masking import mask_field
+
+        opts = self.model._meta
 
         def column(obj):
-            return mask_value(getattr(obj, field_name, None))
+            return mask_field(opts.app_label, opts.model_name, field_name,
+                              getattr(obj, field_name, None), user)
 
         column.short_description = field_name.replace("_", " ").title()
         column.__name__ = f"masked_{field_name}"
@@ -753,7 +756,7 @@ class PIIMaskingAdminMixin:
         if not masked or user_can_view_pii(request.user):
             return display
         return [
-            self._snap_mask_column(name) if name in masked else name
+            self._snap_mask_column(name, request.user) if name in masked else name
             for name in display
         ]
 

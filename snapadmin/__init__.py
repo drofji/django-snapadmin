@@ -90,7 +90,12 @@ APIs
 
 Operations
     ``snapadmin.audit`` · ``snapadmin.masking``
-        Change logging and PII masking.
+        Change logging and PII masking. ``audit`` writes the append-only
+        ``{field: {"old": …, "new": …}}`` diff and renders it; ``masking``
+        resolves *which* fields are sensitive (``SNAPADMIN_MASKED_FIELDS``),
+        *how* each is obfuscated and *who* may see it raw
+        (``SNAPADMIN_MASKING_RULES``) — ``mask_field()`` is the choke point
+        every masking surface goes through.
     ``snapadmin.backup``
         3-2-1 backups (local / network / SFTP / FTP).
     ``snapadmin.monitoring`` · ``snapadmin.health`` · ``snapadmin.alerts`` ·
@@ -111,8 +116,10 @@ Operations
         themselves as they are declared, so every gate is a lookup instead of an
         ``issubclass()`` walk. Internal seam — no public API of its own.
     ``snapadmin.checks``
-        Django system checks — ``snapadmin.W001``…``W007`` catch misconfiguration
-        at startup, so read them before debugging behaviour.
+        Django system checks — warnings ``snapadmin.W001``…``W007`` and errors
+        ``snapadmin.E001``…``E005`` catch misconfiguration at startup, so read
+        them before debugging behaviour. The masking checks are *errors* because
+        a mistyped rule fails open: it masks nothing and says nothing.
     ``snapadmin.theme_i18n``
         Catalog entries for the Unfold theme's own interface strings, which
         ``django-unfold`` ships untranslated — without them a themed admin renders
@@ -150,7 +157,8 @@ unless noted. The families: ``SNAPADMIN_REST_API_*`` / ``SNAPADMIN_API_*``
 fallback), ``SNAPADMIN_BACKUP_*``, ``SNAPADMIN_ERROR_*`` and
 ``SNAPADMIN_HEALTH_ALERT_*`` / ``SNAPADMIN_ALERT_*`` (monitoring and alert
 delivery), ``SNAPADMIN_AUDIT_*`` and
-``SNAPADMIN_MASKED_FIELDS`` (audit and PII), ``SNAPADMIN_EXPORT_*``,
+``SNAPADMIN_MASKED_FIELDS`` / ``SNAPADMIN_MASKING_RULES`` (audit and PII),
+``SNAPADMIN_EXPORT_*``,
 ``SNAPADMIN_SSO_*``, plus layout keys (``SNAPADMIN_URL_PREFIX``,
 ``SNAPADMIN_APP_LABELS``, ``SNAPADMIN_HIDDEN_APPS``, ``SNAPADMIN_NESTED_APPS``,
 ``SNAPADMIN_THEME_AUTH_ADMIN``).

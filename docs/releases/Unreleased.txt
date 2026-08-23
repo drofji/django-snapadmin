@@ -107,6 +107,65 @@ Added
   The German, Spanish, French, Italian, Dutch and Polish wordings are machine-assisted; Russian was
   written by hand. Corrections are welcome.
 
+* **The audit log has a readable diff, and a per-object timeline.**
+  ``SnapadminAuditLog.changes`` has always stored a structured before/after diff
+  (``{field: {"old": …, "new": …}}``), but the admin only ever rendered it as a blob of JSON —
+  legible to a developer, not to the compliance officer the trail exists for. Each entry now shows a
+  field-level table: one row per changed field, the value before, the value after, with unchanged
+  rows muted.
+
+  The *Object* column links each entry to a **timeline** — every recorded change to that one object
+  on a single page, newest first, each rendered as the same diff table. It lives at
+  ``/admin/snapadmin/snapadminauditlog/timeline/<app_label>/<model>/<object_id>/`` and answers the
+  question the changelist cannot: *what has happened to this record?* Both views mask exactly as the
+  rest of the admin does, and both are gated on the audit log's own view permission — the same
+  permission that already exposes these rows in the changelist — so the timeline never reveals more
+  than the list it is reached from. A long history is capped at the 100 most recent entries per page
+  (override ``timeline_max_entries`` on the model admin); ``manage.py snapadmin_audit_export`` remains
+  the way to read the whole history.
+
+* **``SNAPADMIN_MASKING_RULES``: masking rules and permissions, per field.**
+  Which fields are sensitive has been configurable since ``SNAPADMIN_MASKED_FIELDS`` shipped; *how*
+  each one is obfuscated was not — the masker looked at the value's type and applied a fixed policy,
+  which is right for an email address and wrong for a card number, an IBAN or a field that should
+  simply never be shown. A new setting sets the policy per field::
+
+      SNAPADMIN_MASKING_RULES = {
+          "customers.Profile": {
+              # keep the last four digits, star the rest → ************1111
+              "card_number": {"pattern": r"\d(?=\d{4})", "replacement": "*"},
+              # never show it below the field permission
+              "billing_address": {"replacement": "[redacted]",
+                                  "permission": "customers.view_profile_address"},
+          },
+      }
+
+  A rule may carry a ``pattern`` (a regex applied with ``re.sub``), a ``replacement`` (on its own, a
+  flat redaction of the whole value), and a ``permission``. That last one is the second half of the
+  change: a permission named on a rule unlocks the raw value of **that one field** for whoever holds
+  it, without handing out the blanket ``snapadmin.view_raw_pii`` that reveals every masked field of
+  every model. ``masking.user_can_view_pii()`` grew a matching, additive ``field`` argument —
+  ``user_can_view_pii(user, "demo.Customer.email")`` — so every existing call keeps its meaning.
+
+  Naming a field in ``SNAPADMIN_MASKING_RULES`` also declares it sensitive, so the new setting can be
+  used on its own; ``SNAPADMIN_MASKED_FIELDS`` keeps working exactly as before, and a field listed
+  only there still gets the built-in masker. The rules apply on **every** surface that masks — the
+  admin changelist, the REST serializer, GraphQL, background exports and the audit-log diff — so a
+  rule cannot hold on one and quietly not on another.
+
+  Patterns come from settings, but a bad one would still meet production data, so they are guarded:
+  each is compiled once and cached; a pattern that does not compile, one whose replacement references
+  a group it does not have, one shaped like a catastrophic-backtracking bomb (a quantified group
+  containing a quantifier, ``(a+)+``), and any value longer than 4096 characters all fall back to the
+  built-in masker. Every failure path degrades to *more* masking, never to raw data, and the reason
+  is logged once.
+
+  Configuration mistakes get the same treatment as ``SNAPADMIN_MASKED_FIELDS``: a rule naming a model
+  or a field that does not exist, a rule that is not a dict, and a pattern that cannot be used are
+  Django system-check **errors** (``snapadmin.E003``–``E005``), raised by ``manage.py check`` and
+  ``runserver``. They are errors rather than warnings because this setting fails open — a key with a
+  typo in it masks nothing, and nothing on screen would say so.
+
 Fixed
 -----
 
@@ -167,3 +226,28 @@ Changed
   from and, when it disagrees with the installed package, says so in one line instead of leaving
   the mismatch to be discovered as unexplained behaviour. A normal project sees no change — the
   lines appear only when a stamp is present.
+
+* **Audit-log diffs preserve JSON-native types.**
+  ``audit.format_value()`` ran every value through ``str()`` before storing it, so the diff could not
+  distinguish ``42`` from ``"42"``, or ``False`` from the string ``"False"`` — an annoyance when
+  reading the trail and a real problem when a SIEM parses it. Numbers, booleans, strings and ``null``
+  are now stored as themselves. Everything without a JSON representation (``Decimal``, dates, UUIDs,
+  related objects) is still stringified, as are ``inf`` and ``nan``, which have no JSON literal and
+  are rejected by strict JSON columns.
+
+  Rows written by earlier releases are not migrated and still hold the string form, so anything
+  reading ``SnapadminAuditLog.changes`` should accept both. The ``old``/``new`` key names are
+  **unchanged**: they are on disk in every existing install, and renaming them to ``before``/``after``
+  would be a data migration over every row for no functional gain.
+
+Security
+--------
+
+* **The audit-log change form no longer renders the unmasked diff to a viewer without PII access.**
+  The admin swapped the raw ``changes`` field for a masked copy in ``readonly_fields``. That swap
+  removed the real field from the read-only list — and Django therefore put it back in the *form*,
+  where a view-only user (which every audit-log viewer is, the trail being read-only) had it
+  rendered straight from the model. The masked table and the unmasked JSON appeared on the same
+  page. The raw field is now excluded from the form outright, and only the rendered diff is shown.
+  Anyone who could open an audit entry for a model with ``SNAPADMIN_MASKED_FIELDS`` configured could
+  read the masked values; the changelist, the REST API and the export command were never affected.

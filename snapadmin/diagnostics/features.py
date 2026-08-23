@@ -2,7 +2,7 @@
 Feature-adoption collector for ``snapadmin_info`` (the ``features`` section).
 
 A commerce-readiness checklist: for each business-important SnapAdmin capability —
-backups, retention-based deletion, audit trail, PII masking, the REST/GraphQL APIs,
+backups, retention-based deletion, audit trail, PII masking (fields and rules), the REST/GraphQL APIs,
 API tokens, Elasticsearch, background tasks, health/error alerting, rate limiting,
 the read-only / write / delete guards and SSO — report whether it is actually turned
 on or in use in *this* project (``✓``) or sitting unused (``✗``). Where a capability is
@@ -70,13 +70,30 @@ def _sso() -> tuple[bool, str]:
     return bool(providers), _count(len(providers), "provider")
 
 
+def _masking_detail(masked_fields: int, ruled_fields: int) -> str:
+    """``"3 fields"``, or ``"3 fields, 2 rules"`` when rules are configured."""
+    detail = _count(masked_fields, "field")
+    if not ruled_fields:
+        return detail
+    return f"{detail}, {_count(ruled_fields, 'rule')}"
+
+
 def _capabilities() -> list[tuple[str, bool, str]]:
     """Every audited capability as ``(key, enabled, detail)`` in report order."""
     models = _concrete_snap_models()
 
     retention = sum(1 for m in models if (getattr(m, "data_retention_days", None) or 0) > 0)
+    # A field can be declared sensitive by either setting; count the union, and
+    # report how many of them carry an explicit rule (iterating a rules dict
+    # yields its field names, so both shapes fold in the same way).
     masked = getattr(settings, "SNAPADMIN_MASKED_FIELDS", {}) or {}
-    masked_fields = sum(len(fields) for fields in masked.values())
+    rules = getattr(settings, "SNAPADMIN_MASKING_RULES", {}) or {}
+    by_model: dict[str, set[str]] = {}
+    for source in (masked, rules):
+        for key, fields in source.items():
+            by_model.setdefault(str(key).lower(), set()).update(str(f) for f in (fields or []))
+    masked_fields = sum(len(fields) for fields in by_model.values())
+    ruled_fields = sum(len(rule or {}) for rule in rules.values())
     es_enabled = _flag("ELASTICSEARCH_ENABLED", False)
     es_models = sum(1 for m in models if getattr(m, "es_index_enabled", False))
     recipients = list(getattr(settings, "SNAPADMIN_HEALTH_ALERT_EMAILS", []) or
@@ -93,7 +110,7 @@ def _capabilities() -> list[tuple[str, bool, str]]:
         ("error_monitoring", _flag("SNAPADMIN_ERROR_MONITOR_ENABLED", True), ""),
         ("backups", _flag("SNAPADMIN_BACKUP_ENABLED", False), ""),
         ("retention_purge", retention > 0, _count(retention, "model")),
-        ("pii_masking", masked_fields > 0, _count(masked_fields, "field")),
+        ("pii_masking", masked_fields > 0, _masking_detail(masked_fields, ruled_fields)),
         ("api_tokens", *_api_tokens()),
         ("elasticsearch", es_enabled, _count(es_models, "indexed model") if es_enabled else ""),
         ("background_tasks", bool(getattr(settings, "CELERY_BROKER_URL", None)), ""),

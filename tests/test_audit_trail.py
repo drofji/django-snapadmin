@@ -85,9 +85,46 @@ class TestHelpers:
     def test_user_agent_none_request(self):
         assert audit.user_agent(None) == ""
 
-    def test_format_value(self):
+    def test_format_value_keeps_json_native_types(self):
         assert audit.format_value(None) is None
-        assert audit.format_value(42) == "42"
+        assert audit.format_value(42) == 42            # not the string "42"
+        assert audit.format_value(True) is True
+        assert audit.format_value(1.5) == 1.5
+        assert audit.format_value("42") == "42"
+
+    def test_format_value_stringifies_the_rest(self):
+        from decimal import Decimal
+        assert audit.format_value(Decimal("1.20")) == "1.20"
+        assert audit.format_value(float("inf")) == "inf"   # no JSON literal
+        assert audit.format_value(float("nan")) == "nan"
+
+    def test_display_value(self):
+        assert audit.display_value(None) == "\u2014"
+        assert audit.display_value(True) == "true"
+        assert audit.display_value(False) == "false"
+        assert audit.display_value({"b": 1, "a": 2}) == '{"a": 2, "b": 1}'
+        assert audit.display_value([1, "x"]) == '[1, "x"]'
+        assert audit.display_value(7) == "7"
+
+    def test_diff_rows(self):
+        rows = audit.diff_rows({"b": {"old": 1, "new": 2}, "a": {"old": None, "new": "x"}})
+        assert [r["field"] for r in rows] == ["a", "b"]     # sorted by field name
+        assert rows[0] == {"field": "a", "old": "\u2014", "new": "x", "changed": True}
+        assert rows[1] == {"field": "b", "old": "1", "new": "2", "changed": True}
+
+    def test_diff_rows_marks_unchanged_side(self):
+        rows = audit.diff_rows({"a": {"old": "same", "new": "same"}})
+        assert rows[0]["changed"] is False
+
+    def test_diff_rows_tolerates_a_malformed_entry(self):
+        # A hand-written row whose value is not an old/new mapping still renders.
+        rows = audit.diff_rows({"a": "just a value", "b": {"new": 2}})
+        assert rows[0] == {"field": "a", "old": "\u2014", "new": "just a value", "changed": True}
+        assert rows[1] == {"field": "b", "old": "\u2014", "new": "2", "changed": True}
+
+    def test_diff_rows_empty(self):
+        assert audit.diff_rows(None) == []
+        assert audit.diff_rows({}) == []
 
     def test_audit_enabled_default(self):
         assert audit.audit_enabled() is True
@@ -220,14 +257,40 @@ class TestAuditMasking:
     def test_masked_changes_masks_only_configured_fields(self, customer, admin_user):
         row = self._seed(customer, admin_user)
         model_admin = site._registry[SnapadminAuditLog]
-        masked = model_admin.masked_changes(row)
-        assert masked["email"] == {"old": "o***@example.com", "new": "n***@example.com"}
-        assert masked["last_name"] == {"old": "A", "new": "B"}  # not masked
+        html = model_admin.masked_changes(row)
+        assert "o***@example.com" in html and "n***@example.com" in html
+        assert "old@example.com" not in html and "new@example.com" not in html
+        assert ">A<" in html and ">B<" in html  # last_name is not masked
 
     def test_masked_changes_noop_when_unconfigured(self, customer, admin_user):
         row = self._seed(customer, admin_user)
         model_admin = site._registry[SnapadminAuditLog]
-        assert model_admin.masked_changes(row) == row.changes
+        html = model_admin.masked_changes(row)
+        assert "old@example.com" in html and "new@example.com" in html
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS=CUST)
+    def test_changes_diff_renders_raw_values(self, customer, admin_user):
+        row = self._seed(customer, admin_user)
+        model_admin = site._registry[SnapadminAuditLog]
+        html = model_admin.changes_diff(row)
+        assert "old@example.com" in html and "new@example.com" in html
+
+    def test_rendered_diff_escapes_stored_markup(self, customer, admin_user):
+        # An audit row holds whatever was typed into the admin — it must reach
+        # the page escaped, never as live markup.
+        audit.record_audit(
+            _request(admin_user), audit.UPDATE, customer,
+            {"last_name": {"old": "A", "new": "<img src=x onerror=alert(1)>"}},
+        )
+        row = SnapadminAuditLog.objects.first()
+        html = site._registry[SnapadminAuditLog].changes_diff(row)
+        assert "<img src=x" not in html
+        assert "&lt;img src=x onerror=alert(1)&gt;" in html
+
+    def test_rendered_diff_without_changes(self, product, admin_user):
+        audit.record_audit(_request(admin_user), audit.DELETE, product, None)
+        row = SnapadminAuditLog.objects.get()
+        assert "No field-level diff" in site._registry[SnapadminAuditLog].changes_diff(row)
 
     @override_settings(SNAPADMIN_MASKED_FIELDS=CUST)
     def test_readonly_fields_swap_for_unprivileged(self, customer, regular_user, admin_user):
@@ -242,8 +305,126 @@ class TestAuditMasking:
         self._seed(customer, admin_user)
         model_admin = site._registry[SnapadminAuditLog]
         fields = model_admin.get_readonly_fields(_request(admin_user))
-        assert "changes" in fields
+        assert "changes_diff" in fields
         assert "masked_changes" not in fields
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS=CUST)
+    def test_change_form_renders_the_masked_diff(self, customer, regular_user, admin_user, client):
+        from django.contrib.auth.models import Permission
+        from django.urls import reverse
+
+        row = self._seed(customer, admin_user)
+        regular_user.is_staff = True
+        regular_user.save()
+        regular_user.user_permissions.add(Permission.objects.get(
+            content_type__app_label="snapadmin", codename="view_snapadminauditlog",
+        ))
+        client.force_login(regular_user)
+        r = client.get(reverse("admin:snapadmin_snapadminauditlog_change", args=[row.pk]))
+        assert r.status_code == 200
+        body = r.content.decode()
+        assert "o***@example.com" in body
+        assert "old@example.com" not in body
+
+
+# ── Per-object diff timeline (#PROP3c) ───────────────────────────────────────
+
+@pytest.mark.django_db
+class TestTimelineView:
+    def _url(self, obj):
+        from django.urls import reverse
+        return reverse(
+            "admin:snapadmin_snapadminauditlog_timeline",
+            args=[obj._meta.app_label, obj._meta.model_name, obj.pk],
+        )
+
+    def _seed(self, product, admin_user, count=2):
+        for i in range(count):
+            audit.record_audit(
+                _request(admin_user), audit.UPDATE, product,
+                {"name": {"old": f"name {i}", "new": f"name {i + 1}"}},
+            )
+
+    def test_renders_every_entry_newest_first(self, product, admin_user, client):
+        self._seed(product, admin_user)
+        client.force_login(admin_user)
+        r = client.get(self._url(product))
+        assert r.status_code == 200
+        body = r.content.decode()
+        assert "name 0" in body and "name 2" in body
+        assert [e["entry"].pk for e in r.context_data["entries"]] == \
+            list(SnapadminAuditLog.objects.order_by("-timestamp").values_list("pk", flat=True))
+        assert r.context_data["total"] == 2
+        assert r.context_data["truncated"] is False
+
+    def test_empty_history_renders(self, product, admin_user, client):
+        client.force_login(admin_user)
+        r = client.get(self._url(product))
+        assert r.status_code == 200
+        assert r.context_data["entries"] == []
+        assert "No audit entries" in r.content.decode()
+
+    def test_caps_the_number_of_entries(self, product, admin_user, client, monkeypatch):
+        self._seed(product, admin_user, count=3)
+        model_admin = site._registry[SnapadminAuditLog]
+        monkeypatch.setattr(model_admin, "timeline_max_entries", 2, raising=False)
+        client.force_login(admin_user)
+        r = client.get(self._url(product))
+        assert len(r.context_data["entries"]) == 2
+        assert r.context_data["total"] == 3
+        assert r.context_data["truncated"] is True
+
+    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
+    def test_masks_pii_for_unprivileged_viewer(self, product, admin_user, regular_user, client):
+        from django.contrib.auth.models import Permission
+
+        self._seed(product, admin_user, count=1)
+        regular_user.is_staff = True
+        regular_user.save()
+        regular_user.user_permissions.add(Permission.objects.get(
+            content_type__app_label="snapadmin", codename="view_snapadminauditlog",
+        ))
+        client.force_login(regular_user)
+        body = client.get(self._url(product)).content.decode()
+        assert "name 0" not in body and "name 1" not in body
+        assert "na**" in body
+
+    def test_requires_view_permission(self, product, admin_user, regular_user, client):
+        self._seed(product, admin_user, count=1)
+        regular_user.is_staff = True   # staff, but no audit-log view permission
+        regular_user.save()
+        client.force_login(regular_user)
+        assert client.get(self._url(product)).status_code == 403
+
+    def test_url_is_not_shadowed_by_the_change_view(self, product, admin_user, client):
+        # The default admin URLs end in a catch-all "<path:object_id>/"; the
+        # timeline route must be matched before it.
+        client.force_login(admin_user)
+        r = client.get(self._url(product))
+        assert r.status_code == 200
+        assert r.template_name == "snapadmin/audit_timeline.html"
+
+    def test_object_column_links_to_the_timeline(self, product, admin_user):
+        self._seed(product, admin_user, count=1)
+        row = SnapadminAuditLog.objects.get()
+        model_admin = site._registry[SnapadminAuditLog]
+        assert self._url(product) in model_admin.object_timeline(row)
+        assert self._url(product) in model_admin.timeline_link(row)
+
+    def test_unidentifiable_row_has_no_link(self):
+        row = SnapadminAuditLog.objects.create(action="create", object_repr="orphan")
+        model_admin = site._registry[SnapadminAuditLog]
+        assert model_admin.timeline_url(row) is None
+        assert model_admin.object_timeline(row) == "orphan"
+        assert model_admin.timeline_link(row) == "\u2014"
+
+    def test_row_without_repr_falls_back_to_the_id(self, product, admin_user):
+        self._seed(product, admin_user, count=1)
+        row = SnapadminAuditLog.objects.get()
+        row_id, model_admin = row.object_id, site._registry[SnapadminAuditLog]
+        SnapadminAuditLog.objects.update(object_repr="")
+        row.refresh_from_db()
+        assert row_id in model_admin.object_timeline(row)
 
 
 # ── SIEM export command ──────────────────────────────────────────────────────

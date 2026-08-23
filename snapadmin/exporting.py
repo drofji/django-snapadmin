@@ -79,7 +79,7 @@ from django.utils import timezone
 from django.utils.module_loading import import_string
 
 from snapadmin.logging_config import get_logger
-from snapadmin.masking import get_masked_fields, mask_value, user_can_view_pii
+from snapadmin.masking import get_masked_fields, mask_field, user_can_view_pii
 
 logger = get_logger(__name__)
 
@@ -188,6 +188,8 @@ class _DefaultOrmSource:
     def __init__(self, job) -> None:
         model = job.target_model()
         self._pk_attname = model._meta.pk.attname
+        self._model_key = (model._meta.app_label, model._meta.model_name)
+        self._requested_by = job.requested_by
         self._fields = _export_fields(model)
         self._masked = (
             set()
@@ -215,7 +217,8 @@ class _DefaultOrmSource:
                 for row in batch:
                     for name in self._masked:
                         if name in row:
-                            row[name] = mask_value(row[name])
+                            row[name] = mask_field(*self._model_key, name, row[name],
+                                                   self._requested_by)
             cursor = str(batch[-1][self._pk_attname])
             yield batch, cursor
 

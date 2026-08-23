@@ -379,6 +379,18 @@ SNAPADMIN_SSO_PROVIDERS = {}
 # (superusers always see raw). Empty → masking off.
 SNAPADMIN_MASKED_FIELDS = {}
 
+# Per-field masking rules. Says *how* each sensitive field is obfuscated (a regex
+# "pattern"+"replacement", or a "replacement" on its own to redact the whole value)
+# and which "permission" unlocks that one field — instead of the blanket
+# `snapadmin.view_raw_pii`, which reveals every masked field of every model.
+# Naming a field here also marks it sensitive, so this setting works on its own.
+# Try it: set the rule below, log in as a non-superuser and open the Customers
+# changelist, /api/demo/customer/ or an audit entry's diff.
+SNAPADMIN_MASKING_RULES = {}
+#   {"demo.Customer": {"email": {"pattern": r"[^@]", "replacement": "#"},
+#                      "first_name": {"replacement": "[redacted]",
+#                                     "permission": "demo.view_customer"}}}
+
 # Admin-index nesting (issues #4 / #16). Fold auto-generated sections into
 # existing app groups, hide groups, or rename headings — no custom AdminSite.
 # All empty → the index is left exactly as Django builds it.

@@ -1,0 +1,53 @@
+{% extends "admin/base_site.html" %}{% load i18n %}{% comment %}
+Per-object audit timeline: every recorded change to one object, newest first,
+each rendered as a field-level diff.
+
+Extends the active admin's base template, so it inherits whichever theme is in
+play (plain Django admin or django-unfold) instead of pinning either one's
+markup. Everything it adds lives in the `content` block; only the diff tables
+carry inline styling (see snapadmin/audit_diff.html).
+
+Context is built by SnapadminAuditLogAdmin.timeline_view().
+{% endcomment %}
+
+{% block content %}
+<div id="snapadmin-audit-timeline">
+    <p>
+        <a href="{{ changelist_url }}">&larr; {% translate "Back to the audit log" %}</a>
+    </p>
+
+    {% comment %}
+    Deliberately not a {% blocktranslate %}…{% plural %} pair: the shipped catalogs
+    carry no Plural-Forms header, so introducing the project's first plural entry
+    here would mean reworking all ten of them for one line.
+    {% endcomment %}
+    <p>
+        {% blocktranslate trimmed with target=target %}Audit entries for {{ target }}{% endblocktranslate %}:
+        <strong>{{ total }}</strong>{% if target_repr %} — {{ target_repr }}{% endif %}
+    </p>
+
+    {% if truncated %}
+    <p class="help">
+        {% blocktranslate trimmed with limit=limit %}
+            Showing the {{ limit }} most recent entries. Use
+            <code>manage.py snapadmin_audit_export</code> for the full history.
+        {% endblocktranslate %}
+    </p>
+    {% endif %}
+
+    {% for item in entries %}
+    <div class="module" style="margin-bottom:1.5rem;padding:.75rem 1rem;border:1px solid rgba(128,128,128,.35);border-radius:.375rem">
+        <h2 style="margin-top:0">{{ item.entry.timestamp }} — {{ item.entry.get_action_display }}</h2>
+        <p style="opacity:.8">
+            {% blocktranslate trimmed with actor=item.entry.actor_repr|default:_("anonymous") %}
+                by {{ actor }}
+            {% endblocktranslate %}
+            {% if item.entry.ip_address %} · {{ item.entry.ip_address }}{% endif %}
+        </p>
+        {% include "snapadmin/audit_diff.html" with rows=item.rows %}
+    </div>
+    {% empty %}
+    <p>{% translate "No audit entries have been recorded for this object." %}</p>
+    {% endfor %}
+</div>
+{% endblock %}

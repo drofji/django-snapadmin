@@ -7,7 +7,7 @@ DRF serializers for the SnapAdmin auto-generated REST API.
 from django.apps import apps
 from rest_framework import serializers
 
-from snapadmin.masking import get_masked_fields, mask_value, user_can_view_pii
+from snapadmin.masking import get_masked_fields, mask_field, user_can_view_pii
 from snapadmin.models import APIToken
 
 
@@ -35,7 +35,9 @@ class PIIMaskingSerializerMixin:
             return data
         for field in masked:
             if field in data:
-                data[field] = mask_value(data[field])
+                data[field] = mask_field(
+                    model._meta.app_label, model._meta.model_name, field, data[field], user
+                )
         return data
 
 

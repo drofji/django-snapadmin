@@ -60,6 +60,25 @@ class TestSettingsGatedCapabilities:
     def test_pii_masking_off_when_unconfigured(self):
         assert _collect()["pii_masking"] is False
 
+    @override_settings(
+        SNAPADMIN_MASKED_FIELDS={},
+        SNAPADMIN_MASKING_RULES={"demo.customer": {"email": {"replacement": "x"}}},
+    )
+    def test_pii_masking_on_from_rules_alone(self):
+        # A rule declares the field sensitive, so masking is adopted even with
+        # SNAPADMIN_MASKED_FIELDS empty.
+        data = _collect(verbose=True)
+        assert data["pii_masking"] is True
+        assert data["details"]["pii_masking"] == "1 field, 1 rule"
+
+    @override_settings(
+        SNAPADMIN_MASKED_FIELDS={"demo.customer": ["email", "origin"]},
+        SNAPADMIN_MASKING_RULES={"demo.customer": {"email": {"replacement": "x"}}},
+    )
+    def test_pii_masking_counts_the_union_not_the_sum(self):
+        data = _collect(verbose=True)
+        assert data["details"]["pii_masking"] == "2 fields, 1 rule"
+
     @override_settings(SNAPADMIN_HEALTH_ALERT_EMAILS=["ops@example.com"])
     def test_health_alerts_on_with_recipients(self):
         data = _collect(verbose=True)

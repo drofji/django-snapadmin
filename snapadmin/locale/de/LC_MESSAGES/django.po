@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-16 14:53+0000\n"
+"POT-Creation-Date: 2026-08-20 23:06+0000\n"
 "Language: de\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -41,8 +41,20 @@ msgstr "Aktiv"
 msgid "Message"
 msgstr "Nachricht"
 
+msgid "Audit timeline"
+msgstr "Audit-Verlauf"
+
 msgid "Changes"
 msgstr "Änderungen"
+
+msgid "Timeline"
+msgstr "Verlauf"
+
+msgid "View the full change timeline"
+msgstr "Vollständigen Änderungsverlauf anzeigen"
+
+msgid "Object"
+msgstr "Objekt"
 
 msgid "Action"
 msgstr "Aktion"
@@ -192,9 +204,6 @@ msgstr "Modell"
 msgid "Object ID"
 msgstr "Objekt-ID"
 
-msgid "Object"
-msgstr "Objekt"
-
 msgid "Before/after field diff, if any."
 msgstr "Feld-Unterschied vor/nach, falls vorhanden."
 
@@ -304,6 +313,42 @@ msgstr "Reindex-Auftrag"
 
 msgid "Reindex Jobs"
 msgstr "Reindex-Aufträge"
+
+msgid "Field"
+msgstr "Feld"
+
+msgid "Before"
+msgstr "Vorher"
+
+msgid "After"
+msgstr "Nachher"
+
+msgid "No field-level diff was recorded for this action."
+msgstr "Für diese Aktion wurde kein Feld-Diff aufgezeichnet."
+
+msgid "Back to the audit log"
+msgstr "Zurück zum Audit-Log"
+
+#, python-format
+msgid "Audit entries for %(target)s"
+msgstr "Audit-Einträge für %(target)s"
+
+#, python-format
+msgid ""
+"Showing the %(limit)s most recent entries. Use <code>manage.py "
+"snapadmin_audit_export</code> for the full history."
+msgstr ""
+"Es werden die %(limit)s neuesten Einträge angezeigt. Für die vollständige Historie <code>manage.py snapadmin_audit_export</code> verwenden."
+
+msgid "anonymous"
+msgstr "anonym"
+
+#, python-format
+msgid "by %(actor)s"
+msgstr "von %(actor)s"
+
+msgid "No audit entries have been recorded for this object."
+msgstr "Für dieses Objekt wurden keine Audit-Einträge aufgezeichnet."
 
 msgid "Skip to main content"
 msgstr "Zum Hauptinhalt springen"
@@ -580,7 +625,9 @@ msgid "Welcome"
 msgstr "Willkommen"
 
 msgid "You can not create nested object without parent"
-msgstr "Ein verschachteltes Objekt kann nicht ohne übergeordnetes Objekt angelegt werden"
+msgstr ""
+"Ein verschachteltes Objekt kann nicht ohne übergeordnetes Objekt angelegt "
+"werden"
 
 msgid "You have been successfully logged out from the administration"
 msgstr "Sie wurden erfolgreich aus der Administration abgemeldet"

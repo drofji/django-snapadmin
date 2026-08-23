@@ -45,6 +45,30 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   command palette) in English around a translated page. SnapAdmin now supplies those strings in all
   ten locales; nothing to configure, and your project's own catalogs still take precedence.
 
+- **A readable per-object diff timeline in the audit log.** The audit trail already stored a
+  structured `{field: {"old": …, "new": …}}` diff; the admin only ever printed it as raw JSON. Every
+  entry now renders as a field-level before/after table, and the *Object* column links to a
+  **timeline** — every recorded change to that one object on a single page, newest first, at
+  `/admin/snapadmin/snapadminauditlog/timeline/<app>/<model>/<id>/`. Both views mask through the
+  same rules as the rest of the admin, and both are gated on the audit log's own view permission,
+  so the timeline can never show more than the list it is reached from. Long histories are capped at
+  100 entries per page (`timeline_max_entries`); `manage.py snapadmin_audit_export` still has the
+  full history.
+
+- **`SNAPADMIN_MASKING_RULES` — per-field masking rules and per-field PII permissions.** How a field
+  is obfuscated used to be fixed by its type. A rule now sets it per field: a regex rewrite
+  (`{"pattern": r"\d(?=\d{4})", "replacement": "*"}` → `************1111`), a flat redaction
+  (`{"replacement": "[redacted]"}`), and/or a `permission` that unlocks *that one field* for whoever
+  holds it, without granting the blanket `snapadmin.view_raw_pii`. Declaring a rule also declares the
+  field sensitive, so `SNAPADMIN_MASKED_FIELDS` stays optional and **completely unchanged** where it
+  is already in use. Rules apply everywhere masking does — admin changelist, REST, GraphQL,
+  background exports and the audit diff — and `user_can_view_pii(user, field=…)` grew the field
+  argument additively. Patterns are compiled once; one that could backtrack catastrophically
+  (`(a+)+`), one that does not compile, and any value over 4096 characters all fall back to the
+  built-in masker rather than to raw data. Because a rule that names a model or field that does not
+  exist would fail *open* — masking nothing and saying nothing — three new system checks
+  (`snapadmin.E003`–`E005`) reject one at startup.
+
 ### Changed
 - **Rich-text HTML is sanitized on write, not only on render.** `wysiwyg=True` /
   `SnapRichTextField` values are cleaned in `pre_save()`, so every ORM write path (admin form, REST
@@ -55,12 +79,23 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   allowlist via `SNAPADMIN_HTML_SANITIZER`. `QuerySet.update()` is not covered.
 - **`snapadmin_info` reports a demo tree that has drifted from the installed release** in its
   *Version & Status* section. Projects without an extracted demo tree see no change.
+- **Audit diffs keep JSON-native types.** `audit.format_value()` stringified every value, so a diff
+  could not tell `42` from `"42"`, or `False` from `"False"`. Numbers, booleans, strings and `null`
+  are now stored as themselves; everything else (`Decimal`, dates, UUIDs, related objects) is still
+  `str()`-ed, as are non-finite floats, which have no JSON literal. Rows written before this release
+  are untouched and still hold the string form — a consumer of `SnapadminAuditLog.changes` should
+  accept both. The `old`/`new` key names are unchanged and will not be renamed.
 
 ### Fixed
 - **`SnapStatusBadgeField("status", [...])` — the source field and choices may be positional.** They
   were keyword-only, so the obvious call failed with a message that read as "you forgot it". A wrong
   or missing argument now raises a `ValueError` naming the field and the call to write, at import
   time rather than at render time.
+- **The audit-log change form no longer prints the unmasked diff.** For a viewer without PII access
+  the raw `changes` JSON was swapped for a masked copy in `readonly_fields`, which dropped the real
+  field out of that list and back into the form — where Django rendered it read-only straight from
+  the model, unmasked, right beside the masked one. The raw field is now excluded from the form
+  outright and only the rendered diff is shown.
 - **`snapadmin_info` survives a failing section.** A collector that raises now renders as
   `Title: unavailable — ExceptionType: message` (`collector_error` in `--json`) instead of aborting
   the report; credentials in the message are redacted, and a crashed health probe still fails

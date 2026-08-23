@@ -142,6 +142,12 @@ Edit one there and it takes effect immediately, no restart: e.g. set
 `SNAPADMIN_MASKED_FIELDS` to `{"demo.Customer": ["email"]}` and the Customer API
 starts masking emails on the next request.
 
+`core/settings.py` also carries a commented `SNAPADMIN_MASKING_RULES` example next
+to it. Uncomment it and the same email is masked by *your* pattern rather than the
+built-in one, `first_name` is redacted outright, and a non-superuser holding
+`demo.view_customer` gets that one field raw — visible in the Customers changelist,
+in `/api/demo/customer/`, in GraphQL, in an async export, and in the audit-log diff.
+
 How it works (and why it's demo-only) lives in
 [`apps/shop/managed_settings.py`](apps/shop/managed_settings.py): the `snapadmin`
 package never depends on `django-extra-settings`, so the demo *syncs* each DB value
@@ -168,8 +174,9 @@ export ceilings from a web form, with no deploy trail.
 
 This project deliberately exercises SnapAdmin's security posture — the same
 controls documented in the root [`SECURITY.md`](../SECURITY.md): the staff-gated
-system dashboard, PII masking (`SNAPADMIN_MASKED_FIELDS`), the immutable audit
-trail, per-model API field-exposure/write allowlists, API pagination and
+system dashboard, PII masking (`SNAPADMIN_MASKED_FIELDS` + the per-field
+`SNAPADMIN_MASKING_RULES`), the immutable audit trail and its per-object diff
+timeline, per-model API field-exposure/write allowlists, API pagination and
 throttling, and the validated async export. Treat `demo/` as a reference for how
 to wire those into a real project, not just a feature tour.
 

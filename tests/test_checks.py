@@ -311,6 +311,58 @@ class TestUnfoldTheme:
         assert "django-snapadmin[theme]" in result[0].hint
 
 
+class TestMaskingRules:
+    """SNAPADMIN_MASKING_RULES fails open — a bad rule masks nothing and says
+    nothing — so every way of getting it wrong is an error, not a warning."""
+
+    def test_unset_is_clean(self):
+        assert checks.check_masking_rules(None) == []
+
+    @override_settings(SNAPADMIN_MASKING_RULES={
+        "demo.Customer": {"email": {"pattern": r"[^@]", "replacement": "#"}},
+    })
+    def test_valid_rule_is_clean(self):
+        assert checks.check_masking_rules(None) == []
+
+    @override_settings(SNAPADMIN_MASKING_RULES={"demo.Ghost": {"x": {"replacement": "y"}}})
+    def test_unknown_model_is_e003(self):
+        assert [e.id for e in checks.check_masking_rules(None)] == ["snapadmin.E003"]
+
+    @override_settings(SNAPADMIN_MASKING_RULES={"nodot": {"x": {"replacement": "y"}}})
+    def test_unparsable_key_is_e003(self):
+        assert [e.id for e in checks.check_masking_rules(None)] == ["snapadmin.E003"]
+
+    @override_settings(SNAPADMIN_MASKING_RULES={"demo.Customer": {"nope": {"replacement": "y"}}})
+    def test_unknown_field_is_e004(self):
+        assert [e.id for e in checks.check_masking_rules(None)] == ["snapadmin.E004"]
+
+    @override_settings(SNAPADMIN_MASKING_RULES={"demo.Customer": {"email": "not-a-dict"}})
+    def test_non_dict_rule_is_e005(self):
+        assert [e.id for e in checks.check_masking_rules(None)] == ["snapadmin.E005"]
+
+    @override_settings(SNAPADMIN_MASKING_RULES={
+        "demo.Customer": {"email": {"pattern": r"(a+)+", "replacement": "*"}},
+    })
+    def test_catastrophic_pattern_is_e005(self):
+        result = checks.check_masking_rules(None)
+        assert [e.id for e in result] == ["snapadmin.E005"]
+        assert "quantifies a group" in result[0].msg
+
+    @override_settings(SNAPADMIN_MASKING_RULES={
+        "demo.Customer": {"email": {"pattern": "([a-z]", "replacement": "*"}},
+    })
+    def test_uncompilable_pattern_is_e005(self):
+        result = checks.check_masking_rules(None)
+        assert [e.id for e in result] == ["snapadmin.E005"]
+        assert "not a valid regex" in result[0].msg
+
+    @override_settings(SNAPADMIN_MASKING_RULES={
+        "demo.Customer": {"email": {"permission": "demo.view_customer"}},
+    })
+    def test_rule_without_a_pattern_is_clean(self):
+        assert checks.check_masking_rules(None) == []
+
+
 # ── integration ──────────────────────────────────────────────────────────────
 
 class TestIntegration:

@@ -2,8 +2,659 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-08-20 23:06+0000\n"
+"Language: en\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Language: en\n"
 
+msgid "Access Control"
+msgstr ""
+
+msgid "Audit"
+msgstr ""
+
+#, python-format
+msgid "API token created. Copy it now — it will not be shown again: %(key)s"
+msgstr ""
+
+msgid "Token Key"
+msgstr ""
+
+msgid "hidden — shown only once at creation"
+msgstr ""
+
+msgid "Status"
+msgstr ""
+
+msgid "Disabled"
+msgstr ""
+
+msgid "Expired"
+msgstr ""
+
+msgid "Active"
+msgstr ""
+
+msgid "Message"
+msgstr ""
+
+msgid "Audit timeline"
+msgstr ""
+
+msgid "Changes"
+msgstr ""
+
+msgid "Timeline"
+msgstr ""
+
+msgid "View the full change timeline"
+msgstr ""
+
+msgid "Object"
+msgstr ""
+
+msgid "Action"
+msgstr ""
+
+msgid "Allowed models must be a list."
+msgstr ""
+
+#, python-format
+msgid "Invalid model format: '%(item)s'."
+msgstr ""
+
+#, python-format
+msgid "Model '%(item)s' does not exist."
+msgstr ""
+
+msgid "Token Name"
+msgstr ""
+
+msgid ""
+"A descriptive name for this token (e.g. 'CI Pipeline', 'Read-only "
+"dashboard')."
+msgstr ""
+
+msgid "Token Prefix"
+msgstr ""
+
+msgid "First 8 characters of the key, for identification. Not secret."
+msgstr ""
+
+msgid "Token Digest"
+msgstr ""
+
+msgid ""
+"SHA-256 hash of the secret key. The raw key is never stored — it is shown "
+"only once, at creation."
+msgstr ""
+
+msgid "Owner"
+msgstr ""
+
+msgid "Expiration Date"
+msgstr ""
+
+msgid "Leave blank for a token that never expires."
+msgstr ""
+
+msgid "Allowed Models"
+msgstr ""
+
+msgid "List of 'app_label.ModelName' strings this token can access."
+msgstr ""
+
+msgid "Is Active"
+msgstr ""
+
+msgid "Inactive tokens are rejected without being deleted."
+msgstr ""
+
+msgid "Created At"
+msgstr ""
+
+msgid "Last Used At"
+msgstr ""
+
+msgid "API Token"
+msgstr ""
+
+msgid "API Tokens"
+msgstr ""
+
+msgid "Can view unmasked PII data"
+msgstr ""
+
+msgid "Exception"
+msgstr ""
+
+msgid ""
+"Exception class name, or HTTP<code> for a 5xx response without an exception."
+msgstr ""
+
+msgid "Path"
+msgstr ""
+
+msgid "Method"
+msgstr ""
+
+msgid "Status Code"
+msgstr ""
+
+msgid "Fingerprint"
+msgstr ""
+
+msgid "SHA-256 of exception class + path — groups repeats of the same error."
+msgstr ""
+
+msgid "Traceback"
+msgstr ""
+
+msgid "Occurred At"
+msgstr ""
+
+msgid "Error Event"
+msgstr ""
+
+msgid "Error Events"
+msgstr ""
+
+msgid "Created"
+msgstr ""
+
+msgid "Updated"
+msgstr ""
+
+msgid "Deleted"
+msgstr ""
+
+msgid "Actor"
+msgstr ""
+
+msgid "Actor (snapshot)"
+msgstr ""
+
+msgid "IP Address"
+msgstr ""
+
+msgid "User Agent"
+msgstr ""
+
+msgid "Content Type"
+msgstr ""
+
+msgid "App Label"
+msgstr ""
+
+msgid "Model"
+msgstr ""
+
+msgid "Object ID"
+msgstr ""
+
+msgid "Before/after field diff, if any."
+msgstr ""
+
+msgid "Timestamp"
+msgstr ""
+
+msgid "Audit Log"
+msgstr ""
+
+msgid "Audit Logs"
+msgstr ""
+
+msgid "Audit log entries are immutable and cannot be modified."
+msgstr ""
+
+msgid "Audit log entries are immutable and cannot be deleted."
+msgstr ""
+
+msgid "Pending"
+msgstr ""
+
+msgid "Processing"
+msgstr ""
+
+msgid "Completed"
+msgstr ""
+
+msgid "Failed"
+msgstr ""
+
+msgid "Cancelled"
+msgstr ""
+
+msgid "Format"
+msgstr ""
+
+msgid "Filters"
+msgstr ""
+
+msgid "ORM field=value filters applied to the export queryset."
+msgstr ""
+
+msgid "Row Source"
+msgstr ""
+
+msgid ""
+"Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."
+msgstr ""
+
+msgid "Total Rows"
+msgstr ""
+
+msgid "Processed Rows"
+msgstr ""
+
+msgid "Rows written so far — drives progress-percent and ETA reporting."
+msgstr ""
+
+msgid "Resume Cursor (PK)"
+msgstr ""
+
+msgid ""
+"Primary key of the last exported row; blank means start from the beginning."
+msgstr ""
+
+msgid "Resume Byte Offset"
+msgstr ""
+
+msgid "Byte length of the working file confirmed at cursor_pk."
+msgstr ""
+
+msgid "File Name"
+msgstr ""
+
+msgid "Error"
+msgstr ""
+
+msgid "Requested By"
+msgstr ""
+
+msgid "Started At"
+msgstr ""
+
+msgid "Finished At"
+msgstr ""
+
+msgid "Export Job"
+msgstr ""
+
+msgid "Export Jobs"
+msgstr ""
+
+msgid ""
+"Primary key of the last indexed row; blank means start from the beginning."
+msgstr ""
+
+msgid "Reindex Job"
+msgstr ""
+
+msgid "Reindex Jobs"
+msgstr ""
+
+msgid "Field"
+msgstr ""
+
+msgid "Before"
+msgstr ""
+
+msgid "After"
+msgstr ""
+
+msgid "No field-level diff was recorded for this action."
+msgstr ""
+
+msgid "Back to the audit log"
+msgstr ""
+
+#, python-format
+msgid "Audit entries for %(target)s"
+msgstr ""
+
+#, python-format
+msgid ""
+"Showing the %(limit)s most recent entries. Use <code>manage.py "
+"snapadmin_audit_export</code> for the full history."
+msgstr ""
+
+msgid "anonymous"
+msgstr ""
+
+#, python-format
+msgid "by %(actor)s"
+msgstr ""
+
+msgid "No audit entries have been recorded for this object."
+msgstr ""
+
+msgid "Skip to main content"
+msgstr ""
+
+msgid "SnapAdmin on GitHub (opens in a new tab)"
+msgstr ""
+
+msgid "System entry points"
+msgstr ""
+
+msgid "System Entry Points"
+msgstr ""
+
+msgid "Managed Models"
+msgstr ""
+
+msgid "Scheduled Cron Jobs"
+msgstr ""
+
+msgid "Name"
+msgstr ""
+
+msgid "Task"
+msgstr ""
+
+msgid "Schedule"
+msgstr ""
+
+msgid "Description"
+msgstr ""
+
+msgid "Data Distribution"
+msgstr ""
+
+msgid "Bar chart of record counts per managed model"
+msgstr ""
+
+msgid "System Health"
+msgstr ""
+
+msgid "Environment"
+msgstr ""
+
+msgid "Mode"
+msgstr ""
+
+msgid "Hostname"
+msgstr ""
+
+msgid "API Capabilities"
+msgstr ""
+
+msgid ""
+"Automatic CRUD endpoints for all models. Supports filtering, pagination, and "
+"token authentication."
+msgstr ""
+
+msgid "Dynamic schema generation powered by Graphene."
+msgstr ""
+
+#, python-format
+msgid "Built with <strong>SnapAdmin</strong> v%(version)s"
+msgstr ""
+
+msgid "Record Count"
+msgstr ""
+
+msgid "Language"
+msgstr ""
+
+msgid "Single sign-on providers"
+msgstr ""
+
+msgid "Or sign in with"
+msgstr ""
+
+msgid "Add new item"
+msgstr ""
+
+msgid "Add row"
+msgstr ""
+
+msgid "After you've created a user, you’ll be able to edit more user options."
+msgstr ""
+
+msgid "All applications"
+msgstr ""
+
+msgid "Apply Filters"
+msgstr ""
+
+msgid "Cancel"
+msgstr ""
+
+msgid "Choose file to upload"
+msgstr ""
+
+msgid "Click to cancel"
+msgstr ""
+
+msgid "Click to download"
+msgstr ""
+
+msgid "Collapse"
+msgstr ""
+
+msgid "Current file"
+msgstr ""
+
+msgid "Dark"
+msgstr ""
+
+msgid "Date"
+msgstr ""
+
+msgid "Date from"
+msgstr ""
+
+msgid "Date to"
+msgstr ""
+
+msgid "Default"
+msgstr ""
+
+msgid "Edit"
+msgstr ""
+
+msgid "Expand row"
+msgstr ""
+
+msgid "False"
+msgstr ""
+
+msgid "Forgotten your password or username?"
+msgstr ""
+
+msgid "From"
+msgstr ""
+
+msgid "General"
+msgstr ""
+
+msgid "Go back"
+msgstr ""
+
+msgid "Image preview"
+msgstr ""
+
+msgid "Light"
+msgstr ""
+
+msgid "More actions"
+msgstr ""
+
+msgid "Navigate"
+msgstr ""
+
+msgid "New"
+msgstr ""
+
+msgid "Next"
+msgstr ""
+
+msgid "No"
+msgstr ""
+
+msgid "No data"
+msgstr ""
+
+msgid "No results found"
+msgstr ""
+
+msgid "Non field specific"
+msgstr ""
+
+msgid "Not enough data."
+msgstr ""
+
+msgid "Nothing matched your search"
+msgstr ""
+
+msgid "Previous"
+msgstr ""
+
+msgid "Recent searches"
+msgstr ""
+
+msgid "Record picture"
+msgstr ""
+
+msgid "Reset filters"
+msgstr ""
+
+msgid "Reset to default"
+msgstr ""
+
+msgid "Return to site"
+msgstr ""
+
+msgid "Row"
+msgstr ""
+
+msgid "Run"
+msgstr ""
+
+msgid "Run the selected action"
+msgstr ""
+
+msgid "Search apps and models..."
+msgstr ""
+
+msgid "Select"
+msgstr ""
+
+msgid "Select action"
+msgstr ""
+
+msgid "Select action to run"
+msgstr ""
+
+msgid "Select all rows"
+msgstr ""
+
+msgid "Select currency"
+msgstr ""
+
+msgid "Select format"
+msgstr ""
+
+msgid "Select record"
+msgstr ""
+
+msgid "Select value"
+msgstr ""
+
+msgid "System"
+msgstr ""
+
+msgid "This item will be deleted."
+msgstr ""
+
+msgid ""
+"This page yielded into no results. Create a new item or reset your filters."
+msgstr ""
+
+msgid "To"
+msgstr ""
+
+msgid "Toggle password visibility"
+msgstr ""
+
+msgid "True"
+msgstr ""
+
+msgid "Type to search"
+msgstr ""
+
+msgid "Update"
+msgstr ""
+
+msgid "Value"
+msgstr ""
+
+msgid "View traceback"
+msgstr ""
+
+msgid "Welcome"
+msgstr ""
+
+msgid "You can not create nested object without parent"
+msgstr ""
+
+msgid "You have been successfully logged out from the administration"
+msgstr ""
+
+msgid "hide warning"
+msgstr ""
+
+msgid "Enter a valid phone number (e.g. +49151234567 or 089-123456)."
+msgstr ""
+
+msgid "Enter a valid hex color code (e.g. #FF5733 or #F53)."
+msgstr ""
+
+#, python-format
+msgid "File extension '%(ext)s' is not allowed. Allowed: %(allowed)s"
+msgstr ""
+
+#, python-format
+msgid "File size is %(size)s bytes. Max allowed is %(max_size)s bytes."
+msgstr ""
+
+msgid "Could not verify file encoding."
+msgstr ""
+
+#, python-format
+msgid "Invalid encoding. Allowed: %(encodings)s"
+msgstr ""
+
+msgid "online"
+msgstr ""
+
+msgid "offline"
+msgstr ""
+
+msgid "disabled"
+msgstr ""
+
+msgid "Admin Panel"
+msgstr ""
+
+msgid "REST API Root"
+msgstr ""
+
+msgid "Swagger Docs"
+msgstr ""
+
+msgid "GraphQL API"
+msgstr ""
+
+#, python-format
+msgid "Database (%(name)s)"
+msgstr ""
+
+msgid "Local"
+msgstr ""
+
+msgid "No description provided."
+msgstr ""

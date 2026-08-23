@@ -335,7 +335,8 @@ there is no bad automatic change to undo.
 - [Resumable bulk reindex](https://drofji.github.io/django-snapadmin/#bulk-reindex-command) with live progress, `--resume`, `--parallel` and `--limit`
 
 **Operations**
-- [GDPR retention](https://drofji.github.io/django-snapadmin/#gdpr) (`data_retention_days`) and an immutable audit trail
+- [GDPR retention](https://drofji.github.io/django-snapadmin/#gdpr) (`data_retention_days`) and an [immutable audit trail](https://drofji.github.io/django-snapadmin/#audit-trail) with per-object [diff timelines](https://drofji.github.io/django-snapadmin/#audit-timeline)
+- [PII masking](https://drofji.github.io/django-snapadmin/#pii-masking) — declare sensitive fields once and they are obfuscated in the admin, REST, GraphQL, exports and the audit diff; [`SNAPADMIN_MASKING_RULES`](https://drofji.github.io/django-snapadmin/#masking-rules) sets the pattern per field and can unlock one field for one permission
 - [Error monitoring](https://drofji.github.io/django-snapadmin/#error-monitoring) with spike alerts and daily grouped digests, plus health-probe alerts when a subsystem goes down — delivered by email and/or [Slack, Discord, Teams and Telegram webhooks](https://drofji.github.io/django-snapadmin/#alert-channels)
 - [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, offsite FTPS/SFTP
 - [Large-dataset tuning](https://drofji.github.io/django-snapadmin/#performance) — automatic `list_select_related` (no admin N+1), estimated counts, paging caps
@@ -375,7 +376,7 @@ SNAPADMIN_GRAPHQL_REQUIRE_AUTH = True   # auth + per-model perms on every resolv
 SNAPADMIN_URL_PREFIX           = ""     # relocate the whole API surface
 ```
 
-Misconfiguration shows up at startup as a Django system check (`snapadmin.W001`–`W007`), not as a
+Misconfiguration shows up at startup as a Django system check (`snapadmin.W001`–`W007`, `E001`–`E005`), not as a
 mystery at request time — read those first when something behaves unexpectedly.
 
 → **[Full settings reference](https://drofji.github.io/django-snapadmin/#env-vars)** — every

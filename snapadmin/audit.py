@@ -14,6 +14,13 @@ SnapAdmin-generated admin:
   before/after field diff;
 * **WHEN** — a timezone-aware timestamp.
 
+The diff is stored in ``SnapadminAuditLog.changes`` as
+``{field_name: {"old": <before>, "new": <after>}}``. Those two key names are the
+on-disk contract — every row ever written uses them, so they are never renamed;
+read them as-is when consuming the trail from a SIEM. Values keep their
+JSON-native type where they have one (see :func:`format_value`), so a numeric
+``42`` stays distinguishable from the string ``"42"``.
+
 Rows are immutable at the ORM level (``SnapadminAuditLog.save``/``delete``
 raise once persisted) and the admin is fully read-only. Recording is fail-safe:
 an audit failure must never turn a working admin action into an error, so
@@ -24,6 +31,9 @@ SIEM with ``manage.py snapadmin_audit_export``.
 """
 
 from __future__ import annotations
+
+import json
+from math import isfinite
 
 from django.conf import settings
 
@@ -59,11 +69,78 @@ def user_agent(request) -> str:
     return request.META.get("HTTP_USER_AGENT", "")
 
 
-def format_value(value) -> str | None:
-    """Render a field value for the diff — stringified so it is JSON-safe."""
-    if value is None:
-        return None
+def format_value(value) -> object | None:
+    """Render a field value for the diff, JSON-safe and type-preserving.
+
+    Values that JSON represents natively are stored as themselves, so a diff
+    keeps the difference between ``42`` and ``"42"`` (and between ``False``,
+    ``0`` and ``"False"``) instead of flattening everything to text:
+
+    * ``None`` → ``None``; ``bool`` / ``int`` / ``str`` → unchanged;
+    * ``float`` → unchanged when finite. ``inf`` / ``nan`` have no JSON
+      literal and are rejected by strict JSON columns, so they fall back to
+      their string form;
+    * anything else (``Decimal``, ``date``, ``UUID``, a model instance, …) →
+      ``str(value)``, exactly as before.
+
+    Rows written before this became type-preserving hold the stringified form;
+    consumers must accept both.
+    """
+    if value is None or isinstance(value, (bool, int, str)):
+        return value
+    if isinstance(value, float):
+        return value if isfinite(value) else str(value)
     return str(value)
+
+
+def display_value(value) -> str:
+    """Render one diff side as display text.
+
+    ``None`` becomes an em dash (the field had no value on that side), booleans
+    render lowercase so they cannot be confused with the strings ``"True"`` /
+    ``"False"``, and a nested list/dict is shown as compact JSON. Everything
+    else is its ``str``. Callers render the result as text — it is escaped by
+    the template, never marked safe.
+    """
+    if value is None:
+        return "—"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (list, dict)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    return str(value)
+
+
+def diff_rows(changes: dict | None) -> list[dict]:
+    """Flatten a ``changes`` diff into rows ready for rendering.
+
+    ``changes`` is the ``{field: {"old": …, "new": …}}`` mapping stored on
+    ``SnapadminAuditLog.changes`` (already masked, if the viewer is not allowed
+    raw PII). Each row carries the field name, both sides pre-rendered by
+    :func:`display_value`, and ``changed`` — ``False`` when the two sides are
+    equal, which lets a template mute a no-op line instead of dropping it.
+
+    Fields are sorted by name so two entries for the same object read in the
+    same order. A malformed entry (a field whose value is not an
+    ``old``/``new`` mapping — e.g. a hand-written row) degrades to a single
+    "new value" row rather than breaking the view.
+    """
+    if not changes:
+        return []
+    rows = []
+    for field in sorted(changes, key=str):
+        diff = changes[field]
+        if isinstance(diff, dict) and ("old" in diff or "new" in diff):
+            old, new = diff.get("old"), diff.get("new")
+        else:
+            old, new = None, diff
+        rows.append({
+            "field": str(field),
+            "old": display_value(old),
+            "new": display_value(new),
+            "changed": old != new,
+        })
+    return rows
 
 
 def record_audit(request, action: str, instance, changes: dict | None = None) -> None:

@@ -188,6 +188,24 @@ Key protections:
   filter/ordering/search parameters — a masked field is silently excluded from `?field=`,
   `?ordering=field` and `?search=` for a caller without PII access, so match/no-match, sort order or
   search hits can't be used as an oracle to recover the value a masked response body never reveals raw.
+- **Per-field masking rules and permissions** — `SNAPADMIN_MASKING_RULES` sets, per field, how it is
+  obfuscated (a regex `pattern`+`replacement`, or a flat `replacement` redaction) and which
+  `permission` unlocks *that one field*, so raw access can be granted narrowly instead of through the
+  blanket `snapadmin.view_raw_pii`. Naming a field in a rule also marks it sensitive, so the rules
+  cannot be configured in a way that formats a field without also masking it. Rules apply on every
+  masking surface (admin changelist, REST, GraphQL, exports, audit diff) through one choke point,
+  `masking.mask_field()`. Patterns come from settings but still meet production data, so each is
+  compiled once and rejected when it cannot compile or carries a nested quantifier that could
+  backtrack catastrophically (`(a+)+`); values over 4096 characters skip the regex. Every one of those
+  paths — plus a replacement referencing a group the pattern lacks — falls back to the built-in
+  masker, so a broken rule degrades to *more* masking, never to raw data.
+- **Reading the audit trail is not a way around masking** — the audit-log admin renders each entry's
+  diff as a masked field-level table and offers a per-object timeline at
+  `/admin/snapadmin/snapadminauditlog/timeline/<app_label>/<model>/<object_id>/`. Both are gated on
+  the audit log's own view permission (the same one that lists the rows) and mask through the same
+  rules. The raw `changes` JSON is excluded from the change form outright: it was previously only
+  *replaced* in `readonly_fields`, which pushed the real field back into the form where Django
+  rendered it read-only and unmasked next to the masked copy (fixed in the current release).
 - **Immutable audit trail** (`SNAPADMIN_AUDIT_LOG_ENABLED`) records every admin create/update/delete;
   retention via `SNAPADMIN_AUDIT_RETENTION_DAYS` and `snapadmin_audit_export` for SIEM ingestion.
 - **Backups** — 3-2-1 database backups with local/network/FTP(S)/SFTP targets; transport credentials

@@ -1,0 +1,36 @@
+{% load i18n %}{% comment %}
+Field-level diff for one audit-trail entry.
+
+Context: `rows` — the output of `snapadmin.audit.diff_rows()`, i.e. a list of
+{field, old, new, changed} where both sides are already rendered as text and
+already masked for the viewer. Values are printed as text and escaped by the
+template: an audit row holds whatever was typed into the admin, so it is never
+marked safe.
+
+Included per entry by snapadmin/audit_timeline.html and rendered on its own for
+the audit-log change form, so the styling is inline — the fragment must look the
+same under plain Django admin and under django-unfold, without either theme's
+stylesheet. Tints are translucent so they read on a light and a dark background.
+{% endcomment %}
+{% if rows %}
+<table class="snapadmin-audit-diff" style="width:100%;border-collapse:collapse;font-size:.85rem">
+    <thead>
+        <tr>
+            <th scope="col" style="padding:.35rem .5rem;text-align:left;border-bottom:1px solid rgba(128,128,128,.35)">{% translate "Field" %}</th>
+            <th scope="col" style="padding:.35rem .5rem;text-align:left;border-bottom:1px solid rgba(128,128,128,.35)">{% translate "Before" %}</th>
+            <th scope="col" style="padding:.35rem .5rem;text-align:left;border-bottom:1px solid rgba(128,128,128,.35)">{% translate "After" %}</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in rows %}
+        <tr{% if not row.changed %} style="opacity:.55"{% endif %}>
+            <th scope="row" style="padding:.35rem .5rem;text-align:left;vertical-align:top;font-weight:600;border-bottom:1px solid rgba(128,128,128,.2)">{{ row.field }}</th>
+            <td style="padding:.35rem .5rem;vertical-align:top;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;border-bottom:1px solid rgba(128,128,128,.2){% if row.changed %};background:rgba(220,53,69,.12){% endif %}">{{ row.old }}</td>
+            <td style="padding:.35rem .5rem;vertical-align:top;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;border-bottom:1px solid rgba(128,128,128,.2){% if row.changed %};background:rgba(25,135,84,.14){% endif %}">{{ row.new }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="snapadmin-audit-diff-empty" style="opacity:.7">{% translate "No field-level diff was recorded for this action." %}</p>
+{% endif %}
