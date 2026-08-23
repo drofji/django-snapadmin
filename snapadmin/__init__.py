@@ -38,9 +38,11 @@ Three steps take a model from nothing to a full admin + API::
     SnapModel.register_all_admins()
 
 ``snapadmin`` must be in ``INSTALLED_APPS`` and ``snapadmin.urls`` included in
-the root URLconf. Two console scripts help before that point:
-``snapadmin-demo`` runs a throwaway demo project, ``snapadmin-init`` inspects an
-existing project read-only and prints the snippets to paste.
+the root URLconf. Three console scripts help before that point: ``snapadmin-new``
+generates a project you keep (the three steps above, already wired — ``migrate``
+then ``runserver`` work immediately, no Docker, no manual edits), ``snapadmin-demo``
+runs a throwaway demo project, and ``snapadmin-init`` inspects an existing project
+read-only and prints the snippets to paste.
 
 Module map
 ----------
@@ -131,11 +133,16 @@ Tooling
         Elasticsearch and the feature-adoption inventory.
     ``snapadmin.licensing``
         Dependency-licence data behind ``manage.py snapadmin_license_check``.
-    ``snapadmin.quickstart`` · ``snapadmin.integrate`` · ``snapadmin.manage_cli``
-        The console scripts: ``snapadmin-demo``, ``snapadmin-init``, and shims that
-        forward ``snapadmin-info`` / ``snapadmin-license-check`` (either spelling) to
-        the ``manage.py`` command of the same name. All stdlib-only, importing no
-        Django at module level — they run before a project exists.
+    ``snapadmin.scaffold`` · ``snapadmin.quickstart`` · ``snapadmin.integrate`` ·
+    ``snapadmin.manage_cli``
+        The console scripts: ``snapadmin-new`` (generates a project you keep — one
+        worked ``SnapModel``, SQLite, ``.env``/``dist.env``; ``--full`` adds a
+        Dockerfile, docker-compose.yml and the Postgres/Redis/Elasticsearch wiring;
+        templates ship under ``snapadmin/scaffold/templates/`` and render with
+        stdlib ``string.Template``), ``snapadmin-demo``, ``snapadmin-init``, and
+        shims that forward ``snapadmin-info`` / ``snapadmin-license-check`` (either
+        spelling) to the ``manage.py`` command of the same name. All stdlib-only,
+        importing no Django at module level — they run before a project exists.
         ``snapadmin-demo`` stamps the tree it extracts (``snapadmin.quickstart.stamp``),
         so re-running it refreshes that tree — dropping files the new release removed —
         and ``snapadmin_info`` can report a tree left behind by an older release.

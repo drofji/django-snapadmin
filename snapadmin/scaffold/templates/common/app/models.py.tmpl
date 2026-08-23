@@ -1,0 +1,50 @@
+"""
+$app_name/models.py — a worked SnapModel example. Replace it with your own models;
+this one exists to show what one field declaration buys you.
+
+Each ``Snap*Field`` is its plain Django counterpart plus SnapAdmin-only keyword
+arguments (``searchable``, ``filterable``, ``show_in_form``, ...) that drive the
+generated admin list/filters/search *and* the REST/GraphQL API — with no separate
+admin or serializer code to write. None of them add a migration: they are stripped
+before Django sees the field. Full field reference:
+https://drofji.github.io/django-snapadmin/
+"""
+
+from django.utils.translation import gettext_lazy as _
+
+from snapadmin import fields as snap_fields, models as snap_models
+
+
+class Product(snap_models.SnapModel):
+    name = snap_fields.SnapCharField(
+        max_length=200,
+        verbose_name=_("Name"),
+        required=True,
+        searchable=True,
+        show_in_form=True,
+    )
+    price = snap_fields.SnapDecimalField(
+        max_digits=10,
+        decimal_places=2,
+        verbose_name=_("Price"),
+        filterable=True,
+        show_in_form=True,
+    )
+    in_stock = snap_fields.SnapBooleanField(
+        default=True,
+        verbose_name=_("In stock"),
+        filterable=True,
+        show_in_form=True,
+    )
+    created_at = snap_fields.SnapDateTimeField(auto_now_add=True, verbose_name=_("Created"))
+
+    # Mass-assignment allowlist for the auto-generated REST/GraphQL API — only these
+    # fields accept client-supplied values on create/update.
+    api_write_fields = ["name", "price", "in_stock"]
+
+    class Meta:
+        verbose_name = _("Product")
+        verbose_name_plural = _("Products")
+
+    def __str__(self) -> str:
+        return self.name

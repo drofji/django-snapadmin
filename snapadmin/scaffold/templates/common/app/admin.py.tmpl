@@ -1,0 +1,10 @@
+"""
+Registers every SnapModel in $app_name with the Django admin.
+
+SnapModel.register_all_admins() introspects each model's Snap*Field attributes and
+builds a full admin (list display, filters, search) with no further configuration.
+"""
+
+from snapadmin.models import SnapModel
+
+SnapModel.register_all_admins()

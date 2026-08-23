@@ -1,0 +1,15 @@
+
+# ── PostgreSQL (docker-compose service: db) ──────────────────────────────────
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
+POSTGRES_DB=$project_name
+POSTGRES_USER=$project_name
+POSTGRES_PASSWORD=snapadmin
+
+# ── Redis (docker-compose service: redis) ────────────────────────────────────
+REDIS_URL=redis://redis:6379/0
+
+# ── Elasticsearch (docker-compose service: elasticsearch, profile "es") ──────
+# docker compose --profile es up --build
+ELASTICSEARCH_ENABLED=False
+ELASTICSEARCH_URL=http://elasticsearch:9200

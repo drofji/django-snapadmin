@@ -1,0 +1,21 @@
+# SnapAdmin environment variables for $project_name.
+# Copy this file to .env and fill in your values — .env is git-ignored, this file
+# is the one to commit.
+
+# A secret random string used for cryptographic signing. Generate one:
+#   python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+SECRET_KEY=
+
+DEBUG=True
+ALLOWED_HOSTS=localhost,127.0.0.1
+
+# Toggle each SnapAdmin surface independently.
+SNAPADMIN_REST_API_ENABLED=True
+SNAPADMIN_SWAGGER_ENABLED=True
+SNAPADMIN_GRAPHQL_ENABLED=True
+SNAPADMIN_GRAPHIQL_ENABLED=True
+
+# DRF rate limits (empty value disables that throttle).
+SNAPADMIN_THROTTLE_ANON=60/min
+SNAPADMIN_THROTTLE_USER=600/min
+$full_env_extra

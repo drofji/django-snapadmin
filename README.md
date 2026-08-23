@@ -21,7 +21,24 @@ being switched off.
 
 ## 🏁 See it running in 60 seconds
 
-No project, no config, nothing to clone:
+**Start a real project — one you keep, not a throwaway:**
+
+```bash
+pip install django-snapadmin
+snapadmin-new myshop
+cd myshop
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver
+```
+
+Open <http://127.0.0.1:8000/admin/> — the admin, the REST API (`/api/docs/`) and the GraphQL
+endpoint (`/api/graphql/`) are already wired to a worked `Product` model. SQLite, no Docker, no
+manual edits. Pass `--full` for the same project plus a `Dockerfile`, `docker-compose.yml` and the
+PostgreSQL / Redis / Elasticsearch wiring. → **[snapadmin-new reference](https://drofji.github.io/django-snapadmin/#scaffold)**
+
+**Just want to look around first?** A fully-loaded demo (Elasticsearch, audit trail, masking,
+Celery, the works) needs no project of your own either:
 
 ```bash
 pip install django-snapadmin
@@ -128,10 +145,11 @@ and you would rather declare that once than maintain four descriptions of the sa
 
 ---
 
-## 🖥 The four commands
+## 🖥 The five commands
 
 | Command | Answers | What it does |
 |---|---|---|
+| `snapadmin-new` | *"I want to start a project."* | Generates a project you **keep**: `manage.py`, settings, one app with a worked `SnapModel`, SQLite, `.env`/`dist.env`. `migrate` + `runserver` work immediately — no Docker, no manual edits. `--full` adds Docker/Postgres/Redis/ES |
 | `snapadmin-demo` | *"What does this thing actually look like?"* | Downloads and serves a throwaway demo project. Needs no project of your own |
 | `snapadmin-init` | *"How do I add this to my existing project?"* | A **read-only** doctor: prints a present/missing checklist and ready-to-paste snippets. It never edits your code |
 | `snapadmin-info` | *"Is it configured correctly, and is everything up?"* | Version, database, Elasticsearch, Celery, models, system checks, plus a ✓/✗ **feature-adoption audit** |
@@ -146,6 +164,10 @@ snapadmin-license-check   # ≡ snapadmin_license_check
 ```
 
 ```bash
+snapadmin-new myshop                            # a project you keep — SQLite, no Docker
+snapadmin-new myshop --app-name storefront      # name the worked-example app yourself
+snapadmin-new myshop --full                     # + Dockerfile, docker-compose.yml, Postgres/Redis/ES
+
 snapadmin-init                                  # what's missing to wire SnapAdmin in
 snapadmin-init --api --graphql                  # also check the REST / GraphQL config
 
@@ -423,7 +445,7 @@ HTTPS, the Elasticsearch profile, manual setup without Docker, and the seed comm
 
 | Topic | |
 |-------|--|
-| Getting started | [Installation](https://drofji.github.io/django-snapadmin/#installation) · [Integrate an existing project](https://drofji.github.io/django-snapadmin/#snapadmin-init) · [SnapModel](https://drofji.github.io/django-snapadmin/#snap-model) · [Field types](https://drofji.github.io/django-snapadmin/#snap-fields) · [Admin registration](https://drofji.github.io/django-snapadmin/#admin-registration) |
+| Getting started | [Installation](https://drofji.github.io/django-snapadmin/#installation) · [New project (`snapadmin-new`)](https://drofji.github.io/django-snapadmin/#scaffold) · [Integrate an existing project](https://drofji.github.io/django-snapadmin/#snapadmin-init) · [SnapModel](https://drofji.github.io/django-snapadmin/#snap-model) · [Field types](https://drofji.github.io/django-snapadmin/#snap-fields) · [Admin registration](https://drofji.github.io/django-snapadmin/#admin-registration) |
 | APIs | [REST](https://drofji.github.io/django-snapadmin/#api-rest) · [GraphQL](https://drofji.github.io/django-snapadmin/#api-graphql) · [Tokens](https://drofji.github.io/django-snapadmin/#api-tokens) · [Integrating auth / JWT / ETL](https://drofji.github.io/django-snapadmin/#integrating) |
 | Search | [Elasticsearch modes](https://drofji.github.io/django-snapadmin/#elasticsearch) · [Query routing](https://drofji.github.io/django-snapadmin/#es-routing) · [Filters](https://drofji.github.io/django-snapadmin/#es-filter) · [Facets](https://drofji.github.io/django-snapadmin/#es-aggregate) · [Deep scan](https://drofji.github.io/django-snapadmin/#es-scan) |
 | Operations | [Diagnostics (`snapadmin_info`)](https://drofji.github.io/django-snapadmin/#snapadmin-info) · [Licence audit](https://drofji.github.io/django-snapadmin/#license-check) · [Celery & scheduling](https://drofji.github.io/django-snapadmin/#celery) · [GDPR](https://drofji.github.io/django-snapadmin/#gdpr) · [Backups](https://drofji.github.io/django-snapadmin/#backups) · [Error monitoring](https://drofji.github.io/django-snapadmin/#error-monitoring) · [Performance](https://drofji.github.io/django-snapadmin/#performance) |

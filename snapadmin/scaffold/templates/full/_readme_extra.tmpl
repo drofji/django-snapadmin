@@ -1,0 +1,12 @@
+
+## Docker
+
+This project also ships a `Dockerfile` and `docker-compose.yml` (PostgreSQL and Redis,
+plus an optional Elasticsearch service under the `es` profile):
+
+    docker compose up --build
+    # or, with Elasticsearch too:
+    docker compose --profile es up --build
+
+`docker-compose.yml` reads `.env` (via `env_file: .env`) and falls back to SQLite if
+`POSTGRES_HOST` is unset, same as running without Docker.

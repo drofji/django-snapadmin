@@ -233,6 +233,7 @@
     <ul>
       <li><a href="#overview" class="active">Overview</a></li>
       <li><a href="#installation">Installation</a></li>
+      <li><a href="#scaffold">New Project (snapadmin-new)</a></li>
       <li><a href="#snapadmin-init">Integrate an Existing Project</a></li>
       <li><a href="#snap-model">SnapModel</a></li>
       <li><a href="#snap-fields">Snap Fields</a></li>
@@ -440,6 +441,54 @@
 ├── fields.py        # SnapField definitions with admin introspection
 ├── models.py        # SnapModel base, EsManager, and core logic
 └── urls.py          # Auto-configurable API and documentation routes</code></pre>
+
+  <!-- ── New project (snapadmin-new) ──────────────────────────────────────── -->
+  <h2 id="scaffold">🏁 New Project — <code>snapadmin-new</code></h2>
+  <p><code>snapadmin-new</code> (also <code>python -m snapadmin.scaffold</code>) generates a project you
+  <strong>keep</strong> — not a throwaway (<a href="#snapadmin-demo"><code>snapadmin-demo</code></a>) and not
+  a read-only report (<a href="#snapadmin-init"><code>snapadmin-init</code></a>): <code>manage.py</code>, a
+  settings package, one app carrying a worked <code>SnapModel</code> example, SQLite and a
+  <code>.env</code>/<code>dist.env</code>. <code>migrate</code> then <code>runserver</code> work
+  immediately — no Docker, no manual edits.</p>
+
+  <pre><code>pip install django-snapadmin
+snapadmin-new myshop
+cd myshop
+python manage.py migrate
+python manage.py createsuperuser
+python manage.py runserver</code></pre>
+
+  <p>Open <code>http://127.0.0.1:8000/admin/</code> — the admin, the REST API
+  (<code>/api/docs/</code>) and the GraphQL endpoint (<code>/api/graphql/</code>) are already wired to
+  the worked <code>Product</code> model in <code>catalog/models.py</code>. Templates ship inside the
+  wheel under <code>snapadmin/scaffold/templates/</code> and render with the standard library's
+  <code>string.Template</code> — no Jinja, no extra dependency.</p>
+
+  <div class="callout callout-info">
+    <strong>Never overwrites.</strong>
+    <code>snapadmin-new</code> refuses to write into a non-empty target directory — a mistaken
+    re-run cannot silently clobber a project you already edited. The project/app name is validated
+    the same way <code>django-admin startproject</code> validates one: a valid Python identifier
+    that doesn't shadow an existing importable module.
+  </div>
+
+  <p>Pass <code>--full</code> for the containerised stack — same project, plus a
+  <code>Dockerfile</code>, <code>docker-compose.yml</code> and the PostgreSQL / Redis / Elasticsearch
+  wiring (Postgres when <code>POSTGRES_HOST</code> is set, SQLite otherwise, so
+  <code>manage.py check</code>/<code>migrate</code> still work with no services running):</p>
+  <pre><code>snapadmin-new myshop --full
+cd myshop
+docker compose up --build</code></pre>
+
+  <h3>Flags</h3>
+  <table>
+    <thead><tr><th>Flag</th><th>Effect</th></tr></thead>
+    <tbody>
+      <tr><td><code>--path DIR</code></td><td>Directory to create the project in (default: the current directory).</td></tr>
+      <tr><td><code>--app-name NAME</code></td><td>Name of the app carrying the worked <code>SnapModel</code> example (default: <code>catalog</code>).</td></tr>
+      <tr><td><code>--full</code></td><td>Also write a <code>Dockerfile</code>, <code>docker-compose.yml</code> and the Postgres/Redis/Elasticsearch wiring.</td></tr>
+    </tbody>
+  </table>
 
   <!-- ── Quick Start (snapadmin-demo) ─────────────────────────────────────── -->
   <h2 id="snapadmin-demo">🚀 Quick Start — <code>snapadmin-demo</code></h2>

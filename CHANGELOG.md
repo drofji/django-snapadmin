@@ -11,6 +11,15 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 ## Unreleased
 
 ### Added
+- **`snapadmin-new` scaffolds a project you keep.** `pip install django-snapadmin && snapadmin-new
+  myshop` writes `manage.py`, a settings package, one app with a worked `SnapModel` example, SQLite
+  and a `.env`/`dist.env` — `migrate` then `runserver` work immediately, no Docker, no manual edits.
+  `--full` additionally writes a `Dockerfile`, `docker-compose.yml` and the PostgreSQL / Redis /
+  Elasticsearch wiring. Templates ship inside the wheel under `snapadmin/scaffold/templates/` and
+  render with the standard library's `string.Template` — no new dependency. It refuses to write into
+  a non-empty target directory, and validates the project/app name the way `django-admin
+  startproject` does (a valid identifier that doesn't shadow an existing importable module).
+
 - **`snapadmin-demo` refreshes an existing demo tree instead of layering over it.** Every extraction
   now leaves a `.snapadmin-demo.json` stamp (the release it came from and the files it wrote). A
   re-run names both versions before touching anything and deletes the files the new release no

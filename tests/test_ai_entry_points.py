@@ -73,6 +73,7 @@ MAPPED_MODULES = [
     "snapadmin.licensing",
     "snapadmin.quickstart",
     "snapadmin.integrate",
+    "snapadmin.scaffold",
 ]
 
 #: Management commands the docstring advertises, as command-module names.

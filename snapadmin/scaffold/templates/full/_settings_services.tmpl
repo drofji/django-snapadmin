@@ -1,0 +1,11 @@
+
+# Elasticsearch (optional — pip install "django-snapadmin[elasticsearch]", then set
+# es_index_enabled = True on a model to use it). docker-compose.yml runs a cluster
+# under the "es" profile and points these at it.
+ELASTICSEARCH_ENABLED = env_bool("ELASTICSEARCH_ENABLED", False)
+ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200")
+
+# Redis (optional — pip install "django-snapadmin[celery]" for background tasks,
+# then add 'django_celery_beat' / 'django_celery_results' to INSTALLED_APPS).
+# docker-compose.yml ships a Redis service and sets this for the app container.
+REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")

@@ -10,6 +10,37 @@ Each notable change should be a paragraph or bullet, explaining what changed and
 Added
 -----
 
+* **``snapadmin-new`` generates a project you keep.** Until now the package offered a throwaway demo
+  (``snapadmin-demo``) and a read-only doctor for an existing project (``snapadmin-init``) — neither
+  produced something you actually kept, which was the gap between the package and its "quick
+  backend" promise. ``snapadmin-new`` (also ``python -m snapadmin.scaffold``) closes it::
+
+      pip install django-snapadmin
+      snapadmin-new myshop
+      cd myshop
+      python manage.py migrate
+      python manage.py createsuperuser
+      python manage.py runserver
+
+  That writes ``manage.py``, a settings package, one app carrying a worked ``SnapModel`` example (a
+  ``Product`` with a handful of ``Snap*Field``\ s, so the generated admin, REST API and GraphQL
+  schema are actually worth looking at), SQLite, and a ``.env``/``dist.env``. ``migrate`` then
+  ``runserver`` work immediately — no Docker, no manual settings edits, and the worked model ships
+  with its initial migration already generated so there is no ``makemigrations`` step to remember.
+
+  Pass ``--full`` for the same project plus a ``Dockerfile``, ``docker-compose.yml`` and the
+  PostgreSQL / Redis / Elasticsearch wiring (PostgreSQL when ``POSTGRES_HOST`` is set — which
+  ``docker-compose.yml`` does for the app container — SQLite otherwise, so ``manage.py
+  check``/``migrate`` still work with no services running). ``--app-name`` names the example app
+  (default ``catalog``); the project and app name are both validated the way ``django-admin
+  startproject`` validates one — a valid Python identifier that doesn't shadow an existing
+  importable module (stdlib, Django, or ``snapadmin`` itself).
+
+  Templates ship inside the wheel under ``snapadmin/scaffold/templates/`` and render with the
+  standard library's ``string.Template`` — no Jinja, no new runtime dependency, consistent with the
+  other console scripts. Like ``snapadmin-demo`` and ``snapadmin-init``, it never overwrites: writing
+  into a non-empty target directory is a hard refusal, not a prompt.
+
 * **``snapadmin-demo`` now stamps the tree it extracts, and refreshes it properly.** Upgrading the
   package (``pip install -U django-snapadmin``) never touched an already-extracted ``demo/``
   directory: it kept serving the models, templates and settings of the release it came from, so

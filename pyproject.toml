@@ -34,6 +34,8 @@ include = [
     "snapadmin/templates/**/*",
     "snapadmin/static/**/*",
     "snapadmin/locale/**/*",
+    # `snapadmin-new` project-generation templates (rendered with stdlib string.Template).
+    "snapadmin/scaffold/templates/**/*",
     "docs/releases/**/*.txt",
     "docs/migrations/**/*.md",
     { path = "CHANGELOG.md", format = ["sdist", "wheel"] },
@@ -56,6 +58,9 @@ Changelog = "https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md"
 [tool.poetry.scripts]
 snapadmin-demo = "snapadmin.quickstart.cli:main"
 snapadmin-init = "snapadmin.integrate.cli:main"
+# `snapadmin-new <project>` — generates a project you keep (admin + REST API + GraphQL
+# from one worked model; SQLite by default, --full adds Docker/Postgres/Redis/ES).
+snapadmin-new = "snapadmin.scaffold.cli:main"
 # Shims that forward to the manage.py commands of the same name. Both spellings are
 # registered on purpose: the dashed one matches the console scripts above, the
 # underscored one matches the management-command name people read in the docs and
