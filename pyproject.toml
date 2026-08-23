@@ -106,6 +106,11 @@ django-ckeditor-5 = {version = ">=0.0.12", optional = true}
 # if you want AutocompleteFilter list filters in your own admin.
 django-admin-autocomplete-filter = {version = ">=0.7.1", optional = true}
 
+# Optional: XLSX output for the async export API (export_format="xlsx"). openpyxl is MIT, so
+# this is a size/scope call rather than a licence one — most installs export csv/json and have
+# no reason to carry a spreadsheet writer. Imported lazily in snapadmin/exporting.py.
+openpyxl = {version = ">=3.1.0", optional = true}
+
 [tool.poetry.extras]
 theme = ["django-unfold"]
 elasticsearch = ["elasticsearch"]
@@ -114,7 +119,8 @@ backup = ["paramiko"]
 extra-settings = ["django-extra-settings"]
 wysiwyg = ["django-ckeditor-5"]
 autocomplete-filter = ["django-admin-autocomplete-filter"]
-all = ["django-unfold", "elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "django-extra-settings", "django-ckeditor-5", "django-admin-autocomplete-filter"]
+xlsx = ["openpyxl"]
+all = ["django-unfold", "elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "django-extra-settings", "django-ckeditor-5", "django-admin-autocomplete-filter", "openpyxl"]
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.0.0"
@@ -136,6 +142,8 @@ django-extra-settings = ">=0.12.0"
 django-ckeditor-5 = ">=0.0.12"
 # Listed in the demo project's INSTALLED_APPS; the package core does not import it (LGPL, optional).
 django-admin-autocomplete-filter = ">=0.7.1"
+# The suite covers XLSX export end to end; the package core imports it lazily.
+openpyxl = ">=3.1.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

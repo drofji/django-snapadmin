@@ -64,9 +64,9 @@ class TestNormalize:
 
 class TestCuratedMap:
     def test_curated_has_core_and_extras(self):
-        assert len(CURATED) == 16
+        assert len(CURATED) == 17
         assert sum(1 for i in CURATED.values() if i.is_core) == 7
-        assert sum(1 for i in CURATED.values() if not i.is_core) == 9
+        assert sum(1 for i in CURATED.values() if not i.is_core) == 10
 
     def test_license_info_properties(self):
         paramiko = CURATED["paramiko"]
@@ -109,7 +109,7 @@ class TestCuratedMap:
 class TestScan:
     def test_scan_curated_marks_installed(self):
         statuses = scan_curated()
-        assert len(statuses) == 16
+        assert len(statuses) == 17
         django = next(s for s in statuses if s.info.package == "Django")
         assert django.installed is True
         assert django.version is not None

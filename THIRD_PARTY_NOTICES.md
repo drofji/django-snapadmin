@@ -48,6 +48,7 @@ Nothing here is installed by a base `pip install`. Install via, e.g., `pip insta
 | `elasticsearch` | elasticsearch | Apache-2.0 | 🟢 | Full-text search (`ES_ONLY` / `DUAL` models) |
 | `celery` | celery, django-celery-beat, django-celery-results | BSD-3 / BSD / BSD | 🟢 | Background tasks (async export, GDPR purge, digests, backups) |
 | `extra-settings` | django-extra-settings | MIT | 🟢 | In-admin dynamic key/value `Setting` model |
+| `xlsx` | openpyxl | MIT | 🟢 | XLSX output for the async export API (`export_format="xlsx"`) |
 | `autocomplete-filter` | django-admin-autocomplete-filter | **LGPL-3.0** | 🟡 | `AutocompleteFilter` list filters in your own admin |
 | `backup` | paramiko | **LGPL-2.1** | 🟡 | SFTP transport for offsite backups |
 | `wysiwyg` | django-ckeditor-5 (BSD wrapper) **bundling CKEditor 5** | **GPL-2.0+ or commercial** | 🔴 | Rich-text fields (`SnapRichTextField` / `wysiwyg=True`) |
@@ -62,6 +63,11 @@ Nothing here is installed by a base `pip install`. Install via, e.g., `pip insta
 > **`backup` (paramiko)** and **`autocomplete-filter` (django-admin-autocomplete-filter)** are LGPL
 > — weak copyleft, fine for proprietary use as unmodified dynamically-imported dependencies, and both
 > are optional so the base tree stays strictly permissive.
+>
+> **`xlsx` (openpyxl) is optional for size, not for its licence.** openpyxl is MIT and would be
+> perfectly at home in the base install; it is opt-in because most deployments export CSV or JSON
+> and have no reason to carry a spreadsheet writer. Requesting `export_format="xlsx"` without it
+> raises a clear `ImproperlyConfigured` (and the REST API answers 400) instead of failing obscurely.
 
 ## Bundled front-end assets (shipped inside the package)
 

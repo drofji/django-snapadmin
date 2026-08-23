@@ -290,6 +290,7 @@ is safe for commercial and proprietary use. Everything with a licence caveat is 
 | `extra-settings` | `django-extra-settings` | An in-admin dynamic key/value `Setting` model |
 | `wysiwyg` | `django-ckeditor-5` | Rich-text fields — **bundles CKEditor 5 (GPL-or-commercial)** |
 | `autocomplete-filter` | `django-admin-autocomplete-filter` | `AutocompleteFilter` list filters (LGPL) |
+| `xlsx` | `openpyxl` | XLSX output for the async export API (MIT — optional for size, not licence) |
 | `all` | everything above | — |
 
 Run `python manage.py snapadmin_license_check` after installing to see exactly what you ended up

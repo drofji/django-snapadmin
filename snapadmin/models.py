@@ -324,14 +324,15 @@ class SnapadminAuditLog(models.Model):
 
 
 class SnapExportJob(models.Model):
-    """A background CSV/JSON export of a model's rows.
+    """A background CSV / JSON / XLSX export of a model's rows.
 
     Created via ``POST /api/exports/``; a Celery task
     (``snapadmin.run_export``) fills it in chunk by chunk, updating
     ``processed_rows`` so ``GET /api/exports/<id>/`` can report live progress and
     an ETA. Fault-tolerant: the writer resumes from the ``cursor_pk`` /
     ``cursor_bytes`` checkpoint (not the ``processed_rows`` counter) so a retry
-    never duplicates or skips a row. Cancellable: setting ``status`` to
+    never duplicates or skips a row — except for ``xlsx``, a container format
+    that a retry re-exports from the first row. Cancellable: setting ``status`` to
     ``cancelled`` stops the task between chunks. See :mod:`snapadmin.exporting`.
     """
 
@@ -343,8 +344,13 @@ class SnapExportJob(models.Model):
         CANCELLED = "cancelled", _("Cancelled")
 
     class Format(models.TextChoices):
+        # CSV and JSON (newline-delimited) are line-based: the writer appends
+        # chunk after chunk and resumes from a byte offset. XLSX is a *container*
+        # format written whole on completion, so it needs the optional [xlsx]
+        # extra (openpyxl) and does not resume — see snapadmin.exporting.
         CSV = "csv", "CSV"
         JSON = "json", "JSON"
+        XLSX = "xlsx", "XLSX"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     app_label = models.CharField(max_length=100, verbose_name=_("App Label"))

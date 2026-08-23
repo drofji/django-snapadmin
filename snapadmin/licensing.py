@@ -117,6 +117,7 @@ _CURATED: tuple[LicenseInfo, ...] = (
     LicenseInfo("django-celery-beat", "BSD-3-Clause", extra="celery"),
     LicenseInfo("django-celery-results", "BSD-3-Clause", extra="celery"),
     LicenseInfo("django-extra-settings", "MIT", extra="extra-settings"),
+    LicenseInfo("openpyxl", "MIT", extra="xlsx"),
     LicenseInfo(
         "django-admin-autocomplete-filter", "LGPL-3.0", extra="autocomplete-filter", guidance=_LGPL_NOTE
     ),

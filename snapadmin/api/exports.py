@@ -12,6 +12,10 @@ Asynchronous background export API.
 Only ``SnapModel`` targets are exportable, and the caller must hold the model's
 ``view`` permission (token ``allowed_models`` scope applies). Jobs are private to
 their requester; superusers see all.
+
+``export_format`` is ``csv``, ``json`` (newline-delimited) or ``xlsx``. XLSX needs
+the optional ``[xlsx]`` extra, and is rejected here with a 400 when it is missing
+rather than accepted as a job that can only fail in the worker.
 """
 
 from django.apps import apps
@@ -22,12 +26,28 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from snapadmin.api.authentication import SnapAPIAuthMixin, token_has_permission
-from snapadmin.exporting import export_enabled, export_file_name, get_export_storage
+from snapadmin.exporting import (
+    export_enabled,
+    export_file_name,
+    get_export_storage,
+    xlsx_available,
+)
 from snapadmin.masking import get_masked_fields, user_can_view_pii
 from snapadmin.models import APIToken, SnapExportJob, SnapModel
 
 #: JSON-compatible scalar/collection values a filter value may hold.
 FilterValue = str | int | float | bool | list[object] | None
+
+#: Download ``Content-Type`` per export format. An unknown value (a row written
+#: before a format was retired, or by something other than this API) downloads as
+#: a generic binary attachment rather than being mislabelled as text.
+CONTENT_TYPES: dict[str, str] = {
+    SnapExportJob.Format.CSV: "text/csv",
+    SnapExportJob.Format.JSON: "application/x-ndjson",
+    SnapExportJob.Format.XLSX: (
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    ),
+}
 
 
 def _allowed_filters_for_model(model: type[django_models.Model]) -> dict[str, set[str]]:
@@ -151,6 +171,12 @@ class ExportJobCreateSerializer(serializers.ModelSerializer):
         if not _can_view(request, app_label, model_name):
             raise serializers.ValidationError("You do not have permission to export this model.")
 
+        if attrs.get("export_format") == SnapExportJob.Format.XLSX and not xlsx_available():
+            raise serializers.ValidationError(
+                "XLSX export needs the optional openpyxl dependency: "
+                "`pip install django-snapadmin[xlsx]`. Use csv or json instead."
+            )
+
         filters = attrs.get("filters") or {}
         if filters:
             masked = (
@@ -238,6 +264,6 @@ class ExportJobViewSet(
         if not storage.exists(name):
             return Response({"detail": "Export file is no longer available."},
                             status=status.HTTP_410_GONE)
-        content_type = "text/csv" if job.export_format == SnapExportJob.Format.CSV else "application/x-ndjson"
+        content_type = CONTENT_TYPES.get(job.export_format, "application/octet-stream")
         return FileResponse(storage.open(name, "rb"), as_attachment=True,
                             filename=job.file_name, content_type=content_type)

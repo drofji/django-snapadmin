@@ -158,8 +158,9 @@ The base install carries only permissive licences (MIT/BSD/Apache) and is safe
 for commercial use. ``pip install django-snapadmin[<extra>]``:
 ``theme`` (Unfold UI), ``elasticsearch``, ``celery``, ``backup`` (SFTP),
 ``extra-settings``, ``wysiwyg`` (CKEditor 5 — GPL/commercial, hence optional),
-``autocomplete-filter``, or ``all``. Each is imported lazily and raises a
-pointed ``ImproperlyConfigured`` only when its feature is actually used.
+``autocomplete-filter``, ``xlsx`` (openpyxl, for ``export_format="xlsx"``), or
+``all``. Each is imported lazily and raises a pointed ``ImproperlyConfigured``
+only when its feature is actually used.
 
 Further reading
 ---------------

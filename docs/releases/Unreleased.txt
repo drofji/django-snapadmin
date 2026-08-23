@@ -22,6 +22,38 @@ Added
   stamp are candidates for deletion, so anything you added yourself (a ``.env``, your own app, your
   database) is never touched, and the deletions go through the same confirmation as an overwrite.
 
+* **Async exports can now be written as XLSX.** ``POST /api/exports/`` has taken ``export_format``
+  ``csv`` or ``json`` since it existed; it now also takes ``xlsx`` and produces a real workbook
+  rather than a CSV renamed to look like one. Cells keep their types, which is the whole point of
+  asking for a spreadsheet: a ``DecimalField`` lands as a number you can sum, a ``BooleanField`` as
+  a boolean, and a ``DateTimeField`` as a date — converted to the project's current timezone and
+  stripped of its ``tzinfo``, because Excel has no concept of one. Values a spreadsheet cannot hold
+  (a ``UUID``, a ``JSONField``'s dict) are written as text, exactly as the CSV and JSON writers do.
+
+  It rides on the new **``[xlsx]`` extra**: ``pip install django-snapadmin[xlsx]``, which pulls in
+  openpyxl. openpyxl is MIT — this one is optional for size rather than for its licence, since most
+  deployments export CSV or JSON and have no reason to carry a spreadsheet writer. Asking for
+  ``xlsx`` without it gets a ``400`` from the API naming the extra, and a job created another way
+  fails with the same instruction instead of a ``ModuleNotFoundError`` in a worker log.
+
+  **Two behaviours differ from csv/json, deliberately.** A workbook is a zip archive that only
+  becomes readable once it is closed, so it cannot be appended to chunk by chunk. Rows are streamed
+  into a temporary spool — memory stays at one chunk however large the export — and the finished
+  workbook is moved into place in one step. So an ``xlsx`` job **does not resume**: a re-dispatched
+  one re-exports from the first row rather than continuing from its checkpoint (progress polling and
+  cancellation work as they always did). And a cancelled or failed ``xlsx`` job leaves **no** file
+  to download, where a cancelled CSV leaves the rows it managed to write. Nothing about ``csv`` or
+  ``json`` changes.
+
+  One more thing worth stating outright: text that begins with ``=`` is stored as **text**, never as
+  a formula. A spreadsheet writer normally infers the type from the value, which would turn a row
+  somebody typed into your database into something the spreadsheet executes when the file is opened.
+  Control characters the format forbids are stripped, and over-long text is clamped to the per-cell
+  limit, so a single awkward row cannot fail an entire export.
+
+  Parquet was considered alongside XLSX and deliberately left out: ``pyarrow`` is a ~100 MB
+  dependency for a format an admin export is rarely asked for. Say so if you need it.
+
 * **The Unfold theme's own interface is now translated.** ``django-unfold`` ships no translation
   catalogs at all, so on a themed admin its chrome — "All applications", "Apply Filters", "No
   results found", "Select action", "Select value", the command-palette hints, the logout screen —

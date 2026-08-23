@@ -408,6 +408,7 @@
     <tr><td><code>extra-settings</code></td><td><code>django-snapadmin[extra-settings]</code></td><td><code>django-extra-settings</code></td><td>An in-admin dynamic key/value <code>Setting</code> model (as the demo shows)</td></tr>
     <tr><td><code>wysiwyg</code></td><td><code>django-snapadmin[wysiwyg]</code></td><td><code>django-ckeditor-5</code></td><td>Rich-text fields (<code>SnapRichTextField</code> / <code>wysiwyg=True</code>)</td></tr>
     <tr><td><code>autocomplete-filter</code></td><td><code>django-snapadmin[autocomplete-filter]</code></td><td><code>django-admin-autocomplete-filter</code></td><td><code>AutocompleteFilter</code> list filters in your own admin (LGPL)</td></tr>
+    <tr><td><code>xlsx</code></td><td><code>django-snapadmin[xlsx]</code></td><td><code>openpyxl</code></td><td>XLSX output for the <a href="#async-export">async export API</a> (MIT — optional for size, not licence)</td></tr>
     <tr><td><code>all</code></td><td><code>django-snapadmin[all]</code></td><td>everything above</td><td>—</td></tr>
   </table>
 
@@ -1748,9 +1749,10 @@ SNAPADMIN_ESTIMATED_COUNT_THRESHOLD = 100000   # estimate only above this row co
 class BigModel(snap_models.SnapModel):
     show_full_result_count = False</code></pre>
 
-  <h3>Async background export <span class="badge">Celery</span></h3>
+  <h3 id="async-export">Async background export <span class="badge">Celery</span></h3>
   <p>Large synchronous exports time out. SnapAdmin offloads them to a Celery worker that streams a
-  model's rows to CSV or JSON in <strong>resumable chunks</strong>, paged by a primary-key cursor
+  model's rows to CSV, JSON or XLSX. The line-based formats (<code>csv</code>, <code>json</code>) are
+  written in <strong>resumable chunks</strong>, paged by a primary-key cursor
   rather than <code>OFFSET</code> so a concurrent insert/delete elsewhere in the table can't shift the
   window and skip or duplicate a row. Each chunk is written and <code>fsync</code>-ed to disk
   <em>before</em> its checkpoint is persisted, so a worker crash between the two can only leave an
@@ -1772,7 +1774,32 @@ class BigModel(snap_models.SnapModel):
   <pre><code>curl -H "Authorization: Token $TOKEN" -H "Content-Type: application/json" \
      -d '{"app_label": "demo", "model": "Product", "export_format": "csv"}' \
      http://localhost:8000/api/exports/
-# → {"id": "…", "status": "pending", "progress_percent": 0, "eta_seconds": null, …}</code></pre>
+# → {"id": "…", "status": "pending", "progress_percent": 0, "eta_seconds": null, …}
+
+# Same job as a spreadsheet — needs pip install django-snapadmin[xlsx]
+curl -H "Authorization: Token $TOKEN" -H "Content-Type: application/json" \
+     -d '{"app_label": "demo", "model": "Product", "export_format": "xlsx"}' \
+     http://localhost:8000/api/exports/</code></pre>
+
+  <h4 id="export-xlsx">XLSX — the container format <span class="badge">extra</span></h4>
+  <p><code>export_format="xlsx"</code> writes a real workbook via <code>openpyxl</code>, installed with
+  the <a href="#extras"><code>[xlsx]</code> extra</a>. Values keep their types, so <code>price</code>
+  arrives as a number Excel can sum and a <code>DateTimeField</code> as a date — converted to the
+  project's current timezone and stripped of its <code>tzinfo</code>, which Excel has no concept of.
+  Text that begins with <code>=</code> is stored as <strong>text</strong>, never as a formula: exported
+  row data must not become something a spreadsheet executes when the file is opened.</p>
+  <p>A workbook is a zip archive that only becomes readable once it is closed, so it cannot be appended
+  to chunk by chunk the way a CSV can. Rows are streamed into a temporary spool (memory stays at one
+  chunk, whatever the export's size) and the finished workbook is moved into place in one step. Two
+  consequences worth knowing before you pick the format:</p>
+  <ul>
+    <li><strong>No resume.</strong> A re-dispatched XLSX job re-exports from the first row instead of
+    continuing from its checkpoint — progress and cancellation work as usual, resume does not.</li>
+    <li><strong>No partial download.</strong> A cancelled or failed XLSX job leaves no file at all,
+    where a cancelled CSV leaves the rows it managed to write.</li>
+  </ul>
+  <p>Requesting <code>xlsx</code> without the extra is rejected by <code>POST /api/exports/</code> with a
+  <strong>400</strong> naming it, rather than accepted as a job that could only fail in the worker.</p>
 
   <h4 id="export-sources">Custom row sources — <code>SNAPADMIN_EXPORT_SOURCES</code></h4>
   <p>By default an export streams <code>model.objects.filter(**filters)</code> as raw column rows. Three

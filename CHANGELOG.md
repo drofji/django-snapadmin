@@ -18,6 +18,17 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   -U django-snapadmin` upgrades the package but not an extracted `demo/` directory, which used to
   keep serving old models and templates with nothing to say so.
 
+- **XLSX as a third async-export format.** `POST /api/exports/` accepts
+  `export_format="xlsx"` alongside `csv` and `json`, writing a real workbook whose cells keep their
+  types — a `DecimalField` arrives as a number the spreadsheet can sum, a `DateTimeField` as a date
+  in the project's timezone. It needs the new `[xlsx]` extra (`pip install django-snapadmin[xlsx]`,
+  which pulls in MIT-licensed openpyxl); requesting the format without it is rejected with a `400`
+  naming the extra rather than accepted as a job that could only fail later. Because a workbook is
+  written whole rather than appended to, an `xlsx` job **does not resume** from its checkpoint — a
+  retry re-exports from the first row — and a cancelled or failed one leaves no partial file to
+  download. Text beginning with `=` is stored as text, so exported rows are never evaluated as
+  formulas when the file is opened. `csv` and `json` are unchanged.
+
 - **Translations for the Unfold theme's own interface.** `django-unfold` ships no catalogs, so a
   themed admin rendered its shell ("All applications", "Apply Filters", "No results found", the
   command palette) in English around a translated page. SnapAdmin now supplies those strings in all

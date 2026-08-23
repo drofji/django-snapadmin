@@ -6,9 +6,12 @@ writer (snapadmin.exporting), and the /api/exports/ endpoints (create → poll �
 download, cancel, permissions).
 """
 
+import datetime
 import json
 import os
+import sys
 import tempfile
+import uuid
 from decimal import Decimal
 
 import pytest
@@ -354,7 +357,6 @@ class TestRunExportJob:
         assert job.status == "completed" and job.processed_rows == 5
 
     def test_missing_job_is_a_noop(self, db):
-        import uuid
         exporting.run_export_job(uuid.uuid4())  # no such job → returns quietly
 
     @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
@@ -460,6 +462,279 @@ class TestRunExportJob:
         job.refresh_from_db()
         assert job.status == "failed"
         assert "disk full" in job.error
+
+
+# ── XLSX export (#PROP2) ─────────────────────────────────────────────────────
+
+def _load_sheet(job):
+    """Read the workbook an XLSX job produced back as a list of row tuples."""
+    from openpyxl import load_workbook
+
+    workbook = load_workbook(exporting.output_path(job))
+    return list(workbook["Export"].iter_rows(values_only=True))
+
+
+@pytest.mark.django_db
+class TestXlsxWriter:
+    """The container-format writer: round-trip, value coercion, no resume."""
+
+    def test_xlsx_export_round_trips(self, products):
+        from demo.apps.shop.models import Product
+
+        job = _job(export_format="xlsx")
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed"
+        assert job.total_rows == 5 and job.processed_rows == 5
+
+        rows = _load_sheet(job)
+        assert rows[0] == tuple(f.name for f in Product._meta.fields)  # header
+        assert len(rows) == 6                                          # header + 5 rows
+        assert [r[rows[0].index("name")] for r in rows[1:]] == ["P0", "P1", "P2", "P3", "P4"]
+
+    def test_typed_values_stay_typed(self, products):
+        """A spreadsheet's whole point: numbers arrive as numbers, not strings."""
+        job = _job(export_format="xlsx")
+        exporting.run_export_job(job.pk)
+        rows = _load_sheet(job)
+        header = rows[0]
+        first = rows[1]
+        assert first[header.index("price")] == 0            # a number Excel can sum
+        assert first[header.index("available")] is True     # a boolean, not "True"
+        assert isinstance(first[header.index("id")], int)
+
+    def test_aware_datetime_is_written_as_a_date(self, db):
+        # Excel has no timezones; an aware datetime must be localised and stripped
+        # rather than exported as a string (or blowing up the whole sheet).
+        from demo.apps.shop.models import AuditLog
+
+        entry = AuditLog.objects.create(action="login", user_email="a@example.com")
+        job = _job(model="AuditLog", export_format="xlsx")
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed"
+
+        entry.refresh_from_db()
+        rows = _load_sheet(job)
+        written = rows[1][rows[0].index("created_at")]
+        assert isinstance(written, datetime.datetime) and written.tzinfo is None
+        # Excel stores a datetime as a float serial, so compare to the second.
+        expected = timezone.localtime(entry.created_at).replace(tzinfo=None, microsecond=0)
+        assert written.replace(microsecond=0) == expected
+
+    def test_leading_equals_is_text_not_a_formula(self, db):
+        # Formula injection: a row whose text starts with "=" must land in the
+        # sheet as characters, not as something Excel evaluates when opened.
+        from demo.apps.shop.models import AuditLog
+        from openpyxl import load_workbook
+
+        AuditLog.objects.create(action="=1+1", user_email="a@example.com")
+        job = _job(model="AuditLog", export_format="xlsx")
+        exporting.run_export_job(job.pk)
+
+        sheet = load_workbook(exporting.output_path(job))["Export"]
+        header = [c.value for c in next(sheet.iter_rows())]
+        cell = list(sheet.iter_rows())[1][header.index("action")]
+        assert cell.value == "=1+1"
+        assert cell.data_type == "s"   # string, not "f" (formula)
+
+    @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
+    def test_chunked_workbook_is_complete(self, products):
+        job = _job(export_format="xlsx")
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed" and job.processed_rows == 5
+        assert len(_load_sheet(job)) == 6
+
+    @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
+    def test_cancelled_xlsx_leaves_no_partial_file(self, products):
+        # A half-written workbook is a corrupt zip, not a shorter export — so a
+        # cancelled XLSX job publishes nothing at all (a cancelled CSV keeps its
+        # rows). openpyxl's spool must not be left behind either.
+        job = _job(export_format="xlsx")
+        real_refresh = SnapExportJob.refresh_from_db
+        state = {"n": 0}
+
+        def refresh(self, *a, **k):
+            real_refresh(self, *a, **k)
+            state["n"] += 1
+            if state["n"] == 2:
+                SnapExportJob.objects.filter(pk=self.pk).update(status="cancelled")
+                real_refresh(self, *a, **k)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(SnapExportJob, "refresh_from_db", refresh)
+            spools = _capture_spools(mp)
+            exporting.run_export_job(job.pk)
+
+        job.refresh_from_db()
+        assert job.status == "cancelled"
+        assert not os.path.exists(exporting.output_path(job))
+        assert spools and not any(os.path.exists(p) for p in spools)
+
+    @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
+    def test_retry_restarts_instead_of_resuming(self, products):
+        # cursor_pk is still checkpointed for progress, but a container format
+        # cannot be appended to: the retry must re-export from the first row and
+        # produce exactly five rows, not nine.
+        job = _job(export_format="xlsx")
+        real_save = SnapExportJob.save
+        state = {"checkpoints": 0}
+
+        def failing_save(self, *a, **k):
+            fields = k.get("update_fields") or []
+            if "cursor_pk" in fields:
+                state["checkpoints"] += 1
+                if state["checkpoints"] == 2:
+                    raise RuntimeError("crash mid-workbook")
+            return real_save(self, *a, **k)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(SnapExportJob, "save", failing_save)
+            exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "failed" and job.cursor_pk
+
+        exporting.run_export_job(job.pk)          # claimable again (failed)
+        job.refresh_from_db()
+        assert job.status == "completed" and job.processed_rows == 5
+        rows = _load_sheet(job)
+        assert len(rows) == 6
+        assert len({r[rows[0].index("name")] for r in rows[1:]}) == 5   # no duplicates
+
+    def test_stale_workbook_is_replaced_on_rerun(self, products):
+        # os.replace() finalisation: a re-dispatched job overwrites the previous
+        # workbook in place rather than appending to or erroring on it.
+        job = _job(export_format="xlsx")
+        exporting.run_export_job(job.pk)
+        SnapExportJob.objects.filter(pk=job.pk).update(status="pending")
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed"
+        assert len(_load_sheet(job)) == 6
+
+    def test_missing_openpyxl_fails_the_job_with_a_pointed_error(self, products, monkeypatch):
+        # The optional extra is absent: the job must fail with an instruction,
+        # not a raw ModuleNotFoundError out of a Celery worker.
+        monkeypatch.setitem(sys.modules, "openpyxl", None)
+        job = _job(export_format="xlsx")
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "failed"
+        assert "django-snapadmin[xlsx]" in job.error
+
+    def test_xlsx_available_reflects_the_extra(self, monkeypatch):
+        assert exporting.xlsx_available() is True
+        monkeypatch.setitem(sys.modules, "openpyxl", None)
+        assert exporting.xlsx_available() is False
+
+
+def _capture_spools(mp):
+    """Record every temp file openpyxl's write-only worksheet opens for a spool."""
+    from openpyxl.worksheet import _writer as openpyxl_writer
+
+    seen: list[str] = []
+    real_create = openpyxl_writer.create_temporary_file
+
+    def spy(*args, **kwargs):
+        path = real_create(*args, **kwargs)
+        seen.append(path)
+        return path
+
+    mp.setattr(openpyxl_writer, "create_temporary_file", spy)
+    return seen
+
+
+class TestXlsxValueCoercion:
+    """Unit coverage of the cell coercion — openpyxl accepts very little."""
+
+    def test_native_scalars_pass_through(self):
+        for value in (None, 3, 4.5, True, Decimal("1.25"), datetime.date(2026, 1, 2),
+                      datetime.timedelta(seconds=90)):
+            assert exporting._xlsx_value(value) is value
+
+    def test_naive_datetime_and_time_pass_through(self):
+        naive_dt = datetime.datetime(2026, 1, 2, 3, 4)
+        naive_time = datetime.time(3, 4)
+        assert exporting._xlsx_value(naive_dt) is naive_dt
+        assert exporting._xlsx_value(naive_time) is naive_time
+
+    def test_aware_datetime_is_localised_and_stripped(self):
+        aware = datetime.datetime(2026, 1, 2, 3, 4, tzinfo=datetime.timezone.utc)
+        converted = exporting._xlsx_value(aware)
+        assert converted.tzinfo is None
+        assert converted == timezone.localtime(aware).replace(tzinfo=None)
+
+    def test_aware_time_only_loses_its_tzinfo(self):
+        # A bare time has no date to convert against, so there is nothing to
+        # localise — but Excel still rejects the tzinfo.
+        aware = datetime.time(3, 4, tzinfo=datetime.timezone.utc)
+        assert exporting._xlsx_value(aware) == datetime.time(3, 4)
+
+    def test_unsupported_types_become_text(self):
+        value = uuid.uuid4()
+        assert exporting._xlsx_value(value) == str(value)
+        assert exporting._xlsx_value({"a": 1}) == "{'a': 1}"
+
+    def test_control_characters_are_stripped(self):
+        # openpyxl raises IllegalCharacterError on these, which would kill the
+        # sheet's row generator — one bad byte must not fail the whole export.
+        assert exporting._xlsx_value("we\x07ird\x00") == "weird"
+
+    def test_overlong_text_is_clamped_to_excels_limit(self):
+        assert len(exporting._xlsx_value("x" * 50000)) == exporting.XLSX_MAX_CELL_CHARS
+
+    def test_cell_wraps_only_formula_text(self):
+        from openpyxl import Workbook
+        from openpyxl.cell import WriteOnlyCell
+
+        sheet = Workbook(write_only=True).create_sheet(title="Export")
+        assert exporting._xlsx_cell(sheet, WriteOnlyCell, "plain") == "plain"
+        assert exporting._xlsx_cell(sheet, WriteOnlyCell, 7) == 7
+        cell = exporting._xlsx_cell(sheet, WriteOnlyCell, "=1+1")
+        assert cell.value == "=1+1" and cell.data_type == "s"
+
+
+@pytest.mark.django_db
+class TestXlsxExportApi:
+    def test_create_and_download_xlsx(self, auth_client, products):
+        r = auth_client.post("/api/exports/", {"app_label": "demo", "model": "Product",
+                                               "export_format": "xlsx"}, format="json")
+        assert r.status_code == 201, r.content
+        data = r.json()
+        assert data["status"] == "completed" and data["processed_rows"] == 5
+
+        download = auth_client.get(f"/api/exports/{data['id']}/download/")
+        assert download.status_code == 200
+        assert download["Content-Type"] == (
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        body = b"".join(download.streaming_content)
+        assert body.startswith(b"PK")  # a workbook is a zip archive
+
+    def test_xlsx_rejected_without_the_extra(self, auth_client, products, monkeypatch):
+        # Better a 400 naming the extra than a 201 for a job that can only fail.
+        monkeypatch.setitem(sys.modules, "openpyxl", None)
+        r = auth_client.post("/api/exports/", {"app_label": "demo", "model": "Product",
+                                               "export_format": "xlsx"}, format="json")
+        assert r.status_code == 400
+        assert "django-snapadmin[xlsx]" in str(r.json())
+        assert not SnapExportJob.objects.exists()
+
+    def test_unknown_format_downloads_as_binary(self, auth_client, products):
+        # A row whose format this build no longer knows (written by an older
+        # release) must not be served mislabelled as text.
+        job = _job(status="completed", file_name="legacy.bin")
+        SnapExportJob.objects.filter(pk=job.pk).update(export_format="parquet")
+        path = exporting.output_path(job)
+        with open(path, "wb") as fh:
+            fh.write(b"whatever")
+        try:
+            r = auth_client.get(f"/api/exports/{job.pk}/download/")
+            assert r.status_code == 200
+            assert r["Content-Type"] == "application/octet-stream"
+        finally:
+            os.remove(path)
 
 
 # ── PII masking (#SEC6) ──────────────────────────────────────────────────────

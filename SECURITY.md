@@ -123,6 +123,13 @@ Key protections:
   `auto_sanitize=False`, and a custom policy can be supplied via `SNAPADMIN_HTML_SANITIZER` (a dotted
   path to a `Callable[[str], str]`). **`QuerySet.update()` is not covered** — Django does not call
   `pre_save()` for bulk updates, so a caller writing rich text that way must sanitize it themselves.
+- **XLSX exports never turn row data into formulas.** A spreadsheet writer infers a cell's type from
+  its text, so a value beginning with `=` would be stored as a formula the spreadsheet evaluates when
+  the file is opened (`=cmd|…`, `=HYPERLINK(…)`, `=WEBSERVICE(…)` — the spreadsheet counterpart of CSV
+  injection, and the exported rows are attacker-supplied whenever your users can write to the model).
+  `export_format="xlsx"` pins such cells to the text type, so Excel displays the characters that are
+  in the database and executes nothing. Control characters the format forbids are stripped and text
+  is clamped to the per-cell limit, so one hostile row cannot fail the whole export either.
 - Data access goes through the Django ORM / DRF serializers — no hand-built SQL from user input.
 - **`POST /api/exports/` `filters` are restricted to the target model's own fields.** The dict is
   applied as `queryset.filter(**filters)`, so an unvalidated key could otherwise traverse a

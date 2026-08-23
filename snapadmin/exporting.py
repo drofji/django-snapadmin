@@ -4,8 +4,8 @@ snapadmin/exporting.py
 Asynchronous, fault-tolerant background export of model rows.
 
 Large synchronous exports time out; this module streams a model's rows to a
-CSV or JSON file in chunks, tracking progress on a :class:`SnapExportJob` so an
-API consumer can poll status / ETA, cancel, and download the result.
+CSV, JSON or XLSX file in chunks, tracking progress on a :class:`SnapExportJob`
+so an API consumer can poll status / ETA, cancel, and download the result.
 
 Design notes
 ------------
@@ -43,14 +43,32 @@ Design notes
   :mod:`snapadmin.masking`) unless the job's ``requested_by`` holds PII
   access, mirroring the REST serializer so an export can't be used to bypass
   masking a caller sees everywhere else in the API.
+* **Line-based vs container formats** — everything above describes ``csv`` and
+  ``json`` (newline-delimited), which are appended chunk by chunk. ``xlsx`` is a
+  *container*: a workbook is a zip archive that only becomes readable once it is
+  closed, so it cannot be appended to mid-stream and a half-written one is not a
+  smaller export, it is a corrupt file. It is therefore written by
+  :class:`_WorkbookWriter`, which streams the chunks into ``openpyxl``'s
+  write-only workbook (spooled to a temporary file, so memory stays at one chunk)
+  and moves the finished workbook into place in a single ``os.replace``. Two
+  deliberate consequences: an ``xlsx`` job **does not resume** — a re-dispatched
+  one re-exports from the first row — and a cancelled or failed ``xlsx`` job
+  leaves **no** partial file to download, where a cancelled ``csv`` leaves the
+  rows it managed to write. ``openpyxl`` is an optional dependency (the
+  ``[xlsx]`` extra); requesting the format without it fails the job with a
+  pointed ``ImproperlyConfigured`` rather than a ``ModuleNotFoundError``.
 """
 
 from __future__ import annotations
 
 import csv
+import datetime
+import importlib.util
 import io
 import json
 import os
+import re
+from decimal import Decimal
 from typing import Iterator, Protocol
 
 from django.conf import settings
@@ -241,6 +259,227 @@ def _publish(storage: Storage, name: str, working_path: str) -> None:
         storage.save(name, File(fh))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Format writers
+#
+# The chunk loop in _run owns rows, progress, cancellation and checkpoints; a
+# writer owns the bytes. Splitting them is what lets a container format (XLSX)
+# share the loop with the line-based ones without teaching the loop about zip
+# archives — it only has to know whether the format can be resumed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class _ExportWriter(Protocol):
+    """The sink contract :func:`_run` drives, one implementation per format."""
+
+    #: Whether a re-dispatched job may continue from ``(cursor_pk, cursor_bytes)``
+    #: instead of re-exporting from the first row.
+    resumable: bool
+
+    #: Bytes confirmed on disk, checkpointed as ``cursor_bytes``. Meaningful only
+    #: for a resumable writer; a container writer leaves it at 0.
+    byte_len: int
+
+    def start(self, *, resuming: bool, byte_len: int) -> None:
+        """Open the sink, writing any header the format needs on a fresh run."""
+
+    def write(self, batch: list[dict]) -> None:
+        """Write one chunk, updating :attr:`byte_len`."""
+
+    def finish(self) -> None:
+        """Called once all rows are written — the point a container is closed."""
+
+    def close(self) -> None:
+        """Release resources, on the completed *and* the cancelled/failed path."""
+
+
+class _LineFileWriter:
+    """Append-only writer for the line-based formats (CSV and NDJSON).
+
+    Every chunk is ``fsync``-ed before :func:`_run` checkpoints it, so the file
+    can always be truncated back to a confirmed byte length on resume — the
+    crash-safety property described in the module docstring.
+    """
+
+    resumable = True
+
+    def __init__(self, path: str, fields: list[str], *, is_csv: bool) -> None:
+        self._path = path
+        self._fields = fields
+        self._is_csv = is_csv
+        self._handle: io.BufferedWriter | None = None
+        self.byte_len = 0
+
+    def start(self, *, resuming: bool, byte_len: int) -> None:
+        self.byte_len = byte_len
+        self._handle = open(self._path, "ab" if resuming else "wb")
+        if self._is_csv and not resuming:
+            self.byte_len += _write_bytes(self._handle, _csv_header_bytes(self._fields))
+
+    def write(self, batch: list[dict]) -> None:
+        self.byte_len += _write_bytes(self._handle, _rows_bytes(batch, self._fields, self._is_csv))
+
+    def finish(self) -> None:
+        """Nothing to finalise — every chunk is already durable on disk."""
+
+    def close(self) -> None:
+        self._handle.close()
+
+
+class _WorkbookWriter:
+    """XLSX writer, backed by the optional ``openpyxl`` dependency.
+
+    Rows are streamed into a write-only workbook, which spools them to a
+    temporary file as they arrive rather than holding the sheet in memory, so the
+    ceiling is one chunk (``SNAPADMIN_EXPORT_CHUNK_SIZE`` rows) regardless of how
+    large the export is. The workbook is assembled on :meth:`finish` next to the
+    working file and moved into place with a single ``os.replace``, so the path
+    the download endpoint reads either holds a complete workbook or nothing.
+
+    ``resumable`` is ``False``: the spool is not a workbook until it is closed, so
+    there is nothing to resume into and a re-dispatched job starts over.
+    """
+
+    resumable = False
+
+    #: Sheet name of the exported rows. Excel caps sheet names at 31 characters
+    #: and forbids []:*?/\\ — a constant sidesteps both.
+    sheet_title = "Export"
+
+    def __init__(self, path: str, fields: list[str]) -> None:
+        self._path = path
+        self._fields = fields
+        self._workbook = None
+        self._sheet = None
+        self._cell_cls = None
+        self.byte_len = 0
+
+    def start(self, *, resuming: bool, byte_len: int) -> None:
+        workbook_cls, self._cell_cls = _load_openpyxl()
+        self._workbook = workbook_cls(write_only=True)
+        self._sheet = self._workbook.create_sheet(title=self.sheet_title)
+        self._sheet.append(list(self._fields))
+
+    def write(self, batch: list[dict]) -> None:
+        for row in batch:
+            self._sheet.append(
+                [_xlsx_cell(self._sheet, self._cell_cls, row.get(name)) for name in self._fields]
+            )
+
+    def finish(self) -> None:
+        spool = f"{self._path}.part"
+        self._workbook.save(spool)
+        os.replace(spool, self._path)
+
+    def close(self) -> None:
+        # openpyxl removes its own spool file when save() succeeds and otherwise
+        # only at interpreter exit — far too late for a Celery worker, which would
+        # accumulate one abandoned spool per cancelled or failed XLSX export. The
+        # sheet is closed first: dropping the file while its XML stream is still
+        # open leaves a generator that raises "I/O operation on closed file" from
+        # whichever unrelated code happens to trigger the collection. ``_writer``
+        # exists from the header row start() wrote, and save() has already removed
+        # its spool by the time a completed export gets here.
+        spool = self._sheet._writer
+        if os.path.exists(spool.out):
+            self._sheet.close()
+            spool.cleanup()
+
+
+def _writer_for(job, fields: list[str], working_path: str) -> _ExportWriter:
+    """Return the writer for ``job``'s format (see ``SnapExportJob.Format``)."""
+    from snapadmin.models import SnapExportJob
+
+    if job.export_format == SnapExportJob.Format.XLSX:
+        return _WorkbookWriter(working_path, fields)
+    return _LineFileWriter(
+        working_path, fields, is_csv=job.export_format == SnapExportJob.Format.CSV
+    )
+
+
+def _load_openpyxl():
+    """Return ``(Workbook, WriteOnlyCell)``, imported lazily.
+
+    ``openpyxl`` (MIT) is an optional dependency: XLSX is a convenience format
+    most installs never ask for, and the licence-hygiene rule keeps anything the
+    core does not need out of the base install. The pointed error therefore fires
+    when an XLSX export actually runs, not on import.
+    """
+    try:
+        from openpyxl import Workbook
+        from openpyxl.cell import WriteOnlyCell
+    except ImportError as exc:
+        raise ImproperlyConfigured(
+            "XLSX export needs the openpyxl library. Install the optional extra "
+            "`pip install django-snapadmin[xlsx]`, or export this job as csv or json."
+        ) from exc
+    return Workbook, WriteOnlyCell
+
+
+def xlsx_available() -> bool:
+    """Whether the optional ``[xlsx]`` extra (``openpyxl``) can be imported.
+
+    Uses ``find_spec`` rather than a real import so asking the question costs
+    nothing and has no side effects — the REST layer calls it on every export
+    request to reject ``xlsx`` with a 400 up front, instead of accepting a job
+    that can only fail in the worker minutes later.
+    """
+    return importlib.util.find_spec("openpyxl") is not None
+
+
+#: Characters Excel rejects outright (openpyxl raises ``IllegalCharacterError``).
+#: Stripped rather than allowed to fail an entire export over one row's stray byte.
+_XLSX_ILLEGAL_RE = re.compile(r"[\000-\010\013\014\016-\037]")
+
+#: Excel's hard ceiling on the text length of a single cell.
+XLSX_MAX_CELL_CHARS = 32767
+
+#: Value types openpyxl writes natively; anything else is exported as text.
+#: ``datetime.datetime`` is covered by ``date``, and ``bool`` by ``int``.
+_XLSX_NATIVE_TYPES = (bool, int, float, Decimal, datetime.date, datetime.time, datetime.timedelta)
+
+
+def _xlsx_value(value: object) -> object:
+    """Coerce ``value`` into something openpyxl accepts.
+
+    This cannot be left to openpyxl: an unsupported value (a ``UUID``, a
+    ``dict``, an aware datetime) does not fail one cell, it kills the sheet's
+    row generator and every later ``append`` raises ``StopIteration``. So:
+
+    * numbers, ``Decimal``, dates, times and durations pass through, so Excel
+      receives real numbers and dates rather than text;
+    * an aware datetime is converted to the project's current timezone and
+      stripped of its ``tzinfo`` (Excel has no concept of one), matching how
+      Django renders datetimes everywhere else; an aware time, which has no
+      date to convert against, only loses its ``tzinfo``;
+    * anything else becomes ``str(value)``, as the CSV and JSON writers do.
+    """
+    if isinstance(value, datetime.datetime):
+        return timezone.localtime(value).replace(tzinfo=None) if timezone.is_aware(value) else value
+    if isinstance(value, datetime.time):
+        return value.replace(tzinfo=None) if value.utcoffset() is not None else value
+    if value is None or isinstance(value, _XLSX_NATIVE_TYPES):
+        return value
+    return _XLSX_ILLEGAL_RE.sub("", str(value))[:XLSX_MAX_CELL_CHARS]
+
+
+def _xlsx_cell(sheet, cell_cls, value: object) -> object:
+    """Return what to append for ``value`` — a bare value, or a text-typed cell.
+
+    openpyxl infers a cell's type from its text, so a string beginning with ``=``
+    is stored as a **formula**: exported row data that Excel evaluates when the
+    file is opened, the spreadsheet counterpart of CSV injection. Those values
+    get a cell whose type is pinned to text, so Excel shows the characters that
+    are actually in the database and executes nothing.
+    """
+    value = _xlsx_value(value)
+    if isinstance(value, str) and value.startswith("="):
+        cell = cell_cls(sheet, value=value)
+        cell.data_type = "s"
+        return cell
+    return value
+
+
 def run_export_job(job_id) -> None:
     """Execute (or resume) the export for ``job_id``.
 
@@ -293,8 +532,10 @@ def _run(job) -> None:
     name = export_file_name(job)
     working_path = _working_path(name)
     chunk = export_chunk_size()
-    is_csv = job.export_format == SnapExportJob.Format.CSV
-    resuming = bool(job.cursor_pk) and os.path.exists(working_path)
+    writer = _writer_for(job, fields, working_path)
+    # A container format has nothing to resume into (see _WorkbookWriter), so it
+    # takes the fresh-start branch below and re-exports from the first row.
+    resuming = writer.resumable and bool(job.cursor_pk) and os.path.exists(working_path)
 
     if resuming:
         # Discard any flushed-but-uncheckpointed tail (crash between fsync and
@@ -318,13 +559,9 @@ def _run(job) -> None:
             job.cursor_bytes = 0
             job.processed_rows = 0
 
-    byte_len = job.cursor_bytes if resuming else 0
     cursor = job.cursor_pk if resuming else None
-    handle = open(working_path, "ab" if resuming else "wb")
+    writer.start(resuming=resuming, byte_len=job.cursor_bytes if resuming else 0)
     try:
-        if is_csv and not resuming:
-            byte_len += _write_bytes(handle, _csv_header_bytes(fields))
-
         batches = source.iter_batches(cursor=cursor, chunk_size=chunk)
         while True:
             # Cancellation checkpoint — re-read just the status *before* pulling the
@@ -338,16 +575,18 @@ def _run(job) -> None:
             except StopIteration:
                 break
 
-            byte_len += _write_bytes(handle, _rows_bytes(batch, fields, is_csv))
+            writer.write(batch)
 
             # Persist the checkpoint *after* the bytes are durable, so a crash
             # can only under-count (a safe, idempotent re-process of the tail).
             job.cursor_pk = next_cursor
-            job.cursor_bytes = byte_len
+            job.cursor_bytes = writer.byte_len
             job.processed_rows += len(batch)
             job.save(update_fields=["cursor_pk", "cursor_bytes", "processed_rows"])
+
+        writer.finish()
     finally:
-        handle.close()
+        writer.close()
 
     _publish(get_export_storage(), name, working_path)
     job.status = SnapExportJob.Status.COMPLETED

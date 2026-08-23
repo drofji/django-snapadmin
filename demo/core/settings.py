@@ -402,6 +402,14 @@ SNAPADMIN_ESTIMATED_COUNT_THRESHOLD = int(os.getenv('SNAPADMIN_ESTIMATED_COUNT_T
 # Async background export (issue #6). POST /api/exports/ enqueues a Celery job
 # that streams a model's rows to CSV/JSON in resumable chunks; poll, cancel and
 # download via the API. Requires Celery + a broker (runs inline under eager mode).
+# export_format also accepts "xlsx" (a real workbook via openpyxl, installed here
+# through demo/requirements.txt — the [xlsx] extra for a normal install). Try all
+# three against the seeded shop data:
+#   curl -H "Authorization: Token $TOKEN" -H "Content-Type: application/json" \
+#        -d '{"app_label": "demo", "model": "Product", "export_format": "xlsx"}' \
+#        http://localhost:8000/api/exports/
+# Unlike csv/json, a workbook is written whole: an xlsx job does not resume from
+# its checkpoint and a cancelled one leaves no partial file to download.
 SNAPADMIN_EXPORT_ENABLED = env_bool('SNAPADMIN_EXPORT_ENABLED', True)
 SNAPADMIN_EXPORT_CHUNK_SIZE = int(os.getenv('SNAPADMIN_EXPORT_CHUNK_SIZE', '1000'))
 SNAPADMIN_EXPORT_DIR = os.getenv('SNAPADMIN_EXPORT_DIR', str(BASE_DIR / 'exports'))

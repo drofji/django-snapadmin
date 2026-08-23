@@ -58,6 +58,7 @@ Key facts an agent should not have to infer:
 - [REST API](https://drofji.github.io/django-snapadmin/#api-rest): generated CRUD routes, filtering, pagination, throttling, and the delete/write guards.
 - [GraphQL API](https://drofji.github.io/django-snapadmin/#api-graphql): the generated Graphene schema and the GraphiQL playground.
 - [Token management](https://drofji.github.io/django-snapadmin/#api-tokens): `APIToken`, hashed storage, and authenticating API calls.
+- [Async background export](https://drofji.github.io/django-snapadmin/#async-export): `POST /api/exports/` streams a model's rows to a file on a Celery worker, with progress/ETA polling, cancellation and pluggable [row sources](https://drofji.github.io/django-snapadmin/#export-sources). `export_format` is `csv`, `json` (newline-delimited) or [`xlsx`](https://drofji.github.io/django-snapadmin/#export-xlsx). The line formats resume from a primary-key checkpoint after a crash; **xlsx does not** — a workbook is written whole, so a retry re-exports from the first row and a cancelled job leaves no partial file. `xlsx` needs the `[xlsx]` extra (openpyxl) and is rejected with a 400 without it; its cells keep their types and text starting with `=` is stored as text, never a formula.
 
 ## Operations
 
