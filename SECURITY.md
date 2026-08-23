@@ -58,9 +58,21 @@ be removed: a `DeprecationWarning` for a Python name, a notice on stderr for a m
 (so a cron job piping stdout still surfaces it). Both name the replacement. A security fix that
 cannot be made backward-compatible is the one exception, and is documented as such in the advisory.
 
-Currently deprecated, still working: the unprefixed `db_backup`, `purge_expired_data` and
-`send_error_digest` commands — use `snapadmin_db_backup`, `snapadmin_purge_expired_data` and
-`snapadmin_send_error_digest`.
+Currently deprecated, still working — all scheduled for **removal in `1.0`**:
+
+| Deprecated name | Use instead | Removed in |
+|---|---|---|
+| `db_backup` (management command) | `snapadmin_db_backup` | `1.0` |
+| `purge_expired_data` (management command) | `snapadmin_purge_expired_data` | `1.0` |
+| `send_error_digest` (management command) | `snapadmin_send_error_digest` | `1.0` |
+| `snapadmin_info` (underscored console script) | `snapadmin-info` | `1.0` |
+| `snapadmin_license_check` (underscored console script) | `snapadmin-license-check` | `1.0` |
+
+The three management-command aliases print their removal date on stderr every time they run (see
+`snapadmin/management/aliases.py`). The two underscored console scripts are a duplicate spelling of
+the dashed ones declared in `pyproject.toml`, kept only because `snapadmin_info`/`snapadmin_license_check`
+read naturally as Python-style names; the dashed `snapadmin-info` / `snapadmin-license-check` forms
+are the ones that stay past `1.0`.
 
 ## Reporting a vulnerability
 

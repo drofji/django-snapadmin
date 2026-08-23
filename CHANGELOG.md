@@ -105,6 +105,15 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   and `.delay()` / `.apply_async()` raise `ImproperlyConfigured` pointing at
   `pip install django-snapadmin[celery]` instead of silently doing nothing.
 
+### Deprecated
+- **The removal window for the deprecated aliases is now fixed at `1.0`**, stated everywhere the
+  notice appears (stderr, `help` text, module docstrings, `SECURITY.md`, the docs): the unprefixed
+  management commands `db_backup`, `purge_expired_data`, `send_error_digest` (use
+  `snapadmin_db_backup`, `snapadmin_purge_expired_data`, `snapadmin_send_error_digest`) and the
+  underscored console scripts `snapadmin_info` / `snapadmin_license_check` (use the dashed
+  `snapadmin-info` / `snapadmin-license-check`). All of them still work unchanged in this release —
+  this is advance notice, not a behaviour change.
+
 ## 0.1.0b6 — 2026-08-13
 
 A first-run polish release, from installing 0.1.0b5 into a fresh project and walking the demo.

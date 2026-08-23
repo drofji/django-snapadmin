@@ -58,6 +58,13 @@ class TestAliasBehaviour:
         assert new in load_command_class("snapadmin", old).help
 
     @pytest.mark.parametrize("old,new", RENAMES)
+    def test_alias_help_names_the_removal_window(self, old, new):
+        """The 1.0 removal window is decided; the help text must say so, not just "removed"."""
+        from django.core.management import load_command_class
+
+        assert "removed in 1.0" in load_command_class("snapadmin", old).help
+
+    @pytest.mark.parametrize("old,new", RENAMES)
     def test_alias_keeps_the_real_arguments(self, old, new):
         from django.core.management import load_command_class
 
@@ -78,6 +85,7 @@ class TestAliasStillRuns:
         notice = err.getvalue()
         assert "renamed" in notice
         assert "snapadmin_purge_expired_data" in notice
+        assert "removed in 1.0" in notice
 
     def test_new_name_is_quiet(self):
         out, err = StringIO(), StringIO()

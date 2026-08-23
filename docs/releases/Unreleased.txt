@@ -240,6 +240,28 @@ Changed
   **unchanged**: they are on disk in every existing install, and renaming them to ``before``/``after``
   would be a data migration over every row for no functional gain.
 
+Deprecated
+----------
+
+* **The removal window for every currently-deprecated alias is now fixed: 1.0.** Nothing was newly
+  deprecated in this release, but the "future release" wording that used to sit on these was never
+  actually a date — it now is, everywhere someone would look: the stderr notice each aliased
+  command prints, its ``help`` text, its module docstring, ``SECURITY.md``'s API-stability section
+  and this documentation. Covered:
+
+  - The three unprefixed management-command aliases — ``db_backup``, ``purge_expired_data`` and
+    ``send_error_digest`` — keep working exactly as before (same arguments, same behaviour, a
+    rename notice on stderr) until ``1.0``, when they are deleted in favour of
+    ``snapadmin_db_backup``, ``snapadmin_purge_expired_data`` and ``snapadmin_send_error_digest``.
+  - The **underscored** console-script spellings, ``snapadmin_info`` and ``snapadmin_license_check``
+    — duplicates of the dashed ``snapadmin-info`` / ``snapadmin-license-check`` commands — are also
+    scheduled for removal at ``1.0``. The dashed spelling and ``python manage.py snapadmin_info`` /
+    ``snapadmin_license_check`` both stay; only the extra underscored shell command goes. Nothing
+    changes about them in this release — this is advance notice, not a behaviour change.
+
+  Nothing to do yet: every name above still works exactly as it does today. Update crontabs, Celery
+  Beat entries, deploy scripts and any shell alias before upgrading to ``1.0``.
+
 Security
 --------
 

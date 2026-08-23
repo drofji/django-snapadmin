@@ -2349,17 +2349,17 @@ reindex_products_to_elasticsearch.delay()</code></pre>
   silently by <code>INSTALLED_APPS</code> order, so whichever app wins, wins quietly. They were
   renamed:</p>
   <table>
-    <tr><th>Old name</th><th>Use instead</th></tr>
-    <tr><td><code>db_backup</code></td><td><code>snapadmin_db_backup</code></td></tr>
-    <tr><td><code>purge_expired_data</code></td><td><code>snapadmin_purge_expired_data</code></td></tr>
-    <tr><td><code>send_error_digest</code></td><td><code>snapadmin_send_error_digest</code></td></tr>
+    <tr><th>Old name</th><th>Use instead</th><th>Removed in</th></tr>
+    <tr><td><code>db_backup</code></td><td><code>snapadmin_db_backup</code></td><td><code>1.0</code></td></tr>
+    <tr><td><code>purge_expired_data</code></td><td><code>snapadmin_purge_expired_data</code></td><td><code>1.0</code></td></tr>
+    <tr><td><code>send_error_digest</code></td><td><code>snapadmin_send_error_digest</code></td><td><code>1.0</code></td></tr>
   </table>
   <p>A command name lives in crontabs, Dockerfiles and CI, so <strong>the old names still work</strong>
   — same arguments, same behaviour, plus one rename notice on stderr (stdout stays clean, so a piped
-  cron job is unaffected). They will be removed in a future release; update your schedules when
-  convenient. <strong>Celery task names never changed</strong> —
-  <code>snapadmin.purge_expired_data</code> and friends were already prefixed, so no Beat entry needs
-  touching.</p>
+  cron job is unaffected). <strong>They will be removed in <code>1.0</code></strong> — update your
+  schedules before then; the notice itself names the same window. <strong>Celery task names never
+  changed</strong> — <code>snapadmin.purge_expired_data</code> and friends were already prefixed, so
+  no Beat entry needs touching.</p>
 
   <h3>Celery Setup</h3>
   <pre><code># myproject/celery.py
@@ -2463,7 +2463,7 @@ snapadmin-info --brief           # top-level values only
 snapadmin-info --health-check    # probes only; non-zero exit on failure</code></pre>
 
   <div class="callout callout-info">
-    <strong>Every spelling works.</strong>
+    <strong>Every spelling works — for now.</strong>
     This is a <code>manage.py</code> command, but the package also installs shell shims so that
     <code>snapadmin-info</code>, <code>snapadmin_info</code> and
     <code>python manage.py snapadmin_info</code> are all the same thing — the shim walks up from the
@@ -2471,6 +2471,11 @@ snapadmin-info --health-check    # probes only; non-zero exit on failure</code><
     exit code. Run it anywhere inside your project. With no project in sight it says so and points at
     <code>snapadmin-demo</code>, instead of failing as a missing binary. Same for
     <code>snapadmin-license-check</code> / <code>snapadmin_license_check</code>.
+    <strong>The underscored console-script spelling (<code>snapadmin_info</code>,
+    <code>snapadmin_license_check</code>) is a duplicate of the dashed one and will be removed in
+    <code>1.0</code></strong> — the dashed form (<code>snapadmin-info</code>,
+    <code>snapadmin-license-check</code>) and the <code>python manage.py snapadmin_info</code> form
+    both stay; only the extra underscored shell command goes.
   </div>
 
   <h3>Flags</h3>

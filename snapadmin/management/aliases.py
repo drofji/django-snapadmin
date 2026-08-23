@@ -12,8 +12,13 @@ order, so whichever app wins, wins quietly.
 The commands are now ``snapadmin_db_backup``, ``snapadmin_purge_expired_data`` and
 ``snapadmin_send_error_digest``. A management-command name is public API — it lives in people's
 crontabs, Dockerfiles and CI — so the old names keep working through the aliases built here: same
-arguments, same behaviour, plus one line on stderr pointing at the new name. Removing them is a
-future breaking change with its own release note.
+arguments, same behaviour, plus one line on stderr pointing at the new name.
+
+**Removal window: the old names go away in 1.0**, per the API-stability policy in
+``SECURITY.md`` (a deprecated name keeps working for at least one full minor release and says so
+before removal, and only a major version may drop it). Until then this module is the only place
+the notice text lives — the release removing the aliases only has to delete this module and the
+three alias command modules under ``snapadmin/management/commands/``.
 """
 
 from __future__ import annotations
@@ -29,7 +34,7 @@ def deprecated_alias(base: type[BaseCommand], *, old: str, new: str) -> type[Bas
     """
 
     class Alias(base):  # type: ignore[valid-type, misc]
-        help = f"Deprecated alias for `{new}`. Use `{new}` instead; this name will be removed."
+        help = f"Deprecated alias for `{new}`. Use `{new}` instead; this name will be removed in 1.0."
 
         def execute(self, *args, **options):
             # BaseCommand.execute() installs the caller's stderr, but only after it
@@ -39,7 +44,7 @@ def deprecated_alias(base: type[BaseCommand], *, old: str, new: str) -> type[Bas
                 self.stderr = OutputWrapper(options["stderr"])
             notice = (
                 f"`manage.py {old}` has been renamed to `manage.py {new}`. "
-                f"The old name still works but will be removed in a future release — "
+                f"The old name still works but will be removed in 1.0 — "
                 f"update your crontab, Celery Beat entries and deploy scripts."
             )
             # --no-color is applied by BaseCommand.execute(), which has not run yet,
