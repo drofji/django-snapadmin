@@ -3020,6 +3020,18 @@ path("i18n/", include("django.conf.urls.i18n")),</code></pre>
     before any app's.
   </div>
 
+  <div class="callout callout-warn">
+    <strong>A stopgap, held only until Unfold ships its own catalogs</strong>
+    This layer exists because <code>django-unfold</code> has no <code>locale/</code> directory
+    today — a translation submitted upstream was declined pending an extraction workflow
+    (<a href="https://github.com/unfoldadmin/django-unfold/pull/1704">unfoldadmin/django-unfold#1704</a>,
+    plus the earlier <a href="https://github.com/unfoldadmin/django-unfold/issues/1115">#1115</a>).
+    If upstream lands its own catalogs, <code>theme_i18n.py</code> and the 70 msgids it feeds
+    become <strong>redundant, not broken</strong> — Django merges every installed app's catalog for
+    a given msgid, so nothing here has to change first, and this module can simply be deleted once
+    Unfold's own translation for a string is available.
+  </div>
+
   <!-- ── Theming & Styles ───────────────────────────────────────────────────── -->
   <h2 id="theming">🎨 Theming &amp; Styles</h2>
   <p>SnapAdmin ships its admin styling as three layers: one shared sheet plus <strong>exactly one</strong> theme layer, so an install that doesn't use Unfold gets a modern form layout, and an install that does is never fought by one.</p>

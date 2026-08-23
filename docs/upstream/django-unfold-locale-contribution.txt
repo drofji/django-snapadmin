@@ -1,0 +1,132 @@
+django-unfold — draft notes toward upstream locale catalogs
+=============================================================
+
+STATUS: draft only. Not submitted. No PR opened, no branch pushed, nobody at
+unfoldadmin/django-unfold contacted. This file is SnapAdmin-internal working
+notes, kept in-repo as a starting point for a future contribution that a human
+maintainer of this project can choose to send (or not) at their own judgment.
+
+It exists because SnapAdmin currently carries a stopgap for this exact gap —
+see snapadmin/theme_i18n.py — and doing the extraction work once, correctly,
+is most of what an upstream contribution would need anyway. Better to write
+it down now than to redo the research later.
+
+
+Why
+---
+``django-unfold`` (SnapAdmin's optional themed-admin dependency) ships no
+``locale/`` directory. Every string its own templates render — "All
+applications", "Apply Filters", "No results found", "Select action", the
+command-palette hints — stays in English regardless of ``LANGUAGE_CODE``,
+even though the strings themselves are already wrapped in Django's
+translation functions (``gettext``/``{% translate %}``) in Unfold's source.
+The gap is packaging and process, not missing ``_()`` calls.
+
+Confirmed against the ``main`` branch of unfoldadmin/django-unfold: no
+``locale/`` directory under ``src/unfold/``.
+
+Prior discussion upstream (read, not participated in):
+
+* https://github.com/unfoldadmin/django-unfold/issues/596
+  "Django-unfold messages not detected by makemessages" (2024-07). The
+  maintainer's position: adding localization is welcome as a contribution,
+  but maintaining it long-term (reviewing translations, keeping catalogs in
+  sync with new strings) is more time than they have. Points at
+  https://github.com/unfoldadmin/django-unfold/issues/443 as a related
+  interest.
+
+* https://github.com/unfoldadmin/django-unfold/issues/1115
+  "i18n translation for static terms, like placeholder search input field"
+  (2025-03). Reporter hits the exact same strings SnapAdmin's
+  ``theme_i18n.py`` lists (``Search apps and models...``, ``Select action``).
+  Closed after the reporter offered to open a PR "in the near future".
+
+* https://github.com/unfoldadmin/django-unfold/pull/1704
+  "Add Italian translation" (opened 2025-11, closed unmerged 2026-01-11) — a
+  real, concrete attempt: a full ``django.po``/``django.mo`` pair for
+  ``it``. Declined with a specific, actionable blocker from the maintainer:
+
+      "Before we can merge this PR, we need to find out and prepare the
+      documentation how to extract strings for translations from the
+      project. It is important that these strings are not going to contain
+      already translated strings from the django admin so we will not
+      translate something what is already completed."
+
+  That is precisely the scoping problem SnapAdmin's ``theme_i18n.py`` already
+  solved for its own ten locales (see its docstring: only strings Django's
+  own ``django.contrib.admin`` catalog does not already cover). The
+  extraction pass below reuses that same scoping rule.
+
+* https://github.com/unfoldadmin/django-unfold/issues/1415
+  "Establish a Community-Driven, Automated i18n Workflow" (2025-06, closed
+  not-planned) — proposed a Transifex + CI-bot pipeline. Likely overkill for
+  what is, in practice, a small and slow-changing set of chrome strings; the
+  scoped-list approach below needs no bot and no third-party translation
+  platform, which sidesteps the maintenance-burden objection from #596.
+
+
+What upstream would need to add
+--------------------------------
+
+1. ``src/unfold/locale/<lang>/LC_MESSAGES/django.po`` (+ compiled ``.mo``)
+   per shipped language, following the same layout Django apps use. No code
+   change is required in Unfold's templates — the strings are already
+   wrapped in translation calls; only the catalogs are missing.
+
+2. A documented extraction procedure (this is the actual blocker raised on
+   #1704), roughly:
+
+   a. Run ``django-admin makemessages -l <lang> --no-location`` from a
+      throwaway project with only ``unfold`` and ``django.contrib.admin`` in
+      ``INSTALLED_APPS``, scoped to ``src/unfold`` as the source root.
+   b. Diff the resulting msgid set against Django's own ``django.contrib.admin``
+      catalog (``django.contrib.admin.locale.en.LC_MESSAGES``) for the same
+      language and drop every msgid already translated there — this is the
+      "not going to contain already translated strings from the django
+      admin" condition the maintainer asked for.
+   c. What is left is Unfold's own vocabulary — on the current ``main``
+      branch this is roughly 60-80 strings depending on which contribs are
+      counted (import/export, guardian, impersonate are separate template
+      trees and could ship as separate catalogs or be excluded, since not
+      every install uses them).
+   d. Commit the ``.po``, compile to ``.mo`` in the release build step (same
+      as any Django app), and confirm ``include`` in ``pyproject.toml`` /
+      the packaging config actually ships ``locale/`` in the wheel (a
+      package can have the directory in its source tree and still not ship
+      it if the packaging include-list is not updated — SnapAdmin hit this
+      class of bug for its own ``llms.txt`` and now pins it with a test).
+
+3. A packaging-level note so translators know only the strings covered by
+   step 2 need translating, and that PRs skip already-covered admin strings.
+
+4. Ownership question this project cannot answer here: whether Unfold wants
+   per-locale review before merge (their choice) — the earlier proposal
+   (#1415) tried to solve this with automation; a lighter alternative is
+   accepting community ``.po`` PRs the way #1704 already attempted, without
+   requiring a CI/bot pipeline, since the string count is small and changes
+   rarely.
+
+
+Starting seed list
+-------------------
+SnapAdmin's own scoped list (``snapadmin/theme_i18n.py``, module docstring
+has the exclusion rules) is a working example of step 2's output — 70
+msgids, checked against django-unfold 0.99 on Django 6.0, covering the
+shell, changelists, forms, filters, the command palette and login/logout.
+It deliberately excludes Unfold's optional contribs (import/export,
+impersonate, object history, guardian) and its rich-text toolbar, since
+those are separate template trees a base install may not render at all.
+That list — not reproduced here to avoid a second copy going stale — is a
+reasonable starting ``en`` reference for whoever picks this up; the two
+already-translated locales worth reusing first would be ``de`` and ``it``
+(precedent already exists upstream at #598 and #1704 respectively, both
+unmerged but presumably still representative of real translator effort).
+
+
+Out of scope for this note
+---------------------------
+Actually opening a PR, choosing a licence-compatible way to reuse SnapAdmin's
+own translated strings (they were translated for SnapAdmin's own msgids and
+context, and would need re-review for Unfold's phrasing/context before
+reuse), and any communication with the unfoldadmin maintainers. All of that
+needs an explicit human decision this file does not make.

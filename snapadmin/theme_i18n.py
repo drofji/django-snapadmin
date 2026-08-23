@@ -20,6 +20,24 @@ against django-unfold 0.99 on Django 6.0 across all ten shipped locales). "Save"
 would put SnapAdmin in charge of wording it has no business owning. If a future Unfold release
 renames a string, the stale msgid here simply stops matching; nothing breaks, and no test is pinned
 to the theme's markup.
+
+**This module is a stopgap, not a permanent feature — hold it only until django-unfold ships its
+own catalogs.** Upstream has no ``locale/`` directory today (verified against the ``main`` branch)
+and a submitted translation was declined pending that groundwork: see
+`unfoldadmin/django-unfold#1704 <https://github.com/unfoldadmin/django-unfold/pull/1704>`_ (an
+Italian ``django.po``/``django.mo`` pair, closed 2026-01-11 — the maintainer's reply was that
+strings need an extraction pass first, "not going to contain already translated strings from the
+django admin", which is exactly the scoping this module already does) and the earlier request in
+`unfoldadmin/django-unfold#1115 <https://github.com/unfoldadmin/django-unfold/issues/1115>`_.
+
+When upstream lands its own catalogs, ``THEME_STRINGS`` and the ten locale entries it feeds become
+**redundant, not broken**: Django merges every installed app's catalog for a given msgid, so once
+``django-unfold`` supplies a translation for e.g. "Apply Filters", its catalog is consulted exactly
+like SnapAdmin's is today — nothing here needs to change first. At that point this module (and its
+msgids in ``snapadmin/locale/*/LC_MESSAGES/django.po``) can simply be deleted; no setting, import
+or migration depends on it. See ``docs/upstream/django-unfold-locale-contribution.txt`` for
+drafted notes on what upstream's own package would need — kept in-repo as a starting point for a
+future contribution, not sent anywhere.
 """
 
 from django.utils.translation import gettext_lazy as _
