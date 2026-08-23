@@ -336,7 +336,7 @@ there is no bad automatic change to undo.
 
 **Operations**
 - [GDPR retention](https://drofji.github.io/django-snapadmin/#gdpr) (`data_retention_days`) and an immutable audit trail
-- [Error monitoring](https://drofji.github.io/django-snapadmin/#error-monitoring) with spike alerts and daily grouped digests, plus health-probe emails when a subsystem goes down
+- [Error monitoring](https://drofji.github.io/django-snapadmin/#error-monitoring) with spike alerts and daily grouped digests, plus health-probe alerts when a subsystem goes down — delivered by email and/or [Slack, Discord, Teams and Telegram webhooks](https://drofji.github.io/django-snapadmin/#alert-channels)
 - [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, offsite FTPS/SFTP
 - [Large-dataset tuning](https://drofji.github.io/django-snapadmin/#performance) — automatic `list_select_related` (no admin N+1), estimated counts, paging caps
 - [ETL helpers](https://drofji.github.io/django-snapadmin/#integrating) — `upsert_from_source()` and `stale_sync()` with a wipe guard

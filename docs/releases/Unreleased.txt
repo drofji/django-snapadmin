@@ -22,6 +22,46 @@ Added
   stamp are candidates for deletion, so anything you added yourself (a ``.env``, your own app, your
   database) is never touched, and the deletions go through the same confirmation as an overwrite.
 
+* **Alerts can now go to Slack, Discord, Teams or Telegram instead of (or beside) email.**
+  Delivery used to be hard-wired to Django's email machinery, so a team without SMTP — or one that
+  simply lives in a chat channel — got no error-spike alert, no daily digest and no health alert at
+  all. Those three alerts now go through a set of **channels**: email is one of them, and
+  ``SNAPADMIN_ALERT_WEBHOOKS`` adds Slack, Discord and Teams incoming webhooks, the Telegram Bot API,
+  or a plain JSON POST to an endpoint of your own::
+
+      SNAPADMIN_ALERT_WEBHOOKS = [
+          {"type": "slack", "url": os.environ["SLACK_ALERT_WEBHOOK"]},
+          {"type": "telegram", "token": os.environ["TELEGRAM_BOT_TOKEN"],
+                               "chat_id": os.environ["TELEGRAM_CHAT_ID"]},
+          {"type": "json", "url": "https://ops.example.com/hooks/snapadmin",
+           "events": ["health", "error_spike"]},
+      ]
+
+  The webhooks are posted with the standard library, so **no new dependency** enters your install,
+  and an entry's optional ``events`` list (``error_spike`` / ``error_digest`` / ``health``) keeps the
+  daily digest out of an on-call channel. ``SNAPADMIN_ALERT_EMAIL_ENABLED = False`` turns email off
+  entirely for a chat-only deployment; ``SNAPADMIN_ALERT_WEBHOOK_TIMEOUT`` (default 5s) caps how long
+  a POST may take, since the spike alert can fire inside a request.
+
+  **Nothing about alert *frequency* changed.** The thresholds, the grouping and the cache-based
+  cooldowns are shared by every channel rather than reimplemented per channel, so adding a webhook
+  changes where an alert goes, never how often it fires. Delivery is fail-soft in both directions: an
+  unreachable webhook is logged and skipped without breaking the request that recorded the error, the
+  digest task or the ``snapadmin_health_alert`` command, and without stopping the other channels — and
+  if *every* channel fails, the cooldown claimed for that send is released again, so the next
+  occurrence alerts instead of being silently swallowed for the rest of the window. A malformed entry
+  (unknown ``type``, missing ``url``) is logged and skipped, never raised.
+
+  **Webhook URLs are treated as credentials.** A Slack URL's path and a Telegram bot token are the
+  secret, so they are never written to a log line (failures are logged with the host only, as
+  ``https://hooks.slack.com/…``), never included in an alert body, and never reported by
+  ``snapadmin_info``. Keep them in the environment.
+
+  Two behaviours changed as a consequence, both additive: an install with **no** email recipients but a
+  configured webhook now alerts (it used to return "no recipients" and stay silent), and
+  ``send_error_digest()`` reports ``{"sent": False, "reason": "delivery_failed"}`` when no channel
+  accepted the digest — the retention purge still runs.
+
 * **Async exports can now be written as XLSX.** ``POST /api/exports/`` has taken ``export_format``
   ``csv`` or ``json`` since it existed; it now also takes ``xlsx`` and produces a real workbook
   rather than a CSV renamed to look like one. Cells keep their types, which is the whole point of

@@ -1,5 +1,5 @@
 """
-Probe SnapAdmin subsystem health and email the recipients when one is down.
+Probe SnapAdmin subsystem health and alert the configured channels when one is down.
 
 Cron-friendly alternative to the ``snapadmin.send_health_alert`` Celery task for
 deployments without a Celery worker:
@@ -9,9 +9,11 @@ deployments without a Celery worker:
 Runs the same health probes as ``snapadmin_info --health-check`` (database,
 Elasticsearch, REST API, GraphQL — each skipped when its feature toggle is off, so
 a disabled subsystem is never a false alarm) and, when one reports a failure,
-emails ``SNAPADMIN_HEALTH_ALERT_EMAILS`` (falling back to
-``SNAPADMIN_ERROR_ALERT_EMAILS``).
-A cache-based cooldown limits a persistent outage to one email per
+notifies every configured channel: email to ``SNAPADMIN_HEALTH_ALERT_EMAILS``
+(falling back to ``SNAPADMIN_ERROR_ALERT_EMAILS``) plus every chat/webhook target
+in ``SNAPADMIN_ALERT_WEBHOOKS``. The success line names the channels that took the
+alert, so a chat-only deployment does not read as "0 recipients".
+A cache-based cooldown limits a persistent outage to one alert per
 ``SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES``. The command **exits non-zero whenever
 a probe is failing**, so it doubles as a monitoring health gate; ``--force``
 bypasses the cooldown so an alert is (re)sent immediately.
@@ -41,7 +43,7 @@ class Command(BaseCommand):
             self.stdout.write(
                 self.style.WARNING(
                     f"Health alert sent: {failing} of {checked} probe(s) down "
-                    f"({summary['failing_names']}) to {summary['recipients']} recipient(s)."
+                    f"({summary['failing_names']}) via {summary['channels']}."
                 )
             )
         elif summary["reason"] == "healthy":

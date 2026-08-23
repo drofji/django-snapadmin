@@ -18,6 +18,17 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   -U django-snapadmin` upgrades the package but not an extracted `demo/` directory, which used to
   keep serving old models and templates with nothing to say so.
 
+- **Alert channels — Slack, Discord, Teams, Telegram and JSON webhooks beside email.** The error
+  spike alert, the daily digest and the health alert are now delivered by a set of channels
+  configured in `SNAPADMIN_ALERT_WEBHOOKS`; email is one channel among them and can be switched off
+  with `SNAPADMIN_ALERT_EMAIL_ENABLED = False`. Webhooks are posted with the standard library — no
+  new dependency. Thresholds, grouping and the cooldowns are shared by every channel, so a webhook
+  changes where an alert goes, never how often it fires; a per-entry `events` list filters which
+  alerts a channel receives. Delivery is fail-soft (an unreachable webhook never breaks the request,
+  the digest task or `snapadmin_health_alert`, and never stops the other channels), and a send where
+  every channel failed releases the cooldown instead of consuming it. Webhook URLs are treated as
+  secrets: never logged, never in an alert body, never in `snapadmin_info`.
+
 - **XLSX as a third async-export format.** `POST /api/exports/` accepts
   `export_format="xlsx"` alongside `csv` and `json`, writing a real workbook whose cells keep their
   types — a `DecimalField` arrives as a number the spreadsheet can sum, a `DateTimeField` as a date

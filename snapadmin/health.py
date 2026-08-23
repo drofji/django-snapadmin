@@ -1,25 +1,29 @@
 """
 snapadmin/health.py
 
-Email alerting when a SnapAdmin subsystem goes unhealthy.
+Alerting when a SnapAdmin subsystem goes unhealthy.
 
 The counterpart of ``snapadmin_info --health-check``: it runs the same
 health-probe collectors (database, Elasticsearch, REST API, GraphQL) and, when
-one reports ``ok=False``, sends a single email to the configured recipients so an
-operator hears about an outage instead of finding it in the logs. Meant to run on
-a schedule — the ``snapadmin.send_health_alert`` Celery task (via Celery Beat) or
-the ``snapadmin_health_alert`` management command (via system cron). A
-cache-based cooldown means a persistent outage emails at most once per
+one reports ``ok=False``, sends a single notification to the configured channels
+so an operator hears about an outage instead of finding it in the logs. Meant to
+run on a schedule — the ``snapadmin.send_health_alert`` Celery task (via Celery
+Beat) or the ``snapadmin_health_alert`` management command (via system cron). A
+cache-based cooldown means a persistent outage alerts at most once per
 ``SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES`` rather than on every run, and a
 recovery clears the cooldown so the next outage alerts immediately.
 
-Delivery uses Django's standard email machinery — a working ``EMAIL_BACKEND``
-and ``DEFAULT_FROM_EMAIL`` are prerequisites. Each probe honours its feature
-toggle (``ELASTICSEARCH_ENABLED``, ``SNAPADMIN_REST_API_ENABLED``,
-``SNAPADMIN_GRAPHQL_ENABLED``): a disabled subsystem returns ``{"enabled": False}``
-with no ``ok`` key. A probe *fails* only when its data reports ``ok is False``, so
-a subsystem that was intentionally turned off is never a false alarm — mirroring
-the ``--health-check`` semantics exactly.
+Delivery goes through ``snapadmin.alerts``: email (a working ``EMAIL_BACKEND``
+and ``DEFAULT_FROM_EMAIL``) plus any Slack/Discord/Teams/Telegram webhook in
+``SNAPADMIN_ALERT_WEBHOOKS`` subscribed to the ``health`` event. The cooldown
+above is shared by all of them, and a run where every channel failed releases it
+again so the outage is re-announced instead of going quiet.
+
+Each probe honours its feature toggle (``ELASTICSEARCH_ENABLED``,
+``SNAPADMIN_REST_API_ENABLED``, ``SNAPADMIN_GRAPHQL_ENABLED``): a disabled
+subsystem returns ``{"enabled": False}`` with no ``ok`` key. A probe *fails* only
+when its data reports ``ok is False``, so a subsystem that was intentionally turned
+off is never a false alarm — mirroring the ``--health-check`` semantics exactly.
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
+from snapadmin import alerts
 from snapadmin.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -85,13 +90,28 @@ def failing_probes(probes: list[dict]) -> list[dict]:
     return [probe for probe in probes if probe["ok"] is False]
 
 
-def send_health_alert(*, force: bool = False) -> dict:
-    """Probe subsystem health and email the recipients when one is down.
+def probe_lines(failing: list[dict]) -> tuple[str, ...]:
+    """One ``title: reason`` line per failing probe, for the chat channels.
 
-    Returns a flat summary dict: ``sent`` plus a ``reason`` when nothing was
-    emailed (``disabled`` / ``healthy`` / ``no_recipients`` / ``cooldown``), so
-    the Celery task and the management command can report what happened. ``force``
-    bypasses the cooldown (for the ``--force`` flag / testing).
+    The email template renders the full probe table; a chat message gets the
+    part an operator reads first — which subsystem, and why it says it is down.
+    """
+    lines = []
+    for probe in failing:
+        data = probe.get("data") or {}
+        reason = data.get("error") or data.get("detail") or "reported unhealthy"
+        lines.append(f"{probe['title']}: {reason}")
+    return tuple(lines)
+
+
+def send_health_alert(*, force: bool = False) -> dict:
+    """Probe subsystem health and alert the configured channels when one is down.
+
+    Returns a flat summary dict: ``sent`` plus a ``reason`` when nothing went out
+    (``disabled`` / ``healthy`` / ``no_recipients`` / ``cooldown`` /
+    ``delivery_failed``), so the Celery task and the management command can
+    report what happened. ``force`` bypasses the cooldown (for the ``--force``
+    flag / testing).
     """
     config = get_health_config()
     probes = run_health_probes()
@@ -105,28 +125,30 @@ def send_health_alert(*, force: bool = False) -> dict:
         # A recovery clears the cooldown so the next outage alerts immediately.
         cache.delete(HEALTH_ALERT_COOLDOWN_CACHE_KEY)
         return {"sent": False, "reason": "healthy", "checked": checked, "failing": 0}
-    if not config.emails:
+    channels = alerts.build_channels(
+        kind=alerts.ALERT_KIND_HEALTH,
+        recipients=config.emails,
+        from_email=config.from_email,
+    )
+    if not channels:
         logger.warning("health_alert_no_recipients", failing=",".join(failing_names))
         return {"sent": False, "reason": "no_recipients", "checked": checked, "failing": len(failing)}
     # Always attempt to arm the cooldown (``cache.add`` is atomic and a no-op when
     # the key already exists). ``force`` still sends when the window hasn't elapsed,
     # but arming here means a forced send also suppresses the next scheduled run
     # instead of letting it fire a second alert immediately.
-    armed = cache.add(
-        HEALTH_ALERT_COOLDOWN_CACHE_KEY,
-        timezone.now().isoformat(),
-        timeout=config.cooldown_minutes * 60,
-    )
-    if not armed and not force:
+    token = alerts.arm_cooldown(HEALTH_ALERT_COOLDOWN_CACHE_KEY, minutes=config.cooldown_minutes)
+    if token is None and not force:
         return {"sent": False, "reason": "cooldown", "checked": checked, "failing": len(failing)}
 
-    from snapadmin.monitoring import _send_email
-
-    _send_email(
+    alert = alerts.Alert(
+        kind=alerts.ALERT_KIND_HEALTH,
         subject=(
             f"[SnapAdmin] Health alert — {len(failing)} subsystem"
             f"{'' if len(failing) == 1 else 's'} down: {', '.join(failing_names)}"
         ),
+        summary=f"{len(failing)} of {checked} probe(s) failing.",
+        lines=probe_lines(failing),
         template="health_alert",
         context={
             "failing": failing,
@@ -134,14 +156,31 @@ def send_health_alert(*, force: bool = False) -> dict:
             "checked": checked,
             "generated_at": timezone.now(),
         },
-        recipients=config.emails,
-        from_email=config.from_email,
     )
+    result = alerts.dispatch(alert, channels)
+    if not result.any_delivered:
+        # Nothing was announced, so the window must not stay armed — the next
+        # scheduled run has to try again rather than assume it already told someone.
+        alerts.release_cooldown(HEALTH_ALERT_COOLDOWN_CACHE_KEY, token)
+        logger.error(
+            "health_alert_undelivered",
+            failing=",".join(failing_names),
+            checked=checked,
+            channels=",".join(result.failed),
+        )
+        return {
+            "sent": False,
+            "reason": "delivery_failed",
+            "checked": checked,
+            "failing": len(failing),
+            "failing_names": ",".join(failing_names),
+        }
     logger.error(
         "health_alert_sent",
         failing=",".join(failing_names),
         checked=checked,
         recipients=len(config.emails),
+        channels=",".join(result.delivered),
     )
     return {
         "sent": True,
@@ -149,4 +188,5 @@ def send_health_alert(*, force: bool = False) -> dict:
         "failing": len(failing),
         "failing_names": ",".join(failing_names),
         "recipients": len(config.emails),
+        "channels": ",".join(result.delivered),
     }

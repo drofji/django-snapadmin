@@ -194,6 +194,14 @@ Key protections:
   come from `SNAPADMIN_BACKUP_*` settings/env, never hard-coded.
 - **Read-replica routing** (`SNAPADMIN_ANALYTICS_DB_ALIAS`) keeps read-only list/retrieve off the
   primary; writes always stay on `default`.
+- **Alert webhook URLs are credentials** — a Slack/Discord/Teams incoming-webhook URL and a Telegram
+  bot token let their holder post into your channel, so `SNAPADMIN_ALERT_WEBHOOKS` entries belong in
+  environment variables, not in committed settings. SnapAdmin never writes one to a log line (a
+  delivery failure is logged as `alert_channel_failed` with the host only —
+  `https://hooks.slack.com/…`), never puts one in an alert body, and never reports one from
+  `snapadmin_info`. Alert *content* is unfiltered by design: an error subject, exception class and
+  path go to whatever channel you configure, so treat an alert channel as trusted as your error
+  emails — and prefer a private channel for the health alert, which names failing subsystems.
 
 ### Attack-surface reduction & extension guards
 - Each surface can be **switched off**: `SNAPADMIN_REST_API_ENABLED`, `SNAPADMIN_GRAPHQL_ENABLED`,
@@ -213,7 +221,8 @@ Key protections:
 - Scope API tokens with `allowed_models` and set an `expiration_date`; rotate leaked tokens (delete +
   reissue — the raw key cannot be recovered).
 - Leave the user-management API and ES-reindex endpoints disabled unless needed; gate any you enable.
-- Put backup/SFTP/SMTP credentials in environment variables, not in committed settings.
+- Put backup/SFTP/SMTP credentials **and alert webhook URLs** in environment variables, not in
+  committed settings.
 - Restrict who has `is_staff` / model permissions — SnapAdmin honours standard Django auth.
 
 ## Supply chain

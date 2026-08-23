@@ -93,8 +93,12 @@ Operations
         Change logging and PII masking.
     ``snapadmin.backup``
         3-2-1 backups (local / network / SFTP / FTP).
-    ``snapadmin.monitoring`` · ``snapadmin.health`` · ``snapadmin.logging_config``
-        Error capture and digests, health checks, structlog wiring.
+    ``snapadmin.monitoring`` · ``snapadmin.health`` · ``snapadmin.alerts`` ·
+    ``snapadmin.logging_config``
+        Error capture and digests, health checks, structlog wiring. ``alerts``
+        owns the delivery side: email plus Slack / Discord / Teams / Telegram /
+        JSON webhooks (``SNAPADMIN_ALERT_WEBHOOKS``), posted with the standard
+        library, failing soft so one dead channel never blocks the others.
     ``snapadmin.reindexing`` · ``snapadmin.etl`` · ``snapadmin.db``
         Elasticsearch reindexing, ETL helpers, database routing.
     ``snapadmin.tasks`` · ``snapadmin.celery_compat``
@@ -144,7 +148,8 @@ unless noted. The families: ``SNAPADMIN_REST_API_*`` / ``SNAPADMIN_API_*``
 (REST surface, throttling, pagination, guards), ``SNAPADMIN_GRAPHQL_*``,
 ``SNAPADMIN_SWAGGER_ENABLED``, ``SNAPADMIN_ES_*`` (Elasticsearch routing and
 fallback), ``SNAPADMIN_BACKUP_*``, ``SNAPADMIN_ERROR_*`` and
-``SNAPADMIN_HEALTH_ALERT_*`` (monitoring and alerts), ``SNAPADMIN_AUDIT_*`` and
+``SNAPADMIN_HEALTH_ALERT_*`` / ``SNAPADMIN_ALERT_*`` (monitoring and alert
+delivery), ``SNAPADMIN_AUDIT_*`` and
 ``SNAPADMIN_MASKED_FIELDS`` (audit and PII), ``SNAPADMIN_EXPORT_*``,
 ``SNAPADMIN_SSO_*``, plus layout keys (``SNAPADMIN_URL_PREFIX``,
 ``SNAPADMIN_APP_LABELS``, ``SNAPADMIN_HIDDEN_APPS``, ``SNAPADMIN_NESTED_APPS``,

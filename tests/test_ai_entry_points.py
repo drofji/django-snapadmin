@@ -61,6 +61,7 @@ MAPPED_MODULES = [
     "snapadmin.backup",
     "snapadmin.monitoring",
     "snapadmin.health",
+    "snapadmin.alerts",
     "snapadmin.logging_config",
     "snapadmin.reindexing",
     "snapadmin.etl",

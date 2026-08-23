@@ -18,10 +18,15 @@ Two independent notification channels, both driven by ``ErrorEvent`` rows that
      ``SNAPADMIN_ERROR_DIGEST_MAX_GROUPS`` groups so the email never explodes,
      and purges events older than ``SNAPADMIN_ERROR_RETENTION_DAYS``.
 
-Delivery uses Django's standard email machinery — a working ``EMAIL_BACKEND``
-(SMTP in production) and ``DEFAULT_FROM_EMAIL`` are prerequisites.
+Delivery goes through ``snapadmin.alerts``: email (a working ``EMAIL_BACKEND``
+and ``DEFAULT_FROM_EMAIL``) plus any Slack/Discord/Teams/Telegram webhook listed
+in ``SNAPADMIN_ALERT_WEBHOOKS``. The thresholds, grouping and cooldown above are
+shared by every channel — a webhook is a transport, not a second alert — so
+adding one never makes an alert fire more often.
 Everything is fail-safe: monitoring must never turn a broken page into a
-broken site, so recording/alerting errors are logged and swallowed.
+broken site, so recording/alerting errors are logged and swallowed, and a
+delivery that failed everywhere releases the cooldown instead of silently
+consuming it.
 """
 
 from __future__ import annotations
@@ -35,18 +40,20 @@ from dataclasses import dataclass
 from datetime import timedelta
 
 from django.conf import settings
-from django.core.cache import cache
-from django.core.mail import EmailMultiAlternatives
 from django.db.models import Count, Max, Min
 from django.http import HttpRequest
-from django.template.loader import render_to_string
 from django.utils import timezone
 
+from snapadmin import alerts
 from snapadmin.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 ALERT_COOLDOWN_CACHE_KEY = "snapadmin:error-alert-cooldown"
+
+#: How many grouped errors a chat message lists before it says "and N more".
+#: The email keeps the full grouped table — only the webhook text is capped.
+ALERT_MAX_CHAT_LINES = 10
 
 
 @dataclass(frozen=True)
@@ -141,11 +148,13 @@ def record_error(
 
 
 def maybe_send_spike_alert(*, config: ErrorMonitorConfig | None = None) -> bool:
-    """Send the spike alert email if the window threshold has been crossed.
+    """Send the spike alert if the window threshold has been crossed.
 
-    Returns True only when an email was actually sent. The cache-based
-    cooldown (``cache.add`` is atomic) ensures a single alert per cooldown
-    window even under concurrent requests.
+    Returns True only when at least one channel accepted the alert. The
+    cache-based cooldown (``cache.add`` is atomic) ensures a single alert per
+    cooldown window even under concurrent requests — and it is claimed *before*
+    the send, then released again if every channel failed, so an unreachable
+    webhook cannot mute the next spike for the rest of the window.
     """
     from snapadmin.models import ErrorEvent
 
@@ -159,7 +168,12 @@ def maybe_send_spike_alert(*, config: ErrorMonitorConfig | None = None) -> bool:
     if count < config.alert_threshold:
         return False
 
-    if not config.alert_emails:
+    channels = alerts.build_channels(
+        kind=alerts.ALERT_KIND_ERROR_SPIKE,
+        recipients=config.alert_emails,
+        from_email=config.from_email,
+    )
+    if not channels:
         logger.warning(
             "error_monitor_no_alert_recipients",
             count=count,
@@ -167,21 +181,26 @@ def maybe_send_spike_alert(*, config: ErrorMonitorConfig | None = None) -> bool:
         )
         return False
 
-    if not cache.add(
-        ALERT_COOLDOWN_CACHE_KEY,
-        timezone.now().isoformat(),
-        timeout=config.alert_cooldown_minutes * 60,
-    ):
+    token = alerts.arm_cooldown(
+        ALERT_COOLDOWN_CACHE_KEY, minutes=config.alert_cooldown_minutes
+    )
+    if token is None:
         return False
 
     groups, hidden_groups, hidden_events = group_events(
         recent, max_groups=config.digest_max_groups
     )
-    _send_email(
+    alert = alerts.Alert(
+        kind=alerts.ALERT_KIND_ERROR_SPIKE,
         subject=(
             f"[SnapAdmin] {count} server errors in the last "
             f"{config.alert_window_minutes} minutes"
         ),
+        summary=(
+            f"{count} errors in {config.alert_window_minutes} min "
+            f"(threshold {config.alert_threshold})."
+        ),
+        lines=group_lines(groups, hidden_groups=hidden_groups, hidden_events=hidden_events),
         template="error_alert",
         context={
             "count": count,
@@ -192,16 +211,53 @@ def maybe_send_spike_alert(*, config: ErrorMonitorConfig | None = None) -> bool:
             "hidden_events": hidden_events,
             "generated_at": timezone.now(),
         },
-        recipients=config.alert_emails,
-        from_email=config.from_email,
     )
+    result = alerts.dispatch(alert, channels)
+    if not result.any_delivered:
+        alerts.release_cooldown(ALERT_COOLDOWN_CACHE_KEY, token)
+        logger.error(
+            "error_monitor_spike_alert_undelivered",
+            count=count,
+            window_minutes=config.alert_window_minutes,
+            channels=",".join(result.failed),
+        )
+        return False
     logger.error(
         "error_monitor_spike_alert_sent",
         count=count,
         window_minutes=config.alert_window_minutes,
         recipients=len(config.alert_emails),
+        channels=",".join(result.delivered),
     )
     return True
+
+
+def group_lines(
+    groups: list[dict],
+    *,
+    hidden_groups: int = 0,
+    hidden_events: int = 0,
+    max_lines: int = ALERT_MAX_CHAT_LINES,
+) -> tuple[str, ...]:
+    """One short line per error group, for the chat channels.
+
+    The email templates render the full grouped table; a chat message has to
+    stay readable, so this caps the list and states what it left out instead of
+    letting the provider truncate mid-sentence.
+    """
+    lines = [
+        f"{group['count']}× {group['exception_class']} — "
+        f"{group['method'] or 'GET'} {group['path'] or '—'}".rstrip()
+        for group in groups[:max_lines]
+    ]
+    trimmed = groups[max_lines:]
+    remaining_groups = len(trimmed) + hidden_groups
+    if remaining_groups:
+        remaining_events = sum(group["count"] for group in trimmed) + hidden_events
+        lines.append(
+            f"…and {remaining_groups} more group(s) covering {remaining_events} error(s)"
+        )
+    return tuple(lines)
 
 
 def group_events(queryset, *, max_groups: int) -> tuple[list[dict], int, int]:
@@ -262,15 +318,24 @@ def send_error_digest(*, hours: int = 24) -> dict:
     if total == 0:
         logger.info("error_digest_skipped_empty", hours=hours)
         return {"sent": False, "reason": "no_errors", "errors": 0, "purged": purged}
-    if not config.digest_emails:
+    channels = alerts.build_channels(
+        kind=alerts.ALERT_KIND_ERROR_DIGEST,
+        recipients=config.digest_emails,
+        from_email=config.from_email,
+    )
+    if not channels:
         logger.warning("error_digest_no_recipients", errors=total)
         return {"sent": False, "reason": "no_recipients", "errors": total, "purged": purged}
 
-    _send_email(
+    alert = alerts.Alert(
+        kind=alerts.ALERT_KIND_ERROR_DIGEST,
         subject=(
             f"[SnapAdmin] Error digest — {total} errors in {len(groups)} groups "
             f"(last {hours}h)"
         ),
+        summary=f"{total} errors in {len(groups)} group(s) over the last {hours}h.",
+        lines=group_lines(groups, hidden_groups=hidden_groups, hidden_events=hidden_events),
+        severity="warning",
         template="error_digest",
         context={
             "hours": hours,
@@ -280,15 +345,30 @@ def send_error_digest(*, hours: int = 24) -> dict:
             "hidden_events": hidden_events,
             "generated_at": timezone.now(),
         },
-        recipients=config.digest_emails,
-        from_email=config.from_email,
     )
+    result = alerts.dispatch(alert, channels)
+    if not result.any_delivered:
+        logger.warning(
+            "error_digest_undelivered",
+            errors=total,
+            channels=",".join(result.failed),
+            purged=purged,
+        )
+        return {
+            "sent": False,
+            "reason": "delivery_failed",
+            "errors": total,
+            "groups": len(groups),
+            "hidden_groups": hidden_groups,
+            "purged": purged,
+        }
     logger.info(
         "error_digest_sent",
         errors=total,
         groups=len(groups),
         hidden_groups=hidden_groups,
         recipients=len(config.digest_emails),
+        channels=",".join(result.delivered),
         purged=purged,
     )
     return {
@@ -296,6 +376,7 @@ def send_error_digest(*, hours: int = 24) -> dict:
         "errors": total,
         "groups": len(groups),
         "hidden_groups": hidden_groups,
+        "channels": ",".join(result.delivered),
         "purged": purged,
     }
 
@@ -327,10 +408,16 @@ def _send_email(
     recipients: list[str],
     from_email: str | None,
 ) -> None:
-    text_body = render_to_string(f"snapadmin/email/{template}.txt", context)
-    html_body = render_to_string(f"snapadmin/email/{template}.html", context)
-    email = EmailMultiAlternatives(
-        subject=subject, body=text_body, from_email=from_email, to=recipients
+    """Render and send one alert email.
+
+    Kept as a thin delegation to ``alerts.send_email_alert`` — the rendering
+    moved to ``snapadmin.alerts`` when email became one channel among several,
+    and this name predates that, so anything already importing it keeps working.
+    """
+    alerts.send_email_alert(
+        subject=subject,
+        template=template,
+        context=context,
+        recipients=recipients,
+        from_email=from_email,
     )
-    email.attach_alternative(html_body, "text/html")
-    email.send(fail_silently=False)

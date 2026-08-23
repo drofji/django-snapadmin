@@ -284,6 +284,8 @@ class TestErrorDigest:
         summary = send_error_digest()
         assert summary == {
             "sent": True, "errors": 6, "groups": 2, "hidden_groups": 0, "purged": 1,
+            # The digest reports which channels accepted it — email only, here.
+            "channels": "email",
         }
         assert len(mail.outbox) == 1
         message = mail.outbox[0]

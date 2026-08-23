@@ -506,6 +506,28 @@ SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES = int(
     os.getenv('SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES', '60')
 )
 
+# Alert channels: the three alerts above (spike, digest, health) are delivered by
+# email *and* by any chat webhook listed here — Slack, Discord and Teams incoming
+# webhooks, the Telegram Bot API, or a plain JSON POST ({'type': 'json'}). Posted
+# with the standard library, so no extra dependency. Thresholds, grouping and the
+# cooldowns are shared by every channel: a webhook changes where an alert goes,
+# never how often it fires. A URL here is a credential — keep it in the environment.
+SNAPADMIN_ALERT_EMAIL_ENABLED = env_bool('SNAPADMIN_ALERT_EMAIL_ENABLED', True)
+SNAPADMIN_ALERT_WEBHOOK_TIMEOUT = float(os.getenv('SNAPADMIN_ALERT_WEBHOOK_TIMEOUT', '5'))
+SNAPADMIN_ALERT_WEBHOOKS = []
+for _webhook_type in ('slack', 'discord', 'teams'):
+    _webhook_url = os.getenv(f'SNAPADMIN_ALERT_{_webhook_type.upper()}_WEBHOOK', '').strip()
+    if _webhook_url:
+        SNAPADMIN_ALERT_WEBHOOKS.append({'type': _webhook_type, 'url': _webhook_url})
+if os.getenv('SNAPADMIN_ALERT_TELEGRAM_TOKEN', '').strip():
+    SNAPADMIN_ALERT_WEBHOOKS.append({
+        'type': 'telegram',
+        'token': os.getenv('SNAPADMIN_ALERT_TELEGRAM_TOKEN', '').strip(),
+        'chat_id': os.getenv('SNAPADMIN_ALERT_TELEGRAM_CHAT_ID', '').strip(),
+        # Outages only — the daily digest would be noise in a chat used for paging.
+        'events': ['health', 'error_spike'],
+    })
+
 # ErrorEvent rows older than this are purged by the digest task.
 SNAPADMIN_ERROR_RETENTION_DAYS = int(os.getenv('SNAPADMIN_ERROR_RETENTION_DAYS', '30'))
 

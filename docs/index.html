@@ -2643,10 +2643,11 @@ AuditLog.purge_expired(dry_run=True)  # count what *would* be deleted, delete no
   </div>
 
   <!-- ── Error Monitoring ──────────────────────────────────────────────────── -->
-  <h2 id="error-monitoring">🚨 Error Monitoring &amp; Email Alerts</h2>
-  <p>Optional email notifications about server errors, built on one middleware. Every unhandled
+  <h2 id="error-monitoring">🚨 Error Monitoring &amp; Alerts</h2>
+  <p>Optional notifications about server errors, built on one middleware. Every unhandled
   exception and 5xx response is stored as an <code>ErrorEvent</code> — browsable in the admin under
-  <strong>Error Events</strong> — and two email channels keep the team informed:</p>
+  <strong>Error Events</strong> — and two alerts keep the team informed (by email, by chat webhook, or
+  both — see <a href="#alert-channels">Alert channels</a>):</p>
   <ul>
     <li><strong>Spike alert</strong> — when <code>SNAPADMIN_ERROR_ALERT_THRESHOLD</code> errors occur
       within <code>SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES</code> (default 20 errors / 15 min), one email
@@ -2657,10 +2658,12 @@ AuditLog.purge_expired(dry_run=True)  # count what *would* be deleted, delete no
   </ul>
 
   <div class="callout callout-success">
-    <strong>Prerequisite: working SMTP</strong>
-    Delivery uses Django's standard email machinery — configure <code>EMAIL_BACKEND</code>,
+    <strong>Prerequisite: working SMTP — or a webhook</strong>
+    Email delivery uses Django's standard email machinery — configure <code>EMAIL_BACKEND</code>,
     <code>EMAIL_HOST</code>, credentials and <code>DEFAULT_FROM_EMAIL</code>. While the recipient
-    lists are empty no email is ever sent, so the feature is inert until you opt in.
+    lists are empty no email is ever sent, so the feature is inert until you opt in. No mail server?
+    Configure a Slack/Discord/Teams/Telegram webhook instead — every alert below works with
+    <a href="#alert-channels">chat delivery alone</a>.
   </div>
 
   <h3>Setup</h3>
@@ -2752,6 +2755,58 @@ python manage.py snapadmin_health_alert --force   # re-send within the cooldown<
     <code>willfarrell/autoheal</code> sidecar that restarts any container labelled <code>autoheal=true</code>
     once its healthcheck goes unhealthy — covering the "hung but not exited" case that
     <code>restart: unless-stopped</code> alone can't. See the demo <a href="#demo-setup">Docker setup</a>.
+  </div>
+
+  <h3 id="alert-channels">Alert channels — Slack, Discord, Teams, Telegram</h3>
+  <p>Every alert above (spike, digest, health) is delivered by the same set of <strong>channels</strong>.
+  Email is one of them; the others are chat webhooks, posted with the standard library — SnapAdmin adds
+  <strong>no dependency</strong> for alerting. Thresholds, grouping and the cooldown are shared by all
+  channels, so adding a webhook changes <em>where</em> an alert goes, never <em>how often</em> it fires.</p>
+  <pre><code># settings.py — read the URLs from the environment, never hard-code them
+SNAPADMIN_ALERT_WEBHOOKS = [
+    {"type": "slack",    "url": os.environ["SLACK_ALERT_WEBHOOK"]},
+    {"type": "discord",  "url": os.environ["DISCORD_ALERT_WEBHOOK"]},
+    {"type": "teams",    "url": os.environ["TEAMS_ALERT_WEBHOOK"]},
+    {"type": "telegram", "token": os.environ["TELEGRAM_BOT_TOKEN"],
+                         "chat_id": os.environ["TELEGRAM_CHAT_ID"]},
+    # Only page the on-call channel for outages, not for the daily digest:
+    {"type": "json", "url": "https://ops.example.com/hooks/snapadmin",
+     "events": ["health", "error_spike"], "timeout": 3},
+]
+
+SNAPADMIN_ALERT_EMAIL_ENABLED = True   # False → chat-only, no mail server needed
+SNAPADMIN_ALERT_WEBHOOK_TIMEOUT = 5    # seconds per POST</code></pre>
+  <table>
+    <tr><th>Entry key</th><th>Required</th><th>Description</th></tr>
+    <tr><td><code>type</code></td><td>yes</td><td><code>slack</code>, <code>discord</code>, <code>teams</code>, <code>telegram</code>, or <code>json</code> (a plain JSON POST for your own endpoint; <code>webhook</code> is an alias).</td></tr>
+    <tr><td><code>url</code></td><td>yes (except <code>telegram</code>)</td><td>The incoming-webhook URL. Must be <code>http(s)://</code>.</td></tr>
+    <tr><td><code>token</code> + <code>chat_id</code></td><td><code>telegram</code> only</td><td>Bot token and target chat — posted to the Bot API <code>sendMessage</code> endpoint.</td></tr>
+    <tr><td><code>events</code></td><td>no</td><td>Which alerts this channel wants: <code>error_spike</code>, <code>error_digest</code>, <code>health</code>. Omitted = all three.</td></tr>
+    <tr><td><code>timeout</code></td><td>no</td><td>Per-channel POST timeout in seconds; defaults to <code>SNAPADMIN_ALERT_WEBHOOK_TIMEOUT</code>.</td></tr>
+  </table>
+  <div class="callout callout-warn">
+    <strong>A webhook URL is a credential.</strong> Anyone holding a Slack URL or a Telegram bot token
+    can post to your channel, so keep them in the environment, not in source control. SnapAdmin treats
+    them as secrets: they are never written to a log line, never included in an alert body, and never
+    reported by <code>snapadmin_info</code> — failures are logged as
+    <code>alert_channel_failed</code> with the host only (<code>https://hooks.slack.com/…</code>).
+  </div>
+  <div class="callout callout-success">
+    <strong>Fail-soft, and never silently silenced.</strong> A channel that times out is logged and
+    skipped — the request that recorded the error, the digest task and the
+    <code>snapadmin_health_alert</code> command all carry on, and the other channels still receive the
+    alert. If <em>every</em> channel fails, the cooldown that was claimed for the send is released
+    again, so the next occurrence alerts instead of being swallowed for the rest of the window.
+    A malformed entry (unknown <code>type</code>, missing <code>url</code>) is logged and skipped
+    rather than raised.
+  </div>
+  <div class="callout callout-info">
+    <strong>The spike alert posts inside the request that crossed the threshold.</strong> Channels are
+    tried one after another, so the worst case a user waits is roughly
+    <code>SNAPADMIN_ALERT_WEBHOOK_TIMEOUT</code> × number of channels — once per cooldown window, not
+    per error. Keep the timeout low (the 5-second default is deliberate), and if you run many channels,
+    subscribe the chatty ones to <code>error_digest</code> only: the digest and the health alert run in
+    a Celery task or a cron command, off the request path.
   </div>
 
   <!-- ── 3-2-1 Backups ─────────────────────────────────────────────────────── -->
