@@ -323,17 +323,20 @@ class SnapadminAuditLog(models.Model):
         raise ValidationError(_("Audit log entries are immutable and cannot be deleted."))
 
 
-class SnapExportJob(models.Model):
-    """A background CSV / JSON / XLSX export of a model's rows.
+class SnapJobBase(models.Model):
+    """Abstract base for a resumable, progress-tracking background job.
 
-    Created via ``POST /api/exports/``; a Celery task
-    (``snapadmin.run_export``) fills it in chunk by chunk, updating
-    ``processed_rows`` so ``GET /api/exports/<id>/`` can report live progress and
-    an ETA. Fault-tolerant: the writer resumes from the ``cursor_pk`` /
-    ``cursor_bytes`` checkpoint (not the ``processed_rows`` counter) so a retry
-    never duplicates or skips a row — except for ``xlsx``, a container format
-    that a retry re-exports from the first row. Cancellable: setting ``status`` to
-    ``cancelled`` stops the task between chunks. See :mod:`snapadmin.exporting`.
+    Shared by :class:`SnapExportJob` and :class:`SnapReindexJob`: both are
+    created up front and filled in chunk by chunk by a runner that updates
+    ``processed_rows`` so a poller can report live progress (``progress_percent``)
+    and an ETA (``eta_seconds``), resume from a crash via a ``cursor_pk``
+    checkpoint (``pk__gt`` cursor pagination, no OFFSET drift), and can be
+    stopped between chunks by setting ``status`` to ``cancelled``
+    (``is_finished`` then becomes true). ``cursor_pk`` itself is declared on
+    each concrete subclass rather than here — its ``help_text`` carries a
+    genuinely different meaning per job (last *exported* vs last *indexed*
+    row) and collapsing that into one shared string would make one of the two
+    readings a lie.
     """
 
     class Status(models.TextChoices):
@@ -343,53 +346,30 @@ class SnapExportJob(models.Model):
         FAILED = "failed", _("Failed")
         CANCELLED = "cancelled", _("Cancelled")
 
-    class Format(models.TextChoices):
-        # CSV and JSON (newline-delimited) are line-based: the writer appends
-        # chunk after chunk and resumes from a byte offset. XLSX is a *container*
-        # format written whole on completion, so it needs the optional [xlsx]
-        # extra (openpyxl) and does not resume — see snapadmin.exporting.
-        CSV = "csv", "CSV"
-        JSON = "json", "JSON"
-        XLSX = "xlsx", "XLSX"
+    #: Human-readable prefix for __str__, set by each concrete subclass
+    #: (e.g. "Export", "Reindex"). A plain class attribute, not a model field.
+    job_label: str = ""
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     app_label = models.CharField(max_length=100, verbose_name=_("App Label"))
     model = models.CharField(max_length=100, verbose_name=_("Model"))
-    export_format = models.CharField(max_length=8, choices=Format.choices, default=Format.CSV, verbose_name=_("Format"))
-    filters = models.JSONField(default=dict, blank=True, verbose_name=_("Filters"), help_text=_("ORM field=value filters applied to the export queryset."))
-    # Named row source (see SNAPADMIN_EXPORT_SOURCES + snapadmin.exporting). Blank
-    # (the default) uses the built-in ORM source: model.objects.filter(**filters)
-    # serialized as raw column rows. A non-blank value names a registered custom
-    # source (ES-query-backed, key-list-backed, custom document shape); the runner's
-    # crash-safe chunking / progress / cancel / resume / storage are unchanged.
-    source = models.CharField(max_length=64, blank=True, default="", verbose_name=_("Row Source"), help_text=_("Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."))
     status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True, verbose_name=_("Status"))
     total_rows = models.PositiveIntegerField(default=0, verbose_name=_("Total Rows"))
     processed_rows = models.PositiveIntegerField(default=0, verbose_name=_("Processed Rows"), help_text=_("Rows written so far — drives progress-percent and ETA reporting."))
-    # Crash-safe resume checkpoint (see snapadmin.exporting). cursor_pk is the
-    # primary key of the last exported row, used for pk__gt cursor pagination on
-    # resume (no OFFSET drift); cursor_bytes is the working file's byte length
-    # confirmed at that pk, used to truncate any uncheckpointed tail on resume.
-    # Stored as a string so any primary-key type (int / UUID / char) round-trips.
-    cursor_pk = models.CharField(max_length=255, blank=True, default="", verbose_name=_("Resume Cursor (PK)"), help_text=_("Primary key of the last exported row; blank means start from the beginning."))
-    cursor_bytes = models.PositiveBigIntegerField(default=0, verbose_name=_("Resume Byte Offset"), help_text=_("Byte length of the working file confirmed at cursor_pk."))
-    file_name = models.CharField(max_length=255, blank=True, verbose_name=_("File Name"))
     error = models.TextField(blank=True, verbose_name=_("Error"))
-    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+", verbose_name=_("Requested By"))
     created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("Created At"))
     started_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Started At"))
     finished_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Finished At"))
 
     class Meta:
-        verbose_name = _("Export Job")
-        verbose_name_plural = _("Export Jobs")
+        abstract = True
         ordering = ["-created_at"]
 
     def __str__(self) -> str:
-        return f"Export {self.app_label}.{self.model} [{self.status}] {self.processed_rows}/{self.total_rows}"
+        return f"{self.job_label} {self.app_label}.{self.model} [{self.status}] {self.processed_rows}/{self.total_rows}"
 
     def target_model(self):
-        """Resolve the model being exported (raises LookupError if unknown)."""
+        """Resolve the model this job targets (raises LookupError if unknown)."""
         return apps.get_model(self.app_label, self.model)
 
     @property
@@ -416,7 +396,55 @@ class SnapExportJob(models.Model):
         return round(max(0, self.total_rows - self.processed_rows) / rate)
 
 
-class SnapReindexJob(models.Model):
+class SnapExportJob(SnapJobBase):
+    """A background CSV / JSON / XLSX export of a model's rows.
+
+    Created via ``POST /api/exports/``; a Celery task
+    (``snapadmin.run_export``) fills it in chunk by chunk, updating
+    ``processed_rows`` so ``GET /api/exports/<id>/`` can report live progress and
+    an ETA. Fault-tolerant: the writer resumes from the ``cursor_pk`` /
+    ``cursor_bytes`` checkpoint (not the ``processed_rows`` counter) so a retry
+    never duplicates or skips a row — except for ``xlsx``, a container format
+    that a retry re-exports from the first row. Cancellable: setting ``status`` to
+    ``cancelled`` stops the task between chunks. See :mod:`snapadmin.exporting`.
+    """
+
+    job_label = "Export"
+
+    class Format(models.TextChoices):
+        # CSV and JSON (newline-delimited) are line-based: the writer appends
+        # chunk after chunk and resumes from a byte offset. XLSX is a *container*
+        # format written whole on completion, so it needs the optional [xlsx]
+        # extra (openpyxl) and does not resume — see snapadmin.exporting.
+        CSV = "csv", "CSV"
+        JSON = "json", "JSON"
+        XLSX = "xlsx", "XLSX"
+
+    export_format = models.CharField(max_length=8, choices=Format.choices, default=Format.CSV, verbose_name=_("Format"))
+    filters = models.JSONField(default=dict, blank=True, verbose_name=_("Filters"), help_text=_("ORM field=value filters applied to the export queryset."))
+    # Named row source (see SNAPADMIN_EXPORT_SOURCES + snapadmin.exporting). Blank
+    # (the default) uses the built-in ORM source: model.objects.filter(**filters)
+    # serialized as raw column rows. A non-blank value names a registered custom
+    # source (ES-query-backed, key-list-backed, custom document shape); the runner's
+    # crash-safe chunking / progress / cancel / resume / storage are unchanged.
+    source = models.CharField(max_length=64, blank=True, default="", verbose_name=_("Row Source"), help_text=_("Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."))
+    # Crash-safe resume checkpoint (see snapadmin.exporting). cursor_pk is the
+    # primary key of the last exported row, used for pk__gt cursor pagination on
+    # resume (no OFFSET drift); cursor_bytes is the working file's byte length
+    # confirmed at that pk, used to truncate any uncheckpointed tail on resume.
+    # Stored as a string so any primary-key type (int / UUID / char) round-trips.
+    # (Declared here rather than on SnapJobBase — see the base's docstring.)
+    cursor_pk = models.CharField(max_length=255, blank=True, default="", verbose_name=_("Resume Cursor (PK)"), help_text=_("Primary key of the last exported row; blank means start from the beginning."))
+    cursor_bytes = models.PositiveBigIntegerField(default=0, verbose_name=_("Resume Byte Offset"), help_text=_("Byte length of the working file confirmed at cursor_pk."))
+    file_name = models.CharField(max_length=255, blank=True, verbose_name=_("File Name"))
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+", verbose_name=_("Requested By"))
+
+    class Meta(SnapJobBase.Meta):
+        verbose_name = _("Export Job")
+        verbose_name_plural = _("Export Jobs")
+
+
+class SnapReindexJob(SnapJobBase):
     """A background Elasticsearch reindex of a model's rows.
 
     Created by the ``snapadmin_reindex`` management command; the runner in
@@ -431,64 +459,19 @@ class SnapReindexJob(models.Model):
     chunks. See :mod:`snapadmin.reindexing`.
     """
 
-    class Status(models.TextChoices):
-        PENDING = "pending", _("Pending")
-        PROCESSING = "processing", _("Processing")
-        COMPLETED = "completed", _("Completed")
-        FAILED = "failed", _("Failed")
-        CANCELLED = "cancelled", _("Cancelled")
+    job_label = "Reindex"
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    app_label = models.CharField(max_length=100, verbose_name=_("App Label"))
-    model = models.CharField(max_length=100, verbose_name=_("Model"))
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True, verbose_name=_("Status"))
-    total_rows = models.PositiveIntegerField(default=0, verbose_name=_("Total Rows"))
-    processed_rows = models.PositiveIntegerField(default=0, verbose_name=_("Processed Rows"), help_text=_("Rows written so far — drives progress-percent and ETA reporting."))
     # Crash-safe resume checkpoint (see snapadmin.reindexing): cursor_pk is the
     # primary key of the last indexed row, used for pk__gt cursor pagination on
     # resume (no OFFSET drift). Stored as a string so any primary-key type
     # (int / UUID / char) round-trips. ES_ONLY models have no DB pk cursor and
     # always reindex in a single pass, so this stays blank for them.
+    # (Declared here rather than on SnapJobBase — see the base's docstring.)
     cursor_pk = models.CharField(max_length=255, blank=True, default="", verbose_name=_("Resume Cursor (PK)"), help_text=_("Primary key of the last indexed row; blank means start from the beginning."))
-    error = models.TextField(blank=True, verbose_name=_("Error"))
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("Created At"))
-    started_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Started At"))
-    finished_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Finished At"))
 
-    class Meta:
+    class Meta(SnapJobBase.Meta):
         verbose_name = _("Reindex Job")
         verbose_name_plural = _("Reindex Jobs")
-        ordering = ["-created_at"]
-
-    def __str__(self) -> str:
-        return f"Reindex {self.app_label}.{self.model} [{self.status}] {self.processed_rows}/{self.total_rows}"
-
-    def target_model(self):
-        """Resolve the model being reindexed (raises LookupError if unknown)."""
-        return apps.get_model(self.app_label, self.model)
-
-    @property
-    def is_finished(self) -> bool:
-        return self.status in (self.Status.COMPLETED, self.Status.FAILED, self.Status.CANCELLED)
-
-    @property
-    def progress_percent(self) -> int:
-        if not self.total_rows:
-            return 100 if self.status == self.Status.COMPLETED else 0
-        return min(100, round(self.processed_rows * 100 / self.total_rows))
-
-    @property
-    def eta_seconds(self):
-        """Estimated seconds remaining, or ``None`` when not computable yet."""
-        if self.status == self.Status.COMPLETED:
-            return 0
-        if self.status != self.Status.PROCESSING or not self.started_at or not self.processed_rows:
-            return None
-        elapsed = (timezone.now() - self.started_at).total_seconds()
-        rate = self.processed_rows / elapsed if elapsed > 0 else 0
-        if rate <= 0:
-            return None
-        return round(max(0, self.total_rows - self.processed_rows) / rate)
 
 
 # ===========================================================================
@@ -2422,6 +2405,13 @@ class SnapModel(models.Model):
                 "classes": ("tab",)
             }))
 
+        # connectivity.js is unconditional (not gated by offline_mode) on purpose:
+        # it polls /api/health/ and, for models WITHOUT offline_mode, shows a
+        # warning toast and blocks form submits so a user does not lose what they
+        # typed while the backend is down — a safeguard that exists only for the
+        # non-offline-capable majority. It also owns window.SnapAdminToast, which
+        # offline.js borrows for its own "cached / will sync" toast. Do not move it
+        # behind offline_mode; see tests/test_offline.py::TestConnectivityJsInjection.
         BASE_JS = ["admin/js/vendor/jquery/jquery.js", "admin/js/jquery.init.js", "snapadmin/js/jquery_bridge.js", "snapadmin/js/select2.min.js", "snapadmin/js/admin.js", "snapadmin/js/connectivity.js"]
         BASE_CSS = ["snapadmin/css/select2.min.css", "snapadmin/css/admin.css"]
         # The two theme layers are mutually exclusive, and that is the whole
