@@ -91,59 +91,6 @@ Added
   own ``__init__`` (deriving ``null``/``blank``, or building a validator) — raises ``ValueError``
   naming it, rather than silently doing nothing.
 
-* **``@snap_model`` — a plain ``django.db.models.Model`` can now opt in, without subclassing.**
-  Until now the only way to declare a SnapAdmin model was to inherit from ``SnapModel``, which meant
-  rewriting the model layer of any project that already had one. That is the wrong price for a
-  brownfield schema, for a model whose base class belongs to a third-party package, or for fields
-  that come from ``django-money``, ``phonenumber_field`` or ``model-utils``. A class decorator now
-  opts such a model in from the outside::
-
-      from django.db import models
-      from snapadmin import snap_model
-
-      @snap_model(
-          api_write_fields=["name", "price"],   # mass-assignment allowlist
-          api_exclude_fields=["cost_price"],    # never leaves the server
-          search_fields=["name"],               # what ?search= matches on
-      )
-      class Product(models.Model):
-          name = models.CharField(max_length=200)
-          price = models.DecimalField(max_digits=10, decimal_places=2)
-          cost_price = models.DecimalField(max_digits=10, decimal_places=2)
-
-  The decorator adds no field and no attribute to the class, so it needs **no migration**. From then
-  on the model is a SnapAdmin model everywhere the question is asked: the REST API mounts CRUD routes
-  for it, the GraphQL schema gains a type, the offline endpoints and the ``snapadmin.W00x`` system
-  checks see it, and ``snapadmin_info`` inventories it. Its keywords mirror the ``SnapModel`` class
-  attributes of the same name — ``api_exclude_fields``, ``api_write_fields``, ``api_read_only``,
-  ``api_http_method_names``, ``api_filter_lookups``, ``api_default_text_lookups``,
-  ``api_json_filters``, ``offline_mode``, ``offline_cache_limit`` and ``search_fields`` — and only the
-  ones you pass are recorded, so applying it to a ``SnapModel`` subclass overrides exactly those and
-  leaves the rest of the class-level configuration alone.
-
-  **Be clear about what it does not give you.** This is registration and metadata; it attaches none
-  of ``SnapModel``'s runtime machinery, and the surfaces that need that machinery skip a decorated
-  plain model rather than half-work. No ``EsManager``/``EsQuerySet``, so no ``es_search()``, no
-  mirroring on save, no index created on ``post_migrate`` and no selection by ``snapadmin_reindex``.
-  No ``purge_expired()``, so neither the retention command nor the retention task touches it. No
-  generated admin — ``register_all_admins()`` passes it by, because without ``Snap*Field`` flags there
-  is nothing to derive fieldsets, list columns or filters from — and none of the base class's admin
-  niceties (``formatted_id``, the audit/PII ``save()`` hooks, ``admin_overrides``). That is why the
-  decorator deliberately accepts no ``es_*`` or ``data_retention_*`` keywords: storing them would
-  promise indexing and purging that never happen. Needing any of it means subclassing ``SnapModel``;
-  both routes end in the same registry, so switching later changes nothing else.
-
-* **``snapadmin.registry`` is now public API.** The module shipped in the previous release as an
-  internal seam — ``SnapModel`` subclasses registering themselves as they are declared, so every
-  "is this a SnapAdmin model?" gate became a lookup instead of an ``issubclass()`` walk. With
-  ``@snap_model`` it becomes something a project can use directly, and it is documented and pinned
-  accordingly: ``is_registered(model)`` is the gate every surface asks, ``meta_for(model)`` returns a
-  model's recorded settings, ``register(model, **meta)`` is the underlying registration call, and
-  ``get_model_meta(model, name, default)`` is the accessor every SnapAdmin surface now reads a
-  model-level setting through — the registry entry first, the class attribute second. That two-step is
-  what lets both declaration styles read identically without a single existing ``SnapModel`` changing
-  behaviour.
-
 * **``snapadmin-new`` generates a project you keep.** Until now the package offered a throwaway demo
   (``snapadmin-demo``) and a read-only doctor for an existing project (``snapadmin-init``) — neither
   produced something you actually kept, which was the gap between the package and its "quick
