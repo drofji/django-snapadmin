@@ -10,153 +10,66 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 
 ## Unreleased
 
+## 0.1.0b7 — 2026-08-25
+
+Two ways to declare a model instead of one, plus a full-project scaffolder and a batch of
+operational features. No breaking changes, no required migration — every addition is opt-in.
+
 ### Added
-- **`@snap_model` opts a plain `django.db.models.Model` into SnapAdmin, without subclassing.**
-  `@snap_model(api_write_fields=[...], api_exclude_fields=[...], search_fields=[...])` on an ordinary
-  Django model registers it and records the same settings a `SnapModel` subclass declares as class
-  attributes. It adds no field and no attribute, so it needs no migration. The model then gets the
-  REST CRUD routes, a GraphQL type, the offline endpoints, the system checks and the `snapadmin_info`
-  inventory. It deliberately does **not** get `SnapModel`'s runtime machinery — no
-  `EsManager`/`es_search()`/`snapadmin_reindex`, no `purge_expired()`, no generated admin, no
-  `formatted_id` — and the ES, retention and admin sweeps skip it rather than half-work, which is why
-  it accepts no `es_*` / `data_retention_*` keywords. Intended for brownfield schemas, models whose
-  base class belongs to a third-party package, and field packages like `django-money` or
-  `phonenumber_field`.
-
-- **`snapadmin.registry` is public API.** `is_registered(model)` is the gate every SnapAdmin surface
-  asks, `get_model_meta(model, name, default)` reads one model-level setting (registry entry first,
-  class attribute second), and `register()` / `meta_for()` complete the surface. All four are pinned
-  in the public-API contract tests.
-
-- **`snap_field()` puts SnapAdmin metadata on any Django field, not just a `Snap*Field`.**
-  `snap_field(models.CharField(max_length=255), searchable=True, filterable=True)` sets the same
-  attributes a `Snap*Field` stores on itself (`searchable`, `filterable`, `show_in_list`,
-  `wysiwyg`, `tab`, `row`, …) directly on a plain field instance, so a third-party field package
-  (`django-money`, `model-utils`, `phonenumber_field`, …) or a brownfield model that cannot be
-  rewritten onto the `Snap*Field` classes gets identical behaviour. Every reader treats the result
-  exactly like a `Snap*Field`; adds no migration; an unrecognised kwarg raises `ValueError` naming
-  it.
-
-- **`snapadmin-new` scaffolds a project you keep.** `pip install django-snapadmin && snapadmin-new
-  myshop` writes `manage.py`, a settings package, one app with a worked `SnapModel` example, SQLite
-  and a `.env`/`dist.env` — `migrate` then `runserver` work immediately, no Docker, no manual edits.
-  `--full` additionally writes a `Dockerfile`, `docker-compose.yml` and the PostgreSQL / Redis /
-  Elasticsearch wiring. Templates ship inside the wheel under `snapadmin/scaffold/templates/` and
-  render with the standard library's `string.Template` — no new dependency. It refuses to write into
-  a non-empty target directory, and validates the project/app name the way `django-admin
-  startproject` does (a valid identifier that doesn't shadow an existing importable module).
-
-- **`snapadmin-demo` refreshes an existing demo tree instead of layering over it.** Every extraction
-  now leaves a `.snapadmin-demo.json` stamp (the release it came from and the files it wrote). A
-  re-run names both versions before touching anything and deletes the files the new release no
-  longer ships — files you added yourself are never in the stamp and are never deleted. `pip install
-  -U django-snapadmin` upgrades the package but not an extracted `demo/` directory, which used to
-  keep serving old models and templates with nothing to say so.
-
-- **Alert channels — Slack, Discord, Teams, Telegram and JSON webhooks beside email.** The error
-  spike alert, the daily digest and the health alert are now delivered by a set of channels
-  configured in `SNAPADMIN_ALERT_WEBHOOKS`; email is one channel among them and can be switched off
-  with `SNAPADMIN_ALERT_EMAIL_ENABLED = False`. Webhooks are posted with the standard library — no
-  new dependency. Thresholds, grouping and the cooldowns are shared by every channel, so a webhook
-  changes where an alert goes, never how often it fires; a per-entry `events` list filters which
-  alerts a channel receives. Delivery is fail-soft (an unreachable webhook never breaks the request,
-  the digest task or `snapadmin_health_alert`, and never stops the other channels), and a send where
-  every channel failed releases the cooldown instead of consuming it. Webhook URLs are treated as
-  secrets: never logged, never in an alert body, never in `snapadmin_info`.
-
-- **XLSX as a third async-export format.** `POST /api/exports/` accepts
-  `export_format="xlsx"` alongside `csv` and `json`, writing a real workbook whose cells keep their
-  types — a `DecimalField` arrives as a number the spreadsheet can sum, a `DateTimeField` as a date
-  in the project's timezone. It needs the new `[xlsx]` extra (`pip install django-snapadmin[xlsx]`,
-  which pulls in MIT-licensed openpyxl); requesting the format without it is rejected with a `400`
-  naming the extra rather than accepted as a job that could only fail later. Because a workbook is
-  written whole rather than appended to, an `xlsx` job **does not resume** from its checkpoint — a
-  retry re-exports from the first row — and a cancelled or failed one leaves no partial file to
-  download. Text beginning with `=` is stored as text, so exported rows are never evaluated as
-  formulas when the file is opened. `csv` and `json` are unchanged.
-
-- **Translations for the Unfold theme's own interface.** `django-unfold` ships no catalogs, so a
-  themed admin rendered its shell ("All applications", "Apply Filters", "No results found", the
-  command palette) in English around a translated page. SnapAdmin now supplies those strings in all
-  ten locales; nothing to configure, and your project's own catalogs still take precedence.
-
-- **A readable per-object diff timeline in the audit log.** The audit trail already stored a
-  structured `{field: {"old": …, "new": …}}` diff; the admin only ever printed it as raw JSON. Every
-  entry now renders as a field-level before/after table, and the *Object* column links to a
-  **timeline** — every recorded change to that one object on a single page, newest first, at
-  `/admin/snapadmin/snapadminauditlog/timeline/<app>/<model>/<id>/`. Both views mask through the
-  same rules as the rest of the admin, and both are gated on the audit log's own view permission,
-  so the timeline can never show more than the list it is reached from. Long histories are capped at
-  100 entries per page (`timeline_max_entries`); `manage.py snapadmin_audit_export` still has the
-  full history.
-
-- **`SNAPADMIN_MASKING_RULES` — per-field masking rules and per-field PII permissions.** How a field
-  is obfuscated used to be fixed by its type. A rule now sets it per field: a regex rewrite
-  (`{"pattern": r"\d(?=\d{4})", "replacement": "*"}` → `************1111`), a flat redaction
-  (`{"replacement": "[redacted]"}`), and/or a `permission` that unlocks *that one field* for whoever
-  holds it, without granting the blanket `snapadmin.view_raw_pii`. Declaring a rule also declares the
-  field sensitive, so `SNAPADMIN_MASKED_FIELDS` stays optional and **completely unchanged** where it
-  is already in use. Rules apply everywhere masking does — admin changelist, REST, GraphQL,
-  background exports and the audit diff — and `user_can_view_pii(user, field=…)` grew the field
-  argument additively. Patterns are compiled once; one that could backtrack catastrophically
-  (`(a+)+`), one that does not compile, and any value over 4096 characters all fall back to the
-  built-in masker rather than to raw data. Because a rule that names a model or field that does not
-  exist would fail *open* — masking nothing and saying nothing — three new system checks
-  (`snapadmin.E003`–`E005`) reject one at startup.
-
-### Changed
-- **The README is now a landing page, not a manual.** It opens with the problem SnapAdmin solves in
-  plain language — four internal-tool surfaces (admin, two APIs, search) that are normally four
-  separate descriptions of the same data — before any code, then the 60-second quickstart, then the
-  commands. A new *For teams and enterprise* section answers the questions asked before a dependency
-  is approved (licensing and how to prove it, audit trail, GDPR, PII, test coverage, upgrade policy,
-  scale, SSO, monitoring, backups, lock-in) as questions rather than as a feature list. Reference
-  detail — both `INSTALLED_APPS` listings, the extras table, the theme comparison, the Docker demo —
-  moved behind collapsible sections, cutting what a first-time reader has to scroll past by roughly
-  half. No content was dropped and no link changed target.
-- **Rich-text HTML is sanitized on write, not only on render.** `wysiwyg=True` /
-  `SnapRichTextField` values are cleaned in `pre_save()`, so every ORM write path (admin form, REST
-  and GraphQL serializers, `save()`, `bulk_create()`) stores sanitized HTML — previously only the
-  admin changelist cleaned it on the way out, leaving every other consumer with the raw payload.
-  **This changes what is stored and is lossy** for markup outside the allowlist; existing rows are
-  not rewritten. Opt out with `safe_html=True` or the new `auto_sanitize=False`, or widen the
-  allowlist via `SNAPADMIN_HTML_SANITIZER`. `QuerySet.update()` is not covered.
-- **`snapadmin_info` reports a demo tree that has drifted from the installed release** in its
-  *Version & Status* section. Projects without an extracted demo tree see no change.
-- **Audit diffs keep JSON-native types.** `audit.format_value()` stringified every value, so a diff
-  could not tell `42` from `"42"`, or `False` from `"False"`. Numbers, booleans, strings and `null`
-  are now stored as themselves; everything else (`Decimal`, dates, UUIDs, related objects) is still
-  `str()`-ed, as are non-finite floats, which have no JSON literal. Rows written before this release
-  are untouched and still hold the string form — a consumer of `SnapadminAuditLog.changes` should
-  accept both. The `old`/`new` key names are unchanged and will not be renamed.
+- **`@snap_model`** opts a plain `django.db.models.Model` into SnapAdmin without subclassing —
+  registers it and records the same settings a `SnapModel` subclass declares as class attributes.
+  No field, no attribute, no migration. Deliberately does **not** attach `SnapModel`'s runtime
+  machinery (Elasticsearch, retention purge, generated admin); the seven gates that used to
+  hand-roll an `issubclass(model, SnapModel)` check now ask the registry instead.
+- **`snapadmin.registry` is public API** — `is_registered()`, `meta_for()`, `register()`, and the
+  new `get_model_meta()` every SnapAdmin surface now reads a model-level setting through.
+- **`snap_field()`** sets SnapAdmin's field-level attributes (`searchable`, `filterable`,
+  `wysiwyg`, …) directly on any Django field instance — the same interop path as `@snap_model`,
+  one field at a time, for a third-party field package or a field that can't be rewritten.
+- **`snapadmin-new`** scaffolds a project you keep — `manage.py`, settings, a worked `SnapModel`
+  example, SQLite, `migrate` and `runserver` work immediately. `--full` adds Docker/Postgres/
+  Redis/Elasticsearch.
+- **`snapadmin-demo` stamps the tree it extracts** (`.snapadmin-demo.json`), so a re-run actually
+  refreshes it — deleting files the new release dropped, keeping anything you added yourself.
+- **Alert channels** — Slack, Discord, Teams, Telegram and JSON webhooks beside email, via
+  `SNAPADMIN_ALERT_WEBHOOKS`. No new dependency; webhook URLs are treated as credentials.
+- **XLSX exports** behind the optional `[xlsx]` extra — typed cells, formula-injection guarded;
+  not resumable, unlike CSV/JSON.
+- **The Unfold theme's own chrome is now translated** in all ten shipped locales — `django-unfold`
+  ships no catalogs of its own.
+- **A readable audit-log diff and a per-object timeline** — field-level before/after table instead
+  of raw JSON, plus `/admin/.../timeline/<app>/<model>/<id>/` showing every change to one record.
+- **`SNAPADMIN_MASKING_RULES`** — per-field masking pattern/replacement and a permission that
+  unlocks one field without the blanket `view_raw_pii`.
 
 ### Fixed
-- **`SnapStatusBadgeField("status", [...])` — the source field and choices may be positional.** They
-  were keyword-only, so the obvious call failed with a message that read as "you forgot it". A wrong
-  or missing argument now raises a `ValueError` naming the field and the call to write, at import
-  time rather than at render time.
-- **The audit-log change form no longer prints the unmasked diff.** For a viewer without PII access
-  the raw `changes` JSON was swapped for a masked copy in `readonly_fields`, which dropped the real
-  field out of that list and back into the form — where Django rendered it read-only straight from
-  the model, unmasked, right beside the masked one. The raw field is now excluded from the form
-  outright and only the rendered diff is shown.
-- **`snapadmin_info` survives a failing section.** A collector that raises now renders as
-  `Title: unavailable — ExceptionType: message` (`collector_error` in `--json`) instead of aborting
-  the report; credentials in the message are redacted, and a crashed health probe still fails
-  `--health-check`.
-- **`snapadmin.tasks` imports without Celery installed.** Celery is an optional extra, but the
-  module required it at import time. Task names are unchanged; calling a task runs it in-process,
-  and `.delay()` / `.apply_async()` raise `ImproperlyConfigured` pointing at
-  `pip install django-snapadmin[celery]` instead of silently doing nothing.
+- **`SnapStatusBadgeField` accepts its source field and choices positionally**, not just as
+  keywords — the missing-argument error used to point at the wrong thing.
+- **One failing `snapadmin_info` section no longer takes down the whole report** — isolated per
+  collector, with credentials redacted from the error text.
+- **`snapadmin.tasks` no longer requires Celery to import** — calling a task now runs it
+  synchronously without Celery installed; queueing it raises naming the `[celery]` extra.
+
+### Changed
+- **The README is a landing page, not a manual** — problem statement, 60-second quickstart, an
+  enterprise Q&A section; reference material moved behind collapsible sections.
+- **Rich-text HTML is sanitized on write, not only on render** — covers every ORM write path.
+  Lossy by design; `safe_html=True` or `auto_sanitize=False` opt out. `QuerySet.update()` is not
+  covered.
+- **`snapadmin_info` reports demo-tree drift** against the installed package version.
+- **Audit-log diffs preserve JSON-native types** — numbers, booleans and `null` no longer
+  collapse to strings.
 
 ### Deprecated
-- **The removal window for the deprecated aliases is now fixed at `1.0`**, stated everywhere the
-  notice appears (stderr, `help` text, module docstrings, `SECURITY.md`, the docs): the unprefixed
-  management commands `db_backup`, `purge_expired_data`, `send_error_digest` (use
-  `snapadmin_db_backup`, `snapadmin_purge_expired_data`, `snapadmin_send_error_digest`) and the
-  underscored console scripts `snapadmin_info` / `snapadmin_license_check` (use the dashed
-  `snapadmin-info` / `snapadmin-license-check`). All of them still work unchanged in this release —
-  this is advance notice, not a behaviour change.
+- **The removal window for every currently-deprecated alias is now fixed at `1.0`** — no
+  behaviour change, just a date where "a future release" used to be.
+
+### Security
+- **The audit-log change form no longer renders the unmasked diff** to a viewer without PII
+  access — the raw field is now excluded from the form outright.
+- **Wysiwyg sanitization now fails closed if `nh3` cannot be imported**, instead of silently
+  skipping sanitization. `nh3` is still a required dependency today; this is defense in depth
+  ahead of a future release that makes it optional.
 
 ## 0.1.0b6 — 2026-08-13
 
