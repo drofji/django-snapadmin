@@ -811,7 +811,11 @@ snapadmin-init --json             # machine-readable, for your own tooling</code
 
   <!-- ── SnapModel ─────────────────────────────────────────────────────────── -->
   <h2 id="snap-model">🏗 SnapModel</h2>
-  <p>Inherit from <code>SnapModel</code> to get automatic admin registration and a smart <code>__str__</code>.</p>
+  <p>Inherit from <code>SnapModel</code> to get automatic admin registration and a smart <code>__str__</code>.
+  This is the full route — reach for it on a new model when you want everything SnapAdmin can do
+  (Elasticsearch mirroring, retention purge, a fully generated admin). Adding SnapAdmin to a model you
+  already have? See <a href="#snap-model-decorator"><code>@snap_model</code></a> below — most existing
+  projects start there.</p>
   <pre><code>from snapadmin import models as snap_models, fields as snap
 
 class Product(snap_models.SnapModel):

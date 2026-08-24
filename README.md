@@ -63,6 +63,13 @@ trail, background jobs, the works. Log in at `/admin/` with `admin` / `admin`.
 
 ## How it works — the whole idea
 
+There are two ways to declare a model, and most projects want the first one: `@snap_model` and
+`snap_field()` add SnapAdmin to models and fields you already have, without subclassing or
+rewriting anything — the natural starting point for an existing codebase. Subclassing `SnapModel`
+below is the full route: reach for it when you want everything SnapAdmin can do (Elasticsearch
+mirroring, retention purge, a fully generated admin) on a new model, or you're prototyping fast and
+don't yet have a model to preserve.
+
 You add keyword arguments to your fields. They describe how the field should *behave*, and they
 **add no database migration**.
 
@@ -136,11 +143,26 @@ Elasticsearch mirroring, the retention purge, the generated admin — and those 
 rather than half-work. [The full comparison
 table](https://drofji.github.io/django-snapadmin/#snap-model-decorator) says exactly which is which.
 
+Need this for one field rather than a whole model — a single `django-money` or `phonenumber_field`
+column on an otherwise ordinary model? `snap_field()` is the same idea at field scope:
+
+```python
+from django.db import models
+from snapadmin.fields import snap_field
+
+class Product(models.Model):
+    name = snap_field(models.CharField(max_length=255), searchable=True, filterable=True)
+```
+
+It sets the same attributes a `Snap*Field` sets on itself, on a field instance you already have —
+every reader treats the result identically, and it adds no migration either.
+
 </details>
 
 → [Field types](https://drofji.github.io/django-snapadmin/#snap-fields) ·
 [SnapModel reference](https://drofji.github.io/django-snapadmin/#snap-model) ·
-[`@snap_model` for plain models](https://drofji.github.io/django-snapadmin/#snap-model-decorator)
+[`@snap_model` for plain models](https://drofji.github.io/django-snapadmin/#snap-model-decorator) ·
+[`snap_field()` for one field](https://drofji.github.io/django-snapadmin/#snap-field-wrapper)
 
 ---
 
