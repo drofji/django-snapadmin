@@ -7,12 +7,16 @@ script that runs in an administrator's session. These tests pin down that the
 value is now sanitized on render, with an explicit ``safe_html=True`` opt-out
 for content the developer fully trusts.
 """
+import sys
+from unittest import mock
+
 import pytest
+from django.core.exceptions import ImproperlyConfigured
 from django.test import override_settings
 from django.utils.safestring import SafeString
 
 from snapadmin.fields import SnapRichTextField, SnapTextField
-from snapadmin.sanitize import sanitize_html
+from snapadmin.sanitize import _load_nh3, sanitize_html
 
 XSS = '<img src=x onerror="alert(1)"><script>alert(2)</script><b>ok</b>'
 
@@ -262,3 +266,111 @@ class TestWysiwygWidgetOptional:
         msg = str(exc.value)
         assert "wysiwyg" in msg
         assert "django-snapadmin[wysiwyg]" in msg
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fail closed when nh3 is unavailable (#DEP1f)
+#
+# nh3 is a required core dependency today (see pyproject.toml), so this state is
+# currently impossible in a real install — these tests exist ahead of a planned
+# future release that moves nh3 behind an optional extra (mirroring [wysiwyg]/
+# [xlsx]). The guarantee this locks in: once that happens, a missing nh3 must
+# stop the write/render with a pointed ImproperlyConfigured rather than let
+# unsanitized HTML through silently. The real installed nh3 package is never
+# touched — `sys.modules["nh3"] = None` makes `import nh3` raise ImportError for
+# the duration of the context, same technique already used above for the
+# optional CKEditor 5 widget.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def nh3_unavailable():
+    """Simulate ``import nh3`` failing, without uninstalling the real package."""
+    _load_nh3.cache_clear()
+    with mock.patch.dict(sys.modules, {"nh3": None}):
+        yield
+    _load_nh3.cache_clear()
+
+
+class TestSanitizeHtmlFailsClosedWithoutNh3:
+    def test_default_sanitizer_raises_improperly_configured(self, nh3_unavailable):
+        with pytest.raises(ImproperlyConfigured) as exc:
+            sanitize_html(XSS)
+        msg = str(exc.value)
+        assert "nh3" in msg
+
+    def test_custom_sanitizer_setting_does_not_need_nh3(self, nh3_unavailable):
+        """The escape hatch must not import nh3 at all -- it must keep working."""
+        with override_settings(
+            SNAPADMIN_HTML_SANITIZER="tests.test_wysiwyg_sanitize.custom_sanitizer"
+        ):
+            assert sanitize_html("<b>x</b>") == "CUSTOM"
+
+
+@pytest.mark.django_db
+class TestWysiwygSaveFailsClosedWithoutNh3:
+    def _create(self, **kwargs):
+        from decimal import Decimal
+
+        from demo.apps.shop.models import Product
+
+        kwargs.setdefault("name", "X")
+        return Product.objects.create(price=Decimal("1.00"), **kwargs)
+
+    def test_save_raises_and_nothing_unsanitized_is_stored(self, nh3_unavailable):
+        from django.db import transaction
+
+        from demo.apps.shop.models import Product
+
+        with transaction.atomic():
+            with pytest.raises(ImproperlyConfigured):
+                self._create(name="NoNh3", description=XSS)
+
+        # The write must not have gone through at all -- no row, sanitized or not.
+        assert not Product.objects.filter(name="NoNh3").exists()
+
+    def test_custom_sanitizer_setting_still_saves_without_nh3(self, nh3_unavailable):
+        with override_settings(
+            SNAPADMIN_HTML_SANITIZER="tests.test_wysiwyg_sanitize.custom_sanitizer"
+        ):
+            product = self._create(name="CustomNh3", description="<b>x</b>")
+        product.refresh_from_db()
+        assert product.description == "CUSTOM"
+
+
+@pytest.mark.django_db
+class TestWysiwygChangelistFailsClosedWithoutNh3:
+    def _display_for(self, model, field_name):
+        model.get_admin_fields()
+        return model.admin_overrides[f"safe_html_{field_name}"]
+
+    def test_render_raises_improperly_configured(self, nh3_unavailable):
+        from demo.apps.shop.models import Product
+
+        display = self._display_for(Product, "description")
+        with pytest.raises(ImproperlyConfigured):
+            display(None, Product(description=XSS))
+
+    def test_custom_sanitizer_setting_still_renders_without_nh3(self, nh3_unavailable):
+        from demo.apps.shop.models import Product
+
+        with override_settings(
+            SNAPADMIN_HTML_SANITIZER="tests.test_wysiwyg_sanitize.custom_sanitizer"
+        ):
+            display = self._display_for(Product, "description")
+            html = display(None, Product(description=XSS))
+        assert isinstance(html, SafeString)
+        assert html == "CUSTOM"
+
+
+class TestLoadNh3Caching:
+    def test_successful_import_is_cached(self):
+        """Calling the loader twice must not re-attempt the import each time."""
+        _load_nh3.cache_clear()
+        try:
+            first = _load_nh3()
+            second = _load_nh3()
+            assert first is second
+            assert _load_nh3.cache_info().hits >= 1
+        finally:
+            _load_nh3.cache_clear()

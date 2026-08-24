@@ -13,19 +13,56 @@ allowlist: it keeps common rich-text markup while stripping ``<script>``, inline
 event handlers (``onerror`` &c.) and unsafe URL schemes (``javascript:``).
 Projects that need a different policy can set ``SNAPADMIN_HTML_SANITIZER`` to a
 dotted import path pointing at their own ``Callable[[str], str]``.
+
+``nh3`` is imported lazily through :func:`_load_nh3` rather than at module load,
+even though it is currently a required core dependency (see ``pyproject.toml``)
+and this import cannot fail in a released install today. This is defense in
+depth ahead of a planned future release that moves ``nh3`` behind an optional
+extra (mirroring ``[wysiwyg]``/``[xlsx]``): once that happens, a missing ``nh3``
+must fail *closed* — a pointed :class:`~django.core.exceptions.ImproperlyConfigured`
+raised at the moment sanitization is attempted — instead of either crashing the
+whole module at Django startup or, worse, silently letting unsanitized HTML
+through. The ``SNAPADMIN_HTML_SANITIZER`` escape hatch never touches ``nh3`` at
+all, so it keeps working even in that state.
 """
 from __future__ import annotations
 
+import functools
+from types import ModuleType
 from typing import Callable
 
-import nh3
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
+
+
+@functools.lru_cache(maxsize=1)
+def _load_nh3() -> ModuleType:
+    """Return the imported ``nh3`` module, imported lazily and cached.
+
+    Mirrors the house lazy-import pattern (see ``exporting._load_openpyxl()``):
+    the import is attempted only when sanitization is actually about to run,
+    and ``ImportError`` is translated into an actionable ``ImproperlyConfigured``
+    naming exactly what is missing and how to fix it, rather than surfacing a
+    bare ``ModuleNotFoundError`` from deep inside a save or a changelist render.
+    A successful import is cached for the life of the process so the cost is
+    paid once, not on every sanitize call.
+    """
+    try:
+        import nh3
+    except ImportError as exc:
+        raise ImproperlyConfigured(
+            "HTML sanitization needs the nh3 library, which could not be "
+            "imported. Install it (`pip install nh3`), or avoid the "
+            "dependency entirely by pointing SNAPADMIN_HTML_SANITIZER at a "
+            "dotted path to your own Callable[[str], str] sanitizer."
+        ) from exc
+    return nh3
 
 
 def _default_sanitizer(value: str) -> str:
     """Sanitize *value* with nh3's built-in allowlist."""
-    return nh3.clean(value)
+    return _load_nh3().clean(value)
 
 
 def sanitize_html(value: str) -> str:
@@ -33,7 +70,11 @@ def sanitize_html(value: str) -> str:
 
     Empty values are returned unchanged. When ``SNAPADMIN_HTML_SANITIZER`` is
     set to a dotted import path, that callable is used instead of the built-in
-    nh3 sanitizer.
+    nh3 sanitizer -- and ``nh3`` is never imported at all in that case, so the
+    setting keeps working even if ``nh3`` is unavailable. Otherwise, if the
+    built-in nh3 sanitizer cannot be loaded, this raises
+    :class:`~django.core.exceptions.ImproperlyConfigured` rather than returning
+    the value unsanitized.
     """
     if not value:
         return value
