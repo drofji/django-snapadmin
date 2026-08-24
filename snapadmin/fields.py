@@ -256,6 +256,79 @@ class SnapField:
         cls.check = check
 
 
+#: Kwargs :func:`snap_field` may set — the exact attribute names
+#: :meth:`SnapField._initializeSnapLogic` stores on every ``Snap*Field``
+#: instance, so a reader (the searchable filter, the admin's list/form/tab/row
+#: layout, the wysiwyg widget, …) cannot tell whether they came from a
+#: ``Snap*Field`` subclass or from this wrapper.
+#:
+#: Deliberately narrower than :class:`SnapFieldAttributeEnum`: it excludes
+#: ``required`` (meaningful only at construction time, where it derives
+#: ``null``/``blank`` — a field passed into :func:`snap_field` is already
+#: built, so setting it afterwards would silently do nothing) and the file
+#: upload kwargs ``allowed_extensions`` / ``allowed_encodings`` /
+#: ``max_size_bytes`` (those build a validator in ``SnapFileField.__init__``
+#: rather than set an attribute a reader looks up).
+_SNAP_FIELD_WRAPPER_KWARGS: frozenset[str] = frozenset({
+    SnapFieldAttributeEnum.SHOW_IN_LIST.value,
+    SnapFieldAttributeEnum.SHOW_IN_FORM.value,
+    SnapFieldAttributeEnum.SEARCHABLE.value,
+    SnapFieldAttributeEnum.FILTERABLE.value,
+    SnapFieldAttributeEnum.EDITABLE.value,
+    SnapFieldAttributeEnum.UPDATABLE.value,
+    SnapFieldAttributeEnum.AUTOCOMPLETE.value,
+    SnapFieldAttributeEnum.WYSIWYG.value,
+    SnapFieldAttributeEnum.SAFE_HTML.value,
+    SnapFieldAttributeEnum.AUTO_SANITIZE.value,
+    SnapFieldAttributeEnum.TAB.value,
+    SnapFieldAttributeEnum.ROW.value,
+})
+
+
+def snap_field(field: models.Field, **kwargs: bool | str | None) -> models.Field:
+    """Attach SnapAdmin metadata to a plain Django field instance, in place.
+
+    A ``Snap*Field`` subclass is sugar over two things: an ordinary Django
+    field, plus a handful of attributes (``searchable``, ``filterable``,
+    ``show_in_list``, …) that every SnapAdmin reader looks up with
+    ``getattr(field, "...", default)``. ``snap_field()`` sets exactly those
+    attributes on a field instance you already have, so it works on **any**
+    ``django.db.models.Field`` — including one SnapAdmin has never seen, from
+    a third-party package (``django-money``, ``model-utils``,
+    ``phonenumber_field``, …) or a brownfield model that cannot be rewritten
+    onto the ``Snap*Field`` classes::
+
+        from django.db import models
+        from snapadmin.fields import snap_field
+
+        class Product(models.Model):
+            name = snap_field(models.CharField(max_length=255), searchable=True, filterable=True)
+
+    Every reader keeps working unchanged, because there is nothing new to
+    read: the attributes it sets are the same ones a ``Snap*Field`` stores on
+    itself, not a second, parallel place to look. Returns ``field`` so the
+    call composes inline with the field declaration, as above.
+
+    Only the metadata kwargs are accepted (see the table on the "Snap Fields"
+    docs page); an unrecognised name — a typo, or one of ``required`` /
+    ``allowed_extensions`` / ``allowed_encodings`` / ``max_size_bytes``, which
+    only make sense inside a ``Snap*Field``'s own ``__init__`` — raises
+    ``ValueError`` naming it, rather than silently doing nothing.
+
+    Adds no database migration: it mutates the field instance *after*
+    Django's ``Field.__init__`` has already recorded its constructor
+    arguments, so none of these attributes can appear in ``deconstruct()``.
+    """
+    for key, value in kwargs.items():
+        if key not in _SNAP_FIELD_WRAPPER_KWARGS:
+            raise ValueError(
+                f"snap_field() got an unexpected keyword argument {key!r}; valid kwargs are: "
+                f"{', '.join(sorted(_SNAP_FIELD_WRAPPER_KWARGS))}."
+            )
+        setattr(field, key, value)
+    return field
+
+
 class SnapNotDatabaseField(SnapField):
     pass
 

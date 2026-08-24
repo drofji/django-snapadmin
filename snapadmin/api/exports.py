@@ -33,7 +33,8 @@ from snapadmin.exporting import (
     xlsx_available,
 )
 from snapadmin.masking import get_masked_fields, user_can_view_pii
-from snapadmin.models import APIToken, SnapExportJob, SnapModel
+from snapadmin.models import APIToken, SnapExportJob
+from snapadmin.registry import is_registered
 
 #: JSON-compatible scalar/collection values a filter value may hold.
 FilterValue = str | int | float | bool | list[object] | None
@@ -164,7 +165,7 @@ class ExportJobCreateSerializer(serializers.ModelSerializer):
             model = apps.get_model(app_label, model_name)
         except LookupError:
             raise serializers.ValidationError(f"Unknown model '{app_label}.{model_name}'.")
-        if not (isinstance(model, type) and issubclass(model, SnapModel) and model is not SnapModel):
+        if not is_registered(model):
             raise serializers.ValidationError("Only SnapModel-backed models can be exported.")
 
         request = self.context["request"]

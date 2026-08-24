@@ -236,6 +236,7 @@
       <li><a href="#scaffold">New Project (snapadmin-new)</a></li>
       <li><a href="#snapadmin-init">Integrate an Existing Project</a></li>
       <li><a href="#snap-model">SnapModel</a></li>
+      <li><a href="#snap-model-decorator">@snap_model — plain models</a></li>
       <li><a href="#snap-fields">Snap Fields</a></li>
       <li><a href="#advanced-layout">Advanced Layout</a></li>
       <li><a href="#status-badges">Status Badges</a></li>
@@ -818,6 +819,76 @@ class Product(snap_models.SnapModel):
     price = snap.SnapDecimalField(max_digits=10, decimal_places=2, filterable=True)
     available = snap.SnapBooleanField(default=True)</code></pre>
 
+  <!-- ── @snap_model ───────────────────────────────────────────────────────── -->
+  <h2 id="snap-model-decorator">🔌 <code>@snap_model</code> — Plain Django Models</h2>
+  <p>There are two ways to declare a SnapAdmin model. Subclassing <code>SnapModel</code> (above) is
+  the full one. The <code>@snap_model</code> decorator is the other: it opts a plain
+  <code>django.db.models.Model</code> in <strong>from the outside</strong>, without touching its
+  field layer. Use it for a brownfield schema you cannot rewrite, a model whose base class belongs to
+  a third-party package, or fields that come from packages like <code>django-money</code>,
+  <code>phonenumber_field</code> or <code>model-utils</code>.</p>
+
+  <pre><code>from django.db import models
+from snapadmin import snap_model
+
+@snap_model(
+    api_write_fields=["name", "price"],   # mass-assignment allowlist
+    api_exclude_fields=["cost_price"],    # never leaves the server
+    search_fields=["name"],               # what ?search= matches on
+)
+class Product(models.Model):
+    name = models.CharField(max_length=200)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2)</code></pre>
+
+  <p>The decorator adds no field and no attribute to the class, so it needs <strong>no
+  migration</strong>. From then on the model is a SnapAdmin model everywhere the question is asked:
+  the REST API mounts CRUD routes for it, the GraphQL schema gains a type, the offline endpoints and
+  the <code>snapadmin.W00x</code> system checks see it, and <code>snapadmin_info</code> inventories
+  it.</p>
+
+  <h3>Keywords</h3>
+  <p>Each keyword mirrors the <code>SnapModel</code> class attribute of the same name. Only the
+  keywords you actually pass are recorded, so a value you leave out keeps its usual default.</p>
+  <table>
+    <tr><th>Keyword</th><th>Type</th><th>Effect</th></tr>
+    <tr><td><code>api_exclude_fields</code></td><td>list[str]</td><td>Fields kept out of the REST serializer, the GraphQL type and the schema endpoint</td></tr>
+    <tr><td><code>api_write_fields</code></td><td>list[str] | None</td><td>Mass-assignment allowlist; <code>None</code> leaves every non-excluded field writable</td></tr>
+    <tr><td><code>api_read_only</code></td><td>bool</td><td>Serve the model over safe HTTP methods only (writes answer 405)</td></tr>
+    <tr><td><code>api_http_method_names</code></td><td>list[str] | None</td><td>Explicit lowercase HTTP-verb allowlist; wins over <code>api_read_only</code></td></tr>
+    <tr><td><code>api_filter_lookups</code></td><td>dict[str, list[str]]</td><td>Per-field query-filter lookups, e.g. <code>{"name": ["exact", "icontains"]}</code></td></tr>
+    <tr><td><code>api_default_text_lookups</code></td><td>list[str] | None</td><td>Lookup set for every text field not named in <code>api_filter_lookups</code></td></tr>
+    <tr><td><code>api_json_filters</code></td><td>dict[str, list[str]]</td><td>Filterable key-paths inside JSON columns, e.g. <code>{"payload": ["a.b"]}</code></td></tr>
+    <tr><td><code>offline_mode</code></td><td>bool</td><td>Expose the model to the admin's offline cache</td></tr>
+    <tr><td><code>offline_cache_limit</code></td><td>int</td><td>How many recent rows the offline cache prefetches</td></tr>
+    <tr><td><code>search_fields</code></td><td>list[str]</td><td>Fields DRF's <code>?search=</code> matches against — a plain model has no <code>searchable=True</code> Snap fields to derive them from</td></tr>
+  </table>
+
+  <h3>What a decorated model does <em>not</em> get</h3>
+  <p>This is registration and metadata only. It attaches none of <code>SnapModel</code>'s runtime
+  machinery, and the surfaces that need that machinery <strong>skip</strong> a decorated plain model
+  rather than half-work:</p>
+  <table>
+    <tr><th>Capability</th><th>Subclassing <code>SnapModel</code></th><th><code>@snap_model</code> on a plain model</th></tr>
+    <tr><td>REST + GraphQL + schema endpoint</td><td>✅</td><td>✅</td></tr>
+    <tr><td>API field/verb policy, filters, offline cache</td><td>✅</td><td>✅</td></tr>
+    <tr><td>System checks + <code>snapadmin_info</code> inventory</td><td>✅</td><td>✅</td></tr>
+    <tr><td>Elasticsearch (<code>es_search()</code>, mirroring on save, <code>snapadmin_reindex</code>)</td><td>✅</td><td>❌ no <code>EsManager</code> is attached</td></tr>
+    <tr><td>GDPR retention purge (<code>purge_expired()</code>)</td><td>✅</td><td>❌ the purge task and command skip it</td></tr>
+    <tr><td>Generated admin (<code>register_all_admins()</code>)</td><td>✅</td><td>❌ register a <code>ModelAdmin</code> yourself</td></tr>
+    <tr><td><code>formatted_id</code>, audit/PII <code>save()</code> hooks, <code>admin_overrides</code></td><td>✅</td><td>❌</td></tr>
+  </table>
+  <p>That is also why the decorator accepts no <code>es_*</code> or <code>data_retention_*</code>
+  keywords: storing them would promise indexing and purging that never happen. Needing any of the
+  rows marked ❌ means subclassing <code>SnapModel</code> — both routes end up in the same registry,
+  so switching later changes nothing else.</p>
+
+  <p>The registry itself is public: <code>snapadmin.registry.is_registered(model)</code> is the gate
+  every surface asks, and <code>snapadmin.registry.get_model_meta(model, name, default)</code> is how
+  each setting is read — the decorator's value first, the class attribute second. Applying
+  <code>@snap_model</code> to a <code>SnapModel</code> subclass therefore overrides exactly the
+  keywords you pass and leaves the rest of the class-level configuration alone.</p>
+
   <!-- ── Snap Fields ───────────────────────────────────────────────────────── -->
   <h2 id="snap-fields">📋 Snap Fields</h2>
   <p>Every Snap field is a drop-in replacement for the corresponding Django field, with extra admin control attributes.</p>
@@ -892,6 +963,35 @@ class Product(snap_models.SnapModel):
     <strong>See them all live</strong>
     The demo app's <code>Showcase</code> model exercises every field type across tabbed sections, and <code>SnapFunctionField</code>/<code>SnapOneToOneField</code> appear on <code>Showcase</code> and <code>CustomerProfile</code> respectively.
   </div>
+
+  <h3 id="snap-field-wrapper">🔌 The flags on any field — <code>snap_field()</code></h3>
+  <p>A <code>Snap*Field</code> is sugar over two things: an ordinary Django field, plus the flags
+  above set as plain attributes. <code>snap_field(field, **kwargs)</code> sets those same
+  attributes on a field instance you already have, so a third-party field —
+  <code>django-money</code>'s <code>MoneyField</code>, <code>model-utils</code>'s
+  <code>StatusField</code>, <code>phonenumber_field</code>'s <code>PhoneNumberField</code>, or
+  anything else SnapAdmin has never imported — gets the same admin/API behaviour without a
+  <code>Snap*Field</code> subclass to rewrite it into:</p>
+  <pre><code>from django.db import models
+from snapadmin.fields import snap_field
+
+class Product(models.Model):
+    name = snap_field(models.CharField(max_length=255), searchable=True, filterable=True)</code></pre>
+  <p>Every reader treats the result exactly like a <code>Snap*Field</code> — the searchable
+  filter, the admin's list/search/filter config, the wysiwyg widget, the tab/row layout — because
+  there is nothing new to read: <code>snap_field()</code> writes the identical attribute names a
+  <code>Snap*Field</code> stores on itself, not a second place to look. It returns the field, so
+  the call composes inline with the field declaration, and it adds no migration: the attributes are
+  set <em>after</em> Django's <code>Field.__init__</code> already recorded its constructor
+  arguments, so <code>deconstruct()</code> never reports them.</p>
+  <p>Only the flags table above is accepted (an unrecognised kwarg raises <code>ValueError</code>
+  naming it). <code>required</code> and the file-upload kwargs
+  (<code>allowed_extensions</code>/<code>allowed_encodings</code>/<code>max_size_bytes</code>) are
+  deliberately not supported here — they only make sense inside a <code>Snap*Field</code>'s own
+  <code>__init__</code> (deriving <code>null</code>/<code>blank</code>, or building a validator),
+  which has already run by the time a field reaches <code>snap_field()</code>. Set those directly
+  on the Django field instead (<code>null=False, blank=False</code>, or the field's own
+  <code>validators=[...]</code>).</p>
 
   <!-- ── Advanced Layout ────────────────────────────────────────────────────── -->
   <h2 id="advanced-layout">📐 Advanced Layout</h2>
@@ -2543,7 +2643,7 @@ snapadmin-info --health-check    # probes only; non-zero exit on failure</code><
   <ul>
     <li><strong>System checks</strong> — a per-severity <em>count</em> of Django's system checks, not their text. Django normally prints every message in full before any management command runs, which buried this report behind a screen of advisory text, so <code>snapadmin_info</code> opts out of that pass and summarises here instead: <code>--verbose</code> prints the messages, and <strong>errors are always listed</strong> because they block a working deployment (they also make <code>--health-check</code> fail). Run <code>manage.py check</code> for the full text with hints.</li>
     <li><strong>Version &amp; Status</strong> — SnapAdmin version, the Django/Python runtime, and every <code>SNAPADMIN_*</code> feature toggle at its effective value. Run from inside a tree extracted by <a href="#snapadmin-demo"><code>snapadmin-demo</code></a>, it also reports which release that tree came from, and says so plainly when the tree is older (or newer) than the installed package — a mismatch that otherwise shows up only as behaviour you thought was already fixed.</li>
-    <li><strong>Feature adoption</strong> — a commerce-readiness <code>✓</code>/<code>✗</code> checklist of which business-important capabilities are actually on or in use in <em>this</em> project: backups, retention-based deletion, audit trail, PII masking, the REST/GraphQL APIs, API tokens, Elasticsearch, background tasks, health/error alerting, rate limiting, the read-only / write-allowlist / delete guards and SSO. Where a capability is adopted per-model or per-field (retention, masking, read-only models, …), <code>--verbose</code> adds a one-line count. Unlike the toggle list above, the signal here is <em>adoption</em> — a model actually declaring retention, a masked field actually configured — so you can see at a glance what is protected and what is left open.</li>
+    <li><strong>Feature adoption</strong> — a commerce-readiness <code>✓</code>/<code>✗</code> checklist of which business-important capabilities are actually on or in use in <em>this</em> project: backups, retention-based deletion, audit trail, PII masking, the REST/GraphQL APIs, API tokens, Elasticsearch, background tasks, health/error alerting, rate limiting, the read-only / write-allowlist / delete guards, plain models opted in with <code>@snap_model</code> (these are the ones the reindex and the retention purge skip) and SSO. Where a capability is adopted per-model or per-field (retention, masking, read-only models, …), <code>--verbose</code> adds a one-line count. Unlike the toggle list above, the signal here is <em>adoption</em> — a model actually declaring retention, a masked field actually configured — so you can see at a glance what is protected and what is left open.</li>
     <li><strong>Database</strong> — engine, name, host, port and user (never the password), reachability, table count and — where the backend exposes it — on-disk size.</li>
     <li><strong>Elasticsearch</strong> — collapses to <code>disabled</code> when off; otherwise cluster reachability, status and index count, plus the <code>DB_ONLY</code> / <code>DUAL</code> / <code>ES_ONLY</code> tally of your models.</li>
     <li><strong>Celery &amp; Broker</strong> — broker and result-backend URLs with the password redacted, the number of online workers, and the configured Beat schedule (collapses to <code>disabled</code> when Celery isn't installed).</li>
@@ -3463,7 +3563,7 @@ for order in Order.objects.select_related("customer"):   # 1 query, total
     <tr>
       <td><code>SearchLog</code></td>
       <td><span style="background:#ede9fe;color:#6d28d9;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">ES_ONLY</span></td>
-      <td>ES-only model (<code>managed=False</code>), high-frequency write pattern</td>
+      <td>ES-only model (<code>managed=False</code>), high-frequency write pattern, <code>snap_field()</code> on a plain <code>DateTimeField</code></td>
     </tr>
     <tr>
       <td><code>AuditLog</code></td>

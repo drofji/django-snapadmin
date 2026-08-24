@@ -25,13 +25,13 @@ from drf_spectacular.utils import extend_schema
 
 def _offline_models() -> list:
     """Return the registered offline-capable SnapModel classes."""
-    from snapadmin.registry import is_registered
+    from snapadmin.registry import get_model_meta, is_registered
 
     models = []
     for model in apps.get_models():
         if not is_registered(model):
             continue
-        if getattr(model, "offline_mode", False):
+        if get_model_meta(model, "offline_mode", False):
             models.append(model)
     return models
 
@@ -65,8 +65,10 @@ def get_offline_model_keys(user=None) -> list[str]:
 
 def get_offline_model_limits(user=None) -> dict[str, int]:
     """Map each (viewable) offline-capable model key to its ``offline_cache_limit``."""
+    from snapadmin.registry import get_model_meta
+
     return {
-        f"{m._meta.app_label}/{m._meta.model_name}": int(getattr(m, "offline_cache_limit", 100))
+        f"{m._meta.app_label}/{m._meta.model_name}": int(get_model_meta(m, "offline_cache_limit", 100))
         for m in _offline_models()
         if user is None or _can_view(user, m)
     }
@@ -95,7 +97,7 @@ class OfflineModelDataView(APIView):
     permission_classes = [IsAuthenticated]
 
     def _get_offline_model(self, app_label: str, model_name: str):
-        from snapadmin.registry import is_registered
+        from snapadmin.registry import get_model_meta, is_registered
 
         try:
             model = apps.get_model(app_label, model_name)
@@ -103,12 +105,14 @@ class OfflineModelDataView(APIView):
             return None
         if not is_registered(model):
             return None
-        if not getattr(model, "offline_mode", False):
+        if not get_model_meta(model, "offline_mode", False):
             return None
         return model
 
     def _resolve_limit(self, request, model) -> int:
-        cap = int(getattr(model, "offline_cache_limit", 100))
+        from snapadmin.registry import get_model_meta
+
+        cap = int(get_model_meta(model, "offline_cache_limit", 100))
         raw = request.query_params.get("limit")
         if raw is None:
             return cap

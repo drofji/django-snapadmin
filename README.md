@@ -108,8 +108,39 @@ SnapModel.register_all_admins()
 └──────────────┴─────────────────────────────────────────────┘
 ```
 
+<details>
+<summary>Already have models you cannot rewrite? Use the decorator instead</summary>
+
+Subclassing `SnapModel` is the full route. If your model layer already exists — a brownfield schema,
+a base class from a third-party package, fields from `django-money` or `phonenumber_field` — opt in
+from the outside instead. `@snap_model` adds no field and no attribute, so it needs **no migration**:
+
+```python
+from django.db import models
+from snapadmin import snap_model
+
+@snap_model(
+    api_write_fields=["name", "price"],   # what an API client may set
+    api_exclude_fields=["cost_price"],    # never leaves the server
+    search_fields=["name"],               # what ?search= matches on
+)
+class Product(models.Model):
+    name       = models.CharField(max_length=200)
+    price      = models.DecimalField(max_digits=10, decimal_places=2)
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2)
+```
+
+You get the REST API, the GraphQL schema, the offline endpoints, the system checks and the
+`snapadmin-info` inventory. You **do not** get the parts that need `SnapModel`'s machinery —
+Elasticsearch mirroring, the retention purge, the generated admin — and those sweeps skip the model
+rather than half-work. [The full comparison
+table](https://drofji.github.io/django-snapadmin/#snap-model-decorator) says exactly which is which.
+
+</details>
+
 → [Field types](https://drofji.github.io/django-snapadmin/#snap-fields) ·
-[SnapModel reference](https://drofji.github.io/django-snapadmin/#snap-model)
+[SnapModel reference](https://drofji.github.io/django-snapadmin/#snap-model) ·
+[`@snap_model` for plain models](https://drofji.github.io/django-snapadmin/#snap-model-decorator)
 
 ---
 
@@ -244,7 +275,7 @@ The questions a tech lead or a manager asks before approving a dependency:
 | **Single sign-on?** | [SSO / OAuth2 login helper](https://drofji.github.io/django-snapadmin/#enterprise-config); auth is pluggable — JWT, session, or your own |
 | **How do we know it is up?** | Health probes, error-spike alerts and daily digests to email, Slack, Discord, Teams or Telegram. `snapadmin-info --health-check` exits non-zero for your monitoring |
 | **Backups?** | [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, offsite over FTPS/SFTP |
-| **Are we locked in?** | No. It is ordinary Django underneath — models, `ModelAdmin`, DRF viewsets. Override any piece, or stop using the generated ones |
+| **Are we locked in?** | No. It is ordinary Django underneath — models, `ModelAdmin`, DRF viewsets. Override any piece, or stop using the generated ones. Your models need not even inherit from ours: [`@snap_model`](https://drofji.github.io/django-snapadmin/#snap-model-decorator) opts a plain `models.Model` in from the outside |
 
 ---
 

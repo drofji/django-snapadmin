@@ -10,6 +10,140 @@ Each notable change should be a paragraph or bullet, explaining what changed and
 Added
 -----
 
+* **``@snap_model`` — a plain ``django.db.models.Model`` can now opt in, without subclassing.**
+  Until now the only way to declare a SnapAdmin model was to inherit from ``SnapModel``, which meant
+  rewriting the model layer of any project that already had one. That is the wrong price for a
+  brownfield schema, for a model whose base class belongs to a third-party package, or for fields
+  that come from ``django-money``, ``phonenumber_field`` or ``model-utils``. A class decorator now
+  opts such a model in from the outside::
+
+      from django.db import models
+      from snapadmin import snap_model
+
+      @snap_model(
+          api_write_fields=["name", "price"],   # mass-assignment allowlist
+          api_exclude_fields=["cost_price"],    # never leaves the server
+          search_fields=["name"],               # what ?search= matches on
+      )
+      class Product(models.Model):
+          name = models.CharField(max_length=200)
+          price = models.DecimalField(max_digits=10, decimal_places=2)
+          cost_price = models.DecimalField(max_digits=10, decimal_places=2)
+
+  The decorator adds no field and no attribute to the class, so it needs **no migration**. From then
+  on the model is a SnapAdmin model everywhere the question is asked: the REST API mounts CRUD routes
+  for it, the GraphQL schema gains a type, the offline endpoints and the ``snapadmin.W00x`` system
+  checks see it, and ``snapadmin_info`` inventories it. Its keywords mirror the ``SnapModel`` class
+  attributes of the same name — ``api_exclude_fields``, ``api_write_fields``, ``api_read_only``,
+  ``api_http_method_names``, ``api_filter_lookups``, ``api_default_text_lookups``,
+  ``api_json_filters``, ``offline_mode``, ``offline_cache_limit`` and ``search_fields`` — and only the
+  ones you pass are recorded, so applying it to a ``SnapModel`` subclass overrides exactly those and
+  leaves the rest of the class-level configuration alone.
+
+  **Be clear about what it does not give you.** This is registration and metadata; it attaches none
+  of ``SnapModel``'s runtime machinery, and the surfaces that need that machinery skip a decorated
+  plain model rather than half-work. No ``EsManager``/``EsQuerySet``, so no ``es_search()``, no
+  mirroring on save, no index created on ``post_migrate`` and no selection by ``snapadmin_reindex``.
+  No ``purge_expired()``, so neither the retention command nor the retention task touches it. No
+  generated admin — ``register_all_admins()`` passes it by, because without ``Snap*Field`` flags there
+  is nothing to derive fieldsets, list columns or filters from — and none of the base class's admin
+  niceties (``formatted_id``, the audit/PII ``save()`` hooks, ``admin_overrides``). That is why the
+  decorator deliberately accepts no ``es_*`` or ``data_retention_*`` keywords: storing them would
+  promise indexing and purging that never happen. Needing any of it means subclassing ``SnapModel``;
+  both routes end in the same registry, so switching later changes nothing else.
+
+* **``snapadmin.registry`` is now public API.** The module shipped in the previous release as an
+  internal seam — ``SnapModel`` subclasses registering themselves as they are declared, so every
+  "is this a SnapAdmin model?" gate became a lookup instead of an ``issubclass()`` walk. With
+  ``@snap_model`` it becomes something a project can use directly, and it is documented and pinned
+  accordingly: ``is_registered(model)`` is the gate every surface asks, ``meta_for(model)`` returns a
+  model's recorded settings, ``register(model, **meta)`` is the underlying registration call, and
+  ``get_model_meta(model, name, default)`` is the accessor every SnapAdmin surface now reads a
+  model-level setting through — the registry entry first, the class attribute second. That two-step is
+  what lets both declaration styles read identically without a single existing ``SnapModel`` changing
+  behaviour.
+
+* **``snap_field()`` puts SnapAdmin metadata on any Django field, not just a ``Snap*Field``.**
+  Every ``Snap*Field`` is sugar over two things: an ordinary Django field, plus a handful of
+  attributes (``searchable``, ``filterable``, ``show_in_list``, ``wysiwyg``, ``tab``, ``row``, …)
+  that every SnapAdmin reader looks up with ``getattr(field, "...", default)``. Until now getting
+  those attributes onto a field meant using the matching ``Snap*Field`` subclass — no option for a
+  field type SnapAdmin does not ship, such as ``django-money``'s ``MoneyField``,
+  ``model-utils``'s ``StatusField``, ``phonenumber_field``'s ``PhoneNumberField``, or a brownfield
+  model whose fields cannot be rewritten. ``snap_field()`` sets the same attributes directly on a
+  field instance you already have::
+
+      from django.db import models
+      from snapadmin.fields import snap_field
+
+      class Product(models.Model):
+          name = snap_field(models.CharField(max_length=255), searchable=True, filterable=True)
+
+  Every reader treats the result exactly like a ``Snap*Field`` — there is nothing new to look up,
+  only the same attribute names set a different way. It returns the field, so the call composes
+  inline with the field declaration, and it adds **no migration**: the attributes are set *after*
+  ``Field.__init__`` already recorded its constructor arguments, so ``deconstruct()`` never reports
+  them, whatever field type is wrapped.
+
+  Only the metadata flags are accepted (the same table the "Snap Fields" docs page lists); an
+  unrecognised keyword — a typo, or one of ``required`` / ``allowed_extensions`` /
+  ``allowed_encodings`` / ``max_size_bytes``, which only mean something inside a ``Snap*Field``'s
+  own ``__init__`` (deriving ``null``/``blank``, or building a validator) — raises ``ValueError``
+  naming it, rather than silently doing nothing.
+
+* **``@snap_model`` — a plain ``django.db.models.Model`` can now opt in, without subclassing.**
+  Until now the only way to declare a SnapAdmin model was to inherit from ``SnapModel``, which meant
+  rewriting the model layer of any project that already had one. That is the wrong price for a
+  brownfield schema, for a model whose base class belongs to a third-party package, or for fields
+  that come from ``django-money``, ``phonenumber_field`` or ``model-utils``. A class decorator now
+  opts such a model in from the outside::
+
+      from django.db import models
+      from snapadmin import snap_model
+
+      @snap_model(
+          api_write_fields=["name", "price"],   # mass-assignment allowlist
+          api_exclude_fields=["cost_price"],    # never leaves the server
+          search_fields=["name"],               # what ?search= matches on
+      )
+      class Product(models.Model):
+          name = models.CharField(max_length=200)
+          price = models.DecimalField(max_digits=10, decimal_places=2)
+          cost_price = models.DecimalField(max_digits=10, decimal_places=2)
+
+  The decorator adds no field and no attribute to the class, so it needs **no migration**. From then
+  on the model is a SnapAdmin model everywhere the question is asked: the REST API mounts CRUD routes
+  for it, the GraphQL schema gains a type, the offline endpoints and the ``snapadmin.W00x`` system
+  checks see it, and ``snapadmin_info`` inventories it. Its keywords mirror the ``SnapModel`` class
+  attributes of the same name — ``api_exclude_fields``, ``api_write_fields``, ``api_read_only``,
+  ``api_http_method_names``, ``api_filter_lookups``, ``api_default_text_lookups``,
+  ``api_json_filters``, ``offline_mode``, ``offline_cache_limit`` and ``search_fields`` — and only the
+  ones you pass are recorded, so applying it to a ``SnapModel`` subclass overrides exactly those and
+  leaves the rest of the class-level configuration alone.
+
+  **Be clear about what it does not give you.** This is registration and metadata; it attaches none
+  of ``SnapModel``'s runtime machinery, and the surfaces that need that machinery skip a decorated
+  plain model rather than half-work. No ``EsManager``/``EsQuerySet``, so no ``es_search()``, no
+  mirroring on save, no index created on ``post_migrate`` and no selection by ``snapadmin_reindex``.
+  No ``purge_expired()``, so neither the retention command nor the retention task touches it. No
+  generated admin — ``register_all_admins()`` passes it by, because without ``Snap*Field`` flags there
+  is nothing to derive fieldsets, list columns or filters from — and none of the base class's admin
+  niceties (``formatted_id``, the audit/PII ``save()`` hooks, ``admin_overrides``). That is why the
+  decorator deliberately accepts no ``es_*`` or ``data_retention_*`` keywords: storing them would
+  promise indexing and purging that never happen. Needing any of it means subclassing ``SnapModel``;
+  both routes end in the same registry, so switching later changes nothing else.
+
+* **``snapadmin.registry`` is now public API.** The module shipped in the previous release as an
+  internal seam — ``SnapModel`` subclasses registering themselves as they are declared, so every
+  "is this a SnapAdmin model?" gate became a lookup instead of an ``issubclass()`` walk. With
+  ``@snap_model`` it becomes something a project can use directly, and it is documented and pinned
+  accordingly: ``is_registered(model)`` is the gate every surface asks, ``meta_for(model)`` returns a
+  model's recorded settings, ``register(model, **meta)`` is the underlying registration call, and
+  ``get_model_meta(model, name, default)`` is the accessor every SnapAdmin surface now reads a
+  model-level setting through — the registry entry first, the class attribute second. That two-step is
+  what lets both declaration styles read identically without a single existing ``SnapModel`` changing
+  behaviour.
+
 * **``snapadmin-new`` generates a project you keep.** Until now the package offered a throwaway demo
   (``snapadmin-demo``) and a read-only doctor for an existing project (``snapadmin-init``) — neither
   produced something you actually kept, which was the gap between the package and its "quick
@@ -316,3 +450,13 @@ Security
   page. The raw field is now excluded from the form outright, and only the rendered diff is shown.
   Anyone who could open an audit entry for a model with ``SNAPADMIN_MASKED_FIELDS`` configured could
   read the masked values; the changelist, the REST API and the export command were never affected.
+
+* **Wysiwyg HTML sanitization now fails closed if ``nh3`` cannot be imported.** ``nh3`` is imported
+  lazily and cached rather than at module load, and a missing import now raises a pointed
+  ``ImproperlyConfigured`` at the moment sanitization is attempted — on save (``pre_save()``) and on
+  changelist render — instead of letting unsanitized HTML through. **This does not change behaviour
+  for any install today**: ``nh3`` is still a required core dependency, so the failure path this adds
+  cannot currently be reached. It is preparatory hardening for a future release that plans to move
+  ``nh3`` behind an optional extra (mirroring ``[wysiwyg]``/``[xlsx]``) — that packaging change is not
+  part of this release. The ``SNAPADMIN_HTML_SANITIZER`` escape hatch was and remains unaffected
+  either way, since it never imports ``nh3``.

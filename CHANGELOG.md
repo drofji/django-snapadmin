@@ -11,6 +11,32 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 ## Unreleased
 
 ### Added
+- **`@snap_model` opts a plain `django.db.models.Model` into SnapAdmin, without subclassing.**
+  `@snap_model(api_write_fields=[...], api_exclude_fields=[...], search_fields=[...])` on an ordinary
+  Django model registers it and records the same settings a `SnapModel` subclass declares as class
+  attributes. It adds no field and no attribute, so it needs no migration. The model then gets the
+  REST CRUD routes, a GraphQL type, the offline endpoints, the system checks and the `snapadmin_info`
+  inventory. It deliberately does **not** get `SnapModel`'s runtime machinery — no
+  `EsManager`/`es_search()`/`snapadmin_reindex`, no `purge_expired()`, no generated admin, no
+  `formatted_id` — and the ES, retention and admin sweeps skip it rather than half-work, which is why
+  it accepts no `es_*` / `data_retention_*` keywords. Intended for brownfield schemas, models whose
+  base class belongs to a third-party package, and field packages like `django-money` or
+  `phonenumber_field`.
+
+- **`snapadmin.registry` is public API.** `is_registered(model)` is the gate every SnapAdmin surface
+  asks, `get_model_meta(model, name, default)` reads one model-level setting (registry entry first,
+  class attribute second), and `register()` / `meta_for()` complete the surface. All four are pinned
+  in the public-API contract tests.
+
+- **`snap_field()` puts SnapAdmin metadata on any Django field, not just a `Snap*Field`.**
+  `snap_field(models.CharField(max_length=255), searchable=True, filterable=True)` sets the same
+  attributes a `Snap*Field` stores on itself (`searchable`, `filterable`, `show_in_list`,
+  `wysiwyg`, `tab`, `row`, …) directly on a plain field instance, so a third-party field package
+  (`django-money`, `model-utils`, `phonenumber_field`, …) or a brownfield model that cannot be
+  rewritten onto the `Snap*Field` classes gets identical behaviour. Every reader treats the result
+  exactly like a `Snap*Field`; adds no migration; an unrecognised kwarg raises `ValueError` naming
+  it.
+
 - **`snapadmin-new` scaffolds a project you keep.** `pip install django-snapadmin && snapadmin-new
   myshop` writes `manage.py`, a settings package, one app with a worked `SnapModel` example, SQLite
   and a `.env`/`dist.env` — `migrate` then `runserver` work immediately, no Docker, no manual edits.

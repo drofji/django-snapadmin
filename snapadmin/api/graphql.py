@@ -23,7 +23,7 @@ from graphql import GraphQLError, GraphQLResolveInfo
 from snapadmin.logging_config import get_logger
 from snapadmin.masking import get_masked_fields, mask_field, user_can_view_pii
 from snapadmin.models import EsStorageMode
-from snapadmin.registry import is_registered
+from snapadmin.registry import get_model_meta, is_registered
 
 logger = get_logger(__name__)
 
@@ -142,7 +142,7 @@ def get_dynamic_graphql_schema():
 
                 # Create the DjangoObjectType dynamically, honouring the model's
                 # API field exposure control (same exclusion as REST serializers).
-                excluded = list(getattr(model, "api_exclude_fields", []) or [])
+                excluded = list(get_model_meta(model, "api_exclude_fields", []) or [])
                 if excluded:
                     meta_attr = type('Meta', (), {'model': model, 'exclude': excluded})
                 else:

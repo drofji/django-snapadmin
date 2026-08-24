@@ -44,8 +44,8 @@ def purge_expired_data(self):
     """
     GDPR data retention cleanup.
 
-    Scans all registered SnapModel subclasses for a non-None
-    data_retention_days attribute and deletes records older than that limit.
+    Scans every registered SnapModel for a non-None ``data_retention_days``
+    setting and deletes records older than that limit.
     Returns a summary dict with per-model deleted counts. A model whose purge
     only partially succeeded (e.g. the database delete went through but a
     secondary store such as Elasticsearch could not be cleared — see
@@ -53,17 +53,19 @@ def purge_expired_data(self):
     ``errors``, not ``purged`` — it must not be mistaken for a clean purge.
     """
     from django.apps import apps
-    from snapadmin.models import SnapModel
+    from snapadmin.registry import get_model_meta, is_registered
 
     summary: dict[str, int] = {}
     errors: dict[str, str] = {}
     now = timezone.now()
 
     for model in apps.get_models():
-        if not (isinstance(model, type) and issubclass(model, SnapModel) and model is not SnapModel):
+        # ``purge_expired`` is SnapModel's own — a plain model registered with
+        # @snap_model gets no retention purge, so it is skipped here.
+        if not (is_registered(model) and hasattr(model, "purge_expired")):
             continue
 
-        retention_days = getattr(model, "data_retention_days", None)
+        retention_days = get_model_meta(model, "data_retention_days", None)
         if not retention_days or retention_days <= 0:
             continue
 

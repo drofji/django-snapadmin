@@ -16,11 +16,15 @@ from django.db.models.signals import post_migrate
 def sync_es_mappings(sender, **kwargs):
     """
     Ensure Elasticsearch indices and mappings are up-to-date for all SnapModels.
+
+    Only models that actually carry SnapModel's Elasticsearch machinery have an
+    index to maintain; a plain model registered with ``@snap_model`` gets no ES
+    mirroring at all, so it is skipped rather than failing ``post_migrate``.
     """
     from snapadmin.registry import is_registered
 
     for model in apps.get_models():
-        if is_registered(model):
+        if is_registered(model) and hasattr(model, "_ensure_es_index_and_mapping"):
             model._ensure_es_index_and_mapping()
 
 

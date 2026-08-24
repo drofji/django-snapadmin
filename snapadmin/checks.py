@@ -17,7 +17,7 @@ from django.apps import apps
 from django.conf import settings
 from django.core.checks import Error, Info, Warning
 
-from snapadmin.registry import is_registered
+from snapadmin.registry import get_model_meta, is_registered
 
 
 def _resolve_model(dotted: str):
@@ -252,9 +252,9 @@ def _api_writable_models():
     for model in apps.get_models():
         if not is_registered(model):
             continue
-        if getattr(model, "api_read_only", False):
+        if get_model_meta(model, "api_read_only", False):
             continue
-        methods = getattr(model, "api_http_method_names", None)
+        methods = get_model_meta(model, "api_http_method_names", None)
         if methods is not None and not write_verbs.intersection(m.lower() for m in methods):
             continue
         yield model
@@ -266,7 +266,7 @@ def check_api_write_fields(app_configs, **kwargs):
     unguarded = sorted(
         model._meta.label
         for model in _api_writable_models()
-        if getattr(model, "api_write_fields", None) is None
+        if get_model_meta(model, "api_write_fields", None) is None
     )
     if not unguarded:
         return []
@@ -296,9 +296,9 @@ def check_api_read_only(app_configs, **kwargs):
         model._meta.label
         for model in apps.get_models()
         if is_registered(model)
-        and getattr(model, "api_write_fields", None) == []
-        and not getattr(model, "api_read_only", False)
-        and getattr(model, "api_http_method_names", None) is None
+        and get_model_meta(model, "api_write_fields", None) == []
+        and not get_model_meta(model, "api_read_only", False)
+        and get_model_meta(model, "api_http_method_names", None) is None
     )
     if not inert:
         return []

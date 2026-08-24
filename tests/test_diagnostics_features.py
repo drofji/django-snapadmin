@@ -139,6 +139,29 @@ class TestModelBasedCapabilities:
         monkeypatch.setattr(Product, "api_write_fields", ["name"], raising=False)
         assert _collect()["write_allowlist"] is True
 
+    def test_decorated_models_off_when_every_model_subclasses_snapmodel(self):
+        data = _collect(verbose=True)
+        assert data["decorated_models"] is False
+        assert "decorated_models" not in data.get("details", {})
+
+    def test_decorated_models_counts_registered_plain_models(self, monkeypatch):
+        """A @snap_model-registered plain model has no ``register_admin`` to skip."""
+        from django.db import models as django_models
+        from django.test.utils import isolate_apps
+
+        from snapadmin.models import snap_model
+
+        with isolate_apps("snapadmin"):
+            @snap_model()
+            class Ledger(django_models.Model):
+                class Meta:
+                    app_label = "snapadmin"
+
+        monkeypatch.setattr(features_collector, "_concrete_snap_models", lambda: [Ledger])
+        data = _collect(verbose=True)
+        assert data["decorated_models"] is True
+        assert data["details"]["decorated_models"] == "1 plain model"
+
     def test_api_tokens_off_when_none_active(self):
         assert _collect()["api_tokens"] is False
 

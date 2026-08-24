@@ -27,7 +27,7 @@ from snapadmin.logging_config import get_logger
 from snapadmin.masking import get_masked_fields, user_can_view_pii
 from snapadmin.models import APIToken, EsStorageMode
 from snapadmin.pagination import SnapDynamicPagination
-from snapadmin.registry import is_registered
+from snapadmin.registry import get_model_meta, is_registered
 from snapadmin.api.serializers import (
     APITokenCreateSerializer,
     APITokenSerializer,
@@ -213,10 +213,10 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         model = self._model_for_method_policy()
         if model is None:
             return list(_FULL_HTTP_METHOD_NAMES)
-        explicit = getattr(model, "api_http_method_names", None)
+        explicit = get_model_meta(model, "api_http_method_names", None)
         if explicit is not None:
             return sorted({name.lower() for name in explicit} | {"head", "options"})
-        if getattr(model, "api_read_only", False):
+        if get_model_meta(model, "api_read_only", False):
             return list(_SAFE_HTTP_METHOD_NAMES)
         return list(_FULL_HTTP_METHOD_NAMES)
 
@@ -246,7 +246,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         """
         return (
             getattr(settings, "SNAPADMIN_ES_QUERY_ROUTING", True)
-            and getattr(model_class, "es_query_routing", True)
+            and get_model_meta(model_class, "es_query_routing", True)
             and getattr(settings, "ELASTICSEARCH_ENABLED", False)
         )
 
@@ -258,9 +258,15 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         """Fields DRF's SearchFilter may match `?search=` against on the DB path.
 
         Derived from the model's Snap fields flagged ``searchable=True`` — the
-        same set the admin search box uses. ``None`` (no searchable fields)
-        makes SearchFilter a no-op.
+        same set the admin search box uses. A plain model registered with
+        ``@snap_model`` has no Snap fields to derive them from, so it names them
+        directly via the decorator's ``search_fields``; that declaration also
+        wins on a ``SnapModel`` subclass, as every decorator keyword does.
+        ``None`` (no searchable fields) makes SearchFilter a no-op.
         """
+        declared = get_model_meta(model_class, "search_fields", None)
+        if declared is not None:
+            return tuple(declared) or None
         if not hasattr(model_class, "get_admin_fields"):
             return None
         _, _, search_fields, _, _ = model_class.get_admin_fields()
@@ -285,7 +291,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
 
         search_query = self._get_search_query()
         es_limit = getattr(settings, "SNAPADMIN_ES_SEARCH_LIMIT", 1000)
-        storage_mode = getattr(model_class, "es_storage_mode", EsStorageMode.DB_ONLY)
+        storage_mode = get_model_meta(model_class, "es_storage_mode", EsStorageMode.DB_ONLY)
 
         # Where did the query go? Exposed as the X-Snap-Query-Backend response
         # header so API consumers can verify the routing decision.
@@ -616,7 +622,7 @@ class ModelSchemaView(SnapAPIAuthMixin, APIView):
             if isinstance(token, APIToken) and not token.can_access_model(app_label, model_name):
                 continue
 
-            excluded = set(getattr(model, "api_exclude_fields", []) or [])
+            excluded = set(get_model_meta(model, "api_exclude_fields", []) or [])
             results.append({
                 "app_label":  app_label,
                 "model_name": model_name,

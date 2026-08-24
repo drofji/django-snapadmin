@@ -15,21 +15,22 @@ from django.db.models import Q
 from django.utils import timezone
 
 from snapadmin.diagnostics.registry import register
-from snapadmin.models import EsStorageMode, SnapModel
+from snapadmin.models import EsStorageMode
+from snapadmin.registry import get_model_meta, is_registered
 
 
 def _model_items(masked: set) -> list[dict]:
     items: list[dict] = []
     for model in apps.get_models():
-        if not SnapModel.is_concrete_subclass(model):
+        if not is_registered(model):
             continue
         field_names = {field.name for field in model._meta.get_fields()}
         items.append(
             {
                 "model": f"{model._meta.app_label}.{model.__name__}",
-                "es_mode": getattr(model, "es_storage_mode", EsStorageMode.DB_ONLY).name,
-                "retention_days": getattr(model, "data_retention_days", None),
-                "write_restricted": getattr(model, "api_write_fields", None) is not None,
+                "es_mode": get_model_meta(model, "es_storage_mode", EsStorageMode.DB_ONLY).name,
+                "retention_days": get_model_meta(model, "data_retention_days", None),
+                "write_restricted": get_model_meta(model, "api_write_fields", None) is not None,
                 "masked": bool(masked & field_names),
             }
         )

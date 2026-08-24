@@ -232,7 +232,15 @@ class SearchLog(snap_models.SnapModel):
     """
     query = snap_fields.SnapCharField(max_length=255, verbose_name=_("Query"), searchable=True)
     results_count = snap_fields.SnapIntegerField(verbose_name=_("Results Count"))
-    timestamp = django_models.DateTimeField(auto_now_add=True, verbose_name=_("Timestamp"))
+    # snap_field() attaches SnapAdmin metadata to a plain Django field instead
+    # of a Snap*Field subclass — the interop path for a third-party field
+    # package (django-money, phonenumber_field, model-utils, ...) or a model
+    # that cannot be rewritten onto the Snap*Field classes. filterable=True
+    # here gets the same sidebar range filter a SnapDateTimeField would get.
+    timestamp = snap_fields.snap_field(
+        django_models.DateTimeField(auto_now_add=True, verbose_name=_("Timestamp")),
+        filterable=True,
+    )
 
     # ES_ONLY → managed=False, no migration; data is written only to the ES index
     es_storage_mode = snap_models.EsStorageMode.ES_ONLY

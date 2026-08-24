@@ -30,6 +30,12 @@ PUBLIC_IMPORTS = [
     "snapadmin.models.SnapEsUnavailable",
     "snapadmin.models.SnapSaveMixin",
     "snapadmin.models.hash_token_key",
+    # Opting a plain models.Model in (#RFC1b)
+    "snapadmin.models.snap_model",
+    "snapadmin.registry.register",
+    "snapadmin.registry.is_registered",
+    "snapadmin.registry.meta_for",
+    "snapadmin.registry.get_model_meta",
     # Fields
     "snapadmin.fields.SnapField",
     "snapadmin.fields.SnapCharField",
@@ -51,6 +57,7 @@ PUBLIC_IMPORTS = [
     "snapadmin.fields.SnapFunctionField",
     "snapadmin.fields.SnapStatusBadgeField",
     "snapadmin.fields.SnapStatusBadgeFieldChoice",
+    "snapadmin.fields.snap_field",
     # Validators
     "snapadmin.validators.SnapPhoneValidator",
     "snapadmin.validators.SnapColorValidator",
@@ -183,6 +190,35 @@ def test_search_method_signatures():
     assert _params(SnapModel.es_reindex_all) == ["chunk_size"]
     assert _params(SnapModel.es_reindex_only_fields) == []
     assert _params(SnapModel.purge_expired) == ["now", "dry_run"]
+
+
+def test_snap_model_decorator_signature():
+    """The decorator's keywords *are* its API — dropping one breaks a user's model.
+
+    Keyword-only and deliberately limited to the settings a plain model actually
+    honours: no ``es_*``/``data_retention_*`` keywords, because ``@snap_model``
+    attaches none of the machinery that would act on them.
+    """
+    from snapadmin.models import snap_model
+
+    assert _params(snap_model) == [
+        "api_exclude_fields", "api_write_fields", "api_read_only",
+        "api_http_method_names", "api_filter_lookups", "api_default_text_lookups",
+        "api_json_filters", "offline_mode", "offline_cache_limit", "search_fields",
+    ]
+    assert all(
+        param.kind is inspect.Parameter.KEYWORD_ONLY
+        for param in inspect.signature(snap_model).parameters.values()
+    )
+
+
+def test_registry_signatures():
+    from snapadmin import registry
+
+    assert _params(registry.register) == ["model", "meta"]
+    assert _params(registry.is_registered) == ["model"]
+    assert _params(registry.meta_for) == ["model"]
+    assert _params(registry.get_model_meta) == ["model", "name", "default"]
 
 
 def test_apitoken_signatures():
@@ -347,7 +383,8 @@ def test_url_names_reversible(name, args):
 
 _BLESSED_REEXPORTS = {
     "snapadmin.models": [
-        "SnapModel", "EsStorageMode", "APIToken", "SnapEsUnavailable", "SnapPurgeError",
+        "SnapModel", "snap_model", "EsStorageMode", "APIToken", "SnapEsUnavailable",
+        "SnapPurgeError",
     ],
     "snapadmin.fields": [
         "SnapField", "SnapCharField", "SnapTextField", "SnapEmailField", "SnapSlugField",
@@ -358,7 +395,7 @@ _BLESSED_REEXPORTS = {
         "SnapImageField", "SnapBooleanField", "SnapJSONField", "SnapGenericIPAddressField",
         "SnapForeignKey", "SnapOneToOneField", "SnapManyToManyField", "SnapRichTextField",
         "SnapPhoneField", "SnapColorField", "SnapFunctionField", "SnapStatusBadgeField",
-        "SnapStatusBadgeFieldChoice",
+        "SnapStatusBadgeFieldChoice", "snap_field",
     ],
     "snapadmin.validators": ["SnapPhoneValidator", "SnapColorValidator", "SnapFileValidator"],
 }

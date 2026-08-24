@@ -122,6 +122,15 @@ class TestSnapModelRegistration:
 
 class TestGatesSelectTheSameModels:
     def test_registry_matches_the_old_inheritance_test_for_every_model(self):
+        """Holds because no installed model uses ``@snap_model``.
+
+        The decorator (see ``tests/test_snap_model_decorator.py``) is the one way
+        a model can be registered without subclassing ``SnapModel``; every model
+        this project installs still subclasses it, so the equivalence with the
+        predicate the gates used to run is exact. Should a decorated plain model
+        ever join an installed app, this sweep is the test that must be relaxed —
+        deliberately, not by deleting it.
+        """
         for model in apps.get_models():
             expected = issubclass(model, SnapModel) and model is not SnapModel
             assert registry.is_registered(model) is expected, model._meta.label

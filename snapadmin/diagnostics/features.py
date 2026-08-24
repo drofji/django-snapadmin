@@ -21,9 +21,10 @@ from __future__ import annotations
 
 from django.apps import apps
 from django.conf import settings
+from django.db.models import Model
 
 from snapadmin.diagnostics.registry import register
-from snapadmin.models import SnapModel
+from snapadmin.registry import get_model_meta, is_registered
 
 
 def _flag(name: str, default: bool) -> bool:
@@ -37,8 +38,8 @@ def _count(n: int, noun: str) -> str:
     return f"{n} {noun}{'' if n == 1 else 's'}"
 
 
-def _concrete_snap_models() -> list[type[SnapModel]]:
-    return [model for model in apps.get_models() if SnapModel.is_concrete_subclass(model)]
+def _concrete_snap_models() -> list[type[Model]]:
+    return [model for model in apps.get_models() if is_registered(model)]
 
 
 def _api_tokens() -> tuple[bool, str]:
@@ -82,7 +83,7 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     """Every audited capability as ``(key, enabled, detail)`` in report order."""
     models = _concrete_snap_models()
 
-    retention = sum(1 for m in models if (getattr(m, "data_retention_days", None) or 0) > 0)
+    retention = sum(1 for m in models if (get_model_meta(m, "data_retention_days", None) or 0) > 0)
     # A field can be declared sensitive by either setting; count the union, and
     # report how many of them carry an explicit rule (iterating a rules dict
     # yields its field names, so both shapes fold in the same way).
@@ -95,13 +96,17 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     masked_fields = sum(len(fields) for fields in by_model.values())
     ruled_fields = sum(len(rule or {}) for rule in rules.values())
     es_enabled = _flag("ELASTICSEARCH_ENABLED", False)
-    es_models = sum(1 for m in models if getattr(m, "es_index_enabled", False))
+    es_models = sum(1 for m in models if get_model_meta(m, "es_index_enabled", False))
     recipients = list(getattr(settings, "SNAPADMIN_HEALTH_ALERT_EMAILS", []) or
                       getattr(settings, "SNAPADMIN_ERROR_ALERT_EMAILS", []))
     throttled = bool(getattr(settings, "SNAPADMIN_THROTTLE_ANON", None) or
                      getattr(settings, "SNAPADMIN_THROTTLE_USER", None))
-    read_only = sum(1 for m in models if getattr(m, "api_read_only", False))
-    write_allowlist = sum(1 for m in models if getattr(m, "api_write_fields", None) is not None)
+    read_only = sum(1 for m in models if get_model_meta(m, "api_read_only", False))
+    write_allowlist = sum(1 for m in models if get_model_meta(m, "api_write_fields", None) is not None)
+    # Registered plain models (@snap_model) carry none of SnapModel's machinery:
+    # ``register_admin`` is the marker for it. Worth surfacing, because these are
+    # the models the ES reindex and the retention purge deliberately skip.
+    decorated = sum(1 for m in models if not hasattr(m, "register_admin"))
 
     return [
         ("rest_api", _flag("SNAPADMIN_REST_API_ENABLED", True), ""),
@@ -119,6 +124,7 @@ def _capabilities() -> list[tuple[str, bool, str]]:
         ("read_only_models", read_only > 0, _count(read_only, "model")),
         ("write_allowlist", write_allowlist > 0, _count(write_allowlist, "model")),
         ("delete_guard", bool(getattr(settings, "SNAPADMIN_API_DELETE_GUARD", None)), ""),
+        ("decorated_models", decorated > 0, _count(decorated, "plain model")),
         ("sso", *_sso()),
     ]
 

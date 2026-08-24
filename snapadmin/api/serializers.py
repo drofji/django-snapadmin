@@ -9,6 +9,7 @@ from rest_framework import serializers
 
 from snapadmin.masking import get_masked_fields, mask_field, user_can_view_pii
 from snapadmin.models import APIToken
+from snapadmin.registry import get_model_meta
 
 
 class PIIMaskingSerializerMixin:
@@ -118,14 +119,14 @@ class APITokenCreateSerializer(serializers.ModelSerializer):
 def build_model_serializer(model_class):
     # Honour the model's API field exposure control: excluded fields never
     # appear in API responses nor are they writable through the API.
-    excluded = list(getattr(model_class, "api_exclude_fields", []) or [])
+    excluded = list(get_model_meta(model_class, "api_exclude_fields", []) or [])
     meta_attrs = {"model": model_class}
     if excluded:
         meta_attrs["exclude"] = excluded
     else:
         meta_attrs["fields"] = "__all__"
     meta_class = type("Meta", (), meta_attrs)
-    write_fields = getattr(model_class, "api_write_fields", None)
+    write_fields = get_model_meta(model_class, "api_write_fields", None)
     serializer_class = type(
         f"{model_class.__name__}Serializer",
         (WriteFieldAllowlistSerializerMixin, PIIMaskingSerializerMixin, serializers.ModelSerializer),

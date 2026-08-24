@@ -24,6 +24,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.filters import BaseFilterBackend, OrderingFilter, SearchFilter
 
 from snapadmin.masking import get_masked_fields, user_can_view_pii
+from snapadmin.registry import get_model_meta
 
 _filterset_cache: dict = {}
 
@@ -198,7 +199,7 @@ def _resolve_text_lookups(
     field_lookups = model_lookups.get(name)
     if field_lookups is not None:
         return field_lookups
-    model_default = getattr(model_class, "api_default_text_lookups", None)
+    model_default = get_model_meta(model_class, "api_default_text_lookups", None)
     if model_default is not None:
         return model_default
     project_default = getattr(settings, "SNAPADMIN_API_TEXT_LOOKUPS", None)
@@ -209,7 +210,7 @@ def _resolve_text_lookups(
 
 def _build_filters_for_model(model_class: type[django_models.Model]) -> dict[str, django_filters.Filter]:
     filters: dict[str, django_filters.Filter] = {}
-    model_lookups: dict[str, list[str]] = getattr(model_class, "api_filter_lookups", None) or {}
+    model_lookups: dict[str, list[str]] = get_model_meta(model_class, "api_filter_lookups", None) or {}
 
     for field in model_class._meta.get_fields():
         if not hasattr(field, "column"):
@@ -280,7 +281,7 @@ def _build_filters_for_model(model_class: type[django_models.Model]) -> dict[str
             # JSON columns get no filter by default — only the key-paths explicitly
             # declared in the model's api_json_filters are exposed as query params,
             # e.g. api_json_filters = {"payload": ["a.b"]} -> ?payload__a__b=value.
-            json_filters: dict[str, list[str]] = getattr(model_class, "api_json_filters", None) or {}
+            json_filters: dict[str, list[str]] = get_model_meta(model_class, "api_json_filters", None) or {}
             for key_path in json_filters.get(name, []):
                 param_name = f"{name}__{key_path.replace('.', '__')}"
                 filters[param_name] = JsonKeyPathFilter(json_field_name=name, key_path=key_path)

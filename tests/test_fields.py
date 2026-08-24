@@ -18,6 +18,7 @@ Covers:
 from decimal import Decimal
 
 import pytest
+from django.db import models
 from django.utils.safestring import SafeString
 
 from snapadmin.fields import (
@@ -53,6 +54,7 @@ from snapadmin.fields import (
     SnapTimeField,
     SnapURLField,
     SnapUUIDField,
+    snap_field,
 )
 
 
@@ -556,6 +558,118 @@ class TestNewFieldTypes:
         from snapadmin.validators import SnapColorValidator
         f = SnapColorField()
         assert any(isinstance(v, SnapColorValidator) for v in f.validators)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# snap_field() — attaching SnapAdmin metadata to a plain Django field (#RFC1c)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSnapFieldWrapper:
+    """snap_field(field, **kwargs) sets the same attribute names a Snap*Field
+    stores on itself, directly on a plain django.db.models.Field instance."""
+
+    def test_returns_the_same_instance(self):
+        field = models.CharField(max_length=50)
+        assert snap_field(field, searchable=True) is field
+
+    def test_sets_searchable_and_filterable(self):
+        field = snap_field(models.CharField(max_length=50), searchable=True, filterable=True)
+        assert field.searchable is True
+        assert field.filterable is True
+
+    def test_matches_snapcharfield_for_searchable_and_filterable(self):
+        """A plain CharField wrapped with snap_field() must read identically to
+        the equivalent SnapCharField for every existing reader — same attribute
+        names, same values, no second place to look."""
+        wrapped = snap_field(
+            models.CharField(max_length=50), searchable=True, filterable=True,
+        )
+        native = SnapCharField(max_length=50, searchable=True, filterable=True)
+        for attr in ("searchable", "filterable"):
+            assert getattr(wrapped, attr) == getattr(native, attr)
+
+    def test_unset_flags_fall_back_to_the_same_reader_defaults(self):
+        """snap_field() does not need to stamp every flag: every reader already
+        falls back to a default via getattr(field, name, default), so a flag
+        left unset behaves exactly as it does on a Snap*Field that left it at
+        its own default (show_in_list=True, filterable=False, ...)."""
+        wrapped = snap_field(models.CharField(max_length=50), searchable=True)
+        native = SnapCharField(max_length=50, searchable=True)
+        assert getattr(wrapped, "show_in_list", True) == getattr(native, "show_in_list", True)
+        assert getattr(wrapped, "filterable", False) == getattr(native, "filterable", False)
+        assert getattr(wrapped, "wysiwyg", False) == getattr(native, "wysiwyg", False)
+
+    def test_sets_wysiwyg_safe_html_and_auto_sanitize(self):
+        field = snap_field(models.TextField(), wysiwyg=True, safe_html=True, auto_sanitize=False)
+        assert field.wysiwyg is True
+        assert field.safe_html is True
+        assert field.auto_sanitize is False
+
+    def test_sets_tab_and_row(self):
+        field = snap_field(models.CharField(max_length=50), tab="Contact", row="name")
+        assert field.tab == "Contact"
+        assert field.row == "name"
+
+    def test_works_on_any_field_subclass_snapadmin_has_never_seen(self):
+        """Simulates a third-party field package (django-money, phonenumber_field,
+        model-utils, ...): snap_field() must not special-case known field types."""
+
+        class ThirdPartyField(models.CharField):
+            """Stands in for a field type SnapAdmin's code has never imported."""
+
+        field = snap_field(ThirdPartyField(max_length=12), searchable=True, filterable=True)
+        assert isinstance(field, ThirdPartyField)
+        assert field.searchable is True
+        assert field.filterable is True
+
+    def test_works_on_a_foreign_key(self):
+        from demo.apps.shop.models import Category
+
+        field = snap_field(models.ForeignKey(Category, on_delete=models.CASCADE), autocomplete=True)
+        assert field.autocomplete is True
+
+    def test_unknown_kwarg_raises_value_error_naming_it(self):
+        with pytest.raises(ValueError, match="typo_ed_kwarg"):
+            snap_field(models.CharField(max_length=50), typo_ed_kwarg=True)
+
+    def test_required_is_rejected_not_silently_ignored(self):
+        """required=True only means something at construction time (it derives
+        null/blank inside Snap*Field.__init__); a field passed into snap_field()
+        is already built, so accepting it would silently do nothing. Rejecting
+        it is safer than a flag that looks like it works but never does."""
+        with pytest.raises(ValueError, match="required"):
+            snap_field(models.CharField(max_length=50), required=True)
+
+    def test_file_validator_kwargs_are_rejected(self):
+        """allowed_extensions/allowed_encodings/max_size_bytes build a validator
+        inside SnapFileField.__init__ — there is no post-construction attribute
+        for snap_field() to set, so these are rejected rather than accepted and
+        ignored."""
+        with pytest.raises(ValueError, match="allowed_extensions"):
+            snap_field(models.FileField(), allowed_extensions=["pdf"])
+
+    def test_no_kwargs_is_a_no_op_that_still_returns_the_field(self):
+        field = models.CharField(max_length=50)
+        assert snap_field(field) is field
+
+    def test_deconstruct_round_trips_unchanged(self):
+        """snap_field() must add no migration: the attributes it sets are never
+        part of deconstruct()'s args/kwargs, because they are applied after
+        Field.__init__ already recorded its constructor arguments."""
+        field = snap_field(
+            models.CharField(max_length=50, default="x"),
+            searchable=True, filterable=True, show_in_list=False, tab="Info",
+        )
+        name, path, args, kwargs = field.deconstruct()
+        for snap_kwarg in ("searchable", "filterable", "show_in_list", "tab"):
+            assert snap_kwarg not in kwargs
+
+        rebuilt = models.CharField(*args, **kwargs)
+        assert rebuilt.max_length == 50
+        assert rebuilt.default == "x"
+        # The rebuilt field is a plain CharField again — snap_field() carries
+        # no state of its own that deconstruct()/reconstruct() must preserve.
+        assert not hasattr(rebuilt, "searchable")
 
 
 class TestSnapPhoneValidator:

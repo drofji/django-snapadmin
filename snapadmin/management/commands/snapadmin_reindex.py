@@ -26,7 +26,8 @@ from django.apps import apps
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from snapadmin.models import SnapModel, reindexable_snapmodels
+from snapadmin.models import reindexable_snapmodels
+from snapadmin.registry import is_registered
 from snapadmin.reindexing import DEFAULT_CHUNK_SIZE, run_reindex_job, start_reindex
 
 
@@ -86,7 +87,9 @@ class Command(BaseCommand):
                 model = apps.get_model(app_label, model_name)
             except (ValueError, LookupError):
                 raise CommandError(f"Unknown model: {options['model']} (use app_label.ModelName)")
-            if not (isinstance(model, type) and issubclass(model, SnapModel)):
+            # Registration alone is not enough: reindexing needs SnapModel's ES
+            # machinery, which a plain model registered with @snap_model never gets.
+            if not (is_registered(model) and hasattr(model, "es_reindex_all")):
                 raise CommandError(f"{options['model']} is not a SnapModel.")
             models = [model]
         else:

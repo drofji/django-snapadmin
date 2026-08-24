@@ -26,17 +26,19 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         from django.apps import apps
         from django.utils import timezone
-        from snapadmin.models import SnapModel
+        from snapadmin.registry import get_model_meta, is_registered
 
         dry_run: bool = options["dry_run"]
         now = timezone.now()
         total = 0
 
         for model in apps.get_models():
-            if not (isinstance(model, type) and issubclass(model, SnapModel) and model is not SnapModel):
+            # ``purge_expired`` is SnapModel's own — a plain model registered with
+            # @snap_model gets no retention purge, so it is skipped here.
+            if not (is_registered(model) and hasattr(model, "purge_expired")):
                 continue
 
-            retention_days = getattr(model, "data_retention_days", None)
+            retention_days = get_model_meta(model, "data_retention_days", None)
             if not retention_days or retention_days <= 0:
                 continue
 

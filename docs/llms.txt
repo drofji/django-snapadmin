@@ -25,9 +25,10 @@ SnapModel.register_all_admins()
 
 Key facts an agent should not have to infer:
 
-- Snap-only field kwargs (`searchable`, `filterable`, `show_in_list`, `masked`, …) configure the admin and API and are stripped before Django sees them — they add no migration.
+- Snap-only field kwargs (`searchable`, `filterable`, `show_in_list`, `wysiwyg`, …) configure the admin and API and are stripped before Django sees them — they add no migration. `snap_field(field, **kwargs)` sets the same kwargs on a plain `django.db.models.Field` instance in place, for a third-party field package or a model that cannot be rewritten onto the `Snap*Field` classes.
 - Rich-text fields (`wysiwyg=True` / `SnapRichTextField`) sanitize HTML in `pre_save()`, so every ORM write path stores clean markup, and again when the changelist renders. Opt out per field with `safe_html=True` or `auto_sanitize=False`; `QuerySet.update()` bypasses it because Django never calls `pre_save()` there.
 - Module import paths are the public contract and are never moved or renamed; `from snapadmin import SnapModel` and `from snapadmin.models import SnapModel` both work (the top-level re-exports are lazy).
+- A model becomes a SnapAdmin model in one of two ways: subclassing `SnapModel`, or decorating a plain `django.db.models.Model` with `@snap_model(...)`. Both end in the same registry — `snapadmin.registry.is_registered(model)` is the gate every surface asks, `get_model_meta(model, name, default)` reads a setting (decorator value first, class attribute second). The decorator is metadata only: it adds no field (so no migration) and attaches no `EsManager`, no `purge_expired()`, no generated admin — the ES, retention and admin sweeps skip a decorated plain model, which is why it accepts no `es_*`/`data_retention_*` keywords.
 - The Unfold theme is optional (`[theme]` extra). Without it SnapAdmin renders on the stock Django admin.
 - `django-unfold` ships no translation catalogs, so SnapAdmin translates the theme's own interface strings in its ten catalogs (`snapadmin/theme_i18n.py` declares the msgids). A project's own `LOCALE_PATHS` still take precedence over both.
 - Optional stacks never break an import: `snapadmin.tasks` imports without Celery (calling a task runs it in-process; `.delay()` raises `ImproperlyConfigured` naming the `[celery]` extra), and the core boots with DRF/graphene absent.
@@ -50,7 +51,8 @@ Key facts an agent should not have to infer:
 ## Declaring models
 
 - [SnapModel reference](https://drofji.github.io/django-snapadmin/#snap-model): the declarative base, `register_all_admins()`, `es_storage_mode`, `data_retention_days`.
-- [Snap fields](https://drofji.github.io/django-snapadmin/#snap-fields): every `Snap*Field` and its snap-only kwargs.
+- [@snap_model for plain models](https://drofji.github.io/django-snapadmin/#snap-model-decorator): the decorator that opts a plain `django.db.models.Model` in without subclassing — its keyword table, and the table of what a decorated model deliberately does not get.
+- [Snap fields](https://drofji.github.io/django-snapadmin/#snap-fields): every `Snap*Field` and its snap-only kwargs. [`snap_field()`](https://drofji.github.io/django-snapadmin/#snap-field-wrapper) sets the same kwargs on a plain Django field (a third-party field package, or a model that cannot be rewritten onto the `Snap*Field` classes) instead of requiring a `Snap*Field` subclass.
 - [Advanced layout](https://drofji.github.io/django-snapadmin/#advanced-layout): fieldsets, inlines, ordering and grouping of the generated admin form.
 - [Status badges](https://drofji.github.io/django-snapadmin/#status-badges): `SnapStatusBadgeField` and coloured choice rendering in list views.
 - [Admin registration](https://drofji.github.io/django-snapadmin/#admin-registration): auto-registration, per-model opt-out, and hooking custom `ModelAdmin` behaviour.

@@ -37,6 +37,12 @@ Three steps take a model from nothing to a full admin + API::
     from snapadmin.models import SnapModel
     SnapModel.register_all_admins()
 
+Models you cannot rewrite take the other route: leave them plain
+``django.db.models.Model`` classes and opt in from the outside with the
+``@snap_model(...)`` decorator, which registers the model and records the same
+settings without touching its field layer (metadata only — see
+``snapadmin.models.snap_model`` for what it deliberately does not attach).
+
 ``snapadmin`` must be in ``INSTALLED_APPS`` and ``snapadmin.urls`` included in
 the root URLconf. Three console scripts help before that point: ``snapadmin-new``
 generates a project you keep (the three steps above, already wired — ``migrate``
@@ -51,11 +57,19 @@ Import paths are the public contract — modules are never moved or renamed.
 Declaring models
     ``snapadmin.models``
         ``SnapModel`` (the declarative base and ``register_all_admins()``),
-        ``EsStorageMode``, ``APIToken``, ``ErrorEvent``, the ES manager/queryset.
+        ``snap_model`` (the decorator that opts a **plain** ``models.Model`` in —
+        metadata and registration only: no ES manager, no ``purge_expired()``, no
+        generated admin), ``EsStorageMode``, ``APIToken``, ``ErrorEvent``, the ES
+        manager/queryset.
     ``snapadmin.fields``
         Every ``Snap*Field``. Snap-only kwargs (``searchable``, ``filterable``,
-        ``show_in_list``, ``masked``, …) drive the admin and API and are
+        ``show_in_list``, ``wysiwyg``, …) drive the admin and API and are
         stripped before Django sees them, so they add no migration.
+        ``snap_field(field, **kwargs)`` sets the same kwargs directly on a
+        plain Django field instance — a third-party field (``django-money``,
+        ``phonenumber_field``, …) or a brownfield model that cannot be
+        rewritten onto the ``Snap*Field`` classes — so every reader treats it
+        exactly like a ``Snap*Field``.
     ``snapadmin.validators``
         ``deconstructible`` validators: phone, colour, file type/size.
 
@@ -114,9 +128,14 @@ Operations
         synchronously when called, and raises on ``.delay()`` rather than
         pretending the work was queued.
     ``snapadmin.registry``
-        Which models are SnapAdmin's own. ``SnapModel`` subclasses register
-        themselves as they are declared, so every gate is a lookup instead of an
-        ``issubclass()`` walk. Internal seam — no public API of its own.
+        Which models are SnapAdmin's own, and how each one is configured.
+        ``SnapModel`` subclasses register themselves as they are declared and
+        ``@snap_model`` registers a plain model, so every gate is a
+        ``is_registered()`` lookup instead of an ``issubclass()`` walk.
+        ``get_model_meta(model, name, default)`` is the matching accessor for a
+        model-level setting: the registry entry first, the class attribute
+        second, so both ways of declaring a model read identically.
+        ``register()`` / ``meta_for()`` complete the surface.
     ``snapadmin.checks``
         Django system checks — warnings ``snapadmin.W001``…``W007`` and errors
         ``snapadmin.E001``…``E005`` catch misconfiguration at startup, so read
@@ -203,6 +222,7 @@ except PackageNotFoundError:  # running from a source checkout, not pip-installe
 _LAZY_EXPORTS: dict[str, str] = {
     # Core model API + enums/exceptions (snapadmin.models)
     "SnapModel": "snapadmin.models",
+    "snap_model": "snapadmin.models",
     "EsStorageMode": "snapadmin.models",
     "APIToken": "snapadmin.models",
     "SnapEsUnavailable": "snapadmin.models",
@@ -241,6 +261,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     "SnapFunctionField": "snapadmin.fields",
     "SnapStatusBadgeField": "snapadmin.fields",
     "SnapStatusBadgeFieldChoice": "snapadmin.fields",
+    "snap_field": "snapadmin.fields",
     # Validators (snapadmin.validators)
     "SnapPhoneValidator": "snapadmin.validators",
     "SnapColorValidator": "snapadmin.validators",

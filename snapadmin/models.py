@@ -7,7 +7,7 @@ import hashlib
 import secrets
 import string
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import timedelta
 from enum import Enum
 from typing import Any, NoReturn
@@ -83,7 +83,7 @@ from snapadmin import fields as snapfields
 from snapadmin.fields import DjangoFieldAttributeEnum, SnapFieldAttributeEnum, SnapField
 from snapadmin.logging_config import get_logger
 from snapadmin.pagination import EstimatedCountPaginator
-from snapadmin.registry import is_registered, register
+from snapadmin.registry import get_model_meta, is_registered, register
 from snapadmin.sanitize import sanitize_html
 
 logger = get_logger(__name__)
@@ -2547,9 +2547,167 @@ class SnapModel(models.Model):
             pass
 
         for model in apps.get_models():
-            if is_registered(model):
-                if app_label is None or model._meta.app_label == app_label:
-                    model.register_admin()
+            if not is_registered(model):
+                continue
+            # register_admin() is SnapModel's own generator — it reads the Snap
+            # field flags to build fieldsets, filters and list columns. A plain
+            # model registered with @snap_model has no such method (and no Snap
+            # fields to read), so it keeps whatever admin the project wrote for
+            # it by hand instead of being handed a generated one.
+            if not hasattr(model, "register_admin"):
+                continue
+            if app_label is None or model._meta.app_label == app_label:
+                model.register_admin()
+
+
+# ===========================================================================
+# Opting a plain django.db.models.Model in — @snap_model
+# ===========================================================================
+
+#: Sentinel for "this keyword was not passed", distinct from an explicit
+#: ``None`` — which several of the settings below use as a meaningful value
+#: ("no write allowlist", "no per-field lookup override"). Typed ``Any`` so the
+#: public signature can still advertise each parameter's real type.
+_UNSET: Any = object()
+
+
+def _as_list(value: Any) -> Any:
+    """Copy a sequence of names into a list, passing ``None``/``_UNSET`` through.
+
+    The copy matters: the caller's list must not stay live inside the registry,
+    where a later ``append`` would silently re-configure the model.
+    """
+    if value is None or value is _UNSET:
+        return value
+    return [str(item) for item in value]
+
+
+def _as_lookup_map(value: Any) -> Any:
+    """Copy a ``{field: [lookup, …]}`` mapping, passing ``None``/``_UNSET`` through."""
+    if value is None or value is _UNSET:
+        return value
+    return {str(key): _as_list(item) for key, item in value.items()}
+
+
+def snap_model(
+    *,
+    api_exclude_fields: Sequence[str] | None = _UNSET,
+    api_write_fields: Sequence[str] | None = _UNSET,
+    api_read_only: bool = _UNSET,
+    api_http_method_names: Sequence[str] | None = _UNSET,
+    api_filter_lookups: Mapping[str, Sequence[str]] | None = _UNSET,
+    api_default_text_lookups: Sequence[str] | None = _UNSET,
+    api_json_filters: Mapping[str, Sequence[str]] | None = _UNSET,
+    offline_mode: bool = _UNSET,
+    offline_cache_limit: int = _UNSET,
+    search_fields: Sequence[str] | None = _UNSET,
+) -> Callable[[type[models.Model]], type[models.Model]]:
+    """Opt a plain ``django.db.models.Model`` into SnapAdmin, without subclassing.
+
+    :class:`SnapModel` is the declarative route: subclass it, declare ``Snap*Field``
+    fields, and SnapAdmin generates everything. This decorator is the other route,
+    for a model layer you cannot or do not want to rewrite — a brownfield schema, a
+    model whose base class belongs to a third-party package, fields from
+    ``django-money``/``phonenumber_field``/``model-utils``. The model stays a plain
+    Django model; the decorator only registers it and records its configuration::
+
+        from django.db import models
+        from snapadmin.models import snap_model
+
+        @snap_model(
+            api_write_fields=["name", "price"],   # mass-assignment allowlist
+            api_exclude_fields=["cost_price"],    # never leaves the server
+            search_fields=["name"],               # what ?search= matches on
+        )
+        class Product(models.Model):
+            name = models.CharField(max_length=200)
+            price = models.DecimalField(max_digits=10, decimal_places=2)
+            cost_price = models.DecimalField(max_digits=10, decimal_places=2)
+
+    From that point the model is a SnapAdmin model everywhere the question is asked
+    (:func:`snapadmin.registry.is_registered`): the REST API mounts CRUD routes for
+    it, the GraphQL schema gains a type, the offline endpoints and the system checks
+    see it, and ``snapadmin_info`` inventories it. Adding no field and no attribute,
+    the decorator needs no migration.
+
+    **What it does not give you.** This is registration and metadata only — it
+    attaches none of :class:`SnapModel`'s runtime machinery, and the surfaces that
+    need that machinery skip a decorated plain model rather than half-work:
+
+    * **No Elasticsearch.** No :class:`EsManager` / :class:`EsQuerySet`, so no
+      ``es_search()``, no ``es_reindex_all()``, no mirroring on save, and no index
+      created on ``post_migrate``. ``snapadmin_reindex`` will not select it. That is
+      why this decorator accepts no ``es_*`` keywords: storing them would promise
+      indexing that never happens.
+    * **No retention purge.** No ``purge_expired()``, so neither the
+      ``snapadmin_purge_expired_data`` command nor the ``purge_expired_data`` task
+      touches it — hence no ``data_retention_days`` keyword either.
+    * **No generated admin.** ``SnapModel.register_all_admins()`` skips it: without
+      ``Snap*Field`` flags there is nothing to derive fieldsets, list columns or
+      filters from. Register a ``ModelAdmin`` for it yourself, as usual.
+    * **No admin niceties** that live on the base class — ``formatted_id``, the
+      audit/PII ``save()`` hooks, ``admin_overrides``.
+
+    Needing any of those means subclassing :class:`SnapModel` (or adding an
+    explicit manager and hooks of your own); everything above stays reachable by
+    doing so later, since both routes end up in the same registry.
+
+    Every keyword mirrors the :class:`SnapModel` class attribute of the same name
+    and is read back through :func:`snapadmin.registry.get_model_meta`. Only the
+    keywords actually passed are recorded, so applying the decorator to a
+    ``SnapModel`` subclass overrides exactly those and leaves the rest of the
+    class-level configuration in place.
+
+    :param api_exclude_fields: Field names kept out of the REST serializer, the
+        GraphQL type and the schema endpoint.
+    :param api_write_fields: Mass-assignment allowlist; ``None`` (the default)
+        leaves every non-excluded field writable.
+    :param api_read_only: Serve the model over safe HTTP methods only.
+    :param api_http_method_names: Explicit lowercase HTTP-verb allowlist; wins
+        over ``api_read_only``.
+    :param api_filter_lookups: Per-field query-filter lookups,
+        ``{"name": ["exact", "icontains"]}``.
+    :param api_default_text_lookups: Lookup set for every text field not named in
+        ``api_filter_lookups``.
+    :param api_json_filters: Filterable key-paths inside JSON columns,
+        ``{"payload": ["a.b"]}``.
+    :param offline_mode: Expose the model to the admin's offline cache.
+    :param offline_cache_limit: How many recent rows the offline cache prefetches.
+    :param search_fields: Field names DRF's ``?search=`` matches against. A plain
+        model has no ``searchable=True`` Snap fields to derive this from, so
+        without it ``?search=`` is a no-op for the model.
+    :raises TypeError: if applied to anything that is not a ``models.Model``
+        subclass.
+    """
+    meta: dict[str, Any] = {
+        "api_exclude_fields": _as_list(api_exclude_fields),
+        "api_write_fields": _as_list(api_write_fields),
+        "api_read_only": api_read_only,
+        "api_http_method_names": _as_list(api_http_method_names),
+        "api_filter_lookups": _as_lookup_map(api_filter_lookups),
+        "api_default_text_lookups": _as_list(api_default_text_lookups),
+        "api_json_filters": _as_lookup_map(api_json_filters),
+        "offline_mode": offline_mode,
+        "offline_cache_limit": offline_cache_limit,
+        "search_fields": _as_list(search_fields),
+    }
+    given = {name: value for name, value in meta.items() if value is not _UNSET}
+
+    def decorator(model: type[models.Model]) -> type[models.Model]:
+        if not (isinstance(model, type) and issubclass(model, models.Model)):
+            raise TypeError(
+                "@snap_model can only decorate a django.db.models.Model subclass, "
+                f"got {model!r}."
+            )
+        register(model, **given)
+        logger.debug(
+            "snap_model_registered",
+            model=f"{model._meta.app_label}.{model.__name__}",
+            settings=sorted(given),
+        )
+        return model
+
+    return decorator
 
 
 def reindexable_snapmodels() -> list[type["SnapModel"]]:
@@ -2559,14 +2717,20 @@ def reindexable_snapmodels() -> list[type["SnapModel"]]:
     non-``DB_ONLY`` storage mode (``DUAL`` / ``ES_ONLY``). Shared by the
     ``snapadmin_reindex`` management command, the ``run_es_reindex`` task and the
     admin reindex API so all three agree on what "ES-enabled" means.
+
+    ``es_reindex_all`` comes from :class:`SnapModel`, so a plain model registered
+    with :func:`snap_model` can never qualify — it has no index to rebuild. The
+    check is explicit rather than implied by the ES flags, because those flags
+    can be set on any registered model.
     """
     return [
         model
         for model in apps.get_models()
         if is_registered(model)
+        and hasattr(model, "es_reindex_all")
         and (
-            getattr(model, "es_index_enabled", False)
-            or getattr(model, "es_storage_mode", EsStorageMode.DB_ONLY) != EsStorageMode.DB_ONLY
+            get_model_meta(model, "es_index_enabled", False)
+            or get_model_meta(model, "es_storage_mode", EsStorageMode.DB_ONLY) != EsStorageMode.DB_ONLY
         )
     ]
 

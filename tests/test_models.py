@@ -129,6 +129,20 @@ class TestGetAdminFields:
         _, _, _, _, autocomplete_fields = Order.get_admin_fields()
         assert "customer" in autocomplete_fields
 
+    def test_searchlog_list_filter_has_timestamp(self):
+        """SearchLog.timestamp is a plain django_models.DateTimeField wrapped
+        with snap_field(filterable=True) — it must behave exactly like a
+        SnapDateTimeField(filterable=True) here: a range filter in list_filter."""
+        from demo.apps.shop.models import SearchLog
+        _, _, _, list_filter, _ = SearchLog.get_admin_fields()
+        filter_names = []
+        for item in list_filter:
+            if isinstance(item, str):
+                filter_names.append(item)
+            elif isinstance(item, tuple):
+                filter_names.append(item[0])
+        assert "timestamp" in filter_names
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Admin registration

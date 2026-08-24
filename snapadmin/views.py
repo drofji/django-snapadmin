@@ -86,10 +86,11 @@ class DashboardView(StaffRequiredMixin, TemplateView):
             links.append({"name": _("GraphQL API"), "url": "/api/graphql/", "icon": "account_tree"})
 
         # Registered Models
-        from snapadmin.models import SnapModel
         from django.apps import apps
         from django.contrib import admin
         from django.db.models import Count
+
+        from snapadmin.registry import get_model_meta, is_registered
         registered_models = []
 
         # Stats for charts
@@ -100,7 +101,7 @@ class DashboardView(StaffRequiredMixin, TemplateView):
 
         from snapadmin.models import EsStorageMode
         for model in apps.get_models():
-            if issubclass(model, SnapModel) and model is not SnapModel:
+            if is_registered(model):
                 # A model can opt out of the admin entirely (admin_enabled = False),
                 # in which case it has no changelist to link to — reverse() would
                 # raise NoReverseMatch and take the whole dashboard down with it.
@@ -115,7 +116,7 @@ class DashboardView(StaffRequiredMixin, TemplateView):
                 except Exception:
                     pass
 
-                es_mode = getattr(model, "es_storage_mode", EsStorageMode.DB_ONLY)
+                es_mode = get_model_meta(model, "es_storage_mode", EsStorageMode.DB_ONLY)
                 # capfirst on the *plural* name, not .title(): a card counts many
                 # rows, and .title() both force-evaluates the lazy translation and
                 # upper-cases every word — which mangles non-English names
@@ -127,7 +128,7 @@ class DashboardView(StaffRequiredMixin, TemplateView):
                     "count": count,
                     "url": reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_changelist"),
                     "es_mode": es_mode.value if hasattr(es_mode, "value") else str(es_mode),
-                    "retention_days": getattr(model, "data_retention_days", None),
+                    "retention_days": get_model_meta(model, "data_retention_days", None),
                 }
                 registered_models.append(model_info)
 

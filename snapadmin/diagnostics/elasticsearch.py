@@ -16,14 +16,15 @@ from django.conf import settings
 
 from snapadmin.diagnostics.registry import register
 from snapadmin.models import EsStorageMode, SnapModel
+from snapadmin.registry import get_model_meta, is_registered
 
 
 def _storage_mode_tally() -> dict:
     counter: Counter = Counter()
     for model in apps.get_models():
-        if not SnapModel.is_concrete_subclass(model):
+        if not is_registered(model):
             continue
-        counter[getattr(model, "es_storage_mode", EsStorageMode.DB_ONLY)] += 1
+        counter[get_model_meta(model, "es_storage_mode", EsStorageMode.DB_ONLY)] += 1
     return {mode.name: counter.get(mode, 0) for mode in EsStorageMode}
 
 
