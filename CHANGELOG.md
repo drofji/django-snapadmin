@@ -79,6 +79,15 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   (`snapadmin.E003`–`E005`) reject one at startup.
 
 ### Changed
+- **The README is now a landing page, not a manual.** It opens with the problem SnapAdmin solves in
+  plain language — four internal-tool surfaces (admin, two APIs, search) that are normally four
+  separate descriptions of the same data — before any code, then the 60-second quickstart, then the
+  commands. A new *For teams and enterprise* section answers the questions asked before a dependency
+  is approved (licensing and how to prove it, audit trail, GDPR, PII, test coverage, upgrade policy,
+  scale, SSO, monitoring, backups, lock-in) as questions rather than as a feature list. Reference
+  detail — both `INSTALLED_APPS` listings, the extras table, the theme comparison, the Docker demo —
+  moved behind collapsible sections, cutting what a first-time reader has to scroll past by roughly
+  half. No content was dropped and no link changed target.
 - **Rich-text HTML is sanitized on write, not only on render.** `wysiwyg=True` /
   `SnapRichTextField` values are cleaned in `pre_save()`, so every ORM write path (admin form, REST
   and GraphQL serializers, `save()`, `bulk_create()`) stores sanitized HTML — previously only the

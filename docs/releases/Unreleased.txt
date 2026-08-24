@@ -236,6 +236,18 @@ Fixed
 Changed
 -------
 
+* **The README is now a landing page rather than a manual.** It opens with the problem SnapAdmin
+  solves, stated in plain language and without code — an internal tool needs an admin screen, an API
+  for the mobile app, an API for the frontend and a search box, and those are normally four separate
+  descriptions of the same data — followed by the 60-second quickstart and the command table. A new
+  *For teams and enterprise* section answers what a lead or a manager asks before approving a
+  dependency (commercial licensing and how to prove it, the audit trail, GDPR retention, PII masking,
+  test coverage, the upgrade policy, scale, SSO, monitoring, backups, lock-in), phrased as questions
+  instead of as a feature list. Reference material — both ``INSTALLED_APPS`` listings, the extras
+  table, the theme comparison, the performance note, the extending guide and the Docker demo — now
+  sits behind collapsible sections, so a first-time reader scrolls past about half of what they used
+  to. Nothing was removed and no link changed target.
+
 * **Rich-text HTML is now sanitized when it is written, not only when it is rendered.**
   ``wysiwyg=True`` / ``SnapRichTextField`` values were cleaned by the admin changelist on the way
   out, so the admin was safe — but the column itself held whatever was submitted, and every other
