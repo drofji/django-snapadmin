@@ -373,3 +373,50 @@ class TestHonestAbsences:
         monkeypatch.setattr(global_apps, "get_models", lambda: [Ledger])
 
         assert purge_expired_data() == {"purged": {}, "total": 0, "errors": {}}
+
+
+# ── #PAR1d — the model-side mirror of the field parity drift guard ───────────
+#
+# fields._SNAP_FIELD_WRAPPER_DOCUMENTED_EXCLUSIONS tracks Snap*Field attributes
+# with no snap_field() equivalent (empty since #PAR1c). The model side has no
+# single enum of SnapModel's ~30 configuration attributes to diff against —
+# unlike SnapFieldAttributeEnum, they are declared inline with no shared
+# marker — so models._SNAP_MODEL_UNEXPOSED_ATTRIBUTES is a maintained,
+# reasoned list instead (every entry names the #RFC1g row that blocks it).
+# These tests keep that list honest in the two ways that matter: a tracked
+# name must still exist on SnapModel (catching a stale/renamed entry), and it
+# must never simultaneously be a decorator keyword (catching a #RFC1g
+# capability that shipped without removing its now-stale exclusion).
+class TestSnapModelDriftGuard:
+    def test_every_tracked_attribute_still_exists_on_snapmodel(self):
+        from snapadmin.models import _SNAP_MODEL_UNEXPOSED_ATTRIBUTES
+
+        for name in _SNAP_MODEL_UNEXPOSED_ATTRIBUTES:
+            assert hasattr(SnapModel, name), (
+                f"{name!r} is tracked in _SNAP_MODEL_UNEXPOSED_ATTRIBUTES but no longer "
+                "exists on SnapModel — the entry is stale, remove or update it."
+            )
+
+    def test_no_tracked_attribute_is_a_decorator_keyword(self):
+        import inspect
+
+        from snapadmin.models import _SNAP_MODEL_UNEXPOSED_ATTRIBUTES
+
+        params = set(inspect.signature(snap_model).parameters)
+        overlap = params & _SNAP_MODEL_UNEXPOSED_ATTRIBUTES
+        assert overlap == set(), (
+            f"{overlap} are both a snap_model() keyword and in "
+            "_SNAP_MODEL_UNEXPOSED_ATTRIBUTES — the gap has shipped, remove the entry."
+        )
+
+    def test_every_decorator_keyword_matches_a_snapmodel_attribute(self):
+        """search_fields is the one deliberate exception: SnapModel derives its
+        own search_fields from searchable=True Snap fields rather than a class
+        attribute, so it has no attribute of the same name to compare against."""
+        import inspect
+
+        params = set(inspect.signature(snap_model).parameters)
+        for name in params - {"search_fields"}:
+            assert hasattr(SnapModel, name), (
+                f"snap_model() accepts {name!r} but SnapModel has no matching attribute"
+            )

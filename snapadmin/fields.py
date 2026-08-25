@@ -5,6 +5,7 @@ Custom field layer on top of Django's standard model fields.
 ...
 """
 
+import types
 import typing
 from enum import Enum
 
@@ -256,25 +257,32 @@ class SnapField:
         cls.check = check
 
 
-#: Kwargs :func:`snap_field` may set — the exact attribute names
-#: :meth:`SnapField._initializeSnapLogic` stores on every ``Snap*Field``
-#: instance, so a reader (the searchable filter, the admin's list/form/tab/row
-#: layout, the wysiwyg widget, …) cannot tell whether they came from a
-#: ``Snap*Field`` subclass or from this wrapper.
-#:
-#: Deliberately narrower than :class:`SnapFieldAttributeEnum`: it excludes
-#: ``required`` (meaningful only at construction time, where it derives
-#: ``null``/``blank`` — a field passed into :func:`snap_field` is already
-#: built, so setting it afterwards would silently do nothing) and the file
-#: upload kwargs ``allowed_extensions`` / ``allowed_encodings`` /
-#: ``max_size_bytes`` (those build a validator in ``SnapFileField.__init__``
-#: rather than set an attribute a reader looks up).
+#: The three file-upload kwargs: post-construction they cannot be set as a
+#: plain attribute the way the others are — they build a
+#: :class:`~snapadmin.validators.SnapFileValidator` instead (see
+#: :func:`_attach_file_validator`), so :func:`snap_field` handles them apart
+#: from the generic ``setattr`` loop.
+_SNAP_FIELD_FILE_VALIDATOR_KWARGS: frozenset[str] = frozenset({
+    SnapFieldAttributeEnum.ALLOWED_EXTENSIONS.value,
+    SnapFieldAttributeEnum.ALLOWED_ENCODINGS.value,
+    SnapFieldAttributeEnum.MAX_SIZE_BYTES.value,
+})
+
+#: Kwargs :func:`snap_field` may set — every name :meth:`SnapField._initializeSnapLogic`
+#: (or :class:`SnapFileField`/:class:`SnapImageField`'s ``__init__``) stores on a
+#: ``Snap*Field`` instance, so a reader (the searchable filter, the admin's
+#: list/form/tab/row layout, the wysiwyg widget, a file upload validator, …)
+#: cannot tell whether they came from a ``Snap*Field`` subclass or from this
+#: wrapper. ``required`` and the three file-upload kwargs need extra handling
+#: beyond a plain ``setattr`` — see :func:`_apply_required_flag` and
+#: :func:`_attach_file_validator` — but are fully supported, not refused.
 _SNAP_FIELD_WRAPPER_KWARGS: frozenset[str] = frozenset({
     SnapFieldAttributeEnum.SHOW_IN_LIST.value,
     SnapFieldAttributeEnum.SHOW_IN_FORM.value,
     SnapFieldAttributeEnum.SEARCHABLE.value,
     SnapFieldAttributeEnum.FILTERABLE.value,
     SnapFieldAttributeEnum.EDITABLE.value,
+    SnapFieldAttributeEnum.REQUIRED.value,
     SnapFieldAttributeEnum.UPDATABLE.value,
     SnapFieldAttributeEnum.AUTOCOMPLETE.value,
     SnapFieldAttributeEnum.WYSIWYG.value,
@@ -282,7 +290,85 @@ _SNAP_FIELD_WRAPPER_KWARGS: frozenset[str] = frozenset({
     SnapFieldAttributeEnum.AUTO_SANITIZE.value,
     SnapFieldAttributeEnum.TAB.value,
     SnapFieldAttributeEnum.ROW.value,
-})
+} | _SNAP_FIELD_FILE_VALIDATOR_KWARGS)
+
+#: The parity drift guard (`tests/test_fields.py::TestSnapFieldWrapperDriftGuard`)
+#: asserts ``set(SnapFieldAttributeEnum) - _SNAP_FIELD_WRAPPER_KWARGS`` equals
+#: exactly this set. Empty today — #PAR1c closed the last four gaps, so every
+#: ``SnapFieldAttributeEnum`` name is reachable from :func:`snap_field`. A future
+#: ``SnapFieldAttributeEnum`` member must be added to ``_SNAP_FIELD_WRAPPER_KWARGS``
+#: (wired into :func:`snap_field`) or listed here with a reason before the drift
+#: guard passes again — never silently neither.
+_SNAP_FIELD_WRAPPER_DOCUMENTED_EXCLUSIONS: frozenset[str] = frozenset()
+
+
+def _apply_required_flag(field: models.Field, required: bool) -> None:
+    """Mirror ``Snap*Field.__init__``'s ``required`` → ``null``/``blank`` derivation,
+    post-construction.
+
+    Unlike the metadata kwargs, ``required`` is schema-affecting by design — that
+    is its entire purpose. ``required=True`` unconditionally tightens the field
+    to ``null=False, blank=False``, exactly what a hand-built
+    ``Snap*Field(required=True)`` produces; mutating them here, before the field
+    is attached to a model class, needs no special ``deconstruct()`` handling,
+    because Django's own ``deconstruct()`` already reports live ``null``/``blank``
+    state (unlike ``required`` itself, which is derived and forgotten).
+
+    ``required=False`` — the same value ``SnapField``'s own default already
+    means — is deliberately a **no-op on ``null``/``blank``**, not a reset to
+    ``True, True``: a caller who explicitly built the field with
+    ``null=False, blank=False`` (Django's own default) did not ask
+    ``snap_field()`` to reopen it. This is the one place the wrapper cannot
+    replicate ``Snap*Field.__init__``'s ``setdefault``-based precedence (which
+    only fills in ``null``/``blank`` when the caller did not already pass them)
+    — by the time ``snap_field()`` runs, the field's ``null``/``blank`` are
+    already concrete booleans with no record of whether they were explicit.
+    ``required`` can only ever *tighten* a wrapped field, never loosen one.
+    """
+    field.required = required
+    if required:
+        field.null = False
+        field.blank = False
+
+
+def _attach_file_validator(
+    field: models.Field,
+    *,
+    allowed_extensions=None,
+    allowed_encodings=None,
+    max_size_bytes=None,
+) -> None:
+    """Attach a :class:`~snapadmin.validators.SnapFileValidator`, post-construction,
+    mirroring what :class:`SnapFileField`/:class:`SnapImageField` build in
+    ``__init__`` — without the two ways that naive post-init validator
+    attachment breaks:
+
+    * ``Field.validators`` is a ``cached_property`` that Django already
+      evaluates (and caches) during ``Field.__init__`` — appending to
+      ``field._validators`` afterward, alone, is silently never consulted by
+      ``full_clean()``. Popping the cached entry first forces it to recompute
+      on next access, so the new validator is actually live.
+    * The appended validator instance would otherwise show up in
+      ``deconstruct()``'s ``validators=[...]`` kwarg, dirtying
+      ``makemigrations``. Binding a ``deconstruct`` override that strips it by
+      identity — the same :func:`_strip_auto_validator` helper
+      ``SnapFileField``/``SnapImageField``/``SnapPhoneField``/``SnapColorField``
+      already use — keeps the wrapper's "adds no database migration" promise.
+    """
+    validator = snap_validators.SnapFileValidator(
+        allowed_extensions=allowed_extensions,
+        allowed_encodings=allowed_encodings,
+        max_size_bytes=max_size_bytes,
+    )
+    field.__dict__.pop(DjangoFieldAttributeEnum.VALIDATORS.value, None)
+    field._validators = list(field._validators) + [validator]
+
+    original_deconstruct = field.deconstruct
+
+    def deconstruct(self):
+        return _strip_auto_validator(original_deconstruct(), validator)
+
+    field.deconstruct = types.MethodType(deconstruct, field)
 
 
 def snap_field(field: models.Field, **kwargs: bool | str | None) -> models.Field:
@@ -309,23 +395,53 @@ def snap_field(field: models.Field, **kwargs: bool | str | None) -> models.Field
     itself, not a second, parallel place to look. Returns ``field`` so the
     call composes inline with the field declaration, as above.
 
-    Only the metadata kwargs are accepted (see the table on the "Snap Fields"
-    docs page); an unrecognised name — a typo, or one of ``required`` /
-    ``allowed_extensions`` / ``allowed_encodings`` / ``max_size_bytes``, which
-    only make sense inside a ``Snap*Field``'s own ``__init__`` — raises
+    Every :class:`SnapFieldAttributeEnum` name is accepted — full parity with
+    what a ``Snap*Field`` constructor takes, including ``required`` (see
+    :func:`_apply_required_flag`) and the file-upload trio
+    ``allowed_extensions`` / ``allowed_encodings`` / ``max_size_bytes`` (see
+    :func:`_attach_file_validator`, and note those three only make sense on a
+    ``FileField``/``ImageField``). An unrecognised name — a typo — raises
     ``ValueError`` naming it, rather than silently doing nothing.
 
-    Adds no database migration: it mutates the field instance *after*
-    Django's ``Field.__init__`` has already recorded its constructor
-    arguments, so none of these attributes can appear in ``deconstruct()``.
+    Adds no database migration for every kwarg **except** ``required``: the
+    metadata kwargs are mutated *after* ``Field.__init__`` already recorded its
+    constructor arguments, so none of them can appear in ``deconstruct()``.
+    ``required`` is the deliberate exception — it is schema-affecting by
+    design, same as passing ``null=``/``blank=`` directly to the Django field,
+    and **can** produce a migration the same way changing a ``Snap*Field``'s
+    ``required`` would.
+
+    ``wysiwyg=True`` also binds the same sanitize-on-write guarantee
+    ``SnapRichTextField``/``SnapTextField(wysiwyg=True)`` get from
+    :class:`SanitizedHtmlOnSaveMixin` — see :func:`_bind_wysiwyg_pre_save`.
     """
-    for key, value in kwargs.items():
+    for key in kwargs:
         if key not in _SNAP_FIELD_WRAPPER_KWARGS:
             raise ValueError(
                 f"snap_field() got an unexpected keyword argument {key!r}; valid kwargs are: "
                 f"{', '.join(sorted(_SNAP_FIELD_WRAPPER_KWARGS))}."
             )
+
+    file_kwargs = {k: v for k, v in kwargs.items() if k in _SNAP_FIELD_FILE_VALIDATOR_KWARGS}
+    if file_kwargs and not isinstance(field, models.FileField):
+        raise ValueError(
+            "snap_field(): allowed_extensions/allowed_encodings/max_size_bytes only apply to "
+            f"a FileField or ImageField, got {type(field).__name__}."
+        )
+    if file_kwargs:
+        _attach_file_validator(field, **file_kwargs)
+
+    if SnapFieldAttributeEnum.REQUIRED.value in kwargs:
+        _apply_required_flag(field, kwargs[SnapFieldAttributeEnum.REQUIRED.value])
+
+    skip = _SNAP_FIELD_FILE_VALIDATOR_KWARGS | {SnapFieldAttributeEnum.REQUIRED.value}
+    for key, value in kwargs.items():
+        if key in skip:
+            continue
         setattr(field, key, value)
+
+    if getattr(field, "wysiwyg", False):
+        _bind_wysiwyg_pre_save(field)
     return field
 
 
@@ -343,14 +459,13 @@ class SnapCharField(models.CharField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
-class SanitizedHtmlOnSaveMixin:
-    """Sanitize a wysiwyg field's HTML on the way into the database.
+def _sanitize_wysiwyg_pre_save_value(field: models.Field, model_instance: models.Model, value):
+    """Apply the wysiwyg sanitize-on-write rule to one ``pre_save`` value.
 
-    Rendering was already sanitized, but only in the admin changelist — the column itself held
-    whatever was written to it, so every other reader (a project template using ``|safe``, a
-    frontend consuming the REST API, an export) still received the raw payload. Cleaning in
-    ``pre_save`` moves the guarantee into storage and covers **every ORM write path** — admin
-    form, DRF serializer, ``Model.save()``, ``bulk_create`` — instead of one rendering path.
+    Shared by :class:`SanitizedHtmlOnSaveMixin` (the ``Snap*Field`` route) and the
+    :func:`snap_field` wrapper's bound ``pre_save`` (see
+    :func:`_bind_wysiwyg_pre_save`), so both routes run the exact same sanitizer
+    on the exact same rule — never two implementations that could drift apart.
 
     Deliberately narrow:
 
@@ -359,6 +474,59 @@ class SanitizedHtmlOnSaveMixin:
     * ``safe_html=True`` (content the developer vouches for) and ``auto_sanitize=False`` opt out;
     * ``QuerySet.update()`` is **not** covered — Django never calls ``pre_save()`` for it, so a
       caller writing rich text that way sanitizes it themselves. Documented, and pinned by a test.
+    """
+    if not getattr(field, "wysiwyg", False) or not getattr(field, "auto_sanitize", True):
+        return value
+    if getattr(field, "safe_html", False) or not isinstance(value, str) or not value:
+        return value
+    from snapadmin.sanitize import sanitize_html
+
+    cleaned = sanitize_html(value)
+    if cleaned != value:
+        # Keep the instance in hand consistent with the row just written; otherwise the
+        # object the caller holds still carries markup the database no longer has.
+        setattr(model_instance, field.attname, cleaned)
+    return cleaned
+
+
+def _bind_wysiwyg_pre_save(field: models.Field) -> None:
+    """Give a plain, ``snap_field()``-wrapped field the same sanitize-on-write
+    guarantee :class:`SanitizedHtmlOnSaveMixin` gives a ``Snap*Field`` subclass.
+
+    A wrapped field's class never enters ``SanitizedHtmlOnSaveMixin``'s MRO — it
+    is a plain ``django.db.models.Field`` instance, not a ``Snap*Field`` — so the
+    mixin's ``pre_save`` never runs for it. This binds an equivalent ``pre_save``
+    onto the *instance* instead, closing over the field's own original bound
+    method (whatever ``pre_save`` its concrete Django field class already
+    provides) so the wrapper still works on any field type, and delegating the
+    actual sanitize rule to :func:`_sanitize_wysiwyg_pre_save_value` — the exact
+    same function the class route uses, not a second sanitizer.
+
+    Idempotent: calling this more than once on the same field instance (e.g. two
+    :func:`snap_field` calls chained on it) binds the wrapper only once.
+    """
+    if getattr(field, "_snap_wysiwyg_pre_save_bound", False):
+        return
+
+    original_pre_save = field.pre_save
+
+    def pre_save(self, model_instance, add):
+        value = original_pre_save(model_instance, add)
+        return _sanitize_wysiwyg_pre_save_value(self, model_instance, value)
+
+    field.pre_save = types.MethodType(pre_save, field)
+    field._snap_wysiwyg_pre_save_bound = True
+
+
+class SanitizedHtmlOnSaveMixin:
+    """Sanitize a wysiwyg field's HTML on the way into the database.
+
+    Rendering was already sanitized, but only in the admin changelist — the column itself held
+    whatever was written to it, so every other reader (a project template using ``|safe``, a
+    frontend consuming the REST API, an export) still received the raw payload. Cleaning in
+    ``pre_save`` moves the guarantee into storage and covers **every ORM write path** — admin
+    form, DRF serializer, ``Model.save()``, ``bulk_create`` — instead of one rendering path. See
+    :func:`_sanitize_wysiwyg_pre_save_value` for exactly what is and is not covered.
 
     This mixin comes **before** the Django field class in the bases: ``SnapField`` sits after it
     in the MRO, so a ``pre_save`` defined there would lose to ``models.Field.pre_save``.
@@ -366,18 +534,7 @@ class SanitizedHtmlOnSaveMixin:
 
     def pre_save(self, model_instance, add):
         value = super().pre_save(model_instance, add)
-        if not getattr(self, "wysiwyg", False) or not getattr(self, "auto_sanitize", True):
-            return value
-        if getattr(self, "safe_html", False) or not isinstance(value, str) or not value:
-            return value
-        from snapadmin.sanitize import sanitize_html
-
-        cleaned = sanitize_html(value)
-        if cleaned != value:
-            # Keep the instance in hand consistent with the row just written; otherwise the
-            # object the caller holds still carries markup the database no longer has.
-            setattr(model_instance, self.attname, cleaned)
-        return cleaned
+        return _sanitize_wysiwyg_pre_save_value(self, model_instance, value)
 
 
 class SnapTextField(SanitizedHtmlOnSaveMixin, models.TextField, SnapField):

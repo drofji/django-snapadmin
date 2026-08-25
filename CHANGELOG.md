@@ -10,6 +10,14 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 
 ## Unreleased
 
+### Added
+- `snap_field()` now accepts every `Snap*Field` constructor kwarg — `required` and the file-upload
+  trio (`allowed_extensions`/`allowed_encodings`/`max_size_bytes`) are no longer refused.
+
+### Security
+- `snap_field(field, wysiwyg=True)` now sanitizes on write, matching `SnapRichTextField` — closing
+  a gap where the wrapper route stored raw HTML unsanitized.
+
 ## 0.1.0b7 — 2026-08-25
 
 Two ways to declare a model instead of one, plus a full-project scaffolder and a batch of

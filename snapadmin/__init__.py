@@ -69,7 +69,10 @@ Declaring models
         plain Django field instance — a third-party field (``django-money``,
         ``phonenumber_field``, …) or a brownfield model that cannot be
         rewritten onto the ``Snap*Field`` classes — so every reader treats it
-        exactly like a ``Snap*Field``.
+        exactly like a ``Snap*Field``, including ``wysiwyg=True`` sanitize-on-
+        write. ``required=True`` is the one kwarg that can add a migration
+        (it mutates ``null``/``blank`` directly, same as a hand-built
+        ``Snap*Field(required=True)``); everything else stays migration-free.
     ``snapadmin.validators``
         ``deconstructible`` validators: phone, colour, file type/size.
 

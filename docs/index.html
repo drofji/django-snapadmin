@@ -979,17 +979,38 @@ class Product(models.Model):
   filter, the admin's list/search/filter config, the wysiwyg widget, the tab/row layout — because
   there is nothing new to read: <code>snap_field()</code> writes the identical attribute names a
   <code>Snap*Field</code> stores on itself, not a second place to look. It returns the field, so
-  the call composes inline with the field declaration, and it adds no migration: the attributes are
-  set <em>after</em> Django's <code>Field.__init__</code> already recorded its constructor
-  arguments, so <code>deconstruct()</code> never reports them.</p>
-  <p>Only the flags table above is accepted (an unrecognised kwarg raises <code>ValueError</code>
-  naming it). <code>required</code> and the file-upload kwargs
-  (<code>allowed_extensions</code>/<code>allowed_encodings</code>/<code>max_size_bytes</code>) are
-  deliberately not supported here — they only make sense inside a <code>Snap*Field</code>'s own
-  <code>__init__</code> (deriving <code>null</code>/<code>blank</code>, or building a validator),
-  which has already run by the time a field reaches <code>snap_field()</code>. Set those directly
-  on the Django field instead (<code>null=False, blank=False</code>, or the field's own
-  <code>validators=[...]</code>).</p>
+  the call composes inline with the field declaration, and it adds no migration for every flag
+  above: the attributes are set <em>after</em> Django's <code>Field.__init__</code> already
+  recorded its constructor arguments, so <code>deconstruct()</code> never reports them. An
+  unrecognised kwarg raises <code>ValueError</code> naming it, rather than doing nothing.</p>
+
+  <p><code>snap_field()</code> reaches full parity with every <code>Snap*Field</code> constructor
+  kwarg, including three that used to be refused:</p>
+  <ul>
+    <li><strong><code>wysiwyg=True</code> sanitizes on write, identically to
+    <code>SnapRichTextField</code>.</strong> The stored value is cleaned on every ORM write path
+    (<code>Model.save()</code>, the REST API, <code>bulk_create</code>) — the wrapper reuses the
+    exact same sanitizer, not a second one, so a wrapped field and a <code>Snap*Field</code> given
+    the same input store byte-identical output. <code>safe_html=True</code> and
+    <code>auto_sanitize=False</code> opt out the same way on both routes; <code>QuerySet.update()</code>
+    stays uncovered on both (Django never calls <code>pre_save()</code> for it).</li>
+    <li><strong><code>required=True</code> is accepted — the one flag that <em>can</em> produce a
+    migration.</strong> It mutates <code>null</code>/<code>blank</code> directly to
+    <code>False, False</code>, exactly what a hand-built <code>Snap*Field(required=True)</code>
+    produces; that is schema-affecting by design, unlike every other flag on this page.
+    <code>required=False</code> (the default) is a deliberate no-op on <code>null</code>/<code>blank</code>
+    — it never <em>loosens</em> a field you explicitly built as non-nullable.</li>
+    <li><strong><code>allowed_extensions</code> / <code>allowed_encodings</code> / <code>max_size_bytes</code>
+    attach the same upload validator <code>SnapFileField</code>/<code>SnapImageField</code> build,
+    on a <code>FileField</code> or <code>ImageField</code></strong> (a non-file field raises
+    <code>ValueError</code> naming the two field types, rather than failing later with a confusing
+    error). No migration: the validator is stripped from <code>deconstruct()</code> by identity,
+    the same technique those two field classes already use for their own auto-built validator.</li>
+  </ul>
+  <pre><code># wysiwyg sanitize-on-write, required, and file validators — all reachable
+description = snap_field(models.TextField(), wysiwyg=True)
+sku         = snap_field(models.CharField(max_length=32), required=True)
+invoice     = snap_field(models.FileField(), allowed_extensions=["pdf"], max_size_bytes=5_000_000)</code></pre>
 
   <!-- ── Advanced Layout ────────────────────────────────────────────────────── -->
   <h2 id="advanced-layout">📐 Advanced Layout</h2>

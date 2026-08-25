@@ -632,21 +632,111 @@ class TestSnapFieldWrapper:
         with pytest.raises(ValueError, match="typo_ed_kwarg"):
             snap_field(models.CharField(max_length=50), typo_ed_kwarg=True)
 
-    def test_required_is_rejected_not_silently_ignored(self):
-        """required=True only means something at construction time (it derives
-        null/blank inside Snap*Field.__init__); a field passed into snap_field()
-        is already built, so accepting it would silently do nothing. Rejecting
-        it is safer than a flag that looks like it works but never does."""
-        with pytest.raises(ValueError, match="required"):
-            snap_field(models.CharField(max_length=50), required=True)
+    def test_required_true_tightens_null_and_blank(self):
+        """required=True mutates null/blank directly — schema-affecting by
+        design, exactly like Snap*Field(required=True). #PAR1c."""
+        field = snap_field(models.CharField(max_length=50, null=True, blank=True), required=True)
+        assert field.required is True
+        assert field.null is False
+        assert field.blank is False
 
-    def test_file_validator_kwargs_are_rejected(self):
-        """allowed_extensions/allowed_encodings/max_size_bytes build a validator
-        inside SnapFileField.__init__ — there is no post-construction attribute
-        for snap_field() to set, so these are rejected rather than accepted and
-        ignored."""
-        with pytest.raises(ValueError, match="allowed_extensions"):
-            snap_field(models.FileField(), allowed_extensions=["pdf"])
+    def test_required_false_is_a_no_op_on_null_and_blank(self):
+        """required=False must never *loosen* a field the caller explicitly
+        built as non-nullable — snap_field() cannot tell "explicit" from
+        "default" the way Snap*Field.__init__'s setdefault() can, so it only
+        ever tightens, never resets."""
+        field = snap_field(models.CharField(max_length=50, null=True, blank=True), required=False)
+        assert field.required is False
+        assert field.null is True
+        assert field.blank is True
+
+    def test_required_true_matches_snapcharfield_required(self):
+        wrapped = snap_field(models.CharField(max_length=50), required=True)
+        native = SnapCharField(max_length=50, required=True)
+        assert wrapped.null == native.null
+        assert wrapped.blank == native.blank
+
+    def test_required_true_deconstructs_with_the_new_null_blank(self):
+        """required is the one kwarg allowed to change deconstruct() — it is
+        schema-affecting, not metadata."""
+        field = snap_field(models.CharField(max_length=50, null=True, blank=True), required=True)
+        _, _, _, kwargs = field.deconstruct()
+        assert kwargs.get("null", False) is False
+        assert kwargs.get("blank", False) is False
+        assert "required" not in kwargs
+
+    def test_allowed_extensions_kwarg_is_accepted_on_a_file_field(self):
+        """allowed_extensions/allowed_encodings/max_size_bytes attach a
+        SnapFileValidator post-construction, mirroring SnapFileField. #PAR1c."""
+        from snapadmin.validators import SnapFileValidator
+
+        field = snap_field(models.FileField(), allowed_extensions=["pdf"])
+        validators = [v for v in field.validators if isinstance(v, SnapFileValidator)]
+        assert len(validators) == 1
+        assert validators[0].allowed_extensions == ["pdf"]
+
+    def test_allowed_extensions_validator_actually_runs(self):
+        """Not just attached — live: Field.validators is a cached_property Django
+        already resolves during __init__, so a naive post-init append alone
+        would silently never be consulted."""
+        from django.core.exceptions import ValidationError
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        field = snap_field(models.FileField(), allowed_extensions=["pdf"])
+        good = SimpleUploadedFile("doc.pdf", b"x")
+        bad = SimpleUploadedFile("doc.exe", b"x")
+        field.run_validators(good)  # must not raise
+        with pytest.raises(ValidationError):
+            field.run_validators(bad)
+
+    def test_max_size_bytes_and_allowed_encodings_are_accepted(self):
+        from snapadmin.validators import SnapFileValidator
+
+        field = snap_field(
+            models.FileField(), allowed_encodings=["utf-8"], max_size_bytes=1024,
+        )
+        validators = [v for v in field.validators if isinstance(v, SnapFileValidator)]
+        assert validators[0].allowed_encodings == ["utf-8"]
+        assert validators[0].max_size_bytes == 1024
+
+    def test_file_validator_kwargs_do_not_reach_deconstruct(self):
+        """The injected validator must not dirty makemigrations — stripped by
+        identity, the same technique SnapFileField's own deconstruct() uses."""
+        field = snap_field(models.FileField(), allowed_extensions=["pdf"], max_size_bytes=1024)
+        _, _, _, kwargs = field.deconstruct()
+        assert "allowed_extensions" not in kwargs
+        assert "max_size_bytes" not in kwargs
+        assert kwargs.get("validators", []) == []
+
+    def test_file_validator_kwargs_matches_snapfilefield(self):
+        """The wrapper and the class must reject/accept the exact same files."""
+        from django.core.exceptions import ValidationError
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from snapadmin.fields import SnapFileField
+
+        wrapped = snap_field(models.FileField(), allowed_extensions=["pdf"])
+        native = SnapFileField(allowed_extensions=["pdf"])
+        bad = SimpleUploadedFile("doc.exe", b"x")
+
+        with pytest.raises(ValidationError):
+            wrapped.run_validators(bad)
+        with pytest.raises(ValidationError):
+            native.run_validators(bad)
+
+    def test_file_validator_kwargs_refused_on_a_non_file_field(self):
+        """allowed_extensions on a CharField would crash later with a confusing
+        AttributeError (the validator reads file.name/file.size) — refuse it
+        up front with an actionable message instead."""
+        with pytest.raises(ValueError, match="FileField or ImageField"):
+            snap_field(models.CharField(max_length=50), allowed_extensions=["pdf"])
+
+    def test_allowed_extensions_is_accepted_on_an_image_field(self):
+        """ImageField subclasses FileField — the guard must not be stricter
+        than SnapImageField itself."""
+        from snapadmin.validators import SnapFileValidator
+
+        field = snap_field(models.ImageField(), allowed_extensions=["png"])
+        assert any(isinstance(v, SnapFileValidator) for v in field.validators)
 
     def test_no_kwargs_is_a_no_op_that_still_returns_the_field(self):
         field = models.CharField(max_length=50)
@@ -910,3 +1000,91 @@ class TestRequiredNullContradictionCheck:
         # The wrapper must compose with Django's own field checks, not replace them.
         errors = self._check(SnapCharField(max_length=10, required=True, null=True))
         assert "snapadmin.E003" in [e.id for e in errors]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #PAR1d — the field-side parity matrix and its drift guard
+#
+# Parity is a property of *pairs*: every capability a Snap*Field has must be
+# reachable, with identical observable behaviour, through snap_field() too.
+# The matrix below builds the same field both ways for every accepted kwarg
+# and asserts the attribute a reader (the searchable filter, the admin's
+# list/form/tab/row layout, the wysiwyg widget, a filter backend, ...) would
+# see is identical — those readers all go through getattr(field, name,
+# default) (verified by reading get_admin_fields() and the API filter/search
+# builders), so attribute equality *is* the proof that the admin column, the
+# filter/search surface and the generated serializer field all behave alike;
+# there is no separate rendering path to duplicate the test against.
+#
+# The drift guard is the part that keeps this honest over time: it fails the
+# suite the day a new SnapFieldAttributeEnum member is added without either a
+# snap_field() wiring or an explicit, reasoned exclusion.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestFieldAttributeParityMatrix:
+    @pytest.mark.parametrize("attr,value", [
+        ("show_in_list", False),
+        ("show_in_form", True),
+        ("searchable", True),
+        ("filterable", True),
+        ("editable", False),
+        ("updatable", False),
+        ("autocomplete", True),
+        ("tab", "Info"),
+        ("row", "name"),
+        ("wysiwyg", True),
+        ("safe_html", True),
+        ("auto_sanitize", False),
+    ])
+    def test_attribute_matches_the_class_route(self, attr, value):
+        native = SnapTextField(**{attr: value})
+        wrapped = snap_field(models.TextField(), **{attr: value})
+        assert getattr(native, attr) == getattr(wrapped, attr) == value
+
+    def test_required_matches_the_class_route(self):
+        """required needs its own case: it derives null/blank rather than
+        setting itself as a plain value only, so the matrix checks all three."""
+        native = SnapCharField(max_length=50, required=True)
+        wrapped = snap_field(models.CharField(max_length=50), required=True)
+        for attr in ("required", "null", "blank"):
+            assert getattr(native, attr) == getattr(wrapped, attr)
+
+    def test_file_validator_kwargs_match_the_class_route(self):
+        """The remaining #PAR1a capability with no single scalar attribute to
+        compare — proven instead via identical validator configuration."""
+        from snapadmin.fields import SnapFileField
+        from snapadmin.validators import SnapFileValidator
+
+        native = SnapFileField(allowed_extensions=["pdf"], max_size_bytes=1024)
+        wrapped = snap_field(
+            models.FileField(), allowed_extensions=["pdf"], max_size_bytes=1024,
+        )
+        native_v = next(v for v in native.validators if isinstance(v, SnapFileValidator))
+        wrapped_v = next(v for v in wrapped.validators if isinstance(v, SnapFileValidator))
+        assert native_v.allowed_extensions == wrapped_v.allowed_extensions
+        assert native_v.max_size_bytes == wrapped_v.max_size_bytes
+
+
+class TestSnapFieldWrapperDriftGuard:
+    """Fails the day a new SnapFieldAttributeEnum member ships with no
+    snap_field() wiring and no reasoned exclusion — see
+    fields._SNAP_FIELD_WRAPPER_DOCUMENTED_EXCLUSIONS."""
+
+    def test_every_attribute_is_wrapped_or_explicitly_excluded(self):
+        from snapadmin.fields import _SNAP_FIELD_WRAPPER_DOCUMENTED_EXCLUSIONS, _SNAP_FIELD_WRAPPER_KWARGS
+
+        all_names = {attr.value for attr in SnapFieldAttributeEnum}
+        unaccounted = all_names - _SNAP_FIELD_WRAPPER_KWARGS - _SNAP_FIELD_WRAPPER_DOCUMENTED_EXCLUSIONS
+        assert unaccounted == set(), (
+            f"{unaccounted} are new SnapFieldAttributeEnum member(s) with neither a "
+            "snap_field() wiring nor a documented exclusion — add one or the other."
+        )
+
+    def test_no_name_is_both_wrapped_and_excluded(self):
+        """A name cannot be simultaneously accepted and documented as a gap —
+        that combination means the exclusion entry is stale and should be
+        removed now that the capability actually shipped."""
+        from snapadmin.fields import _SNAP_FIELD_WRAPPER_DOCUMENTED_EXCLUSIONS, _SNAP_FIELD_WRAPPER_KWARGS
+
+        assert _SNAP_FIELD_WRAPPER_KWARGS & _SNAP_FIELD_WRAPPER_DOCUMENTED_EXCLUSIONS == set()

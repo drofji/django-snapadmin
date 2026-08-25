@@ -12,10 +12,13 @@ from unittest import mock
 
 import pytest
 from django.core.exceptions import ImproperlyConfigured
+from django.db import connection
+from django.db import models as django_models
 from django.test import override_settings
+from django.test.utils import isolate_apps
 from django.utils.safestring import SafeString
 
-from snapadmin.fields import SnapRichTextField, SnapTextField
+from snapadmin.fields import SnapRichTextField, SnapTextField, snap_field
 from snapadmin.sanitize import _load_nh3, sanitize_html
 
 XSS = '<img src=x onerror="alert(1)"><script>alert(2)</script><b>ok</b>'
@@ -374,3 +377,159 @@ class TestLoadNh3Caching:
             assert _load_nh3.cache_info().hits >= 1
         finally:
             _load_nh3.cache_clear()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #PAR1b — sanitize-on-write parity for snap_field(..., wysiwyg=True)
+#
+# A snap_field()-wrapped plain Django field is not a Snap*Field subclass, so it
+# never enters SanitizedHtmlOnSaveMixin's MRO. Without this, wysiwyg=True on the
+# wrapper route looked identical to the class route at the call site and
+# behaved differently at runtime: it failed OPEN, walking straight around the
+# fail-closed guarantee #DEP1f established. These tests prove the wrapper
+# reaches the exact same guarantee — reusing SanitizedHtmlOnSaveMixin's logic,
+# not a second sanitizer — on every write path the class route already covers.
+#
+# The model under test is declared with isolate_apps + a real schema_editor
+# table (created/dropped per test) rather than a demo model: SearchLog, the
+# demo's only other snap_field() dogfood, is ES_ONLY, and ES_ONLY models skip
+# pre_save() entirely (get_es_document() reads attributes directly, never
+# through the field), so it cannot exercise this write path at all.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _make_wysiwyg_wrapped_model():
+    """An isolated model pairing every wysiwyg variant with a plain control field."""
+    with isolate_apps("snapadmin"):
+        class WysiwygWrapped(django_models.Model):
+            class_route = SnapRichTextField(blank=True)
+            wrapper_route = snap_field(django_models.TextField(blank=True), wysiwyg=True)
+            wrapper_safe_html = snap_field(
+                django_models.TextField(blank=True), wysiwyg=True, safe_html=True
+            )
+            wrapper_no_auto_sanitize = snap_field(
+                django_models.TextField(blank=True), wysiwyg=True, auto_sanitize=False
+            )
+            plain_text = django_models.TextField(blank=True)  # not wysiwyg — must stay untouched
+
+            class Meta:
+                app_label = "snapadmin"
+
+        return WysiwygWrapped
+
+
+@pytest.fixture
+def wysiwyg_wrapped_model():
+    model = _make_wysiwyg_wrapped_model()
+    with connection.schema_editor(atomic=False) as editor:
+        editor.create_model(model)
+    try:
+        yield model
+    finally:
+        with connection.schema_editor(atomic=False) as editor:
+            editor.delete_model(model)
+
+
+class TestSnapFieldWysiwygKwargIsNotForwardedToDjango:
+    def test_wysiwyg_is_not_forwarded_to_django(self):
+        field = snap_field(django_models.TextField(), wysiwyg=True)
+        assert "wysiwyg" not in field.deconstruct()[3]
+
+    def test_safe_html_is_not_forwarded_to_django(self):
+        field = snap_field(django_models.TextField(), wysiwyg=True, safe_html=True)
+        assert "safe_html" not in field.deconstruct()[3]
+
+    def test_auto_sanitize_is_not_forwarded_to_django(self):
+        field = snap_field(django_models.TextField(), wysiwyg=True, auto_sanitize=False)
+        assert "auto_sanitize" not in field.deconstruct()[3]
+
+
+class TestBindWysiwygPreSaveIsIdempotent:
+    def test_chained_snap_field_calls_bind_the_wrapper_only_once(self):
+        """Two snap_field() calls touching wysiwyg=True must not double-wrap pre_save."""
+        field = snap_field(snap_field(django_models.TextField(), wysiwyg=True), safe_html=True)
+        bound_pre_save = field.pre_save
+
+        # Re-binding would replace field.pre_save with a fresh closure; identity
+        # staying put proves the idempotency guard actually short-circuited.
+        snap_field(field, auto_sanitize=False)
+        assert field.pre_save == bound_pre_save
+        assert field.safe_html is True
+        assert field.auto_sanitize is False
+
+
+@pytest.mark.django_db(transaction=True)
+class TestSnapFieldWysiwygSanitizedOnSave:
+    def test_the_stored_value_is_sanitized(self, wysiwyg_wrapped_model):
+        obj = wysiwyg_wrapped_model.objects.create(wrapper_route=XSS)
+        obj.refresh_from_db()
+        assert "<script" not in obj.wrapper_route
+        assert "onerror" not in obj.wrapper_route
+        assert "<b>ok</b>" in obj.wrapper_route
+
+    def test_the_saved_instance_matches_the_database(self, wysiwyg_wrapped_model):
+        """The object in hand must not keep markup the database no longer holds."""
+        obj = wysiwyg_wrapped_model.objects.create(wrapper_route=XSS)
+        assert "<script" not in obj.wrapper_route
+
+    def test_an_update_is_sanitized_too(self, wysiwyg_wrapped_model):
+        obj = wysiwyg_wrapped_model.objects.create(wrapper_route="<b>clean</b>")
+        obj.wrapper_route = XSS
+        obj.save()
+        obj.refresh_from_db()
+        assert "<script" not in obj.wrapper_route
+
+    def test_bulk_create_is_covered(self, wysiwyg_wrapped_model):
+        """Proof the hook is on the field, not in Model.save() — bulk_create skips save()."""
+        wysiwyg_wrapped_model.objects.bulk_create([wysiwyg_wrapped_model(wrapper_route=XSS)])
+        assert "<script" not in wysiwyg_wrapped_model.objects.first().wrapper_route
+
+    def test_queryset_update_is_not_covered(self, wysiwyg_wrapped_model):
+        """Same documented gap as the class route: Django never calls pre_save() for .update()."""
+        obj = wysiwyg_wrapped_model.objects.create(wrapper_route="<b>clean</b>")
+        wysiwyg_wrapped_model.objects.filter(pk=obj.pk).update(wrapper_route=XSS)
+        obj.refresh_from_db()
+        assert "<script" in obj.wrapper_route
+
+    def test_a_plain_non_wysiwyg_field_is_untouched(self, wysiwyg_wrapped_model):
+        obj = wysiwyg_wrapped_model.objects.create(plain_text="Bolts < 5mm & washers > 2mm")
+        obj.refresh_from_db()
+        assert obj.plain_text == "Bolts < 5mm & washers > 2mm"
+
+    def test_safe_html_stores_the_value_verbatim(self, wysiwyg_wrapped_model):
+        obj = wysiwyg_wrapped_model.objects.create(wrapper_safe_html=XSS)
+        obj.refresh_from_db()
+        assert "onerror" in obj.wrapper_safe_html
+
+    def test_auto_sanitize_false_stores_the_value_verbatim(self, wysiwyg_wrapped_model):
+        obj = wysiwyg_wrapped_model.objects.create(wrapper_no_auto_sanitize=XSS)
+        obj.refresh_from_db()
+        assert "onerror" in obj.wrapper_no_auto_sanitize
+
+    def test_none_and_empty_values_survive(self, wysiwyg_wrapped_model):
+        obj = wysiwyg_wrapped_model.objects.create(wrapper_route="")
+        obj.refresh_from_db()
+        assert obj.wrapper_route == ""
+
+    def test_the_serializer_write_path_is_sanitized(self, wysiwyg_wrapped_model):
+        """The REST hole this task exists to close, for the wrapper route too."""
+        from snapadmin.api.serializers import build_model_serializer
+
+        serializer_class = build_model_serializer(wysiwyg_wrapped_model)
+        serializer = serializer_class(data={"wrapper_route": XSS})
+        assert serializer.is_valid(), serializer.errors
+        instance = serializer.save()
+
+        instance.refresh_from_db()
+        assert "<script" not in instance.wrapper_route
+        assert "onerror" not in instance.wrapper_route
+
+
+@pytest.mark.django_db(transaction=True)
+class TestSnapFieldWysiwygMatchesTheClassRoute:
+    """The parity proof: identical input in, byte-identical stored output."""
+
+    def test_stored_values_are_byte_identical(self, wysiwyg_wrapped_model):
+        obj = wysiwyg_wrapped_model.objects.create(class_route=XSS, wrapper_route=XSS)
+        obj.refresh_from_db()
+        assert obj.class_route == obj.wrapper_route

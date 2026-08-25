@@ -6,3 +6,32 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+Added
+-----
+
+* **``snap_field()`` reaches full parity with ``Snap*Field`` — every constructor kwarg is now
+  accepted.** Three that used to raise ``ValueError`` are now supported: ``required=True``
+  (mutates ``null``/``blank`` directly, exactly what a hand-built ``Snap*Field(required=True)``
+  produces — the one kwarg that can add a migration, since it is schema-affecting by design) and
+  the file-upload trio ``allowed_extensions``/``allowed_encodings``/``max_size_bytes`` (attaches the
+  same upload validator ``SnapFileField``/``SnapImageField`` build, on a ``FileField`` or
+  ``ImageField`` — a non-file field now raises a clear error instead of failing later on a
+  confusing ``AttributeError``). A parametrised parity matrix and a drift guard pin the wrapper
+  against the class route going forward: a new ``Snap*Field`` attribute added without a
+  ``snap_field()`` equivalent now fails the test suite until it is either wired in or recorded as
+  a documented, reasoned gap.
+
+Security
+--------
+
+* **``wysiwyg=True`` sanitize-on-write now covers ``snap_field()`` too, not just ``Snap*Field``.**
+  A rich-text field declared through the wrapper is sanitized on every ORM write path
+  (``Model.save()``, the REST API, ``bulk_create()``) — identically to
+  ``SnapRichTextField``/``SnapTextField(wysiwyg=True)``, reusing the exact same sanitizer rather
+  than a second one, and producing byte-identical stored output for the same input on both routes.
+  Previously a ``snap_field(field, wysiwyg=True)`` column looked identical to its class-route
+  equivalent at the call site and stored raw HTML at runtime — walking around the fail-closed HTML
+  sanitization guarantee with no error and no warning. ``safe_html=True`` and
+  ``auto_sanitize=False`` opt out identically on both routes; ``QuerySet.update()`` stays
+  uncovered on both, as before (Django never calls ``pre_save()`` for it).

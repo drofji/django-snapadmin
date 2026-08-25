@@ -2589,6 +2589,34 @@ def _as_lookup_map(value: Any) -> Any:
     return {str(key): _as_list(item) for key, item in value.items()}
 
 
+#: ``SnapModel`` class attributes with no ``@snap_model()`` keyword counterpart
+#: yet — the model-side mirror of ``fields._SNAP_FIELD_WRAPPER_DOCUMENTED_EXCLUSIONS``
+#: (#PAR1d). Each is tracked by a specific #RFC1g capability that needs more than
+#: a keyword to retrofit (an attached manager, a shared purge classmethod, an
+#: admin-generation refactor) — see the #RFC1g verdict table in
+#: ``.claude/roadmap.md``. ``objects`` (the attached ``EsManager``) is
+#: deliberately not tracked here: it is a manager instance, not a scalar/list
+#: config value, so there is no sensible ``objects=`` keyword to add in the
+#: first place. ``tests/test_snap_model_decorator.py``'s drift guard asserts
+#: every name here still exists on ``SnapModel`` (catching a stale entry) and
+#: is never accepted as a decorator keyword (catching an entry #RFC1g already
+#: closed that nobody remembered to remove from this set).
+_SNAP_MODEL_UNEXPOSED_ATTRIBUTES: frozenset[str] = frozenset({
+    # Elasticsearch — needs EsMirrorMixin, not just a keyword (#RFC1g row 1).
+    "es_index_enabled", "es_storage_mode", "es_index_name", "es_mapping",
+    "es_index_settings", "es_auto_mapping", "es_query_routing",
+    # GDPR retention — needs a shared purge_expired attachment (#RFC1g row 2).
+    "data_retention_days", "data_retention_field",
+    # Generated admin — needs register_admin()/get_admin_fields() refactored
+    # onto get_model_meta() before these mean anything for a plain model
+    # (#RFC1g row 3).
+    "admin_enabled", "admin_sections", "admin_tabs", "snap_inlines", "admin_mixins",
+    "js_admin_files", "css_admin_files",
+    "compressed_fields", "warn_unsaved_form", "list_filter_submit",
+    "list_per_page", "list_max_show_all", "show_full_result_count",
+})
+
+
 def snap_model(
     *,
     api_exclude_fields: Sequence[str] | None = _UNSET,
