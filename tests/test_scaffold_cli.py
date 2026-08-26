@@ -110,7 +110,7 @@ class TestDeclaredInPyproject:
 
 
 class TestNoDjangoAtImportTime:
-    """Console scripts run before a project exists — see .claude/rules.md."""
+    """Console scripts run before a Django project exists, so they must stay stdlib-only."""
 
     @pytest.mark.parametrize("module_name", ["__init__", "__main__", "cli", "render", "validate"])
     def test_module_source_has_no_django_import(self, module_name):

@@ -19,7 +19,7 @@ and ``snapadmin_info`` (matching the management-command name people actually rea
 because the whole point is that neither should be a dead end.
 
 Like the other console scripts this module runs **before** any Django project exists, so it must
-stay stdlib-only and must not import Django at module level (see ``.claude/rules.md``).
+stay stdlib-only and must not import Django at module level.
 """
 
 from __future__ import annotations

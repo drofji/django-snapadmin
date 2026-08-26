@@ -146,7 +146,7 @@ class TestEntryPoints:
 
 class TestNoDjangoAtImportTime:
     def test_module_imports_without_django_settings(self):
-        """Console scripts run before a project exists — see .claude/rules.md."""
+        """Console scripts run before a Django project exists, so they must stay stdlib-only."""
         source = Path(manage_cli.__file__).read_text(encoding="utf-8")
         assert "import django" not in source
         assert "from django" not in source

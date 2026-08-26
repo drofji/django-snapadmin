@@ -10,8 +10,7 @@ of truth, and asserts every other site agrees — so a version bump can never
 again leave a site behind unnoticed.
 
 Deliberately offline: the git tag and the PyPI release are VCS/network state,
-not repo state, and are checked by hand at release time
-(``.claude/commands/release.md``) rather than here.
+not repo state, and are checked by hand at release time rather than here.
 
 Sites are located by their surrounding markup, not by line number — several
 sections of ``docs/index.html`` grow independently of this file.
