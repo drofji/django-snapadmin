@@ -105,7 +105,8 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     write_allowlist = sum(1 for m in models if get_model_meta(m, "api_write_fields", None) is not None)
     # Registered plain models (@snap_model) carry none of SnapModel's machinery:
     # ``register_admin`` is the marker for it. Worth surfacing, because these are
-    # the models the ES reindex and the retention purge deliberately skip.
+    # the models the ES reindex and the retention purge deliberately skip. The
+    # ``inventory`` section breaks this down per model (door + exact gap list, #PAR1e).
     decorated = sum(1 for m in models if not hasattr(m, "register_admin"))
 
     return [
