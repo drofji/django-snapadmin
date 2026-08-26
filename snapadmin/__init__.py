@@ -59,7 +59,9 @@ Declaring models
         ``SnapModel`` (the declarative base and ``register_all_admins()``),
         ``snap_model`` (the decorator that opts a **plain** ``models.Model`` in —
         metadata and registration only: no ES manager, no ``purge_expired()``, no
-        generated admin), ``EsStorageMode``, ``APIToken``, ``ErrorEvent``, the ES
+        generated admin), ``snap_property`` (a method decorator for a computed,
+        display-only column — the decorator form of ``SnapFunctionField``, works
+        on either door), ``EsStorageMode``, ``APIToken``, ``ErrorEvent``, the ES
         manager/queryset.
     ``snapadmin.fields``
         Every ``Snap*Field``. Snap-only kwargs (``searchable``, ``filterable``,
@@ -136,9 +138,11 @@ Operations
         ``@snap_model`` registers a plain model, so every gate is a
         ``is_registered()`` lookup instead of an ``issubclass()`` walk.
         ``get_model_meta(model, name, default)`` is the matching accessor for a
-        model-level setting: the registry entry first, the class attribute
-        second, so both ways of declaring a model read identically.
-        ``register()`` / ``meta_for()`` complete the surface.
+        model-level setting, resolving four tiers in order: the registry entry,
+        then the class attribute, then a project-wide ``SNAPADMIN_<NAME>``
+        setting, then this ``default`` argument — so both ways of declaring a
+        model read identically. ``register()`` / ``meta_for()`` complete the
+        surface.
     ``snapadmin.checks``
         Django system checks — warnings ``snapadmin.W001``…``W007`` and errors
         ``snapadmin.E001``…``E005`` catch misconfiguration at startup, so read
@@ -226,6 +230,7 @@ _LAZY_EXPORTS: dict[str, str] = {
     # Core model API + enums/exceptions (snapadmin.models)
     "SnapModel": "snapadmin.models",
     "snap_model": "snapadmin.models",
+    "snap_property": "snapadmin.models",
     "EsStorageMode": "snapadmin.models",
     "APIToken": "snapadmin.models",
     "SnapEsUnavailable": "snapadmin.models",

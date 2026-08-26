@@ -32,6 +32,8 @@ PUBLIC_IMPORTS = [
     "snapadmin.models.hash_token_key",
     # Opting a plain models.Model in (#RFC1b)
     "snapadmin.models.snap_model",
+    # A computed column as a method, on either door (#RFC1d)
+    "snapadmin.models.snap_property",
     "snapadmin.registry.register",
     "snapadmin.registry.is_registered",
     "snapadmin.registry.meta_for",
@@ -212,6 +214,20 @@ def test_snap_model_decorator_signature():
     )
 
 
+def test_snap_property_signature():
+    """Mirrors SnapFunctionField's own constructor kwargs (#RFC1d) — dropping
+    one silently changes what a decorated computed column can express."""
+    from snapadmin.models import snap_property
+
+    assert _params(snap_property) == [
+        "verbose_name", "show_in_list", "show_in_form", "safe_html",
+    ]
+    assert all(
+        param.kind is inspect.Parameter.KEYWORD_ONLY
+        for param in inspect.signature(snap_property).parameters.values()
+    )
+
+
 def test_registry_signatures():
     from snapadmin import registry
 
@@ -383,8 +399,8 @@ def test_url_names_reversible(name, args):
 
 _BLESSED_REEXPORTS = {
     "snapadmin.models": [
-        "SnapModel", "snap_model", "EsStorageMode", "APIToken", "SnapEsUnavailable",
-        "SnapPurgeError",
+        "SnapModel", "snap_model", "snap_property", "EsStorageMode", "APIToken",
+        "SnapEsUnavailable", "SnapPurgeError",
     ],
     "snapadmin.fields": [
         "SnapField", "SnapCharField", "SnapTextField", "SnapEmailField", "SnapSlugField",

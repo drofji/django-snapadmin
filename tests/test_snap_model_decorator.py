@@ -15,15 +15,18 @@ real app registry: they need no table, no migration, and they cannot leak into
 the sweeps that other tests run over ``apps.get_models()``.
 """
 
+from decimal import Decimal
 from itertools import count
 
 import pytest
 from django.apps import apps as global_apps
 from django.db import models as django_models
 from django.test.utils import isolate_apps
+from django.utils.safestring import SafeString
 
 from snapadmin import registry
-from snapadmin.models import EsManager, EsStorageMode, SnapModel, snap_model
+from snapadmin.fields import SnapFunctionField
+from snapadmin.models import EsManager, EsStorageMode, SnapModel, snap_model, snap_property
 
 
 # ── declaration helpers ──────────────────────────────────────────────────────
@@ -306,6 +309,9 @@ class TestOtherSurfacesReadTheMetadata:
         items = inventory._model_items(set())
         assert items == [{
             "model": f"snapadmin.{Ledger.__name__}",
+            # #PAR1e: a decorator-registered model reports its door and the #RFC1g gap list.
+            "door": "decorator",
+            "inactive_capabilities": "elasticsearch, generated_admin, retention_purge",
             "es_mode": EsStorageMode.DB_ONLY.name,
             "retention_days": None,
             "write_restricted": True,
@@ -420,3 +426,161 @@ class TestSnapModelDriftGuard:
             assert hasattr(SnapModel, name), (
                 f"snap_model() accepts {name!r} but SnapModel has no matching attribute"
             )
+
+
+# ── #RFC1d — @snap_property, the decorator form of SnapFunctionField ─────────
+#
+# The decorator builds the identical SnapFunctionField instance the field form
+# builds and stores it under the method's name — no second rendering path —
+# so what is pinned here is that identity, not a re-test of get_admin_fields()'s
+# own scan (already covered by the Product/Order fixtures elsewhere). Each
+# helper below gets a fresh class name for the same cache-collision reason
+# _make_plain_model documents above.
+
+def _make_snapmodel_gadget():
+    """A concrete, freshly-named SnapModel subclass with three @snap_property
+    columns, isolated from the project registry so it can be instantiated
+    freely without a real table."""
+    name = f"PropGadget{next(_counter)}"
+
+    def line_total(self):
+        return f"{self.quantity * self.price:.2f}"
+
+    def raw_html(self):
+        return "<b>bold</b>"
+
+    def trusted_html(self):
+        return "<b>bold</b>"
+
+    with isolate_apps("snapadmin"):
+        return type(
+            name,
+            (SnapModel,),
+            {
+                "__module__": __name__,
+                "quantity": django_models.PositiveIntegerField(default=1),
+                "price": django_models.DecimalField(max_digits=8, decimal_places=2, default=0),
+                "line_total": snap_property(verbose_name="Line total")(line_total),
+                "raw_html": snap_property()(raw_html),
+                "trusted_html": snap_property(safe_html=True)(trusted_html),
+                "Meta": type("Meta", (), {"app_label": "snapadmin"}),
+            },
+        )
+
+
+def _make_decorated_plain_gadget():
+    """A @snap_model-decorated plain model with one @snap_property column —
+    the other door, same computation."""
+    name = f"PropPlainGadget{next(_counter)}"
+
+    def line_total(self):
+        return f"{self.quantity * self.price:.2f}"
+
+    with isolate_apps("snapadmin"):
+        model = type(
+            name,
+            (django_models.Model,),
+            {
+                "__module__": __name__,
+                "quantity": django_models.PositiveIntegerField(default=1),
+                "price": django_models.DecimalField(max_digits=8, decimal_places=2, default=0),
+                "line_total": snap_property(verbose_name="Line total")(line_total),
+                "Meta": type("Meta", (), {"app_label": "snapadmin"}),
+            },
+        )
+        return snap_model()(model)
+
+
+class TestSnapPropertyOnASnapModelSubclass:
+    def test_the_method_becomes_a_snapfunctionfield_class_attribute(self):
+        Gadget = _make_snapmodel_gadget()
+
+        assert isinstance(Gadget.__dict__["line_total"], SnapFunctionField)
+
+    def test_it_computes_the_same_value_the_original_method_body_would(self):
+        Gadget = _make_snapmodel_gadget()
+        field = Gadget.__dict__["line_total"]
+        instance = Gadget(quantity=3, price=Decimal("2.50"))
+
+        assert field.get_display_value(instance) == "7.50"
+
+    def test_it_matches_a_hand_built_snapfunctionfield_for_the_same_body(self):
+        """The parity proof: the decorator route and the field route render
+        identically for the same computation — pinning "not a second engine"."""
+        def compute(obj):
+            return f"{obj.quantity * obj.price:.2f}"
+
+        hand_built = SnapFunctionField(func=compute, verbose_name="Line total")
+        Gadget = _make_snapmodel_gadget()
+        decorated = Gadget.__dict__["line_total"]
+        instance = Gadget(quantity=3, price=Decimal("2.50"))
+
+        assert decorated.get_display_value(instance) == hand_built.get_display_value(instance)
+
+    def test_verbose_name_defaults_to_the_method_name_with_spaces(self):
+        Gadget = _make_snapmodel_gadget()
+
+        assert Gadget.__dict__["raw_html"].verbose_name == "raw html"
+
+    def test_verbose_name_is_used_when_given(self):
+        Gadget = _make_snapmodel_gadget()
+
+        assert Gadget.__dict__["line_total"].verbose_name == "Line total"
+
+    def test_safe_html_false_escapes_and_true_does_not(self):
+        Gadget = _make_snapmodel_gadget()
+        instance = Gadget()
+
+        escaped = Gadget.__dict__["raw_html"].get_display_value(instance)
+        trusted = Gadget.__dict__["trusted_html"].get_display_value(instance)
+
+        assert not isinstance(escaped, SafeString)
+        assert isinstance(trusted, SafeString)
+        assert str(trusted) == "<b>bold</b>"
+
+    def test_it_is_absent_from_meta_get_fields_and_produces_no_migration(self):
+        Gadget = _make_snapmodel_gadget()
+
+        names = {f.name for f in Gadget._meta.get_fields() if hasattr(f, "name")}
+        assert names.isdisjoint({"line_total", "raw_html", "trusted_html"})
+
+    def test_get_admin_fields_reuses_the_existing_enumeration_unmodified(self):
+        """No second rendering path: the isinstance(SnapFunctionField) scan that
+        already discovers a hand-built SnapFunctionField (see models.py's
+        get_admin_fields) discovers this one too, with zero changes to it."""
+        Gadget = _make_snapmodel_gadget()
+
+        _, list_display, _, _, _ = Gadget.get_admin_fields()
+
+        assert "SnapFunctionFieldLine_total" in list_display
+        assert "SnapFunctionFieldLine_total" in Gadget.admin_overrides
+
+
+class TestSnapPropertyOnADecoratedPlainModel:
+    def test_it_becomes_a_snapfunctionfield_here_too(self):
+        Gadget = _make_decorated_plain_gadget()
+
+        assert isinstance(Gadget.__dict__["line_total"], SnapFunctionField)
+
+    def test_it_computes_correctly_even_though_nothing_renders_it_yet(self):
+        """The computation is fully functional on this route already; only the
+        admin *surface* is missing, tracked separately as #RFC1g3."""
+        Gadget = _make_decorated_plain_gadget()
+        field = Gadget.__dict__["line_total"]
+        instance = Gadget(quantity=4, price=Decimal("1.25"))
+
+        assert field.get_display_value(instance) == "5.00"
+
+    def test_it_has_no_generated_admin_to_display_it_on_yet(self):
+        """Matches TestHonestAbsences above: a decorated plain model has no
+        register_admin()/get_admin_fields() at all until #RFC1g3 ships."""
+        Gadget = _make_decorated_plain_gadget()
+
+        assert not hasattr(Gadget, "register_admin")
+        assert not hasattr(Gadget, "get_admin_fields")
+
+    def test_it_is_absent_from_meta_get_fields_and_produces_no_migration(self):
+        Gadget = _make_decorated_plain_gadget()
+
+        names = {f.name for f in Gadget._meta.get_fields() if hasattr(f, "name")}
+        assert "line_total" not in names

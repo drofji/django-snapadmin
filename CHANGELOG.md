@@ -13,6 +13,12 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 ### Added
 - `snap_field()` now accepts every `Snap*Field` constructor kwarg — `required` and the file-upload
   trio (`allowed_extensions`/`allowed_encodings`/`max_size_bytes`) are no longer refused.
+- `@snap_property` decorates a method into a computed, display-only admin column — the decorator
+  form of `SnapFunctionField` (no database column, no migration). Works identically on a
+  `SnapModel` subclass and on a `@snap_model`-decorated plain model.
+- `get_model_meta()` gains a third precedence tier: a project-wide `SNAPADMIN_<NAME>` setting,
+  consulted between the class attribute and the caller's built-in default. Only reachable on the
+  `@snap_model` route — a `SnapModel` subclass always has a class attribute to answer from.
 
 ### Security
 - `snap_field(field, wysiwyg=True)` now sanitizes on write, matching `SnapRichTextField` — closing

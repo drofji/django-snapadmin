@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-16 14:56+0000\n"
+"POT-Creation-Date: 2026-08-26 16:37+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -169,6 +169,9 @@ msgstr "Ilość"
 
 msgid "Price at purchase"
 msgstr "Cena w chwili zakupu"
+
+msgid "Line Total"
+msgstr "Suma pozycji"
 
 msgid "Order Item"
 msgstr "Pozycja zamówienia"

@@ -241,6 +241,12 @@ class SearchLog(snap_models.SnapModel):
         django_models.DateTimeField(auto_now_add=True, verbose_name=_("Timestamp")),
         filterable=True,
     )
+    # Plain on purpose — it needs no Snap behaviour. A SnapModel is an ordinary
+    # Django model underneath, so a bare field works exactly as it would on any
+    # other model: stored, editable, but absent from the generated search box
+    # and sidebar filters (see #mixing-fields for the full contrast with the
+    # two Snap*Fields and the snap_field()-wrapped one above).
+    user_agent = django_models.CharField(max_length=255, blank=True, default="")
 
     # ES_ONLY → managed=False, no migration; data is written only to the ES index
     es_storage_mode = snap_models.EsStorageMode.ES_ONLY
@@ -324,6 +330,16 @@ class OrderItem(snap_models.SnapModel):
     product = snap_fields.SnapForeignKey(Product, on_delete=django_models.CASCADE, verbose_name=_("Product"), show_in_form=True)
     quantity = snap_fields.SnapPositiveIntegerField(default=1, verbose_name=_("Quantity"), show_in_form=True)
     price = snap_fields.SnapDecimalField(max_digits=10, decimal_places=2, verbose_name=_("Price at purchase"), show_in_form=True)
+
+    # @snap_property — a computed, display-only changelist column written as a
+    # method instead of a SnapFunctionField assignment. No database column, no
+    # migration: it never appears in _meta.get_fields(). Equivalent to
+    #   line_total = snap_fields.SnapFunctionField(
+    #       func=lambda obj: f"{obj.quantity * obj.price:.2f}", verbose_name="Line Total",
+    #   )
+    @snap_models.snap_property(verbose_name=_("Line Total"))
+    def line_total(self):
+        return f"{self.quantity * self.price:.2f}"
 
     api_write_fields = ["order", "product", "quantity", "price"]
 

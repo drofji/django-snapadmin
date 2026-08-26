@@ -14,14 +14,18 @@ same models as before.
 
 import gc
 import weakref
+from itertools import count
 from weakref import WeakKeyDictionary
 
 import pytest
 from django.apps import apps
 from django.contrib.auth.models import Permission
+from django.db import models as django_models
+from django.test import override_settings
+from django.test.utils import isolate_apps
 
 from snapadmin import registry
-from snapadmin.models import SnapModel, reindexable_snapmodels
+from snapadmin.models import SnapModel, reindexable_snapmodels, snap_model
 
 
 # ── the primitives ───────────────────────────────────────────────────────────
@@ -149,3 +153,114 @@ class TestGatesSelectTheSameModels:
         assert Product in selected
         assert all(registry.is_registered(model) for model in selected)
         assert Permission not in selected
+
+
+# ── #RFC1e — the model-meta precedence rule ───────────────────────────────────
+#
+# get_model_meta() resolves four tiers in order: registry entry (the decorator
+# argument) > class attribute > a project-wide SNAPADMIN_<NAME> setting > the
+# caller's built-in default. Proven here for one representative name from each
+# family the roadmap names (api_*, es_*, offline_*, data_retention_days),
+# not just one name in isolation.
+#
+# SnapModel declares a concrete class attribute for every name below, and
+# getattr() finds that *inherited* value before tier 3 is ever reached — so
+# the settings tier can only actually be observed on a plain model registered
+# with @snap_model, which carries no such base-class default. Testing it on a
+# SnapModel subclass would prove nothing (tier 2 always wins first there); see
+# get_model_meta's own docstring for the full explanation.
+#
+# @snap_model()'s own kwargs cover only a subset of these names today
+# (es_index_enabled and data_retention_days are not yet accepted — see
+# models._SNAP_MODEL_UNEXPOSED_ATTRIBUTES / #RFC1g). registry.register() is
+# exactly what the decorator calls underneath, so it populates tier 1
+# identically for every name get_model_meta reads, regardless of which names
+# snap_model()'s current kwarg allowlist happens to expose.
+
+_rfc1e_counter = count()
+
+
+def _rfc1e_plain_model(**meta):
+    """A `@snap_model`-decorated plain model with no base-class defaults —
+    the one route on which the settings tier (#RFC1e) is ever reachable."""
+    name = f"Rfc1eTarget{next(_rfc1e_counter)}"
+    with isolate_apps("snapadmin"):
+        model = type(
+            name,
+            (django_models.Model,),
+            {"__module__": __name__, "Meta": type("Meta", (), {"app_label": "snapadmin"})},
+        )
+        return snap_model(**meta)(model)
+
+
+def _rfc1e_snapmodel_subclass(**class_attrs):
+    """A throwaway abstract SnapModel subclass carrying the given class attributes."""
+    name = f"Rfc1eGadget{next(_rfc1e_counter)}"
+    attrs = {
+        **class_attrs,
+        "__module__": __name__,
+        "Meta": type("Meta", (), {"app_label": "demo", "abstract": True}),
+    }
+    return type(name, (SnapModel,), attrs)
+
+
+@pytest.mark.parametrize("name, value, builtin_default", [
+    ("api_read_only", True, False),        # api_*
+    ("es_index_enabled", True, False),      # es_*
+    ("offline_mode", True, False),          # offline_*
+    ("data_retention_days", 30, None),      # data_retention_days
+])
+class TestGetModelMetaPrecedence:
+    def test_decorator_only(self, name, value, builtin_default):
+        model = _rfc1e_plain_model()
+        registry.register(model, **{name: value})
+
+        assert registry.get_model_meta(model, name, builtin_default) == value
+
+    def test_class_attribute_only(self, name, value, builtin_default):
+        Gadget = _rfc1e_snapmodel_subclass(**{name: value})
+
+        assert registry.get_model_meta(Gadget, name, builtin_default) == value
+
+    def test_decorator_wins_over_a_disagreeing_class_attribute_and_setting(self, name, value, builtin_default):
+        """Hybrid: a SnapModel subclass also decorated, the two disagreeing —
+        decorator wins — plus a SNAPADMIN_<NAME> global that disagrees with
+        both thrown in too, to prove it loses to both (#RFC1e)."""
+        Gadget = _rfc1e_snapmodel_subclass(**{name: builtin_default})
+        registry.register(Gadget, **{name: value})
+
+        setting_name = f"SNAPADMIN_{name.upper()}"
+        with override_settings(**{setting_name: builtin_default}):
+            assert registry.get_model_meta(Gadget, name, builtin_default) == value
+
+    def test_class_attribute_wins_over_a_disagreeing_setting(self, name, value, builtin_default):
+        Gadget = _rfc1e_snapmodel_subclass(**{name: value})
+
+        setting_name = f"SNAPADMIN_{name.upper()}"
+        with override_settings(**{setting_name: builtin_default}):
+            assert registry.get_model_meta(Gadget, name, builtin_default) == value
+
+    def test_setting_is_the_third_tier_on_the_snap_model_route(self, name, value, builtin_default):
+        """Only reachable via @snap_model — a SnapModel subclass never falls
+        through to this tier, see the section docstring above."""
+        model = _rfc1e_plain_model()  # no registry entry for `name`
+
+        setting_name = f"SNAPADMIN_{name.upper()}"
+        with override_settings(**{setting_name: value}):
+            assert registry.get_model_meta(model, name, builtin_default) == value
+
+    def test_builtin_default_is_the_last_tier(self, name, value, builtin_default):
+        model = _rfc1e_plain_model()  # no registry entry, no global setting
+
+        assert registry.get_model_meta(model, name, builtin_default) == builtin_default
+
+    def test_a_snapmodel_subclass_never_reaches_the_settings_tier(self, name, value, builtin_default):
+        """The asymmetry get_model_meta's docstring calls out explicitly: an
+        undecorated SnapModel subclass always answers from its (possibly
+        inherited) class attribute, so a global setting cannot reach it even
+        when the subclass never overrides the name itself."""
+        Gadget = _rfc1e_snapmodel_subclass()  # no override — answers via SnapModel's own default
+
+        setting_name = f"SNAPADMIN_{name.upper()}"
+        with override_settings(**{setting_name: value}):
+            assert registry.get_model_meta(Gadget, name, builtin_default) == builtin_default

@@ -80,6 +80,7 @@ def _wysiwyg_widget():
 
 
 from snapadmin import fields as snapfields
+from snapadmin.conf import get_setting
 from snapadmin.fields import DjangoFieldAttributeEnum, SnapFieldAttributeEnum, SnapField
 from snapadmin.logging_config import get_logger
 from snapadmin.pagination import EstimatedCountPaginator
@@ -651,7 +652,7 @@ class EsManager(models.Manager):
 
     def get_queryset(self):
         if getattr(self.model, "es_storage_mode", None) == EsStorageMode.ES_ONLY:
-            limit = getattr(settings, "SNAPADMIN_ES_SEARCH_LIMIT", 1000)
+            limit = get_setting("SNAPADMIN_ES_SEARCH_LIMIT", 1000)
             qs = self.model.es_search(limit=limit)
             if not isinstance(qs, EsQuerySet):
                 return EsQuerySet(self.model, [])
@@ -1087,7 +1088,7 @@ class SnapModel(models.Model):
           callable returning a ready client; takes precedence over everything
           else for fully custom setups (cloud_id, sniffing, custom transport).
         """
-        factory_path = getattr(settings, "SNAPADMIN_ES_CLIENT_FACTORY", None)
+        factory_path = get_setting("SNAPADMIN_ES_CLIENT_FACTORY", None)
         if factory_path:
             from django.utils.module_loading import import_string
 
@@ -1506,7 +1507,7 @@ class SnapModel(models.Model):
         today's silent-fallback behaviour); an explicit ``bool`` overrides it.
         """
         if db_fallback is None:
-            return bool(getattr(settings, "SNAPADMIN_ES_DB_FALLBACK", True))
+            return bool(get_setting("SNAPADMIN_ES_DB_FALLBACK", True))
         return db_fallback
 
     @classmethod
@@ -1559,7 +1560,7 @@ class SnapModel(models.Model):
         # of which backend ends up answering the query.
         resolved = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
 
-        limit = limit or getattr(settings, "SNAPADMIN_ES_SEARCH_LIMIT", 1000)
+        limit = limit or get_setting("SNAPADMIN_ES_SEARCH_LIMIT", 1000)
         fallback = cls._es_db_fallback(db_fallback)
         es_intended = cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY
         use_es = es_intended and getattr(settings, "ELASTICSEARCH_ENABLED", False)
@@ -1948,7 +1949,7 @@ class SnapModel(models.Model):
         # Resolve/validate every term up-front so a bad field raises on the call,
         # not lazily on the first `next()` of the returned generator.
         resolved = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
-        page_size = page_size or getattr(settings, "SNAPADMIN_ES_SEARCH_LIMIT", 1000)
+        page_size = page_size or get_setting("SNAPADMIN_ES_SEARCH_LIMIT", 1000)
         fallback = cls._es_db_fallback(db_fallback)
         pk_only = source is False
         return cls._es_scan_iter(
@@ -2734,6 +2735,91 @@ def snap_model(
             settings=sorted(given),
         )
         return model
+
+    return decorator
+
+
+# ===========================================================================
+# A computed column as a method — @snap_property
+# ===========================================================================
+
+def snap_property(
+    *,
+    verbose_name: str | None = None,
+    show_in_list: bool = True,
+    show_in_form: bool = True,
+    safe_html: bool = False,
+) -> Callable[[Callable[[models.Model], Any]], "snapfields.SnapFunctionField"]:
+    """Turn a method into a computed, display-only admin column.
+
+    The decorator form of :class:`~snapadmin.fields.SnapFunctionField` — the
+    same computed column (no database column, no migration, HTML-escaped
+    unless ``safe_html=True``) written as a method instead of a field
+    assignment::
+
+        class OrderItem(SnapModel):
+            quantity = SnapPositiveIntegerField(...)
+            price = SnapDecimalField(...)
+
+            @snap_property(verbose_name="Line total")
+            def line_total(self):
+                return f"{self.quantity * self.price:.2f}"
+
+    is exactly::
+
+            line_total = SnapFunctionField(
+                func=lambda obj: f"{obj.quantity * obj.price:.2f}",
+                verbose_name="Line total",
+            )
+
+    ``func`` receives the model instance exactly as an ordinary (undecorated)
+    method receives ``self``, so the method body needs no change to become a
+    computed column.
+
+    **Not a second rendering path — #RFC1d's own constraint.** The decorator
+    builds the identical :class:`~snapadmin.fields.SnapFunctionField` instance
+    the field form builds and stores it under the method's name, so it is
+    picked up by the exact code that already scans a model's class attributes
+    for one (:meth:`SnapModel.get_admin_fields`) — that enumeration is
+    untouched. This works unmodified on *either* door: a
+    :class:`SnapFunctionField` is not a ``models.Field`` (nothing in its MRO
+    defines ``contribute_to_class``), so assigning one as a class attribute —
+    whether the class is a :class:`SnapModel` subclass or a plain model
+    decorated with :func:`snap_model` — triggers no Django field machinery
+    either way. It never appears in ``_meta.get_fields()`` and produces no
+    migration, on both routes.
+
+    **What still differs between the two doors is the surface, not the
+    computation.** A :class:`SnapModel` subclass renders the column immediately
+    (``get_admin_fields()`` puts it in ``list_display``, escaped like any other
+    ``safe_html=False`` value). A plain model decorated with :func:`snap_model`
+    has no ``register_admin()``/``get_admin_fields()`` at all yet — that gap is
+    #RFC1g3, not this task — so the same ``@snap_property`` there computes
+    correctly (``field.get_display_value(instance)`` returns the right value
+    today, right now) but has nowhere to display until #RFC1g3 ships. Recording
+    the value here rather than promising a render that does not exist yet.
+
+    :param verbose_name: Column heading. Defaults to the method name with
+        underscores turned into spaces, matching Django's own field default.
+    :param show_in_list: Include the column on the admin changelist. Default
+        ``True``.
+    :param show_in_form: Accepted for parity with :class:`SnapFunctionField`'s
+        constructor; that field is never included in ``form_fields`` (it is
+        not a real ``_meta`` field), so this has no observable effect today.
+    :param safe_html: Trust the returned value as pre-sanitised HTML instead of
+        escaping it before display. Default ``False``.
+    """
+
+    def decorator(func: Callable[[models.Model], Any]) -> "snapfields.SnapFunctionField":
+        name = getattr(func, "__name__", "") or ""
+        resolved_verbose_name = verbose_name if verbose_name is not None else name.replace("_", " ")
+        return snapfields.SnapFunctionField(
+            func=func,
+            verbose_name=resolved_verbose_name,
+            show_in_list=show_in_list,
+            show_in_form=show_in_form,
+            safe_html=safe_html,
+        )
 
     return decorator
 

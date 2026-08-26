@@ -22,6 +22,32 @@ Added
   ``snap_field()`` equivalent now fails the test suite until it is either wired in or recorded as
   a documented, reasoned gap.
 
+* **``@snap_property`` — a computed admin column written as a method, not a field assignment.**
+  The decorator form of ``SnapFunctionField``::
+
+      class OrderItem(SnapModel):
+          @snap_property(verbose_name="Line total")
+          def line_total(self):
+              return f"{self.quantity * self.price:.2f}"
+
+  is exactly the same column as ``line_total = SnapFunctionField(func=lambda obj: ..., verbose_name=...)``
+  — no database column, no migration, HTML-escaped unless ``safe_html=True``. It is not a second
+  rendering path: the decorator builds the identical ``SnapFunctionField`` instance the field form
+  builds and stores it under the method's name, so the admin's existing scan for one picks it up
+  unmodified. Works on both doors — a ``SnapModel`` subclass renders the column immediately; on a
+  ``@snap_model``-decorated plain model the computation is already correct, but has nowhere to
+  display until the decorated-model generated-admin gap closes (tracked separately, unreleased).
+
+* **``get_model_meta()`` gains a third precedence tier — a project-wide ``SNAPADMIN_<NAME>``
+  setting.** The full order is now: explicit decorator argument > class attribute > a
+  ``SNAPADMIN_<NAME>`` setting (``name`` upper-cased, e.g. ``api_read_only`` consults
+  ``SNAPADMIN_API_READ_ONLY``) > the caller's built-in default — resolved through
+  ``snapadmin.conf.get_setting``, so a ``SNAPADMIN_PROFILE`` preset can supply it too. The new tier
+  is only ever reachable on the ``@snap_model`` route: a ``SnapModel`` subclass always has a class
+  attribute to answer from (its own, or an inherited base-class default), so it never falls through
+  to a setting — this closes one more gap between the two doors, letting a decorated plain model
+  inherit a project-wide posture instead of always landing on the library's hard-coded default.
+
 Security
 --------
 
