@@ -143,6 +143,22 @@ class TestGetAdminFields:
                 filter_names.append(item[0])
         assert "timestamp" in filter_names
 
+    def test_searchlog_bare_field_absent_from_search_and_filter_surface(self):
+        """SearchLog.user_agent is a bare django_models.CharField — no snap_field()
+        wrapper, no Snap*Field. It must be stored and admin-editable like any other
+        Django field, but absent from both the search box and the sidebar filters,
+        since search_fields/list_filter are derived from the searchable/filterable
+        attributes a bare field never sets. Contrasted with test_searchlog_list_filter_
+        has_timestamp above: same model, three field shapes, only the ones that ask
+        for search/filter behaviour get it."""
+        from demo.apps.shop.models import SearchLog
+        _, list_display, search_fields, list_filter, _ = SearchLog.get_admin_fields()
+        filter_names = [item if isinstance(item, str) else item[0] for item in list_filter]
+        assert "user_agent" not in search_fields
+        assert "user_agent" not in filter_names
+        # Still an ordinary field: stored, and shown in the list/change form by default.
+        assert "user_agent" in list_display
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Admin registration

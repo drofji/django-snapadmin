@@ -13,16 +13,35 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 ### Added
 - `snap_field()` now accepts every `Snap*Field` constructor kwarg — `required` and the file-upload
   trio (`allowed_extensions`/`allowed_encodings`/`max_size_bytes`) are no longer refused.
+- `SNAPADMIN_PROFILE = "admin" | "api" | "full"` picks sane defaults for the handful of settings
+  that actually differ by use case, instead of deciding all ~90 individually. Unset (or `"full"`)
+  changes nothing — every existing install keeps its current behaviour.
+- `snapadmin_info`'s `inventory` section now reports, per model, which registration door it came
+  through (`SnapModel` subclass vs. `@snap_model` decorator) and which capabilities that door
+  leaves inactive (Elasticsearch mirroring, retention purge, generated admin).
 - `@snap_property` decorates a method into a computed, display-only admin column — the decorator
   form of `SnapFunctionField` (no database column, no migration). Works identically on a
   `SnapModel` subclass and on a `@snap_model`-decorated plain model.
 - `get_model_meta()` gains a third precedence tier: a project-wide `SNAPADMIN_<NAME>` setting,
   consulted between the class attribute and the caller's built-in default. Only reachable on the
   `@snap_model` route — a `SnapModel` subclass always has a class attribute to answer from.
+- A runnable integration checklist (Must work / Should be configured / Data safety /
+  Optional-scale), documented at `#integration-checklist` and now printed by `snapadmin-init`
+  itself — every row is ✅/❌/⚠️, never a false green for anything it can't check without a live
+  project.
+- Database backups can be encrypted in-stream with AGE (`SNAPADMIN_BACKUP_AGE_RECIPIENTS`) — any
+  one of N configured recipients decrypts a bundle independently. Two interchangeable backends
+  (`pyrage`, the new optional `[age]` extra, or the `age` CLI). Empty (the default) changes nothing.
+- `SNAPADMIN_BACKUP_INCLUDE` bundles media and an encrypted `.env` alongside the database backup
+  (default `["db"]`, opt-in). Every run now also writes an unencrypted `manifest.json` sidecar;
+  retention (`SNAPADMIN_BACKUP_KEEP`) applies per part.
 
 ### Security
 - `snap_field(field, wysiwyg=True)` now sanitizes on write, matching `SnapRichTextField` — closing
   a gap where the wrapper route stored raw HTML unsanitized.
+- Backing up `env` with no `SNAPADMIN_BACKUP_AGE_RECIPIENTS` configured is refused fail-closed
+  (system check `snapadmin.E007` plus a matching runtime guard) — a `.env` file's secrets are never
+  written to a backup destination unencrypted.
 
 ## 0.1.0b7 — 2026-08-25
 

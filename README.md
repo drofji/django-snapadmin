@@ -61,6 +61,25 @@ trail, background jobs, the works. Log in at `/admin/` with `admin` / `admin`.
 
 ---
 
+## Is your integration actually correct?
+
+A runnable checklist — every row names the command that proves it, not just the thing to remember.
+`snapadmin-init` now prints this itself, with a ✅/❌/⚠️ per row (⚠️ = needs a running project to
+check, never a false green):
+
+| Check | Verify |
+|---|---|
+| App boots, models registered | `manage.py check` · `snapadmin_info --section inventory` |
+| Migrations applied | `manage.py migrate --check` |
+| Auth on the API, PII masked where it matters | `snapadmin_info --section features` |
+| Backups on, **2+ destinations**, encryption (**strongly recommended**) | `snapadmin_info --section features` |
+| Have you actually run a restore? | An untested backup is the most common form of not having one |
+
+→ [Full checklist](https://drofji.github.io/django-snapadmin/#integration-checklist) — Must work /
+Should be configured / Data safety / Optional, with a "why it matters" column.
+
+---
+
 ## How it works — the whole idea
 
 There are two ways to declare a model, and most projects want the first one: `@snap_model` and
@@ -141,7 +160,7 @@ You get the REST API, the GraphQL schema, the offline endpoints, the system chec
 `snapadmin-info` inventory. You **do not** get the parts that need `SnapModel`'s machinery —
 Elasticsearch mirroring, the retention purge, the generated admin — and those sweeps skip the model
 rather than half-work. [The full comparison
-table](https://drofji.github.io/django-snapadmin/#snap-model-decorator) says exactly which is which.
+table](https://drofji.github.io/django-snapadmin/#two-ways) says exactly which is which.
 
 Need this for one field rather than a whole model — a single `django-money` or `phonenumber_field`
 column on an otherwise ordinary model? `snap_field()` is the same idea at field scope:
@@ -157,12 +176,17 @@ class Product(models.Model):
 It sets the same attributes a `Snap*Field` sets on itself, on a field instance you already have —
 every reader treats the result identically, and it adds no migration either.
 
+You never have to convert a whole model at once, either — a `SnapModel` is a normal Django model, so
+bare fields, `snap_field()`-wrapped fields and `Snap*Field`s freely mix in the same class body; only
+the fields that need Snap behaviour get it. [Worked example](https://drofji.github.io/django-snapadmin/#mixing-fields).
+
 </details>
 
 → [Field types](https://drofji.github.io/django-snapadmin/#snap-fields) ·
 [SnapModel reference](https://drofji.github.io/django-snapadmin/#snap-model) ·
 [`@snap_model` for plain models](https://drofji.github.io/django-snapadmin/#snap-model-decorator) ·
-[`snap_field()` for one field](https://drofji.github.io/django-snapadmin/#snap-field-wrapper)
+[`snap_field()` for one field](https://drofji.github.io/django-snapadmin/#snap-field-wrapper) ·
+[Mixing Snap & plain fields](https://drofji.github.io/django-snapadmin/#mixing-fields)
 
 ---
 
@@ -296,7 +320,7 @@ The questions a tech lead or a manager asks before approving a dependency:
 | **Will it survive our load?** | Read-replica routing, estimated counts, paging caps, streaming exports. [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) |
 | **Single sign-on?** | [SSO / OAuth2 login helper](https://drofji.github.io/django-snapadmin/#enterprise-config); auth is pluggable — JWT, session, or your own |
 | **How do we know it is up?** | Health probes, error-spike alerts and daily digests to email, Slack, Discord, Teams or Telegram. `snapadmin-info --health-check` exits non-zero for your monitoring |
-| **Backups?** | [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, offsite over FTPS/SFTP |
+| **Backups?** | [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, offsite over FTPS/SFTP, optionally **AGE-encrypted** in-stream so a compromised destination never sees plaintext. `SNAPADMIN_BACKUP_INCLUDE` optionally bundles media and an encrypted `.env` alongside the database, with a checksummed manifest. A dedicated restore command is on the roadmap — see the [integration checklist](https://drofji.github.io/django-snapadmin/#integration-checklist)'s "have you run a restore?" row |
 | **Are we locked in?** | No. It is ordinary Django underneath — models, `ModelAdmin`, DRF viewsets. Override any piece, or stop using the generated ones. Your models need not even inherit from ours: [`@snap_model`](https://drofji.github.io/django-snapadmin/#snap-model-decorator) opts a plain `models.Model` in from the outside |
 
 ---
@@ -413,7 +437,8 @@ INSTALLED_APPS = [
 ```
 
 > **Elasticsearch needs no app entry** — `pip install django-snapadmin[elasticsearch]` and set
-> `ELASTICSEARCH_ENABLED = True`. Same for `[backup]` (SFTP offsite backups): a dependency, not an app.
+> `ELASTICSEARCH_ENABLED = True`. Same for `[backup]` (SFTP offsite backups) and `[age]`
+> (encrypted backups): a dependency, not an app.
 
 </details>
 
@@ -429,6 +454,7 @@ is safe for commercial and proprietary use. Everything with a licence caveat is 
 | `elasticsearch` | `elasticsearch` | Full-text search, `DUAL` / `ES_ONLY` models |
 | `celery` | `celery`, `django-celery-beat`, `django-celery-results` | Background tasks: async export, GDPR purge, digests, backups |
 | `backup` | `paramiko` | SFTP offsite database backups |
+| `age` | `pyrage` | AGE-encrypted backups (MIT — or skip this extra and use the `age` CLI instead) |
 | `extra-settings` | `django-extra-settings` | An in-admin dynamic key/value `Setting` model |
 | `wysiwyg` | `django-ckeditor-5` | Rich-text fields — **bundles CKEditor 5 (GPL-or-commercial)** |
 | `autocomplete-filter` | `django-admin-autocomplete-filter` | `AutocompleteFilter` list filters (LGPL) |
@@ -456,10 +482,14 @@ SNAPADMIN_SWAGGER_ENABLED  = True   # Swagger UI + ReDoc
 SNAPADMIN_URL_PREFIX       = ""     # relocate the whole API surface
 ```
 
-Misconfiguration shows up **at startup** as a Django system check (`snapadmin.W001`–`W007`,
-`E001`–`E005`), not as a mystery at request time.
+Don't want to decide all ~90 of them? `SNAPADMIN_PROFILE = "admin"` (or `"api"` / `"full"`) picks
+sane defaults for the handful that actually matter — an explicit setting always overrides it.
 
-→ [Every setting, with defaults](https://drofji.github.io/django-snapadmin/#env-vars)
+Misconfiguration shows up **at startup** as a Django system check (`snapadmin.W001`–`W009`,
+`E001`–`E006`), not as a mystery at request time.
+
+→ [Every setting, with defaults](https://drofji.github.io/django-snapadmin/#env-vars) ·
+[SNAPADMIN_PROFILE presets](https://drofji.github.io/django-snapadmin/#profiles)
 
 <details>
 <summary>Extending it — SnapAdmin is meant to be customised, not forked</summary>

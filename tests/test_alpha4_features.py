@@ -211,7 +211,10 @@ class TestEsAutoMapping:
         assert SnapModel._derive_es_field_mapping(dj_models.BinaryField()) is None
 
     def test_auto_mapped_search_fields_are_text_only(self):
-        assert SearchLog._es_search_fields() == ["query"]
+        # query (SnapCharField) and user_agent (a bare django_models.CharField, #DOC8a) both
+        # auto-map to ES "text" and are picked up identically — auto-mapping is isinstance-driven,
+        # blind to Snap-ness (#PAR1a). results_count (long) and timestamp (date) are excluded.
+        assert SearchLog._es_search_fields() == ["query", "user_agent"]
 
 
 # ── Bulk re-indexing ──────────────────────────────────────────────────────────

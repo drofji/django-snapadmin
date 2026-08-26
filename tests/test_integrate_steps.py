@@ -103,9 +103,111 @@ class TestModels:
 class TestCheckProject:
     def test_base_steps(self, tmp_path):
         names = [s.name for s in steps.check_project(_ctx(project_dir=tmp_path))]
-        assert names == ["installed_apps", "urls", "settings", "install", "models"]
+        assert names == [
+            "installed_apps", "urls", "settings", "install", "models", "migrations",
+            "pii_masking", "throttling", "pagination", "alerts", "backups", "backup_encryption",
+            "restore_tested",
+        ]
 
     def test_with_api_and_graphql(self, tmp_path):
         ctx = _ctx(project_dir=tmp_path, include_api=True, include_graphql=True)
         names = [s.name for s in steps.check_project(ctx)]
         assert "rest_api" in names and "graphql" in names
+        assert "api_auth" in names
+
+    def test_api_auth_only_with_api_flag(self, tmp_path):
+        names = [s.name for s in steps.check_project(_ctx(project_dir=tmp_path))]
+        assert "api_auth" not in names
+
+
+class TestMigrationsStep:
+    def test_always_not_checked(self, tmp_path):
+        step = steps.migrations_step(_ctx(project_dir=tmp_path))
+        assert step.present is None
+        assert "not checked" in step.note.lower()
+        assert step.group == "must_work"
+
+
+class TestApiAuthStep:
+    def test_present(self):
+        step = steps.api_auth_step(_ctx(settings_text="SNAPADMIN_API_AUTHENTICATION_CLASSES = []"))
+        assert step.present is True
+
+    def test_missing(self):
+        step = steps.api_auth_step(_ctx(settings_text=""))
+        assert step.present is False
+        assert step.group == "should_configure"
+
+
+class TestMaskingStep:
+    def test_present_via_masked_fields(self):
+        assert steps.masking_step(_ctx(settings_text="SNAPADMIN_MASKED_FIELDS = {}")).present is True
+
+    def test_present_via_masking_rules(self):
+        assert steps.masking_step(_ctx(settings_text="SNAPADMIN_MASKING_RULES = {}")).present is True
+
+    def test_missing(self):
+        step = steps.masking_step(_ctx(settings_text=""))
+        assert step.present is False
+        assert step.group == "should_configure"
+
+
+class TestThrottlingStep:
+    def test_present(self):
+        assert steps.throttling_step(_ctx(settings_text="SNAPADMIN_THROTTLE_ANON = '60/min'")).present is True
+
+    def test_missing(self):
+        assert steps.throttling_step(_ctx(settings_text="")).present is False
+
+
+class TestPaginationStep:
+    def test_present(self):
+        step = steps.pagination_step(_ctx(settings_text="SNAPADMIN_API_PAGE_SIZE = 50"))
+        assert step.present is True
+
+    def test_missing(self):
+        step = steps.pagination_step(_ctx(settings_text=""))
+        assert step.present is False
+        assert step.group == "should_configure"
+
+
+class TestAlertsStep:
+    def test_present(self):
+        assert steps.alerts_step(_ctx(settings_text="SNAPADMIN_HEALTH_ALERT_EMAILS = []")).present is True
+
+    def test_missing(self):
+        step = steps.alerts_step(_ctx(settings_text=""))
+        assert step.present is False
+        assert step.group == "should_configure"
+
+
+class TestBackupsStep:
+    def test_present(self):
+        assert steps.backups_step(_ctx(settings_text="SNAPADMIN_BACKUP_ENABLED = True")).present is True
+
+    def test_missing(self):
+        step = steps.backups_step(_ctx(settings_text=""))
+        assert step.present is False
+        assert step.group == "data_safety"
+
+
+class TestBackupEncryptionStep:
+    def test_present_has_no_note(self):
+        step = steps.backup_encryption_step(_ctx(settings_text="SNAPADMIN_BACKUP_AGE_RECIPIENTS = []"))
+        assert step.present is True
+        assert step.note == ""
+
+    def test_missing_recommends_it(self):
+        step = steps.backup_encryption_step(_ctx(settings_text=""))
+        assert step.present is False
+        assert "recommended" in step.note.lower()
+        assert step.group == "data_safety"
+
+
+class TestRestoreTestedStep:
+    def test_always_not_checked_no_command_invented(self, tmp_path):
+        step = steps.restore_tested_step(_ctx(project_dir=tmp_path))
+        assert step.present is None
+        assert step.snippet == ""
+        assert "no automated restore command yet" in step.note.lower()
+        assert step.group == "data_safety"

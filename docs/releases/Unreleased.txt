@@ -22,6 +22,27 @@ Added
   ``snap_field()`` equivalent now fails the test suite until it is either wired in or recorded as
   a documented, reasoned gap.
 
+* **``SNAPADMIN_PROFILE`` presets collapse ~90 settings to one line.** Set it to ``"admin"``
+  (admin UI only — REST, GraphQL, Swagger and GraphiQL off), ``"api"`` (REST + GraphQL on), or
+  ``"full"`` (today's defaults, and the implicit value when unset). An explicit setting always
+  wins over the profile, and leaving ``SNAPADMIN_PROFILE`` unset changes nothing — every existing
+  install resolves exactly as it did before, pinned by a test walking every setting the package
+  reads. ``snapadmin.conf.get_setting(name, default)`` is the new single resolution point every
+  ``SNAPADMIN_*`` read site goes through (explicit setting > active profile > built-in default).
+  Misconfiguration is caught by ``manage.py check``: an unrecognised profile name is
+  ``snapadmin.E006``, and an explicit setting that quietly overrides what the active profile would
+  otherwise set is ``snapadmin.W009``. See the `SNAPADMIN_PROFILE presets
+  <https://drofji.github.io/django-snapadmin/#profiles>`_ docs.
+
+* **``snapadmin_info`` now names which door each model came through, and what that costs it.**
+  The ``inventory`` section (``snapadmin_info --section inventory``) gains two columns per model:
+  ``door`` (``subclass`` for a ``SnapModel`` subclass, ``decorator`` for a plain model registered
+  with ``@snap_model``) and ``inactive_capabilities`` — the exact machinery that door does not get
+  (Elasticsearch mirroring, retention purge, the generated admin), read off the same markers the
+  runtime gates already check rather than guessed from the model's shape. Previously a decorated
+  model's missing capabilities were invisible to the report; now they are named, per model, right
+  next to the settings that look identical on both routes.
+
 * **``@snap_property`` — a computed admin column written as a method, not a field assignment.**
   The decorator form of ``SnapFunctionField``::
 
@@ -47,6 +68,36 @@ Added
   attribute to answer from (its own, or an inherited base-class default), so it never falls through
   to a setting — this closes one more gap between the two doors, letting a decorated plain model
   inherit a project-wide posture instead of always landing on the library's hard-coded default.
+
+* **A runnable integration checklist — and ``snapadmin-init`` now prints it.** The new `Integration
+  Checklist <https://drofji.github.io/django-snapadmin/#integration-checklist>`_ docs page groups
+  the "is my integration actually correct?" questions into Must work / Should be configured before
+  production / Data safety / Optional-scale, and every row names the exact command that proves it.
+  ``snapadmin-init``'s report *is* this checklist now: each row prints ✅ (present), ❌ (missing —
+  with the snippet to add) or ⚠️ (not checked — this doctor is read-only and runs before a project
+  may even be configured, so anything needing a live database or server degrades to "not checked"
+  rather than a false green). Data safety includes backup encryption, framed as strongly
+  recommended, and a reminder to actually test a restore.
+
+* **Database backups can be encrypted in-stream with AGE.** Set ``SNAPADMIN_BACKUP_AGE_RECIPIENTS``
+  (a list of one or more age/SSH public keys) and every dump is encrypted before a single byte
+  reaches disk — ``pg_dump``/SQLite → gzip → age → the ``.age``-suffixed file. Any one of the
+  configured recipients' private keys decrypts a bundle independently — no shared secret, no
+  re-encryption to add a reader. Two interchangeable backends
+  (``SNAPADMIN_BACKUP_AGE_BACKEND``): the in-process ``pyrage`` library (new optional ``[age]``
+  extra) or the ``age`` command-line tool. With the setting empty (the default), nothing changes.
+  See `Encrypting backups <https://drofji.github.io/django-snapadmin/#backup-encryption>`_.
+
+* **A backup run can now bundle media and an encrypted ``.env`` alongside the database.** Set
+  ``SNAPADMIN_BACKUP_INCLUDE`` (default ``["db"]``, so this is entirely opt-in) to any subset of
+  ``db``, ``media``, ``env``. Media (``MEDIA_ROOT``) is tarred and streamed — never built in
+  memory — with an exclude-glob setting (``SNAPADMIN_BACKUP_MEDIA_EXCLUDE``) and a size guard that
+  warns rather than aborts past a configurable threshold; an unreadable file is skipped with a
+  warning instead of failing the whole backup. Every run now also produces one always-unencrypted
+  ``manifest.json`` sidecar listing the parts actually shipped, their ciphertext checksums, package
+  versions and a ready-to-paste restore command. Retention (``SNAPADMIN_BACKUP_KEEP``) applies per
+  part, so opting into media never starves the database dump's own retention headroom. See `Media
+  and .env in the bundle <https://drofji.github.io/django-snapadmin/#backup-bundle>`_.
 
 Security
 --------

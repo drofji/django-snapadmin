@@ -61,9 +61,26 @@ _MODELS_SNIPPET = (
 class Step:
     name: str
     title: str
-    present: bool
+    #: ``True`` (✅, present) / ``False`` (❌, missing) / ``None`` (⚠️, not checked —
+    #: this doctor is stdlib-only and runs before a Django project exists, so it
+    #: cannot tell without importing Django and touching a live database; the
+    #: ``note`` names the live command that can, e.g. ``snapadmin_info --health-check``).
+    #: Never reinterpret ``None`` as ``False`` — that would be exactly the false
+    #: green this doctor is required to never print (see ``rules.md``).
+    present: bool | None
     snippet: str
     note: str = ""
+    #: Which group of the integration checklist (docs `#integration-checklist`) this
+    #: row belongs to, so the report can render the same four groups the docs do.
+    group: str = "must_work"
+
+
+#: Display order + heading for each :attr:`Step.group` value.
+GROUPS: tuple[tuple[str, str], ...] = (
+    ("must_work", "Must work"),
+    ("should_configure", "Should be configured before production"),
+    ("data_safety", "Data safety"),
+)
 
 
 def _has(text: str, *tokens: str) -> bool:
@@ -150,6 +167,133 @@ def models_step(ctx: ProjectContext) -> Step:
     return Step("models", "Model conversion (advisory)", not files, _MODELS_SNIPPET, note)
 
 
+def migrations_step(ctx: ProjectContext) -> Step:
+    """Whether pending migrations exist — genuinely not checkable here.
+
+    Answering this needs Django's app registry and a database connection, both
+    of which this doctor deliberately never touches (stdlib-only, read-only,
+    runs before a project may even be configured). Always reports "not
+    checked" rather than guessing — a degraded row, never a false green.
+    """
+    return Step(
+        "migrations",
+        "Migrations applied",
+        None,
+        "python manage.py migrate --check",
+        "Not checked — needs a live database connection. Run the command in the snippet; "
+        "it exits non-zero if anything is unapplied, without applying it.",
+        group="must_work",
+    )
+
+
+def api_auth_step(ctx: ProjectContext) -> Step:
+    present = "SNAPADMIN_API_AUTHENTICATION_CLASSES" in ctx.settings_text
+    snippet = (
+        "SNAPADMIN_API_AUTHENTICATION_CLASSES = [\n"
+        '    "rest_framework_simplejwt.authentication.JWTAuthentication",  # or your own\n'
+        '    "snapadmin.api.authentication.APITokenAuthentication",        # keep tokens working too\n'
+        "]"
+    )
+    return Step(
+        "api_auth", "Authentication on the API", present, snippet,
+        "Defaults to SnapAdmin's own token auth if unset — fine to ship, but confirm it's the "
+        "authenticator you actually want.",
+        group="should_configure",
+    )
+
+
+def masking_step(ctx: ProjectContext) -> Step:
+    present = _has(ctx.settings_text, "SNAPADMIN_MASKED_FIELDS", "SNAPADMIN_MASKING_RULES")
+    snippet = (
+        'SNAPADMIN_MASKED_FIELDS = {"shop.customer": ["email", "phone"]}\n'
+        "# or SNAPADMIN_MASKING_RULES for per-permission unmasking"
+    )
+    return Step(
+        "pii_masking", "PII masking configured for sensitive fields", present, snippet,
+        group="should_configure",
+    )
+
+
+def throttling_step(ctx: ProjectContext) -> Step:
+    present = _has(ctx.settings_text, "SNAPADMIN_THROTTLE_ANON", "SNAPADMIN_THROTTLE_USER")
+    snippet = (
+        'SNAPADMIN_THROTTLE_ANON = "60/min"\n'
+        'SNAPADMIN_THROTTLE_USER = "600/min"'
+    )
+    return Step(
+        "throttling", "API throttling configured", present, snippet,
+        "Ships with a default rate even if unset — this row flags an explicit choice, not a gap.",
+        group="should_configure",
+    )
+
+
+def pagination_step(ctx: ProjectContext) -> Step:
+    present = "SNAPADMIN_API_PAGE_SIZE" in ctx.settings_text
+    snippet = "SNAPADMIN_API_PAGE_SIZE = 25   # default; lower for wide rows, raise for small ones"
+    return Step(
+        "pagination", "API page size configured", present, snippet,
+        "Ships with a default (25) even if unset — this row flags an explicit choice, not a gap.",
+        group="should_configure",
+    )
+
+
+def alerts_step(ctx: ProjectContext) -> Step:
+    present = _has(ctx.settings_text, "SNAPADMIN_HEALTH_ALERT_EMAILS", "SNAPADMIN_ERROR_ALERT_EMAILS", "SNAPADMIN_ALERT_")
+    snippet = (
+        'SNAPADMIN_HEALTH_ALERT_EMAILS = ["ops@example.com"]\n'
+        "# or SNAPADMIN_ALERT_SLACK_WEBHOOK / _DISCORD_WEBHOOK / _TEAMS_WEBHOOK / _TELEGRAM_*"
+    )
+    return Step(
+        "alerts", "Error and health alerts wired to a real channel", present, snippet,
+        group="should_configure",
+    )
+
+
+def backups_step(ctx: ProjectContext) -> Step:
+    present = "SNAPADMIN_BACKUP_ENABLED" in ctx.settings_text
+    snippet = (
+        "SNAPADMIN_BACKUP_ENABLED = True\n"
+        "SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS = 24\n"
+        "SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = 24   # a second, offsite destination — the 3-2-1 rule"
+    )
+    return Step(
+        "backups", "Backups enabled, with at least two destinations", present, snippet,
+        "This doctor only checks that backups are turned on, not how many destinations are "
+        "configured — confirm with `snapadmin_info --section features` once the project is running.",
+        group="data_safety",
+    )
+
+
+def backup_encryption_step(ctx: ProjectContext) -> Step:
+    present = "SNAPADMIN_BACKUP_AGE_RECIPIENTS" in ctx.settings_text
+    snippet = 'SNAPADMIN_BACKUP_AGE_RECIPIENTS = ["age1qyqs..."]  # pip install django-snapadmin[age]'
+    note = (
+        "" if present else
+        "Optional, but strongly recommended: an unencrypted dump on a rented offsite server is "
+        "your whole database in someone else's hands. Costs one setting."
+    )
+    return Step(
+        "backup_encryption", "Backup encryption configured (strongly recommended)", present, snippet,
+        note, group="data_safety",
+    )
+
+
+def restore_tested_step(ctx: ProjectContext) -> Step:
+    """Whether a restore has ever actually been run — always "not checked".
+
+    Not checkable statically (it is an operational event, not a setting), and
+    there is no ``snapadmin_restore`` command yet to point at either — say so
+    honestly rather than citing a command that does not exist.
+    """
+    return Step(
+        "restore_tested", "You have actually run a restore", None, "",
+        "An untested backup is the most common form of not having a backup. There is no "
+        "automated restore command yet — verify manually: restore a recent dump to a scratch "
+        "database and confirm the data matches.",
+        group="data_safety",
+    )
+
+
 def check_project(ctx: ProjectContext) -> list[Step]:
     steps = [installed_apps_step(ctx), urls_step(ctx), settings_step(ctx)]
     if ctx.include_api:
@@ -158,4 +302,14 @@ def check_project(ctx: ProjectContext) -> list[Step]:
         steps.append(graphql_step(ctx))
     steps.append(install_step(ctx))
     steps.append(models_step(ctx))
+    steps.append(migrations_step(ctx))
+    if ctx.include_api:
+        steps.append(api_auth_step(ctx))
+    steps.append(masking_step(ctx))
+    steps.append(throttling_step(ctx))
+    steps.append(pagination_step(ctx))
+    steps.append(alerts_step(ctx))
+    steps.append(backups_step(ctx))
+    steps.append(backup_encryption_step(ctx))
+    steps.append(restore_tested_step(ctx))
     return steps
