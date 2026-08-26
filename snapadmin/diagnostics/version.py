@@ -14,6 +14,7 @@ import django
 from django.conf import settings
 
 from snapadmin import __version__
+from snapadmin.conf import get_setting
 from snapadmin.diagnostics.registry import register
 from snapadmin.quickstart import stamp
 
@@ -39,6 +40,11 @@ _PRERELEASE_MARKERS = ("a", "b", "rc", "dev")
 def _flag(setting: str, default: bool | None) -> bool:
     if default is None:
         default = bool(getattr(settings, "DEBUG", False))
+    # Only SNAPADMIN_* names go through the profile-aware accessor — this
+    # tuple also carries "ELASTICSEARCH_ENABLED", a different package's
+    # setting that SNAPADMIN_PROFILE has no business resolving.
+    if setting.startswith("SNAPADMIN_"):
+        return bool(get_setting(setting, default))
     return bool(getattr(settings, setting, default))
 
 
@@ -64,11 +70,16 @@ def _demo_tree() -> dict:
 def collect(*, verbose: bool) -> dict:
     """Collect the version and feature-flag section."""
     prerelease = any(marker in __version__ for marker in _PRERELEASE_MARKERS)
+    features = {label: _flag(setting, default) for label, setting, default in _FEATURE_FLAGS}
+    # Swagger documents the REST API, so — like `urls.py` — it follows REST's
+    # own resolved value by default rather than the tuple's static `True`,
+    # which would otherwise report Swagger as on when REST itself is off.
+    features["swagger"] = bool(get_setting("SNAPADMIN_SWAGGER_ENABLED", features["rest_api"]))
     return {
         "version": __version__,
         "status": "pre-release" if prerelease else "stable",
         "django": django.get_version(),
         "python": platform.python_version(),
         **_demo_tree(),
-        "features": {label: _flag(setting, default) for label, setting, default in _FEATURE_FLAGS},
+        "features": features,
     }

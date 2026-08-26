@@ -5,19 +5,21 @@ URL configuration for the SnapAdmin REST API.
 """
 
 import structlog
+from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.urls import path, include
-from django.conf import settings
 
-REST_API_ENABLED = getattr(settings, "SNAPADMIN_REST_API_ENABLED", True)
+from snapadmin.conf import get_setting
+
+REST_API_ENABLED = get_setting("SNAPADMIN_REST_API_ENABLED", True)
 # Swagger documents the REST API, so it follows it by default: with the REST API
 # switched off there is nothing to document, and defaulting to True would make
 # SNAPADMIN_REST_API_ENABLED = False insufficient on its own to load this URLconf
 # without drf-spectacular installed. An explicit setting still wins either way.
-SWAGGER_ENABLED = getattr(settings, "SNAPADMIN_SWAGGER_ENABLED", REST_API_ENABLED)
-GRAPHQL_ENABLED = getattr(settings, "SNAPADMIN_GRAPHQL_ENABLED", True)
+SWAGGER_ENABLED = get_setting("SNAPADMIN_SWAGGER_ENABLED", REST_API_ENABLED)
+GRAPHQL_ENABLED = get_setting("SNAPADMIN_GRAPHQL_ENABLED", True)
 # Admin-only user management API — off by default (opt-in surface).
-USER_API_ENABLED = getattr(settings, "SNAPADMIN_USER_API_ENABLED", False)
+USER_API_ENABLED = get_setting("SNAPADMIN_USER_API_ENABLED", False)
 # Optional extra path segment prepended to *every* snapadmin route. Projects that
 # already own the mount point (e.g. they include snapadmin at the site root, or
 # under "/api/" which collides with their own API) can relocate the whole surface
@@ -25,7 +27,7 @@ USER_API_ENABLED = getattr(settings, "SNAPADMIN_USER_API_ENABLED", False)
 # by setting e.g. SNAPADMIN_URL_PREFIX = "snapadmin/". Empty (default) is a no-op
 # and keeps the historical layout. Route *names* are unchanged, so reverse() and
 # {% url %} keep working regardless of the prefix.
-URL_PREFIX = getattr(settings, "SNAPADMIN_URL_PREFIX", "")
+URL_PREFIX = get_setting("SNAPADMIN_URL_PREFIX", "")
 
 logger = structlog.get_logger(__name__)
 
@@ -200,8 +202,8 @@ if GRAPHQL_ENABLED:
 
         # GraphiQL playground: enabled only alongside DEBUG unless overridden —
         # keep the interactive explorer out of production by default.
-        GRAPHIQL_ENABLED = getattr(
-            settings, "SNAPADMIN_GRAPHIQL_ENABLED", getattr(settings, "DEBUG", False)
+        GRAPHIQL_ENABLED = get_setting(
+            "SNAPADMIN_GRAPHIQL_ENABLED", getattr(settings, "DEBUG", False)
         )
         urlpatterns += [
             path("graphql/", SnapGraphQLView.as_view(graphiql=GRAPHIQL_ENABLED, schema=schema), name="graphql"),

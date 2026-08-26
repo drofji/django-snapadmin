@@ -20,6 +20,7 @@ from django.utils.text import capfirst
 from django.utils.translation import gettext_lazy as _
 
 from snapadmin import __version__
+from snapadmin.conf import get_setting
 
 #: Display label per service-probe state. The raw state stays on the context as
 #: ``status`` because the template turns it into a CSS class (``status-online``);
@@ -43,7 +44,7 @@ class StaffRequiredMixin(AccessMixin):
     """
 
     def dispatch(self, request, *args, **kwargs):
-        if getattr(settings, "SNAPADMIN_DASHBOARD_PUBLIC", False):
+        if get_setting("SNAPADMIN_DASHBOARD_PUBLIC", False):
             return super().dispatch(request, *args, **kwargs)
         user = request.user
         if not (user.is_authenticated and user.is_staff):
@@ -77,12 +78,17 @@ class DashboardView(StaffRequiredMixin, TemplateView):
             {"name": _("Admin Panel"), "url": reverse("admin:index"), "icon": "admin_panel_settings"},
         ]
 
-        if getattr(settings, "SNAPADMIN_REST_API_ENABLED", True):
+        rest_api_enabled = get_setting("SNAPADMIN_REST_API_ENABLED", True)
+        graphql_enabled = get_setting("SNAPADMIN_GRAPHQL_ENABLED", True)
+        if rest_api_enabled:
             links.append({"name": _("REST API Root"), "url": "/api/", "icon": "api"})
-            if getattr(settings, "SNAPADMIN_SWAGGER_ENABLED", True):
+            # Swagger documents the REST API, so — like `urls.py` — it follows
+            # REST's resolved value by default rather than hardcoding True,
+            # which would otherwise claim Swagger is on when REST itself is off.
+            if get_setting("SNAPADMIN_SWAGGER_ENABLED", rest_api_enabled):
                 links.append({"name": _("Swagger Docs"), "url": reverse("swagger-ui"), "icon": "menu_book"})
 
-        if getattr(settings, "SNAPADMIN_GRAPHQL_ENABLED", True):
+        if graphql_enabled:
             links.append({"name": _("GraphQL API"), "url": "/api/graphql/", "icon": "account_tree"})
 
         # Registered Models
@@ -146,7 +152,7 @@ class DashboardView(StaffRequiredMixin, TemplateView):
             "debug": settings.DEBUG,
             "allowed_hosts": settings.ALLOWED_HOSTS,
             "version": __version__,
-            "graphql_enabled": getattr(settings, "SNAPADMIN_GRAPHQL_ENABLED", True),
+            "graphql_enabled": graphql_enabled,
         })
         return context
 

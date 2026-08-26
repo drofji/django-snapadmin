@@ -311,6 +311,78 @@ class TestUnfoldTheme:
         assert "django-snapadmin[theme]" in result[0].hint
 
 
+# ── backup encryption recipients (W008) ──────────────────────────────────────
+
+class TestBackupAgeRecipients:
+    def test_unset_is_clean(self):
+        assert checks.check_backup_age_recipients(None) == []
+
+    def test_empty_list_is_clean(self):
+        with override_settings(SNAPADMIN_BACKUP_AGE_RECIPIENTS=[]):
+            assert checks.check_backup_age_recipients(None) == []
+
+    @override_settings(SNAPADMIN_BACKUP_AGE_RECIPIENTS=[
+        "age1scr8rpq5lxtaqqskkawrft82at865e4j3gvs30cjv79q5qq3gc7qwj8um3",
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBaU comment",
+    ])
+    def test_plausible_recipients_are_clean(self):
+        assert checks.check_backup_age_recipients(None) == []
+
+    @override_settings(SNAPADMIN_BACKUP_AGE_RECIPIENTS=["not-a-key"])
+    def test_malformed_recipient_warns(self):
+        result = checks.check_backup_age_recipients(None)
+        assert len(result) == 1
+        assert result[0].id == "snapadmin.W008"
+        assert "not-a-key" in result[0].msg
+
+    @override_settings(SNAPADMIN_BACKUP_AGE_RECIPIENTS=[
+        "age1scr8rpq5lxtaqqskkawrft82at865e4j3gvs30cjv79q5qq3gc7qwj8um3", "garbage",
+    ])
+    def test_one_good_one_bad_only_names_the_bad_one(self):
+        result = checks.check_backup_age_recipients(None)
+        assert len(result) == 1
+        assert "garbage" in result[0].msg
+        assert "age1scr8rpq5lxtaqqskkawrft82at865e4j3gvs30cjv79q5qq3gc7qwj8um3" not in result[0].msg
+
+    def test_does_not_require_pyrage_or_age_binary(self):
+        """The check validates shape only — it must work even with neither
+        backend installed, since a project may intend to use just one."""
+        import sys
+        from unittest import mock
+
+        with override_settings(SNAPADMIN_BACKUP_AGE_RECIPIENTS=["age1x"]):
+            with mock.patch.dict(sys.modules, {"pyrage": None}):
+                result = checks.check_backup_age_recipients(None)
+        assert result == []  # "age1x" is a plausible shape, no import was needed to say so
+
+
+class TestBackupEnvRequiresEncryption:
+    def test_default_include_is_clean(self):
+        assert checks.check_backup_env_requires_encryption(None) == []
+
+    @override_settings(SNAPADMIN_BACKUP_INCLUDE=["db", "media"])
+    def test_env_absent_is_clean_regardless_of_recipients(self):
+        assert checks.check_backup_env_requires_encryption(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_INCLUDE=["db", "env"],
+        SNAPADMIN_BACKUP_AGE_RECIPIENTS=["age1scr8rpq5lxtaqqskkawrft82at865e4j3gvs30cjv79q5qq3gc7qwj8um3"],
+    )
+    def test_env_with_recipients_is_clean(self):
+        assert checks.check_backup_env_requires_encryption(None) == []
+
+    @override_settings(SNAPADMIN_BACKUP_INCLUDE=["env"])
+    def test_env_with_no_recipients_is_e007(self):
+        result = checks.check_backup_env_requires_encryption(None)
+        assert [e.id for e in result] == ["snapadmin.E007"]
+        assert "env" in result[0].msg
+
+    @override_settings(SNAPADMIN_BACKUP_INCLUDE=["env"], SNAPADMIN_BACKUP_AGE_RECIPIENTS=[])
+    def test_env_with_empty_recipients_list_is_e007(self):
+        result = checks.check_backup_env_requires_encryption(None)
+        assert [e.id for e in result] == ["snapadmin.E007"]
+
+
 class TestMaskingRules:
     """SNAPADMIN_MASKING_RULES fails open — a bad rule masks nothing and says
     nothing — so every way of getting it wrong is an error, not a warning."""
@@ -361,6 +433,74 @@ class TestMaskingRules:
     })
     def test_rule_without_a_pattern_is_clean(self):
         assert checks.check_masking_rules(None) == []
+
+
+# ── SNAPADMIN_PROFILE (#SIMPL1g) ──────────────────────────────────────────────
+
+class TestSnapadminProfile:
+    def test_unset_is_clean(self):
+        assert checks.check_snapadmin_profile(None) == []
+
+    @override_settings(SNAPADMIN_PROFILE="admin")
+    def test_recognised_profile_is_clean(self):
+        assert checks.check_snapadmin_profile(None) == []
+
+    @override_settings(SNAPADMIN_PROFILE="api")
+    def test_api_profile_is_clean(self):
+        assert checks.check_snapadmin_profile(None) == []
+
+    @override_settings(SNAPADMIN_PROFILE="full")
+    def test_full_profile_is_clean(self):
+        assert checks.check_snapadmin_profile(None) == []
+
+    @override_settings(SNAPADMIN_PROFILE="production")
+    def test_unrecognised_profile_errors(self):
+        result = checks.check_snapadmin_profile(None)
+        assert len(result) == 1
+        assert result[0].id == "snapadmin.E006"
+        assert "production" in result[0].msg
+
+
+class TestSnapadminProfileContradiction:
+    def test_no_profile_is_clean(self):
+        assert checks.check_snapadmin_profile_contradiction(None) == []
+
+    @override_settings(SNAPADMIN_PROFILE="full")
+    def test_full_profile_has_nothing_to_contradict(self):
+        """`full` ships no preset entries — it *is* the built-in defaults."""
+        assert checks.check_snapadmin_profile_contradiction(None) == []
+
+    @override_settings(SNAPADMIN_PROFILE="admin")
+    def test_admin_profile_with_no_explicit_override_is_clean(self, monkeypatch):
+        # The demo project's own settings.py declares every SNAPADMIN_* name
+        # explicitly (project convention) — including the four this profile
+        # differs on, each pinned to what "full" already defaults to. Remove
+        # them to simulate the project this check is actually for: one that
+        # never set them and relies on the profile.
+        from django.conf import settings as django_settings
+        for name in checks.conf._PRESETS["admin"]:
+            monkeypatch.delattr(django_settings, name, raising=False)
+        assert checks.check_snapadmin_profile_contradiction(None) == []
+
+    @override_settings(SNAPADMIN_PROFILE="admin", SNAPADMIN_REST_API_ENABLED=True)
+    def test_explicit_setting_disagreeing_with_the_profile_warns(self):
+        result = checks.check_snapadmin_profile_contradiction(None)
+        ids = [w.id for w in result]
+        assert "snapadmin.W009" in ids
+        matching = next(w for w in result if "SNAPADMIN_REST_API_ENABLED" in w.msg)
+        assert "admin" in matching.msg
+        assert "True" in matching.msg
+
+    @override_settings(SNAPADMIN_PROFILE="admin", SNAPADMIN_REST_API_ENABLED=False)
+    def test_explicit_setting_matching_the_profile_is_clean(self):
+        """Agreeing with the profile is not a contradiction — no warning."""
+        result = checks.check_snapadmin_profile_contradiction(None)
+        assert not any("SNAPADMIN_REST_API_ENABLED" in w.msg for w in result)
+
+    @override_settings(SNAPADMIN_PROFILE="production")
+    def test_unrecognised_profile_is_ignored_here(self):
+        """check_snapadmin_profile (E006) owns reporting an invalid profile name."""
+        assert checks.check_snapadmin_profile_contradiction(None) == []
 
 
 # ── integration ──────────────────────────────────────────────────────────────

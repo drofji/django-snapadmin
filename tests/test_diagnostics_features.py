@@ -50,6 +50,39 @@ class TestSettingsGatedCapabilities:
     def test_backups_off_by_default(self):
         assert _collect()["backups"] is False
 
+    @override_settings(SNAPADMIN_BACKUP_ENABLED=True)
+    def test_backup_detail_defaults_to_db_unencrypted(self):
+        data = _collect(verbose=True)
+        assert data["details"]["backups"] == "db"
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_INCLUDE=["db", "media", "env"],
+    )
+    def test_backup_detail_reports_every_included_part(self):
+        data = _collect(verbose=True)
+        assert data["details"]["backups"] == "db+media+env"
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_AGE_RECIPIENTS=["age1x", "age1y"],
+    )
+    def test_backup_detail_reports_encryption_and_recipient_count(self):
+        data = _collect(verbose=True)
+        assert data["details"]["backups"] == "db, encrypted (2 recipients)"
+
+    def test_backup_detail_never_reports_identity(self):
+        """No setting or code path here ever touches the identity file's
+        contents — only public recipients and a count reach the report."""
+        with override_settings(
+            SNAPADMIN_BACKUP_ENABLED=True,
+            SNAPADMIN_BACKUP_AGE_RECIPIENTS=["age1x"],
+            SNAPADMIN_BACKUP_AGE_IDENTITY_FILE="/secret/identity.txt",
+        ):
+            data = _collect(verbose=True)
+        assert "identity" not in data["details"]["backups"]
+        assert "/secret/identity.txt" not in json.dumps(data)
+
     @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.customer": ["email", "origin"]})
     def test_pii_masking_counts_fields(self):
         data = _collect(verbose=True)
@@ -201,6 +234,29 @@ class TestSso:
         data = _collect(verbose=True)
         assert data["sso"] is True
         assert "provider" in data["details"]["sso"]
+
+
+class TestProfile:
+    """SNAPADMIN_PROFILE adoption (#SIMPL1g) — "on" means set at all, even to "full"."""
+
+    def test_off_when_not_set(self, monkeypatch):
+        from django.conf import settings as django_settings
+        monkeypatch.delattr(django_settings, "SNAPADMIN_PROFILE", raising=False)
+        assert _collect()["profile"] is False
+
+    def test_on_when_the_demo_s_own_full_default_is_active(self):
+        # The demo project's own settings.py sets SNAPADMIN_PROFILE = "full"
+        # (a documented no-op, kept to dogfood the setting) — the ambient
+        # test settings already exercise this path with no override needed.
+        data = _collect(verbose=True)
+        assert data["profile"] is True
+        assert data["details"]["profile"] == "full"
+
+    @override_settings(SNAPADMIN_PROFILE="admin")
+    def test_detail_names_the_active_profile(self):
+        data = _collect(verbose=True)
+        assert data["profile"] is True
+        assert data["details"]["profile"] == "admin"
 
 
 class TestVerboseAndDetails:

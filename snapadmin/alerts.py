@@ -49,12 +49,12 @@ from urllib import request as urllib_request
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from django.conf import settings
 from django.core.cache import cache
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.utils import timezone
 
+from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -400,7 +400,7 @@ class AlertDeliveryError(Exception):
 
 def _webhook_entries() -> list[Mapping[str, Any]]:
     """The raw ``SNAPADMIN_ALERT_WEBHOOKS`` entries, tolerating a bad setting."""
-    configured = getattr(settings, "SNAPADMIN_ALERT_WEBHOOKS", None) or []
+    configured = get_setting("SNAPADMIN_ALERT_WEBHOOKS", None) or []
     if isinstance(configured, (str, bytes, Mapping)) or not isinstance(configured, Iterable):
         logger.warning("alert_webhooks_setting_invalid", type=type(configured).__name__)
         return []
@@ -410,8 +410,8 @@ def _webhook_entries() -> list[Mapping[str, Any]]:
 def _default_timeout() -> float:
     """``SNAPADMIN_ALERT_WEBHOOK_TIMEOUT``, falling back to the 5s default."""
     try:
-        return float(getattr(settings, "SNAPADMIN_ALERT_WEBHOOK_TIMEOUT",
-                             DEFAULT_WEBHOOK_TIMEOUT_SECONDS))
+        return float(get_setting("SNAPADMIN_ALERT_WEBHOOK_TIMEOUT",
+                                  DEFAULT_WEBHOOK_TIMEOUT_SECONDS))
     except (TypeError, ValueError):
         logger.warning("alert_webhook_timeout_invalid")
         return DEFAULT_WEBHOOK_TIMEOUT_SECONDS
@@ -494,7 +494,7 @@ def build_channels(
     installs that want chat delivery only.
     """
     channels: list[AlertChannel] = []
-    email_enabled = bool(getattr(settings, "SNAPADMIN_ALERT_EMAIL_ENABLED", True))
+    email_enabled = bool(get_setting("SNAPADMIN_ALERT_EMAIL_ENABLED", True))
     if email_enabled and recipients:
         channels.append(EmailChannel(recipients=recipients, from_email=from_email))
     channels.extend(get_webhook_channels(kind=kind))

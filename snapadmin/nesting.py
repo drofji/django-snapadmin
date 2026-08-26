@@ -46,12 +46,12 @@ settings above is non-empty — stock single-app installs are untouched.
    :func:`snapadmin.checks.check_nesting_active_site`.
 """
 
-from django.conf import settings
+from snapadmin.conf import get_setting
 
 
 def get_nested_apps() -> dict:
     """``{source_app_label: target_app_label}`` — models moved into the target."""
-    return dict(getattr(settings, "SNAPADMIN_NESTED_APPS", None) or {})
+    return dict(get_setting("SNAPADMIN_NESTED_APPS", None) or {})
 
 
 def get_hidden_apps() -> set:
@@ -60,12 +60,12 @@ def get_hidden_apps() -> set:
     Cosmetic only — see the module warning above. This does not restrict
     access to the hidden app's models; use Django's permission system for that.
     """
-    return set(getattr(settings, "SNAPADMIN_HIDDEN_APPS", None) or [])
+    return set(get_setting("SNAPADMIN_HIDDEN_APPS", None) or [])
 
 
 def get_app_label_overrides() -> dict:
     """``{app_label: "Display Name"}`` — rename a group's heading."""
-    return dict(getattr(settings, "SNAPADMIN_APP_LABELS", None) or {})
+    return dict(get_setting("SNAPADMIN_APP_LABELS", None) or {})
 
 
 def nesting_configured() -> bool:

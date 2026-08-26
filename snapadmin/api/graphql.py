@@ -14,12 +14,12 @@ import graphene
 from graphene_django import DjangoObjectType
 from graphene_django.views import GraphQLView
 from django.apps import apps
-from django.conf import settings
 from django.db.models import Model, QuerySet
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 from graphql import GraphQLError, GraphQLResolveInfo
 
+from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
 from snapadmin.masking import get_masked_fields, mask_field, user_can_view_pii
 from snapadmin.models import EsStorageMode
@@ -37,7 +37,7 @@ def _check_access(info, model) -> None:
     applies on top. Disable with ``SNAPADMIN_GRAPHQL_REQUIRE_AUTH = False``
     (not recommended — it exposes every SnapModel to anonymous callers).
     """
-    if not getattr(settings, "SNAPADMIN_GRAPHQL_REQUIRE_AUTH", True):
+    if not get_setting("SNAPADMIN_GRAPHQL_REQUIRE_AUTH", True):
         return
 
     request = info.context

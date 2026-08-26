@@ -23,6 +23,7 @@ from django.apps import apps
 from django.conf import settings
 from django.db.models import Model
 
+from snapadmin.conf import get_setting
 from snapadmin.diagnostics.registry import register
 from snapadmin.registry import get_model_meta, is_registered
 
@@ -71,12 +72,39 @@ def _sso() -> tuple[bool, str]:
     return bool(providers), _count(len(providers), "provider")
 
 
+def _profile() -> tuple[bool, str]:
+    """``SNAPADMIN_PROFILE`` adoption (#SIMPL1g) — "on" means a project chose to
+    set it at all, even to "full", not that a non-default profile is active.
+
+    Reads the setting directly rather than through :func:`~snapadmin.conf.get_setting`:
+    this *is* the profile mechanism being reported on, not a setting a profile
+    resolves.
+    """
+    profile = getattr(settings, "SNAPADMIN_PROFILE", None)
+    return profile is not None, profile or ""
+
+
 def _masking_detail(masked_fields: int, ruled_fields: int) -> str:
     """``"3 fields"``, or ``"3 fields, 2 rules"`` when rules are configured."""
     detail = _count(masked_fields, "field")
     if not ruled_fields:
         return detail
     return f"{detail}, {_count(ruled_fields, 'rule')}"
+
+
+def _backup_detail() -> str:
+    """``"db, encrypted"``, ``"db+media+env, encrypted"``, or ``"db"`` unencrypted.
+
+    Reports what a run actually bundles (SNAPADMIN_BACKUP_INCLUDE) and
+    whether AGE encryption is configured — never the identity, only the
+    boolean and the recipient count, both safe to print.
+    """
+    include = list(get_setting("SNAPADMIN_BACKUP_INCLUDE", None) or ["db"])
+    recipients = list(get_setting("SNAPADMIN_BACKUP_AGE_RECIPIENTS", None) or [])
+    parts = "+".join(include)
+    if not recipients:
+        return parts
+    return f"{parts}, encrypted ({_count(len(recipients), 'recipient')})"
 
 
 def _capabilities() -> list[tuple[str, bool, str]]:
@@ -87,8 +115,8 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     # A field can be declared sensitive by either setting; count the union, and
     # report how many of them carry an explicit rule (iterating a rules dict
     # yields its field names, so both shapes fold in the same way).
-    masked = getattr(settings, "SNAPADMIN_MASKED_FIELDS", {}) or {}
-    rules = getattr(settings, "SNAPADMIN_MASKING_RULES", {}) or {}
+    masked = get_setting("SNAPADMIN_MASKED_FIELDS", {}) or {}
+    rules = get_setting("SNAPADMIN_MASKING_RULES", {}) or {}
     by_model: dict[str, set[str]] = {}
     for source in (masked, rules):
         for key, fields in source.items():
@@ -97,10 +125,10 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     ruled_fields = sum(len(rule or {}) for rule in rules.values())
     es_enabled = _flag("ELASTICSEARCH_ENABLED", False)
     es_models = sum(1 for m in models if get_model_meta(m, "es_index_enabled", False))
-    recipients = list(getattr(settings, "SNAPADMIN_HEALTH_ALERT_EMAILS", []) or
-                      getattr(settings, "SNAPADMIN_ERROR_ALERT_EMAILS", []))
-    throttled = bool(getattr(settings, "SNAPADMIN_THROTTLE_ANON", None) or
-                     getattr(settings, "SNAPADMIN_THROTTLE_USER", None))
+    recipients = list(get_setting("SNAPADMIN_HEALTH_ALERT_EMAILS", []) or
+                      get_setting("SNAPADMIN_ERROR_ALERT_EMAILS", []))
+    throttled = bool(get_setting("SNAPADMIN_THROTTLE_ANON", None) or
+                     get_setting("SNAPADMIN_THROTTLE_USER", None))
     read_only = sum(1 for m in models if get_model_meta(m, "api_read_only", False))
     write_allowlist = sum(1 for m in models if get_model_meta(m, "api_write_fields", None) is not None)
     # Registered plain models (@snap_model) carry none of SnapModel's machinery:
@@ -110,11 +138,11 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     decorated = sum(1 for m in models if not hasattr(m, "register_admin"))
 
     return [
-        ("rest_api", _flag("SNAPADMIN_REST_API_ENABLED", True), ""),
-        ("graphql", _flag("SNAPADMIN_GRAPHQL_ENABLED", True), ""),
-        ("audit_trail", _flag("SNAPADMIN_AUDIT_LOG_ENABLED", True), ""),
-        ("error_monitoring", _flag("SNAPADMIN_ERROR_MONITOR_ENABLED", True), ""),
-        ("backups", _flag("SNAPADMIN_BACKUP_ENABLED", False), ""),
+        ("rest_api", bool(get_setting("SNAPADMIN_REST_API_ENABLED", True)), ""),
+        ("graphql", bool(get_setting("SNAPADMIN_GRAPHQL_ENABLED", True)), ""),
+        ("audit_trail", bool(get_setting("SNAPADMIN_AUDIT_LOG_ENABLED", True)), ""),
+        ("error_monitoring", bool(get_setting("SNAPADMIN_ERROR_MONITOR_ENABLED", True)), ""),
+        ("backups", bool(get_setting("SNAPADMIN_BACKUP_ENABLED", False)), _backup_detail()),
         ("retention_purge", retention > 0, _count(retention, "model")),
         ("pii_masking", masked_fields > 0, _masking_detail(masked_fields, ruled_fields)),
         ("api_tokens", *_api_tokens()),
@@ -124,9 +152,10 @@ def _capabilities() -> list[tuple[str, bool, str]]:
         ("rate_limiting", throttled, ""),
         ("read_only_models", read_only > 0, _count(read_only, "model")),
         ("write_allowlist", write_allowlist > 0, _count(write_allowlist, "model")),
-        ("delete_guard", bool(getattr(settings, "SNAPADMIN_API_DELETE_GUARD", None)), ""),
+        ("delete_guard", bool(get_setting("SNAPADMIN_API_DELETE_GUARD", None)), ""),
         ("decorated_models", decorated > 0, _count(decorated, "plain model")),
         ("sso", *_sso()),
+        ("profile", *_profile()),
     ]
 
 

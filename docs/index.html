@@ -289,6 +289,7 @@
       <li><a href="#optimizations">Optimizations Guide</a></li>
       <li><a href="#celery">Celery &amp; Periodic Tasks</a></li>
       <li><a href="#backups">3-2-1 Backups</a></li>
+      <li><a href="#restore">Restoring a Backup</a></li>
       <li><a href="#error-monitoring">Error Monitoring</a></li>
       <li><a href="#logging">Structured Logging</a></li>
       <li><a href="#gdpr">GDPR / Data Retention</a></li>
@@ -624,7 +625,7 @@ snapadmin-init --json             # machine-readable, for your own tooling</code
       <tr><td>Backups enabled, <strong>at least two destinations</strong> (the 3-2-1 rule)</td><td>One destination is one point of failure away from zero backups</td><td><code>snapadmin_info --section features</code> → <code>backups</code> · see <a href="#backups">3-2-1 Backups</a></td></tr>
       <tr><td>Retention set (<code>SNAPADMIN_BACKUP_KEEP</code>)</td><td>Unbounded retention quietly fills a disk; no retention loses history</td><td>Check the setting is present — see <a href="#backups">3-2-1 Backups</a></td></tr>
       <tr><td>Backup encryption configured <strong>(strongly recommended)</strong></td><td>Encryption is optional — you can run backups without it. We strongly recommend turning it on: an unencrypted dump on a rented offsite server is your whole database in someone else's hands. It costs one setting.</td><td><code>snapadmin_info --section features</code> → <code>backups</code> shows <code>encrypted (N recipient)</code> · see <a href="#backup-encryption">Encrypting backups</a></td></tr>
-      <tr><td><strong>Have you actually run a restore?</strong></td><td>An untested backup is the most common form of not having a backup</td><td>No automated command yet — restore a recent dump to a scratch database by hand and confirm the data matches. <code>snapadmin-init</code> flags this row as "not checked" rather than pretending it verified anything.</td></tr>
+      <tr><td><strong>Have you actually run a restore?</strong></td><td>An untested backup is the most common form of not having a backup</td><td><code>python manage.py snapadmin_restore &lt;bundle&gt; --confirm</code> against a recent dump and confirm the data matches — see <a href="#restore">Restoring a backup</a>. <code>snapadmin-init</code> flags this row as "not checked" rather than pretending it verified anything.</td></tr>
     </tbody>
   </table>
 
@@ -2364,15 +2365,85 @@ SNAPADMIN_BACKUP_ENV_FILE = "/etc/snapadmin/project.env"</code></pre>
   <strong>skipped with a warning</strong>, not an aborted backup — a broken thumbnail must not cost you
   the database. The manifest lists snapadmin/Django versions, the DB engine, every part actually
   produced with its ciphertext checksum (so a truncated upload is caught before any decrypt attempt is
-  made), and the full recipient list. <strong>A dedicated restore command is not shipped yet</strong> —
-  until it lands, restoring means decrypting a part by hand (<code>age -d -i identity.txt
-  snapadmin-db-*.sql.gz.age | gunzip | psql …</code>) and verifying the manifest's checksums yourself.
-  See the <a href="#integration-checklist">integration checklist</a>'s "have you run a restore?" row.</p>
+  made), the full recipient list, and a ready-to-paste <code>snapadmin_restore</code> command — see
+  <a href="#restore">Restoring a backup</a>.</p>
 
   <p>Retention (<code>SNAPADMIN_BACKUP_KEEP</code>) applies <strong>per part</strong>: a run that
   includes media keeps its own newest <code>N</code> media bundles independently of the database
   dump's own <code>N</code>, so opting into media never starves the database backup's retention
   headroom.</p>
+
+  <!-- ── Restore ───────────────────────────────────────────────────────────── -->
+  <h2 id="restore">↩️ Restoring a Backup</h2>
+  <div class="callout callout-warn">
+    <strong>Backups nobody has restored are not backups.</strong> Test a restore before you need one —
+    the <a href="#integration-checklist">integration checklist</a>'s "have you run a restore?" row
+    exists for exactly this reason.
+  </div>
+  <p><code>manage.py snapadmin_restore</code> restores a bundle <code>snapadmin_db_backup</code>
+  produced. <strong>Dry-run is the default</strong> — without <code>--confirm</code> it prints exactly
+  what would happen (which parts, which database, whether the <code>.env</code> file would be
+  overwritten) and changes nothing:</p>
+  <pre><code># See what backups are available (a local path, or from a configured destination):
+python manage.py snapadmin_restore --list
+python manage.py snapadmin_restore --list --destination sftp
+
+# Plan only — prints what would happen, touches nothing:
+python manage.py snapadmin_restore snapadmin-manifest-20260826-020000.json
+
+# Pull straight from a destination and restore only the database:
+python manage.py snapadmin_restore sftp:snapadmin-manifest-20260826-020000.json \
+    --only db --identity /etc/snapadmin/age-identity.txt --confirm</code></pre>
+
+  <p>Before touching anything, the manifest's per-part checksum is verified against the fetched
+  ciphertext — a truncated or corrupted upload is refused rather than half-restored. An encrypted
+  bundle restored with no <code>--identity</code> prints exactly how many recipients it needs and
+  their fingerprints, instead of failing on an opaque parse error.</p>
+
+  <table>
+    <tr><th>Flag</th><th>Meaning</th></tr>
+    <tr><td><code>--only db,media,env</code></td><td>Restore only these parts (comma-separated)</td></tr>
+    <tr><td><code>--skip media</code></td><td>Restore everything selected except these parts</td></tr>
+    <tr><td><code>--identity PATH</code></td><td>Path to the AGE identity (private key) file, for an encrypted bundle</td></tr>
+    <tr><td><code>--confirm</code></td><td>Actually perform the restore (default: plan only)</td></tr>
+    <tr><td><code>--no-snapshot</code></td><td>Skip the automatic pre-restore snapshot — prints a loud warning</td></tr>
+  </table>
+
+  <div class="callout callout-warn">
+    <strong><code>env</code> is never restored by a bare <code>--confirm</code>.</strong> It overwrites
+    your project's secrets, so it must be named explicitly: <code>--only env</code> or
+    <code>--only db,env</code>. A restore that only names <code>db</code>/<code>media</code> never
+    touches your <code>.env</code> file.
+  </div>
+
+  <p>Restoring <code>db</code> is <strong>not live-safe</strong>: existing connections are terminated
+  and, for PostgreSQL, the database is dropped and recreated before the dump loads. Run it in a
+  maintenance window. SQLite is a straight file replace after closing the connection.</p>
+
+  <h3 id="restore-rollback">The pre-restore safety net: <code>snapadmin_rollback</code></h3>
+  <p>Before a <code>--confirm</code>ed restore touches anything, it automatically snapshots the
+  <strong>current</strong> live state of every part it is about to overwrite — the same parts, encrypted
+  the same way a real backup would be — into <code>SNAPADMIN_RESTORE_SNAPSHOT_DIR</code> (default: a
+  <code>rollback/</code> subdirectory of the local backup directory), and prints the snapshot id
+  prominently before proceeding. <strong>If the snapshot itself fails, the restore is aborted</strong> —
+  never on a best-effort basis.</p>
+  <pre><code># List available snapshots:
+python manage.py snapadmin_rollback --list
+
+# Roll back to the most recent one (dry-run by default, same --confirm):
+python manage.py snapadmin_rollback --confirm
+
+# Roll back to a specific one:
+python manage.py snapadmin_rollback 20260826-020000 --identity /etc/snapadmin/age-identity.txt --confirm</code></pre>
+  <p>Snapshots have their own retention, <code>SNAPADMIN_RESTORE_SNAPSHOT_KEEP</code> (default 3) —
+  separate from <code>SNAPADMIN_BACKUP_KEEP</code>, since these are short-lived safety nets, not
+  backups, and must not compete with the real retention policy for disk. <code>--no-snapshot</code>
+  exists for the operator who knows better and prints a loud warning when used.</p>
+  <div class="callout callout-info">
+    <strong>A snapshot is only as good as the disk it lives on.</strong> It protects against a bad
+    restore, not against losing the server entirely — it is not a substitute for the encrypted
+    offsite copy a real backup destination provides.
+  </div>
 
   <!-- ── Error Monitoring ──────────────────────────────────────────────────── -->
   <h2 id="error-monitoring">🚨 Error Monitoring &amp; Alerts</h2>
@@ -3255,6 +3326,8 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset, same as
     <tr><td><code>SNAPADMIN_BACKUP_MEDIA_EXCLUDE</code></td><td><code>[]</code></td><td>Glob patterns, relative to <code>MEDIA_ROOT</code>, excluded from the media bundle</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_ENV_FILE</code></td><td>—</td><td>Path to the <code>.env</code> file backed up when <code>env</code> is in <code>SNAPADMIN_BACKUP_INCLUDE</code></td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_MEDIA_SIZE_WARNING_BYTES</code></td><td><code>10 GiB</code></td><td>Past this size, the media backup logs a warning — never aborts</td></tr>
+    <tr><td><code>SNAPADMIN_RESTORE_SNAPSHOT_DIR</code></td><td><code>&lt;local dir&gt;/rollback</code></td><td>Where <code>snapadmin_restore --confirm</code>'s automatic pre-restore snapshots are stored (see <a href="#restore-rollback">The pre-restore safety net</a>)</td></tr>
+    <tr><td><code>SNAPADMIN_RESTORE_SNAPSHOT_KEEP</code></td><td><code>3</code></td><td>How many pre-restore snapshots to keep (oldest pruned first) — separate from <code>SNAPADMIN_BACKUP_KEEP</code></td></tr>
   </table>
 
   <div class="callout callout-warn">
@@ -3826,7 +3899,7 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
     no JavaScript. It states what SnapAdmin is, carries the three-step quickstart, lists the facts an
     assistant should not have to infer — snap-only field kwargs add no migration, import paths are the
     public contract, the Unfold theme is optional, misconfiguration surfaces as
-    <code>snapadmin.W001</code>–<code>W009</code> and <code>snapadmin.E001</code>–<code>E006</code> —
+    <code>snapadmin.W001</code>–<code>W009</code> and <code>snapadmin.E001</code>–<code>E007</code> —
     and then links every section of this page with a
     line describing what it covers.
   </p>

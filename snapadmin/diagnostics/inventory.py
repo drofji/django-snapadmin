@@ -12,10 +12,10 @@ database is unreachable they are simply omitted rather than failing the whole re
 from __future__ import annotations
 
 from django.apps import apps
-from django.conf import settings
 from django.db.models import Q
 from django.utils import timezone
 
+from snapadmin.conf import get_setting
 from snapadmin.diagnostics.registry import register
 from snapadmin.models import EsStorageMode
 from snapadmin.registry import get_model_meta, is_registered
@@ -96,7 +96,7 @@ def _token_counts() -> dict:
 @register("inventory", title="Models & Security", icon="📊", order=50)
 def collect(*, verbose: bool) -> dict:
     """Collect the models & security section."""
-    masked = set(getattr(settings, "SNAPADMIN_MASKED_FIELDS", []) or [])
+    masked = set(get_setting("SNAPADMIN_MASKED_FIELDS", []) or [])
     items = _model_items(masked)
     data: dict = {
         "models": {"total": len(items), "items": items},

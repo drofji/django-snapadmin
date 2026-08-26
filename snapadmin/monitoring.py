@@ -45,6 +45,7 @@ from django.http import HttpRequest
 from django.utils import timezone
 
 from snapadmin import alerts
+from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -75,22 +76,22 @@ class ErrorMonitorConfig:
 
 def get_config() -> ErrorMonitorConfig:
     """Read the SNAPADMIN_ERROR_* settings, applying documented defaults."""
-    alert_emails = list(getattr(settings, "SNAPADMIN_ERROR_ALERT_EMAILS", []))
-    digest_emails = list(getattr(settings, "SNAPADMIN_ERROR_DIGEST_EMAILS", [])) or alert_emails
-    window = int(getattr(settings, "SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES", 15))
+    alert_emails = list(get_setting("SNAPADMIN_ERROR_ALERT_EMAILS", []))
+    digest_emails = list(get_setting("SNAPADMIN_ERROR_DIGEST_EMAILS", [])) or alert_emails
+    window = int(get_setting("SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES", 15))
     return ErrorMonitorConfig(
-        enabled=bool(getattr(settings, "SNAPADMIN_ERROR_MONITOR_ENABLED", True)),
-        alert_enabled=bool(getattr(settings, "SNAPADMIN_ERROR_ALERT_ENABLED", True)),
-        alert_threshold=int(getattr(settings, "SNAPADMIN_ERROR_ALERT_THRESHOLD", 20)),
+        enabled=bool(get_setting("SNAPADMIN_ERROR_MONITOR_ENABLED", True)),
+        alert_enabled=bool(get_setting("SNAPADMIN_ERROR_ALERT_ENABLED", True)),
+        alert_threshold=int(get_setting("SNAPADMIN_ERROR_ALERT_THRESHOLD", 20)),
         alert_window_minutes=window,
         alert_cooldown_minutes=int(
-            getattr(settings, "SNAPADMIN_ERROR_ALERT_COOLDOWN_MINUTES", window)
+            get_setting("SNAPADMIN_ERROR_ALERT_COOLDOWN_MINUTES", window)
         ),
         alert_emails=alert_emails,
-        digest_enabled=bool(getattr(settings, "SNAPADMIN_ERROR_DIGEST_ENABLED", True)),
+        digest_enabled=bool(get_setting("SNAPADMIN_ERROR_DIGEST_ENABLED", True)),
         digest_emails=digest_emails,
-        digest_max_groups=int(getattr(settings, "SNAPADMIN_ERROR_DIGEST_MAX_GROUPS", 20)),
-        retention_days=int(getattr(settings, "SNAPADMIN_ERROR_RETENTION_DAYS", 30)),
+        digest_max_groups=int(get_setting("SNAPADMIN_ERROR_DIGEST_MAX_GROUPS", 20)),
+        retention_days=int(get_setting("SNAPADMIN_ERROR_RETENTION_DAYS", 30)),
         from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
     )
 

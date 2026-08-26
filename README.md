@@ -73,7 +73,7 @@ check, never a false green):
 | Migrations applied | `manage.py migrate --check` |
 | Auth on the API, PII masked where it matters | `snapadmin_info --section features` |
 | Backups on, **2+ destinations**, encryption (**strongly recommended**) | `snapadmin_info --section features` |
-| Have you actually run a restore? | An untested backup is the most common form of not having one |
+| Have you actually run a restore? | `snapadmin_restore <bundle> --confirm` against a recent dump — an untested backup is the most common form of not having one |
 
 → [Full checklist](https://drofji.github.io/django-snapadmin/#integration-checklist) — Must work /
 Should be configured / Data safety / Optional, with a "why it matters" column.
@@ -320,7 +320,7 @@ The questions a tech lead or a manager asks before approving a dependency:
 | **Will it survive our load?** | Read-replica routing, estimated counts, paging caps, streaming exports. [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) |
 | **Single sign-on?** | [SSO / OAuth2 login helper](https://drofji.github.io/django-snapadmin/#enterprise-config); auth is pluggable — JWT, session, or your own |
 | **How do we know it is up?** | Health probes, error-spike alerts and daily digests to email, Slack, Discord, Teams or Telegram. `snapadmin-info --health-check` exits non-zero for your monitoring |
-| **Backups?** | [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, offsite over FTPS/SFTP, optionally **AGE-encrypted** in-stream so a compromised destination never sees plaintext. `SNAPADMIN_BACKUP_INCLUDE` optionally bundles media and an encrypted `.env` alongside the database, with a checksummed manifest. A dedicated restore command is on the roadmap — see the [integration checklist](https://drofji.github.io/django-snapadmin/#integration-checklist)'s "have you run a restore?" row |
+| **Backups?** | [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, offsite over FTPS/SFTP, optionally **AGE-encrypted** in-stream so a compromised destination never sees plaintext. `SNAPADMIN_BACKUP_INCLUDE` optionally bundles media and an encrypted `.env` alongside the database, with a checksummed manifest and a [restore command](https://drofji.github.io/django-snapadmin/#restore) — dry-run by default, with an automatic pre-restore snapshot and a matching [rollback command](https://drofji.github.io/django-snapadmin/#restore-rollback) |
 | **Are we locked in?** | No. It is ordinary Django underneath — models, `ModelAdmin`, DRF viewsets. Override any piece, or stop using the generated ones. Your models need not even inherit from ours: [`@snap_model`](https://drofji.github.io/django-snapadmin/#snap-model-decorator) opts a plain `models.Model` in from the outside |
 
 ---
@@ -486,7 +486,7 @@ Don't want to decide all ~90 of them? `SNAPADMIN_PROFILE = "admin"` (or `"api"` 
 sane defaults for the handful that actually matter — an explicit setting always overrides it.
 
 Misconfiguration shows up **at startup** as a Django system check (`snapadmin.W001`–`W009`,
-`E001`–`E006`), not as a mystery at request time.
+`E001`–`E007`), not as a mystery at request time.
 
 → [Every setting, with defaults](https://drofji.github.io/django-snapadmin/#env-vars) ·
 [SNAPADMIN_PROFILE presets](https://drofji.github.io/django-snapadmin/#profiles)

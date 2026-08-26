@@ -14,7 +14,6 @@ the lookup set for one of its own fields via ``SnapModel.api_filter_lookups``.
 """
 
 import django_filters
-from django.conf import settings
 from django.db import connections, models as django_models
 from django.db.models import Q, QuerySet
 from django.utils.module_loading import import_string
@@ -23,6 +22,7 @@ from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.exceptions import ValidationError
 from rest_framework.filters import BaseFilterBackend, OrderingFilter, SearchFilter
 
+from snapadmin.conf import get_setting
 from snapadmin.masking import get_masked_fields, user_can_view_pii
 from snapadmin.registry import get_model_meta
 
@@ -144,7 +144,7 @@ class JsonKeyPathFilter(django_filters.CharFilter):
 
     def _scan_cap(self) -> int:
         return (
-            getattr(settings, "SNAPADMIN_API_JSON_FILTER_SCAN_CAP", None)
+            get_setting("SNAPADMIN_API_JSON_FILTER_SCAN_CAP", None)
             or _JSON_FILTER_SCAN_CAP_DEFAULT
         )
 
@@ -202,7 +202,7 @@ def _resolve_text_lookups(
     model_default = get_model_meta(model_class, "api_default_text_lookups", None)
     if model_default is not None:
         return model_default
-    project_default = getattr(settings, "SNAPADMIN_API_TEXT_LOOKUPS", None)
+    project_default = get_setting("SNAPADMIN_API_TEXT_LOOKUPS", None)
     if project_default is not None:
         return project_default
     return _TEXT_LOOKUPS_DEFAULT
@@ -376,7 +376,7 @@ def get_api_filter_backends() -> list[type[BaseFilterBackend]]:
     String entries are imported with :func:`~django.utils.module_loading.import_string`;
     a class object is used as-is.
     """
-    configured = getattr(settings, "SNAPADMIN_API_FILTER_BACKEND", None)
+    configured = get_setting("SNAPADMIN_API_FILTER_BACKEND", None)
     if configured is None:
         return [SnapAdminFilterBackend, SearchFilter, OrderingFilter]
     if isinstance(configured, (str, type)):

@@ -118,7 +118,23 @@ Operations
         (``SNAPADMIN_MASKING_RULES``) — ``mask_field()`` is the choke point
         every masking surface goes through.
     ``snapadmin.backup``
-        3-2-1 backups (local / network / SFTP / FTP).
+        3-2-1 backups (local / network / SFTP / FTP). ``SNAPADMIN_BACKUP_INCLUDE``
+        (default ``["db"]``) optionally bundles ``media`` and an AGE-encrypted
+        ``env`` alongside the database — loose per-part files sharing one run's
+        timestamp, plus an always-unencrypted ``manifest.json`` sidecar.
+        Retention (``SNAPADMIN_BACKUP_KEEP``) applies per part.
+    ``snapadmin.restore``
+        Restoring a bundle ``snapadmin.backup`` produced — fetch from any
+        configured destination, verify the manifest's per-part checksum,
+        decrypt, then apply to the live database/media/``.env``. Backs
+        ``manage.py snapadmin_restore``, which is dry-run by default.
+    ``snapadmin.snapshot``
+        The pre-restore safety net: ``snapadmin_restore --confirm`` snapshots
+        the current live state of every part it is about to overwrite before
+        touching anything (``SNAPADMIN_RESTORE_SNAPSHOT_DIR``,
+        ``SNAPADMIN_RESTORE_SNAPSHOT_KEEP`` — its own short-lived retention,
+        separate from ``SNAPADMIN_BACKUP_KEEP``). Backs
+        ``manage.py snapadmin_rollback``.
     ``snapadmin.monitoring`` · ``snapadmin.health`` · ``snapadmin.alerts`` ·
     ``snapadmin.logging_config``
         Error capture and digests, health checks, structlog wiring. ``alerts``
@@ -143,11 +159,26 @@ Operations
         setting, then this ``default`` argument — so both ways of declaring a
         model read identically. ``register()`` / ``meta_for()`` complete the
         surface.
+    ``snapadmin.conf``
+        The single accessor for every ``SNAPADMIN_*`` setting:
+        ``get_setting(name, default)`` resolves an explicit Django setting,
+        then the active ``SNAPADMIN_PROFILE`` preset (``admin`` / ``api`` /
+        ``full``), then the built-in default — collapsing "99 settings to
+        configure" to one line for a new project without changing behaviour
+        for an install that already sets things explicitly.
     ``snapadmin.checks``
-        Django system checks — warnings ``snapadmin.W001``…``W007`` and errors
-        ``snapadmin.E001``…``E005`` catch misconfiguration at startup, so read
+        Django system checks — warnings ``snapadmin.W001``…``W009`` and errors
+        ``snapadmin.E001``…``E007`` catch misconfiguration at startup, so read
         them before debugging behaviour. The masking checks are *errors* because
         a mistyped rule fails open: it masks nothing and says nothing.
+        ``E007`` is the backup ``.env``-without-encryption refusal: ``env`` in
+        ``SNAPADMIN_BACKUP_INCLUDE`` with no ``SNAPADMIN_BACKUP_AGE_RECIPIENTS``
+        configured fails closed rather than shipping plaintext secrets.
+    ``snapadmin.crypto``
+        Streaming AGE encryption for backup artefacts — two backends
+        (``pyrage``, the optional ``[age]`` extra; or the ``age`` command-line
+        tool) behind one ``encrypt_stream``/``decrypt_stream`` interface. Used
+        by ``snapadmin.backup`` when ``SNAPADMIN_BACKUP_AGE_RECIPIENTS`` is set.
     ``snapadmin.theme_i18n``
         Catalog entries for the Unfold theme's own interface strings, which
         ``django-unfold`` ships untranslated — without them a themed admin renders
@@ -176,10 +207,12 @@ Tooling
 Management commands
     ``snapadmin_info``, ``snapadmin_license_check``, ``snapadmin_reindex``,
     ``snapadmin_audit_export``, ``snapadmin_health_alert``, ``snapadmin_db_backup``,
-    ``snapadmin_purge_expired_data``, ``snapadmin_send_error_digest``. The last
-    three were once unprefixed (``db_backup``, ``purge_expired_data``,
+    ``snapadmin_purge_expired_data``, ``snapadmin_send_error_digest``,
+    ``snapadmin_restore``, ``snapadmin_rollback``. The three GDPR/error-digest ones
+    were once unprefixed (``db_backup``, ``purge_expired_data``,
     ``send_error_digest``); those names still work as deprecated aliases that print
-    a rename notice.
+    a rename notice. ``snapadmin_restore``/``snapadmin_rollback`` are dry-run by
+    default — pass ``--confirm`` to actually restore or roll back.
 
 Settings
 --------
@@ -187,7 +220,8 @@ Everything is namespaced ``SNAPADMIN_*`` and every feature is off-by-default
 unless noted. The families: ``SNAPADMIN_REST_API_*`` / ``SNAPADMIN_API_*``
 (REST surface, throttling, pagination, guards), ``SNAPADMIN_GRAPHQL_*``,
 ``SNAPADMIN_SWAGGER_ENABLED``, ``SNAPADMIN_ES_*`` (Elasticsearch routing and
-fallback), ``SNAPADMIN_BACKUP_*``, ``SNAPADMIN_ERROR_*`` and
+fallback), ``SNAPADMIN_BACKUP_*``, ``SNAPADMIN_RESTORE_SNAPSHOT_*``
+(the pre-restore safety net), ``SNAPADMIN_ERROR_*`` and
 ``SNAPADMIN_HEALTH_ALERT_*`` / ``SNAPADMIN_ALERT_*`` (monitoring and alert
 delivery), ``SNAPADMIN_AUDIT_*`` and
 ``SNAPADMIN_MASKED_FIELDS`` / ``SNAPADMIN_MASKING_RULES`` (audit and PII),
@@ -203,6 +237,7 @@ Optional extras
 The base install carries only permissive licences (MIT/BSD/Apache) and is safe
 for commercial use. ``pip install django-snapadmin[<extra>]``:
 ``theme`` (Unfold UI), ``elasticsearch``, ``celery``, ``backup`` (SFTP),
+``age`` (pyrage, for encrypted backups — ``SNAPADMIN_BACKUP_AGE_RECIPIENTS``),
 ``extra-settings``, ``wysiwyg`` (CKEditor 5 — GPL/commercial, hence optional),
 ``autocomplete-filter``, ``xlsx`` (openpyxl, for ``export_format="xlsx"``), or
 ``all``. Each is imported lazily and raises a pointed ``ImproperlyConfigured``

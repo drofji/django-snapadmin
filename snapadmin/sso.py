@@ -28,7 +28,8 @@ button that goes nowhere is worse than no button. Entries with an unsafe
 from urllib.parse import urlparse
 
 import structlog
-from django.conf import settings
+
+from snapadmin.conf import get_setting
 
 logger = structlog.get_logger(__name__)
 
@@ -56,9 +57,9 @@ def get_sso_providers() -> list[dict]:
       point providers at external identity providers, so by default no host
       restriction applies.
     """
-    raw = getattr(settings, "SNAPADMIN_SSO_PROVIDERS", None) or {}
+    raw = get_setting("SNAPADMIN_SSO_PROVIDERS", None) or {}
     allowed_hosts = {
-        host.lower() for host in (getattr(settings, "SNAPADMIN_SSO_ALLOWED_HOSTS", None) or [])
+        host.lower() for host in (get_setting("SNAPADMIN_SSO_ALLOWED_HOSTS", None) or [])
     }
     providers: list[dict] = []
     for key, meta in raw.items():

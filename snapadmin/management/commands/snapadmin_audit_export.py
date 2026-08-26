@@ -141,10 +141,10 @@ class Command(BaseCommand):
 
     @staticmethod
     def _purge() -> int:
-        from django.conf import settings
+        from snapadmin.conf import get_setting
         from snapadmin.models import SnapadminAuditLog
 
-        days = int(getattr(settings, "SNAPADMIN_AUDIT_RETENTION_DAYS", 365))
+        days = int(get_setting("SNAPADMIN_AUDIT_RETENTION_DAYS", 365))
         if days <= 0:
             return 0
         from datetime import timedelta

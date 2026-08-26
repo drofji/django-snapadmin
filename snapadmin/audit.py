@@ -35,8 +35,7 @@ from __future__ import annotations
 import json
 from math import isfinite
 
-from django.conf import settings
-
+from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -49,7 +48,7 @@ DELETE = "delete"
 
 def audit_enabled() -> bool:
     """Whether administrative actions are recorded to the audit trail."""
-    return bool(getattr(settings, "SNAPADMIN_AUDIT_LOG_ENABLED", True))
+    return bool(get_setting("SNAPADMIN_AUDIT_LOG_ENABLED", True))
 
 
 def client_ip(request) -> str | None:

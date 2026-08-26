@@ -35,6 +35,7 @@ from django.core.cache import cache
 from django.utils import timezone
 
 from snapadmin import alerts
+from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -59,13 +60,13 @@ def get_health_config() -> HealthAlertConfig:
     already set up error alerting receives health alerts without configuring a
     second recipient list.
     """
-    emails = list(getattr(settings, "SNAPADMIN_HEALTH_ALERT_EMAILS", [])) or list(
-        getattr(settings, "SNAPADMIN_ERROR_ALERT_EMAILS", [])
+    emails = list(get_setting("SNAPADMIN_HEALTH_ALERT_EMAILS", [])) or list(
+        get_setting("SNAPADMIN_ERROR_ALERT_EMAILS", [])
     )
     return HealthAlertConfig(
-        enabled=bool(getattr(settings, "SNAPADMIN_HEALTH_ALERT_ENABLED", True)),
+        enabled=bool(get_setting("SNAPADMIN_HEALTH_ALERT_ENABLED", True)),
         emails=emails,
-        cooldown_minutes=int(getattr(settings, "SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES", 60)),
+        cooldown_minutes=int(get_setting("SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES", 60)),
         from_email=getattr(settings, "DEFAULT_FROM_EMAIL", None),
     )
 

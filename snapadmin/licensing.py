@@ -122,6 +122,7 @@ _CURATED: tuple[LicenseInfo, ...] = (
         "django-admin-autocomplete-filter", "LGPL-3.0", extra="autocomplete-filter", guidance=_LGPL_NOTE
     ),
     LicenseInfo("paramiko", "LGPL-2.1", extra="backup", guidance=_LGPL_NOTE),
+    LicenseInfo("pyrage", "MIT", extra="age"),
     LicenseInfo(
         "django-ckeditor-5",
         "GPL-2.0-or-later OR Commercial",

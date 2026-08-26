@@ -116,16 +116,25 @@ django-admin-autocomplete-filter = {version = ">=0.7.1", optional = true}
 # no reason to carry a spreadsheet writer. Imported lazily in snapadmin/exporting.py.
 openpyxl = {version = ">=3.1.0", optional = true}
 
+# Optional: AGE-encrypted backups (SNAPADMIN_BACKUP_AGE_RECIPIENTS). pyrage (MIT) is in-process
+# bindings over the Rust `age` crate — no OS package required, works identically on every
+# platform pip works on. An operator who would rather manage encryption through the OS package
+# manager can skip this extra entirely and set SNAPADMIN_BACKUP_AGE_BACKEND="binary" to use the
+# `age` command-line tool instead (e.g. `apt install age` on Debian 12+/Ubuntu 22.04+). Imported
+# lazily in snapadmin/crypto.py.
+pyrage = {version = ">=1.4.0", optional = true}
+
 [tool.poetry.extras]
 theme = ["django-unfold"]
 elasticsearch = ["elasticsearch"]
 celery = ["celery", "django-celery-beat", "django-celery-results"]
 backup = ["paramiko"]
+age = ["pyrage"]
 extra-settings = ["django-extra-settings"]
 wysiwyg = ["django-ckeditor-5"]
 autocomplete-filter = ["django-admin-autocomplete-filter"]
 xlsx = ["openpyxl"]
-all = ["django-unfold", "elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "django-extra-settings", "django-ckeditor-5", "django-admin-autocomplete-filter", "openpyxl"]
+all = ["django-unfold", "elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "pyrage", "django-extra-settings", "django-ckeditor-5", "django-admin-autocomplete-filter", "openpyxl"]
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.0.0"

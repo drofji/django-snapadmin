@@ -35,6 +35,14 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 - `SNAPADMIN_BACKUP_INCLUDE` bundles media and an encrypted `.env` alongside the database backup
   (default `["db"]`, opt-in). Every run now also writes an unencrypted `manifest.json` sidecar;
   retention (`SNAPADMIN_BACKUP_KEEP`) applies per part.
+- `manage.py snapadmin_restore` restores a backup bundle — dry-run by default, `--confirm` to
+  perform it. Verifies the manifest checksum before touching anything, supports `--only`/`--skip`
+  part selection, fetches straight from a configured destination (`<destination>:<name>`), and
+  prints exactly which identity an encrypted bundle needs.
+- `manage.py snapadmin_rollback` undoes a restore: `snapadmin_restore --confirm` automatically
+  snapshots the current live state before touching anything (aborting the restore if the snapshot
+  itself fails), and `snapadmin_rollback [<id>]` restores it back. Its own short retention
+  (`SNAPADMIN_RESTORE_SNAPSHOT_KEEP`, default 3) is separate from `SNAPADMIN_BACKUP_KEEP`.
 
 ### Security
 - `snap_field(field, wysiwyg=True)` now sanitizes on write, matching `SnapRichTextField` — closing

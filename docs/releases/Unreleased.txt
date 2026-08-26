@@ -99,6 +99,33 @@ Added
   part, so opting into media never starves the database dump's own retention headroom. See `Media
   and .env in the bundle <https://drofji.github.io/django-snapadmin/#backup-bundle>`_.
 
+* **A real restore command: ``manage.py snapadmin_restore``.** Backups nobody has restored are not
+  backups. ``<source>`` is a local manifest path or ``<destination>:<name>`` to pull straight from
+  any configured destination; ``--list`` enumerates what is available without downloading anything.
+  **Dry-run by default** — without ``--confirm`` it prints exactly what would happen (which parts,
+  which database, whether ``.env`` would be overwritten) and touches nothing. Every part's checksum
+  is verified against the manifest before anything is applied, so a truncated or corrupted upload is
+  refused rather than half-restored; an encrypted bundle restored with no ``--identity`` prints the
+  recipient count and fingerprints instead of failing on an opaque parse error. ``--only``/``--skip``
+  select parts (comma-separated ``db,media,env``); ``env`` is never restored by a bare ``--confirm``
+  — it must be named explicitly, since it overwrites secrets. Restoring ``db`` is not live-safe:
+  existing connections are terminated and, for PostgreSQL, the database is dropped and recreated
+  before the dump loads. See `Restoring a backup
+  <https://drofji.github.io/django-snapadmin/#restore>`_.
+
+* **An automatic pre-restore safety net: ``manage.py snapadmin_rollback``.** Before a
+  ``--confirm``ed restore touches anything, the current live state of every part it is about to
+  overwrite is automatically snapshotted (encrypted the same way a real backup would be) into
+  ``SNAPADMIN_RESTORE_SNAPSHOT_DIR`` (default: a ``rollback/`` subdirectory of the local backup
+  directory), with the snapshot id printed prominently. **If the snapshot itself fails, the restore
+  is aborted** rather than proceeding on a best-effort basis. ``snapadmin_rollback [<id>]`` restores
+  a snapshot — with no id, the most recent one, named in the output; also dry-run by default, with
+  the same ``--confirm``. Snapshots have their own short retention
+  (``SNAPADMIN_RESTORE_SNAPSHOT_KEEP``, default 3), separate from ``SNAPADMIN_BACKUP_KEEP``, so they
+  never compete with the real backup policy for disk. ``--no-snapshot`` exists for the operator who
+  knows better and prints a loud warning when used. See `The pre-restore safety net
+  <https://drofji.github.io/django-snapadmin/#restore-rollback>`_.
+
 Security
 --------
 

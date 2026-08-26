@@ -6,11 +6,11 @@ Custom DRF authentication backend for SnapAdmin API Tokens.
 
 import logging
 
-from django.conf import settings
 from django.contrib.auth.base_user import AbstractBaseUser
 from django.utils.module_loading import import_string
 from rest_framework import authentication, exceptions
 
+from snapadmin.conf import get_setting
 from snapadmin.models import APIToken, hash_token_key
 
 logger = logging.getLogger("snapadmin.api.auth")
@@ -32,7 +32,7 @@ def get_api_authentication_classes() -> list[type]:
     behaviour. With non-token schemes, model CRUD permissions fall back to
     plain Django model permissions (see ``TokenModelPermission``).
     """
-    configured = getattr(settings, "SNAPADMIN_API_AUTHENTICATION_CLASSES", None)
+    configured = get_setting("SNAPADMIN_API_AUTHENTICATION_CLASSES", None)
     if configured is None:
         return [APITokenAuthentication]
     return [

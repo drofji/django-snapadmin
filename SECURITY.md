@@ -115,6 +115,12 @@ Key protections:
   404s for any Django model that isn't declared as a `SnapModel` (e.g. `auth.User`), regardless of the
   caller's Django permissions — the generic API surface can never be used to read or write a model that
   wasn't intentionally opted in via `SnapModel`.
+- **`SNAPADMIN_PROFILE = "admin"` reduces exposed surface by default.** It turns REST, GraphQL,
+  Swagger and GraphiQL off — a smaller attack surface for a project that only serves the Django admin.
+  An explicit `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` still overrides it either way;
+  `manage.py check` warns (`snapadmin.W009`) when an explicit setting silently disagrees with the
+  active profile, so re-enabling a surface a profile turned off is never silent. See
+  [`SNAPADMIN_PROFILE` presets](https://drofji.github.io/django-snapadmin/#profiles).
 
 ### API tokens
 - Tokens are **hashed with SHA-256 at rest** — the raw key is shown **once** at creation and never
@@ -230,6 +236,66 @@ Key protections:
   retention via `SNAPADMIN_AUDIT_RETENTION_DAYS` and `snapadmin_audit_export` for SIEM ingestion.
 - **Backups** — 3-2-1 database backups with local/network/FTP(S)/SFTP targets; transport credentials
   come from `SNAPADMIN_BACKUP_*` settings/env, never hard-coded.
+- **Backup encryption (AGE)** — set `SNAPADMIN_BACKUP_AGE_RECIPIENTS` (one or more age/SSH public
+  keys) and every dump is encrypted **in-stream** — `pg_dump`/SQLite → gzip → age → the `.age`-suffixed
+  file — before a single byte reaches disk; no plaintext or plain-gzip artefact is ever written, not
+  even transiently, and a mid-pipeline failure leaves nothing behind rather than a partial/corrupt one.
+  With the setting empty (the default) nothing changes.
+  - **What this protects against:** a compromised or merely readable backup *destination* — a rented
+    FTP host, a Storage Box, anyone who can list your `local`/`network` directory. Without a matching
+    private key, the file is unreadable.
+  - **What this does *not* protect against:** a compromised application server. The server already
+    holds the live, unencrypted database — backup encryption adds nothing there; it protects the copy
+    once it leaves the machine that produced it.
+  - **Any one of N recipients decrypts alone** — age's multi-recipient property, not a shared secret:
+    encrypting to three keys means three people can each restore independently, with no re-encryption
+    needed to add or remove a reader from *future* backups.
+  - **Key rotation, stated plainly because it surprises people:** adding a recipient only affects
+    backups made *after* the change — it does not retroactively grant access to older bundles.
+    Removing a recipient is the same in reverse: an already-encrypted bundle stays decryptable by every
+    key it was originally encrypted to, forever, since decrypting it requires no new encryption step.
+    If a key is compromised, treat every backup already encrypted to it as compromised too, not just
+    future ones — re-encrypting past bundles to a fresh key set is a manual step, not automatic.
+  - **A private key (identity) never appears in a setting, in `snapadmin_info` output, or in a log
+    line** — only the recipient (public key) list and the identity **file path** are ever recorded or
+    printed; the identity is supplied only at restore time, from a file
+    (`SNAPADMIN_BACKUP_AGE_IDENTITY_FILE`), never as key material in a setting.
+  - **Two interchangeable backends** — the in-process `pyrage` library (the `[age]` extra) or the
+    `age` command-line tool (`SNAPADMIN_BACKUP_AGE_BACKEND="binary"`, e.g. `apt install age` on
+    Debian 12+/Ubuntu 22.04+). Both implement the identical, standardised file format, so a bundle
+    encrypted with one restores fine with the other — or with the plain `age` CLI run by hand on a
+    jump host with no Django involved at all.
+- **Backup bundle contents — the `.env` fail-closed rule** — `SNAPADMIN_BACKUP_INCLUDE` (default
+  `["db"]`) can extend a run to `media` and/or `env` (a project `.env`/secrets file). Including `env`
+  with `SNAPADMIN_BACKUP_AGE_RECIPIENTS` empty is refused **fail closed**, in two independent places:
+  a startup system check (`snapadmin.E007`, so `manage.py check`/`migrate`/`runserver` catch it before
+  a single backup ever runs) and a runtime guard inside the backup path itself (so it still refuses if
+  reached another way — recipients configured, then cleared, without a restart). A `.env` file's
+  contents — `SECRET_KEY`, database passwords, third-party API keys — are never written to a backup
+  destination unencrypted. The always-unencrypted `manifest.json` sidecar that accompanies every
+  bundle (by design — it must be readable without an identity) carries no secrets: only part names,
+  per-part **ciphertext** checksums, versions and the public recipient list.
+- **Restoring a backup** (`manage.py snapadmin_restore`) — dry-run by default; `--confirm` performs
+  it. Every part's checksum is verified against the manifest before any byte reaches the live
+  database/media/`.env`, so a truncated or corrupted upload is refused rather than half-restored. An
+  encrypted bundle restored with no `--identity` prints the recipient count and fingerprints, never a
+  bare parse error. `env` is never restored by a bare `--confirm` — it overwrites secrets, so it must
+  be named explicitly in `--only`. A restore is **not live-safe**: existing database connections are
+  terminated and, for PostgreSQL, the database is dropped and recreated before the dump loads — plan
+  a maintenance window.
+- **The pre-restore snapshot and `manage.py snapadmin_rollback`** — before a `--confirm`ed restore
+  touches anything, the current live state of every part it is about to overwrite is automatically
+  snapshotted (encrypted the same way a real backup would be, if recipients are configured) into
+  `SNAPADMIN_RESTORE_SNAPSHOT_DIR`. **If the snapshot itself fails, the restore is aborted** — never on
+  a best-effort basis, since this is the entire point of the safety net. `--no-snapshot` exists for the
+  operator who knows better and prints a loud warning when used.
+  - **What this protects against:** a restore that turns out to have been the wrong call — the
+    snapshot lets you get back to exactly the state immediately before the restore ran.
+  - **What this does *not* protect against:** losing the disk the snapshot lives on. A snapshot is
+    only as good as the storage underneath it — it is **not** a substitute for the encrypted offsite
+    copy a real, separately-stored backup destination provides. Snapshots also have their own short
+    retention (`SNAPADMIN_RESTORE_SNAPSHOT_KEEP`, default 3) specifically so they never compete with
+    the real backup policy for disk — they are a safety net with a short half-life, not a backup.
 - **Read-replica routing** (`SNAPADMIN_ANALYTICS_DB_ALIAS`) keeps read-only list/retrieve off the
   primary; writes always stay on `default`.
 - **Alert webhook URLs are credentials** — a Slack/Discord/Teams incoming-webhook URL and a Telegram
@@ -261,6 +327,8 @@ Key protections:
 - Leave the user-management API and ES-reindex endpoints disabled unless needed; gate any you enable.
 - Put backup/SFTP/SMTP credentials **and alert webhook URLs** in environment variables, not in
   committed settings.
+- **Encrypt backups** — set `SNAPADMIN_BACKUP_AGE_RECIPIENTS`. An unencrypted dump on a rented offsite
+  server is your whole database in someone else's hands; encryption costs one setting.
 - Restrict who has `is_staff` / model permissions — SnapAdmin honours standard Django auth.
 
 ## Supply chain

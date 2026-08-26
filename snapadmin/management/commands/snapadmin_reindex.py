@@ -26,6 +26,7 @@ from django.apps import apps
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
+from snapadmin.conf import get_setting
 from snapadmin.models import reindexable_snapmodels
 from snapadmin.registry import is_registered
 from snapadmin.reindexing import DEFAULT_CHUNK_SIZE, run_reindex_job, start_reindex
@@ -79,7 +80,7 @@ class Command(BaseCommand):
         # --tune / --no-tune override the project default; unset defers to the setting.
         tune = options["tune"]
         if tune is None:
-            tune = getattr(settings, "SNAPADMIN_REINDEX_TUNE_DEFAULT", False)
+            tune = get_setting("SNAPADMIN_REINDEX_TUNE_DEFAULT", False)
 
         if options["model"]:
             try:

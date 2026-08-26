@@ -1174,12 +1174,13 @@ class TestDynamicViewSetThrottling:
         # The test settings pin both to None (see demo/core/settings_test.py) so
         # the suite never throttles itself. Simulate a host project that never
         # set either setting at all by swapping in a bare namespace for the
-        # module-level `settings` name get_rate() reads from.
+        # `settings` name get_rate() ultimately resolves through — since
+        # #SIMPL1g that resolution lives in snapadmin.conf, not in this module.
         import types
-        from snapadmin.api import views as views_module
+        from snapadmin import conf
         from snapadmin.api.views import SnapAnonRateThrottle, SnapUserRateThrottle
 
-        monkeypatch.setattr(views_module, "settings", types.SimpleNamespace())
+        monkeypatch.setattr(conf, "settings", types.SimpleNamespace())
 
         assert SnapAnonRateThrottle().get_rate() == "60/min"
         assert SnapUserRateThrottle().get_rate() == "600/min"

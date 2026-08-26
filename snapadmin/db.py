@@ -21,6 +21,8 @@ construction for stock single-database installs.
 from django.conf import settings
 from django.db import DEFAULT_DB_ALIAS
 
+from snapadmin.conf import get_setting
+
 
 def analytics_db_alias() -> str:
     """Return the DB alias read-only analytical queries should use.
@@ -29,7 +31,7 @@ def analytics_db_alias() -> str:
     configured ``DATABASES``. Falls back to :data:`DEFAULT_DB_ALIAS` when unset,
     empty, or pointing at an unknown alias.
     """
-    alias = getattr(settings, "SNAPADMIN_ANALYTICS_DB_ALIAS", "") or ""
+    alias = get_setting("SNAPADMIN_ANALYTICS_DB_ALIAS", "") or ""
     if alias and alias in settings.DATABASES:
         return alias
     return DEFAULT_DB_ALIAS

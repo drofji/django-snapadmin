@@ -21,6 +21,7 @@ from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
 
 from snapadmin.api.authentication import SnapAPIAuthMixin, token_has_permission
+from snapadmin.conf import get_setting
 from snapadmin.db import route_read
 from snapadmin.api.filters import get_api_filter_backends
 from snapadmin.logging_config import get_logger
@@ -57,7 +58,7 @@ class SnapAnonRateThrottle(AnonRateThrottle):
     scope = "snapadmin_anon"
 
     def get_rate(self) -> str | None:
-        return getattr(settings, "SNAPADMIN_THROTTLE_ANON", "60/min")
+        return get_setting("SNAPADMIN_THROTTLE_ANON", "60/min")
 
 
 class SnapUserRateThrottle(UserRateThrottle):
@@ -70,7 +71,7 @@ class SnapUserRateThrottle(UserRateThrottle):
     scope = "snapadmin_user"
 
     def get_rate(self) -> str | None:
-        return getattr(settings, "SNAPADMIN_THROTTLE_USER", "600/min")
+        return get_setting("SNAPADMIN_THROTTLE_USER", "600/min")
 
 
 class TokenModelPermission(permissions.BasePermission):
@@ -245,7 +246,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         (default True), and ``ELASTICSEARCH_ENABLED``.
         """
         return (
-            getattr(settings, "SNAPADMIN_ES_QUERY_ROUTING", True)
+            get_setting("SNAPADMIN_ES_QUERY_ROUTING", True)
             and get_model_meta(model_class, "es_query_routing", True)
             and getattr(settings, "ELASTICSEARCH_ENABLED", False)
         )
@@ -290,7 +291,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             return []
 
         search_query = self._get_search_query()
-        es_limit = getattr(settings, "SNAPADMIN_ES_SEARCH_LIMIT", 1000)
+        es_limit = get_setting("SNAPADMIN_ES_SEARCH_LIMIT", 1000)
         storage_mode = get_model_meta(model_class, "es_storage_mode", EsStorageMode.DB_ONLY)
 
         # Where did the query go? Exposed as the X-Snap-Query-Backend response
@@ -411,7 +412,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
                 status=status.HTTP_404_NOT_FOUND,
             )
         response = super().list(request, *args, **kwargs)
-        if getattr(settings, "SNAPADMIN_QUERY_BACKEND_HEADER", True):
+        if get_setting("SNAPADMIN_QUERY_BACKEND_HEADER", True):
             response["X-Snap-Query-Backend"] = self._query_backend
         return response
 
@@ -430,7 +431,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         if callable(hook) and not hook(request):
             return False
 
-        guard = getattr(settings, "SNAPADMIN_API_DELETE_GUARD", None)
+        guard = get_setting("SNAPADMIN_API_DELETE_GUARD", None)
         if guard:
             guard_fn = import_string(guard) if isinstance(guard, str) else guard
             if not guard_fn(request, instance):
@@ -485,7 +486,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             return None
         if value <= 0:
             raise ValueError(f"?limit= must be a positive integer, got {raw!r}.")
-        limit_max = int(getattr(settings, "SNAPADMIN_EXPORT_LIMIT_MAX", 0) or 0)
+        limit_max = int(get_setting("SNAPADMIN_EXPORT_LIMIT_MAX", 0) or 0)
         if limit_max > 0:
             value = min(value, limit_max)
         return value
@@ -506,7 +507,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             )
         queryset = self.filter_queryset(self.get_queryset())
         response = Response({"count": queryset.count()})
-        if getattr(settings, "SNAPADMIN_QUERY_BACKEND_HEADER", True):
+        if get_setting("SNAPADMIN_QUERY_BACKEND_HEADER", True):
             response["X-Snap-Query-Backend"] = self._query_backend
         return response
 
@@ -545,7 +546,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         if limit is not None:
             queryset = queryset[:limit]
         else:
-            max_rows = int(getattr(settings, "SNAPADMIN_EXPORT_MAX_ROWS", 0) or 0)
+            max_rows = int(get_setting("SNAPADMIN_EXPORT_MAX_ROWS", 0) or 0)
             if max_rows > 0:
                 match_count = queryset.count()
                 if match_count > max_rows:
@@ -573,7 +574,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
                     )
         serializer_class = self.get_serializer_class()
 
-        chunk_size = max(1, int(getattr(settings, "SNAPADMIN_EXPORT_CHUNK_SIZE", 1000)))
+        chunk_size = max(1, int(get_setting("SNAPADMIN_EXPORT_CHUNK_SIZE", 1000)))
 
         def stream():
             # A capped queryset is already sliced (can't call iterator() on it);
@@ -591,7 +592,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         response = StreamingHttpResponse(stream(), content_type="application/x-ndjson")
         filename = f"{model_class._meta.app_label}_{model_class._meta.model_name}.ndjson"
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
-        if getattr(settings, "SNAPADMIN_QUERY_BACKEND_HEADER", True):
+        if get_setting("SNAPADMIN_QUERY_BACKEND_HEADER", True):
             response["X-Snap-Query-Backend"] = self._query_backend
         return response
 

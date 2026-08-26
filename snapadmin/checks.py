@@ -17,6 +17,8 @@ from django.apps import apps
 from django.conf import settings
 from django.core.checks import Error, Info, Warning
 
+from snapadmin import conf
+from snapadmin.conf import get_setting
 from snapadmin.registry import get_model_meta, is_registered
 
 
@@ -33,7 +35,7 @@ def _resolve_model(dotted: str):
 
 
 def check_analytics_db_alias(app_configs, **kwargs):
-    alias = getattr(settings, "SNAPADMIN_ANALYTICS_DB_ALIAS", "") or ""
+    alias = get_setting("SNAPADMIN_ANALYTICS_DB_ALIAS", "") or ""
     if alias and alias not in settings.DATABASES:
         return [Warning(
             f"SNAPADMIN_ANALYTICS_DB_ALIAS = {alias!r} is not a configured DATABASES alias.",
@@ -46,7 +48,7 @@ def check_analytics_db_alias(app_configs, **kwargs):
 
 def check_masked_fields(app_configs, **kwargs):
     errors = []
-    masked = getattr(settings, "SNAPADMIN_MASKED_FIELDS", None) or {}
+    masked = get_setting("SNAPADMIN_MASKED_FIELDS", None) or {}
     for key, fields in masked.items():
         model = _resolve_model(key)
         if model is None:
@@ -78,7 +80,7 @@ def check_masking_rules(app_configs, **kwargs):
     from snapadmin.masking import _has_nested_quantifier
 
     errors = []
-    rules = getattr(settings, "SNAPADMIN_MASKING_RULES", None) or {}
+    rules = get_setting("SNAPADMIN_MASKING_RULES", None) or {}
     for key, fields in rules.items():
         model = _resolve_model(key)
         if model is None:
@@ -135,7 +137,7 @@ def check_masking_rules(app_configs, **kwargs):
 def check_nested_apps(app_configs, **kwargs):
     warnings = []
     installed = {c.label for c in apps.get_app_configs()}
-    nested = getattr(settings, "SNAPADMIN_NESTED_APPS", None) or {}
+    nested = get_setting("SNAPADMIN_NESTED_APPS", None) or {}
     for source, target in nested.items():
         if target not in installed:
             warnings.append(Warning(
@@ -149,9 +151,9 @@ def check_nested_apps(app_configs, **kwargs):
 
 def check_sso_providers(app_configs, **kwargs):
     warnings = []
-    providers = getattr(settings, "SNAPADMIN_SSO_PROVIDERS", None) or {}
+    providers = get_setting("SNAPADMIN_SSO_PROVIDERS", None) or {}
     allowed_hosts = {
-        host.lower() for host in (getattr(settings, "SNAPADMIN_SSO_ALLOWED_HOSTS", None) or [])
+        host.lower() for host in (get_setting("SNAPADMIN_SSO_ALLOWED_HOSTS", None) or [])
     }
     for key, meta in providers.items():
         if not isinstance(meta, dict) or not (meta.get("url") or "").strip():
@@ -261,7 +263,7 @@ def _api_writable_models():
 
 
 def check_api_write_fields(app_configs, **kwargs):
-    if not getattr(settings, "SNAPADMIN_REST_API_ENABLED", True):
+    if not get_setting("SNAPADMIN_REST_API_ENABLED", True):
         return []
     unguarded = sorted(
         model._meta.label
@@ -290,7 +292,7 @@ def check_api_read_only(app_configs, **kwargs):
     instead. Quiet once the model sets ``api_read_only`` or an explicit
     ``api_http_method_names`` policy, so the tradeoff is a deliberate choice.
     """
-    if not getattr(settings, "SNAPADMIN_REST_API_ENABLED", True):
+    if not get_setting("SNAPADMIN_REST_API_ENABLED", True):
         return []
     inert = sorted(
         model._meta.label
@@ -339,6 +341,108 @@ def check_unfold_theme(app_configs, **kwargs):
     )]
 
 
+def check_backup_age_recipients(app_configs, **kwargs):
+    """Warn about a recipient string that cannot possibly be a valid age/SSH key.
+
+    Deliberately advisory, not an error: a typo'd recipient among several
+    still leaves the others working, and backups must not fail to *run* over
+    a config mistake. Deliberately does not import pyrage or shell out to
+    `age` (see `crypto.looks_like_recipient`) — a project may intend to use
+    only one of the two backends, and this check must not force either.
+    """
+    from snapadmin.crypto import looks_like_recipient
+
+    recipients = get_setting("SNAPADMIN_BACKUP_AGE_RECIPIENTS", None) or []
+    bad = [value for value in recipients if not looks_like_recipient(str(value))]
+    if not bad:
+        return []
+    return [Warning(
+        f"SNAPADMIN_BACKUP_AGE_RECIPIENTS contains {len(bad)} entr{'y' if len(bad) == 1 else 'ies'} "
+        f"that do not look like an age or SSH public key: {_format_labels([repr(v) for v in bad])}.",
+        hint="Each entry must be an age public key ('age1…') or an SSH public key "
+             "('ssh-ed25519 …' / 'ssh-rsa …'). A malformed entry will fail encryption "
+             "the next time a backup runs rather than being silently skipped.",
+        id="snapadmin.W008",
+    )]
+
+
+def check_backup_env_requires_encryption(app_configs, **kwargs):
+    """Error: ``env`` in ``SNAPADMIN_BACKUP_INCLUDE`` with no AGE recipients configured.
+
+    A ``.env`` file holds ``SECRET_KEY``, DB passwords, S3 keys — anything else
+    a backup ships is expendable if lost or read by the wrong person; this is
+    not. Fail closed at startup rather than the first time a scheduled backup
+    happens to include ``env`` and ships a plaintext secrets file to whatever
+    destination is configured. :func:`snapadmin.backup.build_backup_bundle`
+    repeats this exact guard at runtime (:class:`~snapadmin.backup.BackupError`)
+    for the case where recipients were configured, then cleared, without a
+    restart — this check alone cannot catch that.
+    """
+    include = get_setting("SNAPADMIN_BACKUP_INCLUDE", ["db"]) or []
+    if "env" not in include:
+        return []
+    recipients = get_setting("SNAPADMIN_BACKUP_AGE_RECIPIENTS", None) or []
+    if recipients:
+        return []
+    return [Error(
+        "SNAPADMIN_BACKUP_INCLUDE includes 'env' but SNAPADMIN_BACKUP_AGE_RECIPIENTS "
+        "is empty — a backup would ship your .env file's secrets (SECRET_KEY, DB "
+        "password, …) to the backup destination in plain text.",
+        hint="Set SNAPADMIN_BACKUP_AGE_RECIPIENTS to at least one age or SSH public "
+             "key, or remove 'env' from SNAPADMIN_BACKUP_INCLUDE.",
+        id="snapadmin.E007",
+    )]
+
+
+def check_snapadmin_profile(app_configs, **kwargs):
+    """Error: ``SNAPADMIN_PROFILE`` set to a name the package does not know.
+
+    :func:`snapadmin.conf.get_setting` also refuses this at the first setting
+    it resolves after boot (fail closed, not a silent fall-through) — but by
+    then the failure is a raised exception deep in whatever imported first.
+    This check exists so the same misconfiguration is caught cleanly by
+    ``manage.py check`` too, with the valid choices named up front.
+    """
+    profile = getattr(settings, "SNAPADMIN_PROFILE", None)
+    if profile is None or profile in conf.PROFILES:
+        return []
+    return [Error(
+        f"SNAPADMIN_PROFILE = {profile!r} is not a recognised profile.",
+        hint=f"Choose one of {', '.join(conf.PROFILES)}, or unset it to keep "
+             "today's defaults (equivalent to 'full').",
+        id="snapadmin.E006",
+    )]
+
+
+def check_snapadmin_profile_contradiction(app_configs, **kwargs):
+    """Warn when an explicit setting silently overrides what the active profile implies.
+
+    Explicit always wins over a profile (documented, deliberate) — but a
+    project that opted into ``SNAPADMIN_PROFILE = "admin"`` specifically to
+    turn REST/GraphQL off, then left an old ``SNAPADMIN_REST_API_ENABLED =
+    True`` from before it adopted profiles, ends up with REST on anyway and
+    no signal that the profile's choice was overridden. This is advisory,
+    not an error: overriding a profile on purpose is a normal, supported thing
+    to do.
+    """
+    profile = getattr(settings, "SNAPADMIN_PROFILE", None)
+    if profile is None or profile not in conf.PROFILES:
+        return []
+    warnings = []
+    for name, preset_value in sorted(conf._PRESETS[profile].items()):
+        if hasattr(settings, name) and getattr(settings, name) != preset_value:
+            warnings.append(Warning(
+                f"{name} = {getattr(settings, name)!r} is set explicitly, overriding "
+                f"what SNAPADMIN_PROFILE = {profile!r} would otherwise set it to "
+                f"({preset_value!r}).",
+                hint="The explicit setting wins — this is allowed and sometimes "
+                     "intentional. If it is not, remove the explicit setting to let "
+                     "the profile take effect.",
+                id="snapadmin.W009",
+            ))
+    return warnings
+
+
 ALL_CHECKS = [
     check_analytics_db_alias,
     check_masked_fields,
@@ -348,7 +452,11 @@ ALL_CHECKS = [
     check_sso_providers,
     check_api_write_fields,
     check_api_read_only,
+    check_backup_age_recipients,
+    check_backup_env_requires_encryption,
     check_unfold_theme,
+    check_snapadmin_profile,
+    check_snapadmin_profile_contradiction,
 ]
 
 

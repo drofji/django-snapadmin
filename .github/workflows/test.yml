@@ -56,6 +56,12 @@ jobs:
           pip install -r demo/requirements.txt
           pip install "Django~=${{ matrix.django }}.0"
 
+      - name: Install the age CLI (binary backend for AGE-encrypted backups)
+        # ubuntu-latest ships past Ubuntu 22.04, so `age` is a first-party apt
+        # package — this gives the SNAPADMIN_BACKUP_AGE_BACKEND="binary" tests
+        # a real round-trip against the actual tool, not a mock.
+        run: sudo apt-get update && sudo apt-get install -y age
+
       - name: Show resolved versions
         run: |
           python --version

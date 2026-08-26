@@ -13,7 +13,6 @@ reindex runs synchronously and returns a per-model summary; set
 Celery to be installed and a broker configured.
 """
 
-from django.conf import settings
 from rest_framework import permissions, status
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -21,15 +20,16 @@ from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
 
 from snapadmin.api.authentication import SnapAPIAuthMixin
+from snapadmin.conf import get_setting
 from snapadmin.models import run_reindex
 
 
 def reindex_api_enabled() -> bool:
-    return bool(getattr(settings, "SNAPADMIN_REINDEX_API_ENABLED", False))
+    return bool(get_setting("SNAPADMIN_REINDEX_API_ENABLED", False))
 
 
 def reindex_api_async() -> bool:
-    return bool(getattr(settings, "SNAPADMIN_REINDEX_API_ASYNC", False))
+    return bool(get_setting("SNAPADMIN_REINDEX_API_ASYNC", False))
 
 
 class ESReindexView(SnapAPIAuthMixin, APIView):

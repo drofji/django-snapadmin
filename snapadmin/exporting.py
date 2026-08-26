@@ -78,6 +78,7 @@ from django.core.files.storage import FileSystemStorage, Storage
 from django.utils import timezone
 from django.utils.module_loading import import_string
 
+from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
 from snapadmin.masking import get_masked_fields, mask_field, user_can_view_pii
 
@@ -85,11 +86,11 @@ logger = get_logger(__name__)
 
 
 def export_enabled() -> bool:
-    return bool(getattr(settings, "SNAPADMIN_EXPORT_ENABLED", True))
+    return bool(get_setting("SNAPADMIN_EXPORT_ENABLED", True))
 
 
 def export_chunk_size() -> int:
-    return max(1, int(getattr(settings, "SNAPADMIN_EXPORT_CHUNK_SIZE", 1000)))
+    return max(1, int(get_setting("SNAPADMIN_EXPORT_CHUNK_SIZE", 1000)))
 
 
 def export_dir() -> str:
@@ -100,7 +101,7 @@ def export_dir() -> str:
     published file are one and the same — preserving the historical local-disk
     behavior with zero configuration.
     """
-    configured = getattr(settings, "SNAPADMIN_EXPORT_DIR", "")
+    configured = get_setting("SNAPADMIN_EXPORT_DIR", "")
     if not configured:
         base = getattr(settings, "MEDIA_ROOT", "") or os.getcwd()
         configured = os.path.join(str(base), "snapadmin_exports")
@@ -119,7 +120,7 @@ def get_export_storage() -> Storage:
     deployment-topology-agnostic; the class is instantiated with no arguments,
     so it must be configured through its own settings.
     """
-    configured = getattr(settings, "SNAPADMIN_EXPORT_STORAGE", "")
+    configured = get_setting("SNAPADMIN_EXPORT_STORAGE", "")
     if configured:
         storage_cls = import_string(configured) if isinstance(configured, str) else configured
         return storage_cls()
@@ -233,7 +234,7 @@ def get_export_source(job) -> ExportRowSource:
     """
     if not job.source:
         return _DefaultOrmSource(job)
-    registry = getattr(settings, "SNAPADMIN_EXPORT_SOURCES", None) or {}
+    registry = get_setting("SNAPADMIN_EXPORT_SOURCES", None) or {}
     dotted = registry.get(job.source)
     if dotted is None:
         raise ImproperlyConfigured(

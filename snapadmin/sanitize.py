@@ -31,9 +31,10 @@ import functools
 from types import ModuleType
 from typing import Callable
 
-from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
+
+from snapadmin.conf import get_setting
 
 
 @functools.lru_cache(maxsize=1)
@@ -78,7 +79,7 @@ def sanitize_html(value: str) -> str:
     """
     if not value:
         return value
-    dotted = getattr(settings, "SNAPADMIN_HTML_SANITIZER", None)
+    dotted = get_setting("SNAPADMIN_HTML_SANITIZER", None)
     sanitizer: Callable[[str], str] = (
         import_string(dotted) if dotted else _default_sanitizer
     )

@@ -49,8 +49,7 @@ import re
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from django.conf import settings
-
+from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -84,7 +83,7 @@ def _model_entry(setting: str, app_label: str, model_name: str):
     Keys are matched case-insensitively on both halves, so ``"demo.Customer"``
     and ``"demo.customer"`` resolve identically.
     """
-    raw = getattr(settings, setting, None) or {}
+    raw = get_setting(setting, None) or {}
     wanted = f"{app_label}.{model_name}".lower()
     for key, value in raw.items():
         if str(key).lower() == wanted:

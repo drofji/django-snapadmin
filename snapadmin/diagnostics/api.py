@@ -10,16 +10,16 @@ health-alert email don't report a subsystem that was intentionally turned off.
 
 from __future__ import annotations
 
-from django.conf import settings
 from django.urls import reverse
 
+from snapadmin.conf import get_setting
 from snapadmin.diagnostics.registry import register
 
 
 @register("api", title="REST API", icon="🔌", order=34, health_probe=True)
 def collect(*, verbose: bool) -> dict:
     """Collect the REST API section."""
-    if not getattr(settings, "SNAPADMIN_REST_API_ENABLED", True):
+    if not get_setting("SNAPADMIN_REST_API_ENABLED", True):
         return {"enabled": False}
 
     data: dict = {"enabled": True}

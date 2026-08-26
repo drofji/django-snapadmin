@@ -20,22 +20,23 @@ listings trade an exact total for one that returns instantly. Wired into every
 SnapAdmin-generated admin; global kill-switch ``SNAPADMIN_ESTIMATED_COUNT``.
 """
 
-from django.conf import settings
 from django.core.paginator import Paginator
 from django.db import connections
 from django.db.models import QuerySet
 from django.utils.functional import cached_property
+
+from snapadmin.conf import get_setting
 
 DEFAULT_THRESHOLD = 100_000
 
 
 def estimated_count_enabled() -> bool:
     """Whether the fast-count optimisation is active (default True)."""
-    return bool(getattr(settings, "SNAPADMIN_ESTIMATED_COUNT", True))
+    return bool(get_setting("SNAPADMIN_ESTIMATED_COUNT", True))
 
 
 def _estimate_threshold() -> int:
-    return int(getattr(settings, "SNAPADMIN_ESTIMATED_COUNT_THRESHOLD", DEFAULT_THRESHOLD))
+    return int(get_setting("SNAPADMIN_ESTIMATED_COUNT_THRESHOLD", DEFAULT_THRESHOLD))
 
 
 def pg_estimated_count(queryset) -> int | None:
@@ -104,11 +105,11 @@ def _build_snap_dynamic_pagination() -> type:
 
         @property
         def page_size(self) -> int:
-            return int(getattr(settings, "SNAPADMIN_API_PAGE_SIZE", 25))
+            return int(get_setting("SNAPADMIN_API_PAGE_SIZE", 25))
 
         @property
         def max_page_size(self) -> int:
-            return int(getattr(settings, "SNAPADMIN_API_MAX_PAGE_SIZE", 500))
+            return int(get_setting("SNAPADMIN_API_MAX_PAGE_SIZE", 500))
 
     return SnapDynamicPagination
 

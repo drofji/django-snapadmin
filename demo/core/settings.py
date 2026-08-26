@@ -262,6 +262,13 @@ LOGIN_REDIRECT_URL = '/admin/'
 # ------------------------------------------------------------------------------
 # SNAPADMIN CONFIGURATION
 # ------------------------------------------------------------------------------
+# SNAPADMIN_PROFILE collapses the ~90 settings below to one line for a project
+# that does not want to decide each one individually — "admin" (admin UI only,
+# REST/GraphQL off) | "api" (REST + GraphQL on) | "full" (today's defaults).
+# An explicit setting always wins over the profile, which is why this demo
+# still declares every toggle below explicitly — "full" here is a documented
+# no-op, kept only to dogfood the setting itself.
+SNAPADMIN_PROFILE = os.getenv('SNAPADMIN_PROFILE', 'full')
 # Feature toggles — each API surface can be switched off independently via .env
 # (SNAPADMIN_REST_API_ENABLED=False removes all /api/ CRUD routes, etc.).
 SNAPADMIN_REST_API_ENABLED = env_bool('SNAPADMIN_REST_API_ENABLED', True)
@@ -573,6 +580,39 @@ SNAPADMIN_BACKUP_SFTP_PASSWORD = os.getenv('SNAPADMIN_BACKUP_SFTP_PASSWORD', '')
 SNAPADMIN_BACKUP_SFTP_KEY_FILE = os.getenv('SNAPADMIN_BACKUP_SFTP_KEY_FILE', '')
 SNAPADMIN_BACKUP_SFTP_DIR = os.getenv('SNAPADMIN_BACKUP_SFTP_DIR', '/')
 SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = int(os.getenv('SNAPADMIN_BACKUP_SFTP_EVERY_HOURS', '168'))
+
+# Encryption at rest — a list of age (age1…) and/or SSH public keys. Every dump is
+# streamed straight through age before a byte reaches disk when this is non-empty;
+# empty (the default) changes nothing. The identity (private key) is never a setting —
+# it is supplied only at restore time via SNAPADMIN_BACKUP_AGE_IDENTITY_FILE or --identity.
+SNAPADMIN_BACKUP_AGE_RECIPIENTS = (
+    [r.strip() for r in os.getenv('SNAPADMIN_BACKUP_AGE_RECIPIENTS', '').split(',') if r.strip()]
+)
+SNAPADMIN_BACKUP_AGE_IDENTITY_FILE = os.getenv('SNAPADMIN_BACKUP_AGE_IDENTITY_FILE', '')
+SNAPADMIN_BACKUP_AGE_BACKEND = os.getenv('SNAPADMIN_BACKUP_AGE_BACKEND', 'auto')
+SNAPADMIN_BACKUP_AGE_BINARY_PATH = os.getenv('SNAPADMIN_BACKUP_AGE_BINARY_PATH', '')
+
+# What a backup run bundles beyond the database: "media" (MEDIA_ROOT, tarred and
+# streamed) and "env" (a project .env file — requires SNAPADMIN_BACKUP_AGE_RECIPIENTS
+# to be set, refused otherwise). "db" alone (today's behaviour) stays the default.
+SNAPADMIN_BACKUP_INCLUDE = (
+    [p.strip() for p in os.getenv('SNAPADMIN_BACKUP_INCLUDE', 'db').split(',') if p.strip()]
+)
+SNAPADMIN_BACKUP_MEDIA_EXCLUDE = (
+    [g.strip() for g in os.getenv('SNAPADMIN_BACKUP_MEDIA_EXCLUDE', '').split(',') if g.strip()]
+)
+SNAPADMIN_BACKUP_ENV_FILE = os.getenv('SNAPADMIN_BACKUP_ENV_FILE', str(BASE_DIR / '.env'))
+# Past this many bytes, a media backup logs a warning (it still runs — this warns,
+# it never aborts, unless the disk genuinely fills).
+SNAPADMIN_BACKUP_MEDIA_SIZE_WARNING_BYTES = int(
+    os.getenv('SNAPADMIN_BACKUP_MEDIA_SIZE_WARNING_BYTES', str(10 * 1024 ** 3))  # 10 GiB
+)
+
+# Pre-restore safety net: snapadmin_restore snapshots the current live state before a
+# --confirmed restore touches anything. Separate directory and retention from real
+# backups — these are short-lived safety nets, not backups.
+SNAPADMIN_RESTORE_SNAPSHOT_DIR = os.getenv('SNAPADMIN_RESTORE_SNAPSHOT_DIR', '')
+SNAPADMIN_RESTORE_SNAPSHOT_KEEP = int(os.getenv('SNAPADMIN_RESTORE_SNAPSHOT_KEEP', '3'))
 
 # ------------------------------------------------------------------------------
 # ELASTICSEARCH

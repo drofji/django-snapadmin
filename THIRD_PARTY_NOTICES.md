@@ -51,6 +51,7 @@ Nothing here is installed by a base `pip install`. Install via, e.g., `pip insta
 | `xlsx` | openpyxl | MIT | 🟢 | XLSX output for the async export API (`export_format="xlsx"`) |
 | `autocomplete-filter` | django-admin-autocomplete-filter | **LGPL-3.0** | 🟡 | `AutocompleteFilter` list filters in your own admin |
 | `backup` | paramiko | **LGPL-2.1** | 🟡 | SFTP transport for offsite backups |
+| `age` | pyrage | MIT | 🟢 | AGE-encrypted backups (`SNAPADMIN_BACKUP_AGE_RECIPIENTS`) |
 | `wysiwyg` | django-ckeditor-5 (BSD wrapper) **bundling CKEditor 5** | **GPL-2.0+ or commercial** | 🔴 | Rich-text fields (`SnapRichTextField` / `wysiwyg=True`) |
 
 > **`wysiwyg` (CKEditor 5) is the one to watch for commercial use.** The Python wrapper

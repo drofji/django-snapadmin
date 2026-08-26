@@ -46,9 +46,10 @@ def apply_unfold_auth_admin() -> list[str]:
     Idempotent; safe to call more than once.
     """
     from django.apps import apps
-    from django.conf import settings
 
-    if not getattr(settings, "SNAPADMIN_THEME_AUTH_ADMIN", True):
+    from snapadmin.conf import get_setting
+
+    if not get_setting("SNAPADMIN_THEME_AUTH_ADMIN", True):
         return []
     if not apps.is_installed("unfold") or not apps.is_installed("django.contrib.auth"):
         return []
