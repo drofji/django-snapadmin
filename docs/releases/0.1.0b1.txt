@@ -8,6 +8,18 @@ rename, dashboard staff gate, dependencies moved behind extras); see the migrati
 
 Upgrading: see docs/migrations/0.1.0a11_to_0.1.0b1.md for the exact steps.
 
+Breaking
+========
+
+- Celery tasks moved from ``api.tasks.*`` to ``snapadmin/tasks.py`` under the ``snapadmin.*``
+  namespace, with no back-compat alias — update every ``CELERY_BEAT_SCHEDULE`` entry and any
+  direct import. See Changed, below, and the migration guide.
+- The system dashboard is now staff-gated by default. Set ``SNAPADMIN_DASHBOARD_PUBLIC = True``
+  to restore the old open behaviour. See Security, below.
+- ``django-admin-autocomplete-filter``, the wysiwyg editor (``django-ckeditor-5``) and
+  ``django-extra-settings`` moved behind optional extras — action required only if you relied on
+  one of them installing transitively. See Changed, below.
+
 Changed
 =======
 

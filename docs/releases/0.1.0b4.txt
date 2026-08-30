@@ -10,6 +10,11 @@ built-in theme when Unfold is absent, so the base install is leaner and strictly
 existing themed installs are byte-identical. No model, no migration, and every existing import path,
 setting and signature is unchanged.
 
+Breaking
+========
+
+None.
+
 Added
 =====
 

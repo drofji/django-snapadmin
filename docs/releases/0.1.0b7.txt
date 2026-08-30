@@ -15,6 +15,11 @@ sanitizer now also runs on write rather than only on render (see Changed) and, s
 now fails closed instead of open if its ``nh3`` dependency were ever missing (see Security) —
 neither changes behaviour for an install that has not opted into the new field flags.
 
+Breaking
+--------
+
+None.
+
 Added
 -----
 

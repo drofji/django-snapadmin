@@ -7,6 +7,25 @@ Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Sec
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
 
+Breaking
+--------
+
+None in this release. ``SNAPADMIN_REST_API_ENABLED`` / ``SNAPADMIN_GRAPHQL_ENABLED`` are
+**deprecated** to default to ``False`` at ``1.0`` — see Deprecated, below, for the warning this
+release adds and the migration-guide paragraph pinning today's behaviour.
+
+Retro-note (this heading is new — two known historical cases predate it and were never called out
+per release):
+
+* ``SnapModel.get_admin_fields()``'s return arity silently grew from four values to five in an
+  earlier pre-1.0 release, with no changelog entry. Downstream code that unpacked it positionally
+  broke with ``ValueError: too many values to unpack`` during admin autodiscovery. The shape is
+  pinned going forward (see the generated-admin fix in this same release) so it cannot shift
+  silently again.
+* ``django-admin-rangefilter`` stopped being a dependency in ``0.1.0b6`` — already documented
+  under that release's ``Removed`` heading; see ``docs/releases/0.1.0b6.txt`` rather than
+  duplicating the note here.
+
 Added
 -----
 

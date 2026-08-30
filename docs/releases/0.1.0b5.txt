@@ -9,6 +9,11 @@ in-memory key set, makes async export sources pluggable, and adds a feature-adop
 snapadmin_info. Everything is additive and backward-compatible; two additive migrations ship
 (a demo-only watermark column and SnapExportJob.source).
 
+Breaking
+========
+
+None.
+
 Added
 =====
 

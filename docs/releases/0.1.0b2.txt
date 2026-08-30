@@ -4,6 +4,11 @@
 A security fix for the dynamic model API plus a packaging fix for the installed CHANGELOG's doc
 links. No breaking changes; a drop-in upgrade from 0.1.0b1.
 
+Breaking
+--------
+
+None.
+
 Security
 --------
 

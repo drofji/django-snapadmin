@@ -3,6 +3,11 @@
 
 Housekeeping release — no new features, no API changes. Still a pre-release.
 
+Breaking
+========
+
+None.
+
 Fixed
 =====
 

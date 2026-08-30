@@ -3,6 +3,11 @@
 
 Enterprise configuration pass: four settings-driven features that fit SnapAdmin's zero-boilerplate philosophy — each inert on stock single-database installs until you opt in. Closes issues #15, #13, #12 and #4/#16. Still a pre-release — APIs may change before `0.1.0` stable.
 
+Breaking
+========
+
+None.
+
 Added
 =====
 

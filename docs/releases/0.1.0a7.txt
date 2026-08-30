@@ -3,6 +3,11 @@
 
 Ops & docs pass: a secure SSH/SFTP offsite backup transport, hands-off PyPI publishing, richer PyPI project links, and a documentation split that separates the installable package from the bundled demo plus a new guide on extending SnapAdmin. Still a pre-release — APIs may change before `0.1.0` stable.
 
+Breaking
+========
+
+None.
+
 Added
 =====
 

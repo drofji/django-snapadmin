@@ -11,6 +11,19 @@ or not ES is enabled. Imports gain a guarded ``stale_sync()`` prune and a resuma
 substring — see the first entry under Changed for the one-line fix if you rely on the old behaviour.
 No migration guide is needed; no schema or data migration is required.
 
+Breaking
+--------
+
+- Auto-generated REST API text filters now default to **exact** match instead of substring —
+  switch a bare ``?field=value`` call that expects a substring match to ``?field__icontains=value``.
+  See Changed, below.
+- SFTP offsite backups now verify the remote host key against ``known_hosts`` instead of trusting
+  it on first connect — pre-populate ``known_hosts`` for the backup host before upgrading, or the
+  next scheduled backup fails. See Security, below ("Database backup hardening").
+- The streaming export's ``?limit=`` now rejects an explicit zero or negative value with ``400``
+  instead of silently streaming every row — omit ``?limit=`` if you relied on that fallback. See
+  Fixed, below.
+
 Added
 -----
 

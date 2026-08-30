@@ -11,6 +11,13 @@ public contract pins.
 No migration, no import path moved, no setting renamed. Two dependencies the package never
 imported are gone — see Removed if your own code was relying on them transitively.
 
+Breaking
+--------
+
+- ``django-admin-rangefilter`` is no longer a dependency. Only breaking for code that imported it
+  directly or listed it in ``INSTALLED_APPS`` — install it yourself in that case. See Removed,
+  below, for the full note.
+
 Added
 -----
 
