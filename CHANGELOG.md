@@ -10,6 +10,14 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 
 ## Unreleased
 
+### Breaking
+- None in this release. `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` are deprecated
+  to default to `False` at `1.0` — see the deprecation warning and migration note below.
+- Retro-note (this heading is new): `SnapModel.get_admin_fields()`'s return arity silently grew
+  from four values to five in an earlier pre-1.0 release with no changelog entry — now pinned so
+  it cannot shift silently again. `django-admin-rangefilter` stopped being a dependency in
+  `0.1.0b6`, already documented there under `Removed` — see that entry rather than duplicating it.
+
 ### Added
 - `snap_field()` now accepts every `Snap*Field` constructor kwarg — `required` and the file-upload
   trio (`allowed_extensions`/`allowed_encodings`/`max_size_bytes`) are no longer refused.
@@ -55,6 +63,9 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 
 Two ways to declare a model instead of one, plus a full-project scaffolder and a batch of
 operational features. No breaking changes, no required migration — every addition is opt-in.
+
+### Breaking
+- None.
 
 ### Added
 - **`@snap_model`** opts a plain `django.db.models.Model` into SnapAdmin without subclassing —
@@ -116,6 +127,10 @@ operational features. No breaking changes, no required migration — every addit
 
 A first-run polish release, from installing 0.1.0b5 into a fresh project and walking the demo.
 No migration; no import path, setting or command name removed.
+
+### Breaking
+- `django-admin-rangefilter` is no longer a dependency — breaking only for code that imported it
+  directly or listed it in `INSTALLED_APPS`; see `Removed` below.
 
 ### Added
 - **`llms.txt`** — a machine-readable map of the documentation for AI coding assistants, in the
@@ -202,6 +217,7 @@ async export sources become pluggable, and `snapadmin_info` gains a feature-adop
 is additive and backward-compatible; two additive migrations ship (a demo-only watermark column and
 `SnapExportJob.source`).
 
+- **Breaking:** none.
 - **Added:** `SnapModel.es_count()` — exact match count of a structured ES query, past the search limit.
 - **Added:** ES query methods accept `db_fallback=False` (+ `SNAPADMIN_ES_DB_FALLBACK`) to raise
   `SnapEsUnavailable` instead of silently falling back to the database.
@@ -224,6 +240,7 @@ An operability, onboarding and decoupling release: four new operator/onboarding 
 health-alert email channel, Docker self-healing in the demo, and `django-unfold` made an optional
 theme. No model, no migration; every existing import path, setting and signature is unchanged.
 
+- **Breaking:** none.
 - **Added:** `snapadmin_info` — one command reporting config, connected services and health
   (`--json`, `--section`, `--brief`/`--verbose`, `--health-check`); secrets never printed.
 - **Added:** `snapadmin_license_check` — runtime licence audit with 🟢/🟡/🔴 tiers and a
@@ -248,11 +265,14 @@ theme. No model, no migration; every existing import path, setting and signature
 A large security and Elasticsearch release: ten security fixes, a structured Elasticsearch query
 layer, and safer bulk imports. One breaking change to the auto-generated REST filters.
 
-- **Changed (BREAKING):** auto-generated REST filters now default text fields to **exact** match
+- **Breaking:** auto-generated REST filters now default text fields to **exact** match
   instead of substring. `?field=value` was `icontains` (a never-indexable leading-wildcard `LIKE`,
   and `?sku=123` also matched `sku=91234`); it is now an exact, index-usable match. Substring
   search moves to the explicit `?field__icontains=value`, alongside new `__startswith` and `__in`
   lookups. Set `api_filter_lookups` per model to restore the old behaviour for a given field.
+  SFTP backups now verify the remote host key against `known_hosts` (pre-populate it before
+  upgrading); the streaming export's `?limit=0` or negative now rejects with `400` instead of
+  streaming everything.
 - **Security:** GraphQL now enforces `view` permission and PII masking on **every relation a query
   traverses**, not just top-level fields, matching the REST contract.
 - **Security:** new `api_write_fields` mass-assignment guard restricts which fields accept a
@@ -284,6 +304,7 @@ See [the full release notes](https://github.com/drofji/django-snapadmin/blob/mai
 
 ## 0.1.0b2 — 2026-07-13
 
+- **Breaking:** none.
 - **Security:** the generic dynamic model API (`/api/models/<app>/<model>/`) now only resolves
   `SnapModel` subclasses, mirroring the schema endpoint. Previously any registered Django model
   (e.g. `auth.User`) could be listed, retrieved, created, updated or deleted through it.
@@ -300,9 +321,11 @@ optional dependencies so a base install is fully permissively licensed. Carries 
 > Upgrading from 0.1.0a11? A few changes need action (Celery task rename, dashboard gate, deps moved
 > to extras) — see [the migration guide](https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/0.1.0a11_to_0.1.0b1.md).
 
-- **Changed (BREAKING):** Celery tasks moved to `snapadmin/tasks.py` and renamed to the `snapadmin.*`
+- **Breaking:** Celery tasks moved to `snapadmin/tasks.py` and renamed to the `snapadmin.*`
   namespace (from `api.tasks.*`) so `autodiscover_tasks()` finds them. Update every
-  `CELERY_BEAT_SCHEDULE` entry and any imports; no back-compat aliases are kept.
+  `CELERY_BEAT_SCHEDULE` entry and any imports; no back-compat aliases are kept. The dashboard is
+  now staff-gated by default (see Security below); `django-admin-autocomplete-filter`, the wysiwyg
+  editor and `django-extra-settings` moved behind optional extras (see Changed below).
 - **Security:** the system dashboard is now staff-gated by default (it exposed hostname,
   processor, OS, database name, service health and `ALLOWED_HOSTS` to anonymous callers).
   Opt out with `SNAPADMIN_DASHBOARD_PUBLIC = True`.
@@ -338,8 +361,11 @@ See [the full release notes](https://github.com/drofji/django-snapadmin/blob/mai
 ## 0.1.0a11 — 2026-07-05
 
 Squashed the `snapadmin` and `demo` migrations (`0001`–`0006` each) into a single
-`0001_initial.py` per app. Breaking for installs that already ran `migrate` on a prior alpha
-(drop/recreate the database); no model or API changes.
+`0001_initial.py` per app. No model or API changes.
+
+**Breaking:** migration history reset — installs that already ran `migrate` on a prior alpha must
+reset the recorded migration rows and fake-apply the new initial (drop/recreate the database also
+works); see the migration guide.
 
 ## 0.1.0a10 — 2026-07-05
 
@@ -347,21 +373,29 @@ Housekeeping only: fixed a malformed `templates/admin/index...html` filename (th
 dashboard override was silently ignored) and replaced a debug `print()` / swallowed exception
 around GraphQL URL wiring with structured `structlog` logging.
 
+**Breaking:** none.
+
 ## 0.1.0a9 — 2026-07-05
 
 Enterprise backlog: immutable audit trail, asynchronous background export, large-dataset
 pagination, full i18n (10 locales), WCAG 2.1 AA accessibility, an ecosystem-compatibility matrix,
 configuration health checks and a migration guide.
 
+**Breaking:** none.
+
 ## 0.1.0a8 — 2026-07-05
 
 Config-driven enterprise features: read-replica routing, an SSO/OAuth2 login helper, PII masking
 and nested-app grouping.
 
+**Breaking:** none.
+
 ## 0.1.0a7 — 2026-07-04
 
 SFTP offsite backups and a `[backup]` extra, automated PyPI publishing (tag → OIDC Trusted
 Publishing), PyPI project URLs, and a docs split (package vs demo) with an Extending guide.
+
+**Breaking:** none.
 
 ## 0.1.0a1 – 0.1.0a6
 
