@@ -330,6 +330,11 @@ SNAPADMIN_API_JSON_FILTER_SCAN_CAP = int(os.getenv('SNAPADMIN_API_JSON_FILTER_SC
 # DRF rate limits (e.g. '60/min'). Empty value disables that throttle.
 SNAPADMIN_THROTTLE_ANON = os.getenv('SNAPADMIN_THROTTLE_ANON', '60/min') or None
 SNAPADMIN_THROTTLE_USER = os.getenv('SNAPADMIN_THROTTLE_USER', '600/min') or None
+# Which CACHES entry snapadmin.limits.reserve() stores its window/concurrency/cooldown
+# counters in — point it at a shared backend (Redis, Memcached, ...) before relying on
+# quotas across more than one worker process. 'default' (LocMemCache here) is fine for
+# this single-process demo.
+SNAPADMIN_LIMITS_CACHE_ALIAS = os.getenv('SNAPADMIN_LIMITS_CACHE_ALIAS', 'default')
 # Row ceiling on the synchronous streaming export before it answers 413 and
 # steers the caller to the async export API (0 = unlimited).
 SNAPADMIN_EXPORT_MAX_ROWS = int(os.getenv('SNAPADMIN_EXPORT_MAX_ROWS', '0'))

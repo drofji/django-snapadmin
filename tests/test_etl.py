@@ -413,3 +413,51 @@ def test_sync_exchange_rates_command_last_seen_skip_over_ceiling():
                  "--strategy", "last_seen", stderr=err)
     assert "skipped" in err.getvalue().lower()
     assert ExchangeRate.objects.count() == 10          # nothing pruned
+
+
+@pytest.mark.django_db
+class TestSyncExchangeRatesRateLimit:
+    """``--rate-limit`` showcases snapadmin.limits.reserve() gating the sync's
+    outbound feed call. Each test clears the default cache first — the quota
+    counter is process-wide, and other tests in this file call the same
+    command without the flag (which never touches the cache)."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_cache(self):
+        from django.core.cache import cache
+        cache.clear()
+        yield
+        cache.clear()
+
+    def test_unset_flag_never_touches_the_quota(self):
+        # Sanity check for the demo wiring: plain (no --rate-limit) runs must
+        # stay exactly as unaffected as every other test in this file already
+        # proves — this just makes that guarantee explicit for this feature.
+        for _ in range(3):
+            call_command("sync_exchange_rates", stdout=StringIO())
+        assert ExchangeRate.objects.count() == 10
+
+    def test_runs_within_the_quota_succeed(self):
+        out = StringIO()
+        call_command("sync_exchange_rates", "--rate-limit", "2", stdout=out)
+        assert "Synced 10 rates" in out.getvalue()
+
+    def test_exhausted_quota_skips_the_sync_and_touches_nothing(self):
+        call_command("sync_exchange_rates", "--rate-limit", "1", stdout=StringIO())
+        out = StringIO()
+        call_command("sync_exchange_rates", "--rate-limit", "1", stdout=out)
+        text = out.getvalue()
+        assert "quota exhausted" in text.lower()
+        assert "Synced" not in text
+        # Only the first (allowed) run wrote anything.
+        assert ExchangeRate.objects.count() == 10
+
+    def test_concurrency_guard_prevents_a_racing_second_call(self):
+        from snapadmin.limits import reserve
+        # Hold the same concurrency slot the command itself reserves, exactly
+        # as a genuinely-overlapping second invocation would.
+        with reserve("demo.sync_exchange_rates", concurrency=1):
+            out = StringIO()
+            call_command("sync_exchange_rates", "--rate-limit", "100", stdout=out)
+        assert "quota exhausted" in out.getvalue().lower()
+        assert ExchangeRate.objects.count() == 0

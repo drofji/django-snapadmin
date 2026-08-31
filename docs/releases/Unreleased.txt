@@ -42,6 +42,14 @@ per release):
   under that release's ``Removed`` heading; see ``docs/releases/0.1.0b6.txt`` rather than
   duplicating the note here.
 
+* **``snapadmin.purge_expired_data`` now also purges the audit log.** ``SNAPADMIN_AUDIT_RETENTION_DAYS``
+  already documented a 365-day default, but until now the only thing that ever read it was
+  ``snapadmin_audit_export --purge`` — the scheduled task/command never touched
+  ``SnapadminAuditLog`` at all. A project that already schedules ``purge_expired_data`` via Celery
+  Beat and has audit rows older than 365 days will see them deleted on the first run after
+  upgrading. Set ``SNAPADMIN_AUDIT_RETENTION_DAYS = 0`` to keep every audit row indefinitely, as
+  before.
+
 Added
 -----
 
@@ -231,6 +239,69 @@ Added
   line reporting a model's completion, cancellation or failure always print regardless of the
   interval, so a run's outcome is never swallowed by the throttle.
 
+* **A reusable quota primitive: ``snapadmin.limits.reserve(key, windows, concurrency)``.** Projects
+  kept rebuilding the same cache-backed sliding window for a per-tenant or per-token quota across
+  several time windows at once (per second *and* per minute *and* per day), a concurrency cap, and
+  a cooldown after an upstream service answers ``429`` — including for calls the project makes
+  *outbound* to a third party, which a request-scoped DRF throttle has no way to express. This has
+  no opinion about what ``key`` means, so it serves an inbound API guard and an outbound client
+  call identically::
+
+      from snapadmin.limits import reserve
+
+      with reserve(f"tenant:{tenant_id}", windows={60: 100, 3600: 1000}, concurrency=5) as slot:
+          if not slot.allowed:
+              return too_many_requests(retry_after=slot.retry_after)
+          call_the_upstream_api()
+
+  ``snapadmin.limits.cooldown(key, seconds)`` is the separate, explicit signal for the one thing
+  ``reserve()`` cannot see on its own — that an upstream call just answered ``429`` — and blocks
+  every ``reserve()`` for that key until it expires. Two honest limitations, documented in the
+  docstring and the docs: counters are per-process unless ``SNAPADMIN_LIMITS_CACHE_ALIAS`` points
+  at a shared cache, and a counter evicted under cache pressure fails open (allows), never closed.
+  Demonstrated wired into an actual outbound call in the demo project's ``sync_exchange_rates
+  --rate-limit N``. See `Quotas & Rate Limits <https://drofji.github.io/django-snapadmin/#quotas>`_.
+
+* **Retention now takes uploaded files with it: ``SnapModel.data_retention_files``.** Deleting a
+  row was never the whole GDPR story for a model whose row owns a file — the row is what remembers
+  the file's name, so a purged row used to leave its file unreachable *and* undeletable without a
+  separate storage sweep. Set ``data_retention_files = ["field_name", ...]`` to the
+  ``SnapFileField``/``SnapImageField`` names to delete alongside an expiring row. Files are deleted
+  **before** the row, so a storage failure leaves the row (and the file's name) intact and the purge
+  retryable — ``purge_expired()`` raises ``SnapPurgeError`` rather than silently continuing. A path
+  another live row still references is skipped, never deleted out from under it. ``dry_run=True``
+  touches nothing, as before. Unset (the default) changes nothing. See `GDPR Data Retention
+  <https://drofji.github.io/django-snapadmin/#gdpr>`_.
+
+* **Export/reindex job housekeeping: ``SNAPADMIN_EXPORT_RETENTION_DAYS``.** Export and reindex job
+  rows — and the CSV/JSON/XLSX files an export wrote — were never cleaned up at all, quietly filling
+  a disk on a project that runs scheduled exports. Set this to a number of days (unset/off by
+  default, since unlike the two retention sweeps above this one deletes files a project may want to
+  keep) and ``snapadmin.purge_expired_data`` deletes finished ``SnapExportJob``/``SnapReindexJob``
+  rows past the window along with their published files, plus a sweep for any export file left
+  behind with no job row at all (the state a worker that died mid-export leaves). Assumes the export
+  storage location is dedicated to SnapAdmin exports.
+
+* **The audit log now purges itself automatically.** ``SnapadminAuditLog`` is not a ``SnapModel``,
+  so ``snapadmin.purge_expired_data`` never reached it — on a default install (the audit log is on
+  by default) the table grew forever unless someone remembered to run
+  ``snapadmin_audit_export --purge`` by hand. The same task/command now purges it explicitly against
+  ``SNAPADMIN_AUDIT_RETENTION_DAYS`` (default 365, unchanged), every time it runs. Rows stay
+  append-only — the purge uses ``QuerySet.delete()``, the one sanctioned bypass of that guard.
+  ``snapadmin_audit_export --purge`` is unaffected and keeps working exactly as before.
+
+* **New check ``snapadmin.W012``** warns when retention is configured somewhere — a model's
+  ``data_retention_days``, the audit log's on-by-default window, or
+  ``SNAPADMIN_EXPORT_RETENTION_DAYS`` — but no ``CELERY_BEAT_SCHEDULE`` entry runs
+  ``snapadmin.purge_expired_data`` to actually enforce it. That combination — retention configured,
+  nothing scheduled — is the state every retention report behind this release turned out to be in.
+
+* **One table listing every purge SnapAdmin performs.** The audit log, error events, export/reindex
+  jobs, expired API tokens and model-level ``data_retention_days`` were each documented separately,
+  so a reader could see one sweep was automatic and reasonably assume the rest were too. `The full
+  purge table <https://drofji.github.io/django-snapadmin/#retention-table>`_ lists all five: what
+  table, what setting, what removes it, and the recommended schedule.
+
 Changed
 -------
 
@@ -291,6 +362,11 @@ Fixed
   actions already built for themselves. The check now runs once, in ``initial()``, before any
   handler runs — every current action and anything added later inherits it automatically instead of
   needing its own copy of the same guard.
+
+* **``POST /api/exports/<id>/cancel/`` now stamps ``finished_at``**, alongside ``status=cancelled``
+  — matching what completion and failure already do. A cancelled export can leave a real partial
+  file on disk, and until now that job was invisible to anything measuring a retention window on
+  ``finished_at``, including the new ``SNAPADMIN_EXPORT_RETENTION_DAYS`` purge.
 
 Security
 --------

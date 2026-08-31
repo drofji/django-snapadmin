@@ -99,10 +99,25 @@ Admin surface
 APIs
     ``snapadmin.api.views`` · ``snapadmin.api.serializers`` · ``snapadmin.api.filters``
         The generated REST surface (per-model CRUD, filtering, pagination).
+        ``snap_action`` (in ``api.views``) turns a model method into a
+        user-defined REST action — ``POST /api/models/<app>/<Model>/<pk>/
+        <name>/`` (or the list-level route with ``detail=False``) — bound by
+        the model's own ``api_read_only``/``api_http_method_names`` policy and
+        a derived or explicit Django permission; discoverable per model via
+        ``GET /api/models/schema/``. ``api_field_permissions`` (registry
+        metadata, resolved by ``get_model_meta`` like every other model-level
+        setting) gates a field's very presence/writability in REST and
+        GraphQL, orthogonal to PII masking — see ``snapadmin.masking``.
     ``snapadmin.api.graphql``
         The generated Graphene schema.
     ``snapadmin.api.authentication`` · ``snapadmin.sso``
         API-token auth and SSO redirect handling.
+    ``snapadmin.limits``
+        A cache-backed quota primitive — ``reserve(key, windows, concurrency)``
+        for per-tenant/per-token limits across several time windows at once
+        plus a concurrency cap, and ``cooldown(key, seconds)`` for backing off
+        after an upstream 429. No opinion about what ``key`` means, so it
+        guards an inbound endpoint and an outbound client call alike.
     ``snapadmin.api.exports`` · ``snapadmin.exporting``
         Async row exports; pluggable sources via ``SNAPADMIN_EXPORT_SOURCES``.
     ``snapadmin.api.users`` · ``snapadmin.api.health`` · ``snapadmin.api.reindex``
@@ -116,7 +131,10 @@ Operations
         resolves *which* fields are sensitive (``SNAPADMIN_MASKED_FIELDS``),
         *how* each is obfuscated and *who* may see it raw
         (``SNAPADMIN_MASKING_RULES``) — ``mask_field()`` is the choke point
-        every masking surface goes through.
+        every masking surface goes through. ``user_can_access_field()`` is a
+        related but orthogonal guard: whether a field is present/writable at
+        all, driven by a model's ``api_field_permissions`` rather than a
+        masking rule.
     ``snapadmin.backup``
         3-2-1 backups (local / network / SFTP / FTP / S3-compatible via the
         ``s3`` extra — AWS, MinIO, Backblaze B2, Hetzner Object Storage,
@@ -171,13 +189,16 @@ Operations
         configure" to one line for a new project without changing behaviour
         for an install that already sets things explicitly.
     ``snapadmin.checks``
-        Django system checks — warnings ``snapadmin.W001``…``W009`` and errors
-        ``snapadmin.E001``…``E007`` catch misconfiguration at startup, so read
+        Django system checks — warnings ``snapadmin.W001``…``W012`` and errors
+        ``snapadmin.E001``…``E008`` catch misconfiguration at startup, so read
         them before debugging behaviour. The masking checks are *errors* because
         a mistyped rule fails open: it masks nothing and says nothing.
         ``E007`` is the backup ``.env``-without-encryption refusal: ``env`` in
         ``SNAPADMIN_BACKUP_INCLUDE`` with no ``SNAPADMIN_BACKUP_AGE_RECIPIENTS``
-        configured fails closed rather than shipping plaintext secrets.
+        configured fails closed rather than shipping plaintext secrets. ``E008``
+        catches a ``@snap_action`` whose declared HTTP methods conflict with its
+        own model's ``api_read_only``/``api_http_method_names`` policy — dead
+        configuration that would otherwise always answer ``403``.
     ``snapadmin.crypto``
         Streaming AGE encryption for backup artefacts — two backends
         (``pyrage``, the optional ``[age]`` extra; or the ``age`` command-line

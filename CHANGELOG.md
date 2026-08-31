@@ -33,6 +33,13 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   unhelpful, return value). Code calling these directly and branching on the return value for a
   total-failure case must now catch the exception instead (`BackupError`, `SnapPurgeError`,
   `AlertDeliveryError`, `ReindexError`) — see the task-outcome convention under Fixed, below.
+- `snapadmin.purge_expired_data` / `snapadmin_purge_expired_data` now also purge the audit log
+  (`SnapadminAuditLog`) automatically, against `SNAPADMIN_AUDIT_RETENTION_DAYS` — a setting that
+  already documented a 365-day default but, until now, was only ever read by
+  `snapadmin_audit_export --purge`. A project that already schedules `purge_expired_data` via Celery
+  Beat and has audit rows older than 365 days will see them deleted on the first run after
+  upgrading. Set `SNAPADMIN_AUDIT_RETENTION_DAYS = 0` to keep every audit row indefinitely, as
+  before.
 
 ### Added
 - `snap_field()` now accepts every `Snap*Field` constructor kwarg — `required` and the file-upload
@@ -100,6 +107,29 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   throttles the per-chunk progress line so a multi-hour run in a detached container doesn't fill
   the log with one line per chunk; the line reporting a model's completion, cancellation or
   failure always prints regardless of the throttle.
+- `snapadmin.limits.reserve(key, windows, concurrency)` — a cache-backed quota primitive for
+  per-tenant/per-token limits across several time windows at once, a concurrency cap, and an
+  explicit `cooldown()` after an upstream 429, with no opinion about what `key` means (an inbound
+  API guard and an outbound client call use it identically). Counters are per-process unless
+  `SNAPADMIN_LIMITS_CACHE_ALIAS` points at a shared cache; an evicted counter fails open, never
+  closed. Demonstrated in the demo project's `sync_exchange_rates --rate-limit N`.
+- `SnapModel.data_retention_files` — a list of `SnapFileField`/`SnapImageField` names whose storage
+  objects are deleted along with an expiring row, so a GDPR purge no longer leaves an orphaned file
+  (unreachable, but undeletable without a separate storage sweep) behind. Files are deleted before
+  the row; a storage failure raises `SnapPurgeError` and leaves the row intact for a retry, and a
+  path another live row still references is skipped rather than deleted out from under it. Unset
+  (the default) changes nothing.
+- `SNAPADMIN_EXPORT_RETENTION_DAYS` — opt-in (unset by default) cleanup of finished
+  `SnapExportJob`/`SnapReindexJob` rows and their published files past the window, plus a sweep for
+  any export file left behind with no job row at all. Runs from the same
+  `snapadmin.purge_expired_data` task/command as every other retention sweep.
+- New check `snapadmin.W012`: retention is configured somewhere (a model's `data_retention_days`,
+  the audit log's on-by-default window, or `SNAPADMIN_EXPORT_RETENTION_DAYS`) but no
+  `CELERY_BEAT_SCHEDULE` entry runs `snapadmin.purge_expired_data` to actually enforce it.
+- A single table in the docs (`#retention-table`) listing every table SnapAdmin can auto-delete,
+  its setting, and its recommended schedule — the audit log, error events, export/reindex jobs,
+  expired API tokens and model-level `data_retention_days` were previously documented separately,
+  each looking automatic on its own with no way to see what the whole picture actually covers.
 
 ### Changed
 - The shipped `admin.js`'s select2 initialisation is opt-in now — see Breaking, above, for the
@@ -139,6 +169,10 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   including `retrieve`/`update`/`partial_update` — previously provided by DRF without an explicit
   guard, so they fell through to filtering an empty queryset instead of the consistent 404 body the
   other five actions already built for themselves. The check now runs once in `initial()`.
+- `POST /api/exports/<id>/cancel/` now stamps `finished_at` alongside `status=cancelled`, matching
+  completion and failure — a cancelled job can leave a real partial file on disk, and until now it
+  was invisible to anything measuring a retention window on `finished_at` (including the new
+  `SNAPADMIN_EXPORT_RETENTION_DAYS` purge).
 
 ### Security
 - `snap_field(field, wysiwyg=True)` now sanitizes on write, matching `SnapRichTextField` — closing

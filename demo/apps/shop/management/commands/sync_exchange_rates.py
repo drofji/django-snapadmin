@@ -22,6 +22,13 @@ feed no longer reports — the delete half of a recurring sync. Combine with
     rows left below it. It runs with `on_exceed="skip"`, so an over-the-ceiling
     prune logs and continues (returns `aborted=True`) instead of raising — the
     posture an unattended job usually wants.
+
+`--rate-limit N` showcases `snapadmin.limits.reserve()` guarding the *outbound*
+call to the "external" feed — the use case DRF's own request-scoped throttles
+can't express at all. Off by default (so a normal sync is unaffected); passing
+it caps this command to N runs per minute (`concurrency=1` too, so two syncs
+can never race the same feed at once) and exits cleanly instead of calling the
+feed when the quota is exhausted.
 """
 
 import random
@@ -31,6 +38,7 @@ from django.utils import timezone
 
 from demo.apps.shop.models import ExchangeRate
 from snapadmin.etl import StaleSyncAbort, stale_sync, upsert_from_source
+from snapadmin.limits import reserve
 
 # Stand-in for a response streamed from an external rates provider.
 _CURRENCIES = ["USD", "GBP", "JPY", "CHF", "CAD", "AUD", "SEK", "NOK", "PLN", "CZK"]
@@ -63,8 +71,30 @@ class Command(BaseCommand):
             "--strategy", choices=["keyset", "last_seen"], default="keyset",
             help="How --prune finds stale rows: keyset (in-memory diff) or last_seen (DB-side watermark).",
         )
+        parser.add_argument(
+            "--rate-limit", type=int, default=None,
+            help=(
+                "Cap this command to N runs per minute (plus a concurrency=1 guard against "
+                "two syncs racing the same feed), via snapadmin.limits.reserve(). Off by default."
+            ),
+        )
 
     def handle(self, *args, **options):
+        if options["rate_limit"] is not None:
+            slot = reserve(
+                "demo.sync_exchange_rates", windows={60: options["rate_limit"]}, concurrency=1,
+            )
+            if not slot.allowed:
+                self.stdout.write(self.style.WARNING(
+                    f"Sync skipped — quota exhausted ({slot.reason}); "
+                    f"retry in {slot.retry_after or 0:.0f}s."
+                ))
+                return
+            with slot:
+                return self._run(options)
+        return self._run(options)
+
+    def _run(self, options):
         run_started = timezone.now()
         codes = _CURRENCIES[: options["only"]]
         summary = upsert_from_source(

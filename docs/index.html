@@ -280,6 +280,7 @@
       <li><a href="#api-rest">REST API</a></li>
       <li><a href="#api-graphql">GraphQL API</a></li>
       <li><a href="#api-tokens">Token Management</a></li>
+      <li><a href="#quotas">Quotas &amp; Rate Limits</a></li>
       <li><a href="#elasticsearch">Elasticsearch (ES)</a></li>
       <li><a href="#offline">Offline Mode</a></li>
     </ul>
@@ -1699,6 +1700,46 @@ token = APIToken.create_for_user(
 new_raw_key = token.rotate()   # old key stops authenticating immediately
 # new_raw_key is shown once — store it now, it is not recoverable afterwards</code></pre>
 
+  <!-- ── Quotas & Rate Limits ───────────────────────────────────────────────── -->
+  <h2 id="quotas">🧮 Quotas &amp; Rate Limits</h2>
+  <p><code>SnapAnonRateThrottle</code> / <code>SnapUserRateThrottle</code> (<code>SNAPADMIN_THROTTLE_ANON</code> /
+  <code>SNAPADMIN_THROTTLE_USER</code>, above) give one global rate for every anonymous or authenticated
+  caller. <code>snapadmin.limits.reserve()</code> is the narrower primitive projects keep rebuilding on top
+  of that: a <strong>per-tenant or per-token quota across several time windows at once</strong>, a
+  <strong>concurrency cap</strong>, and a <strong>cooldown</strong> after an upstream service answers
+  <code>429</code> — including for calls <em>your project</em> makes outbound to a third party, which a
+  request-scoped DRF throttle has no way to express at all. It has no opinion about what the key means, so
+  it serves inbound and outbound alike:</p>
+  <pre><code>from snapadmin.limits import reserve
+
+with reserve(f"tenant:{tenant_id}", windows={60: 100, 3600: 1000}, concurrency=5) as slot:
+    if not slot.allowed:
+        return too_many_requests(retry_after=slot.retry_after)  # slot.reason: "rate_limited" | "concurrency" | "cooldown"
+    call_the_upstream_api()</code></pre>
+  <p><code>windows</code> is <code>{period_seconds: max_count}</code> — every window must clear for the
+  reservation to succeed. <code>concurrency</code>, if given, additionally caps how many reservations for
+  the same key may be held at once; releasing the returned object (or using it as a context manager, as
+  above) frees the slot, and an unreleased slot expires on its own after
+  <code>concurrency_timeout</code> seconds (default 300) so a crashed holder can never leak it forever.
+  <code>snapadmin.limits.cooldown(key, seconds)</code> is a separate, explicit signal for the one thing
+  <code>reserve()</code> cannot see on its own: call it after an upstream actually answers <code>429</code>,
+  and every <code>reserve()</code> for that key fails fast (before touching a window or the concurrency
+  counter) until the cooldown expires.</p>
+  <p><strong>Two honest limitations, worth reading before trusting this in production:</strong></p>
+  <ul>
+    <li><strong>Counters are per-process unless <code>CACHES</code> points at a shared backend.</strong>
+    The default <code>LocMemCache</code> is private to one process — four Gunicorn workers each enforce
+    the configured limit independently, so the effective ceiling is four times what <code>windows</code>
+    says. Point <code>SNAPADMIN_LIMITS_CACHE_ALIAS</code> at a shared cache (Redis, Memcached, a database
+    cache) before relying on this across more than one worker.</li>
+    <li><strong>A cache that evicts a counter under memory pressure fails open, not closed.</strong> An
+    evicted counter looks identical to one that never existed, so the next call sees a fresh window and is
+    allowed — the same trade-off any cache-backed rate limiter makes, including DRF's own throttles.</li>
+  </ul>
+  <p>See it wired into an actual outbound call in the demo project's <code>sync_exchange_rates
+  --rate-limit N</code> management command (caps the "call to the external feed" to N runs per minute,
+  plus a <code>concurrency=1</code> guard against two syncs racing the same feed).</p>
+
   <!-- ── Elasticsearch ──────────────────────────────────────────────────────── -->
   <h2 id="elasticsearch">🔍 Elasticsearch Integration</h2>
   <p>SnapAdmin supports three Elasticsearch storage modes via <code>EsStorageMode</code>. Choose the mode per model based on your use case.</p>
@@ -2795,7 +2836,10 @@ logger.error("payment_failed", reason="card_declined")</code></pre>
   <h2 id="gdpr">🔒 GDPR Data Retention</h2>
   <p>SnapAdmin gives you a one-line retention window on any <code>SnapModel</code> to help comply with
   EU data retention laws (GDPR). The two attributes below declare <em>what counts as expired</em>; a
-  scheduled task you wire up is what actually deletes it.</p>
+  scheduled task you wire up is what actually deletes it. The same <code>snapadmin.purge_expired_data</code>
+  task also covers two things that are not <code>SnapModel</code>s at all — the audit log and, if you opt
+  in, finished export/reindex job rows and their files — see
+  <a href="#retention-table">the full purge table</a> below for everything the package can auto-delete.</p>
   <div class="callout callout-warn">
     <strong>Nothing purges on its own.</strong>
     SnapAdmin runs no background daemon, so setting <code>data_retention_days</code> deletes nothing
@@ -2807,16 +2851,19 @@ logger.error("payment_failed", reason="card_declined")</code></pre>
   <pre><code>class AuditLog(SnapModel):
     action     = SnapCharField(max_length=100)
     created_at = SnapDateTimeField(auto_now_add=True)
+    attachment = SnapFileField(upload_to="audit/", blank=True, null=True)
 
     # Rows older than 90 days count as expired (deleted when the purge runs)
     data_retention_days  = 90
-    data_retention_field = "created_at"  # default — any DateTimeField works</code></pre>
+    data_retention_field = "created_at"    # default — any DateTimeField works
+    data_retention_files = ["attachment"]  # delete the file with the row (#RET2c)</code></pre>
 
   <h3>How it works</h3>
   <table>
     <tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr>
     <tr><td><code>data_retention_days</code></td><td><code>int | None</code></td><td><code>None</code></td><td>Max age of records in days. Set to a positive integer to enable auto-deletion.</td></tr>
     <tr><td><code>data_retention_field</code></td><td><code>str</code></td><td><code>"created_at"</code></td><td>Name of the <code>DateTimeField</code> to measure record age against.</td></tr>
+    <tr><td><code>data_retention_files</code></td><td><code>list[str] | None</code></td><td><code>None</code></td><td><code>SnapFileField</code>/<code>SnapImageField</code> names whose files are deleted along with an expiring row. <code>None</code> (the default) purges rows only, exactly as before this existed.</td></tr>
   </table>
 
   <h3>Running the cleanup</h3>
@@ -2838,14 +2885,80 @@ AuditLog.purge_expired(dry_run=True)  # count what *would* be deleted, delete no
   <p>The purge is <strong>storage-aware</strong> — it removes expired records from wherever the model actually keeps them, so personal data never lingers in a secondary store:</p>
   <table>
     <tr><th>Mode</th><th>What gets purged</th></tr>
-    <tr><td><code>DB_ONLY</code></td><td>Bulk delete from the database.</td></tr>
-    <tr><td><code>DUAL</code></td><td>Bulk delete from the database <strong>and</strong> the mirrored Elasticsearch documents (the pks are collected before the DB delete, then cleared from the index).</td></tr>
-    <tr><td><code>ES_ONLY</code></td><td>A range <code>delete_by_query</code> against the index on <code>data_retention_field</code> (which must be mapped as a <code>date</code> in <code>es_mapping</code>).</td></tr>
+    <tr><td><code>DB_ONLY</code></td><td>Bulk delete from the database (plus <code>data_retention_files</code>, if declared).</td></tr>
+    <tr><td><code>DUAL</code></td><td>Bulk delete from the database <strong>and</strong> the mirrored Elasticsearch documents (the pks are collected before the DB delete, then cleared from the index), plus <code>data_retention_files</code>.</td></tr>
+    <tr><td><code>ES_ONLY</code></td><td>A range <code>delete_by_query</code> against the index on <code>data_retention_field</code> (which must be mapped as a <code>date</code> in <code>es_mapping</code>). No DB table means no field to read a file path from, so <code>data_retention_files</code> does not apply here.</td></tr>
   </table>
   <div class="callout callout-success">
     <strong>Why this matters for GDPR</strong>
-    A plain <code>QuerySet.delete()</code> never calls each model's <code>delete()</code>, so a naïve bulk purge would leave the Elasticsearch copy behind. SnapAdmin's <code>purge_expired()</code> closes that gap for both <code>DUAL</code> and <code>ES_ONLY</code> models. ES operations are best-effort and require <code>ELASTICSEARCH_ENABLED=True</code>.
+    A plain <code>QuerySet.delete()</code> never calls each model's <code>delete()</code>, so a naïve bulk purge would leave the Elasticsearch copy — or an uploaded file — behind. SnapAdmin's <code>purge_expired()</code> closes that gap for <code>DUAL</code>/<code>ES_ONLY</code> models and for <code>data_retention_files</code> alike. ES operations are best-effort and require <code>ELASTICSEARCH_ENABLED=True</code>.
   </div>
+
+  <h3>File payloads: files before rows</h3>
+  <p>Deleting the row but not the file it references is the wrong outcome for a GDPR retention
+  feature — the row is what remembers the file's name, so an orphaned file becomes unreachable
+  <em>and</em> undeletable without a separate storage sweep. <code>data_retention_files</code> closes
+  that gap, with two rules that make it safe to run unattended:</p>
+  <ul>
+    <li><strong>Files are deleted before their row.</strong> If a file cannot be removed (a storage
+    error), the row — and therefore the file's name — is left intact and <code>purge_expired()</code>
+    raises <code>SnapPurgeError</code> instead of silently continuing, so the purge is retryable on
+    the next run rather than orphaning the file permanently. A missing file (already gone) is treated
+    as already-done, not an error.</li>
+    <li><strong>A path another live row still references is never deleted.</strong> Two rows can
+    legitimately point at the same storage path; before removing a file, SnapAdmin checks whether any
+    other row outside this purge still needs it and skips the delete if so (one extra query per
+    distinct path) — "we deleted a file another row still points at" is unrecoverable, "we left a
+    file behind" is a storage sweep.</li>
+  </ul>
+  <p><code>dry_run=True</code> touches nothing — no file is deleted and no row is counted as
+  skipped, exactly as before <code>data_retention_files</code> existed.</p>
+
+  <h3>The audit log, and export/reindex job cleanup</h3>
+  <p>Two more tables grow forever unless something purges them, and neither is a <code>SnapModel</code>
+  — so <code>snapadmin.purge_expired_data</code> covers each explicitly, alongside the per-model sweep
+  above, every time it runs:</p>
+  <ul>
+    <li><strong>The audit log (<code>SnapadminAuditLog</code>)</strong> — governed by
+    <code>SNAPADMIN_AUDIT_RETENTION_DAYS</code> (default <strong>365</strong>, i.e. on by default).
+    Rows are append-only (<code>save</code>/<code>delete</code> raise once persisted); the purge uses
+    <code>QuerySet.delete()</code>, the one sanctioned bypass of that guard, so the trail itself stays
+    tamper-evident right up until the retention window closes. This does not change what
+    <code>manage.py snapadmin_audit_export --purge</code> does — that command keeps working exactly
+    as before, reading the same setting independently.</li>
+    <li><strong>Export/reindex jobs (<code>SnapExportJob</code>/<code>SnapReindexJob</code>)</strong> —
+    governed by <code>SNAPADMIN_EXPORT_RETENTION_DAYS</code>, unset (<strong>off</strong>) by default —
+    unlike the two sweeps above, this one deletes files a project may deliberately want to keep (a
+    downloaded report, an archival export), so it needs an explicit opt-in. Once set, finished job
+    rows past the window are deleted along with their published files (files before rows, same
+    ordering rule as <code>data_retention_files</code>), and a second pass sweeps any export file left
+    behind with <em>no</em> job row at all — the state a worker that died mid-export leaves.
+    This assumes the export storage location (<a href="#export">see Async Export</a>) is used
+    exclusively for SnapAdmin exports; do not point it at a bucket with unrelated files.</li>
+  </ul>
+  <div class="callout callout-warn" id="retention-w012">
+    <strong>snapadmin.W012</strong> — retention is configured somewhere (a model's
+    <code>data_retention_days</code>, the audit log's on-by-default 365 days, or
+    <code>SNAPADMIN_EXPORT_RETENTION_DAYS</code>) but no <code>CELERY_BEAT_SCHEDULE</code> entry runs
+    <code>snapadmin.purge_expired_data</code> — every report behind this warning turned out to be
+    retention configured but nothing ever scheduled to enforce it, so the table quietly grows forever
+    exactly as if it had never been set.
+  </div>
+
+  <h3 id="retention-table">Every purge the package performs, in one place</h3>
+  <p>Retention is real but was historically scattered across four unrelated tables — this table is the
+  single answer to "what gets cleaned up, by what, and how often should I schedule it":</p>
+  <table>
+    <tr><th>Table</th><th>Setting</th><th>What removes it</th><th>Recommended schedule</th></tr>
+    <tr><td>Any <code>SnapModel</code>'s rows (+ <code>data_retention_files</code>)</td><td><code>data_retention_days</code> / <code>data_retention_field</code> / <code>data_retention_files</code> (per model)</td><td><code>snapadmin.purge_expired_data</code></td><td>Daily</td></tr>
+    <tr><td><code>SnapadminAuditLog</code></td><td><code>SNAPADMIN_AUDIT_RETENTION_DAYS</code> (default 365)</td><td><code>snapadmin.purge_expired_data</code> (or <code>snapadmin_audit_export --purge</code> for a SIEM-export-then-prune pass)</td><td>Daily</td></tr>
+    <tr><td><code>ErrorEvent</code></td><td><code>SNAPADMIN_ERROR_RETENTION_DAYS</code> (default 30)</td><td><code>snapadmin.send_error_digest</code> (purges as a side effect of sending the digest)</td><td>Daily (with the digest)</td></tr>
+    <tr><td><code>SnapExportJob</code> / <code>SnapReindexJob</code> + their files</td><td><code>SNAPADMIN_EXPORT_RETENTION_DAYS</code> (default off — opt in)</td><td><code>snapadmin.purge_expired_data</code></td><td>Daily, once opted in</td></tr>
+    <tr><td>Expired <code>APIToken</code> rows</td><td><code>APIToken.expiration_date</code> (per token; an expired token stops authenticating immediately either way)</td><td><code>snapadmin.purge_expired_tokens</code></td><td>Daily</td></tr>
+  </table>
+  <p style="font-size: 13px; color: var(--muted);">All five rows above run from the beat schedule in
+  <a href="#celery">Celery &amp; Periodic Tasks</a> — the demo project's own
+  <code>CELERY_BEAT_SCHEDULE</code> schedules every one of them.</p>
 
   <!-- ── Enterprise config ─────────────────────────────────────────────────── -->
   <h2 id="enterprise-config">🏢 Enterprise Config <span class="badge">v0.1.0a8</span></h2>
@@ -3393,6 +3506,7 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset, same as
     <tr><td><code>SNAPADMIN_USER_API_ENABLED</code></td><td><code>False</code></td><td>Serve the admin-only user-management API (<code>/api/users/</code>, <code>/api/permissions/</code>)</td></tr>
     <tr><td><code>SNAPADMIN_THEME_AUTH_ADMIN</code></td><td><code>True</code></td><td>With the optional Unfold theme installed, re-register Django's stock <code>User</code>/<code>Group</code> admins with Unfold's theme and forms (see <a href="#themed-auth-admin">Themed auth admin</a>)</td></tr>
     <tr><td><code>SNAPADMIN_CONNECTIVITY_ENABLED</code></td><td><code>False</code></td><td>Load the admin-wide health-poll/save-guard/sidebar-badge layer (<code>snapadmin/js/connectivity.js</code>) — only takes effect when at least one registered model also has <code>offline_mode = True</code> (see <a href="#offline">Offline Mode</a>)</td></tr>
+    <tr><td><code>SNAPADMIN_LIMITS_CACHE_ALIAS</code></td><td><code>"default"</code></td><td>Which <code>CACHES</code> entry <code>snapadmin.limits.reserve()</code> stores its window/concurrency/cooldown counters in — point it at a shared backend before relying on quotas across more than one worker process (see <a href="#quotas">Quotas &amp; Rate Limits</a>)</td></tr>
   </table>
 
   <h3>API behaviour, auth &amp; limits</h3>
