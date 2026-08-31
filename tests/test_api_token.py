@@ -250,3 +250,205 @@ class TestTokenAPIEndpoints:
     def test_response_has_is_valid_field(self, auth_client, api_token):
         r = auth_client.get(f"/api/tokens/{api_token.pk}/")
         assert r.json()["is_valid"] is True
+
+
+# ── #TOK2a: allowed_scopes + token_has_scope ──────────────────────────────────
+
+@pytest.mark.django_db
+class TestAllowedScopes:
+    def test_default_is_empty_list(self, api_token):
+        assert api_token.allowed_scopes == []
+
+    def test_create_for_user_stores_scopes(self, admin_user):
+        from snapadmin.models import APIToken
+        t = APIToken.create_for_user(admin_user, "Scoped", allowed_scopes=["reports:read"])
+        assert t.allowed_scopes == ["reports:read"]
+
+    def test_invalid_scope_type_rejected(self, api_token):
+        from django.core.exceptions import ValidationError
+        api_token.allowed_scopes = ["reports:read", 42]
+        with pytest.raises(ValidationError):
+            api_token.full_clean()
+
+    def test_blank_scope_string_rejected(self, api_token):
+        from django.core.exceptions import ValidationError
+        api_token.allowed_scopes = ["   "]
+        with pytest.raises(ValidationError):
+            api_token.full_clean()
+
+    def test_not_a_list_rejected(self, api_token):
+        from django.core.exceptions import ValidationError
+        api_token.allowed_scopes = "reports:read"
+        with pytest.raises(ValidationError):
+            api_token.full_clean()
+
+
+@pytest.mark.django_db
+class TestTokenHasScope:
+    def test_granted_scope_allowed(self, admin_user):
+        from snapadmin.api.authentication import token_has_scope
+        from snapadmin.models import APIToken
+        t = APIToken.create_for_user(admin_user, "S", allowed_scopes=["reports:read"])
+        assert token_has_scope(t, "reports:read") is True
+
+    def test_ungranted_scope_denied(self, admin_user):
+        from snapadmin.api.authentication import token_has_scope
+        from snapadmin.models import APIToken
+        t = APIToken.create_for_user(admin_user, "S", allowed_scopes=["reports:read"])
+        assert token_has_scope(t, "reports:write") is False
+
+    def test_empty_scopes_denies_by_default(self, api_token):
+        # Unlike allowed_models, empty allowed_scopes is fail-closed: there is
+        # no Django-permission equivalent for an opaque, project-defined
+        # string to delegate to.
+        from snapadmin.api.authentication import token_has_scope
+        assert api_token.allowed_scopes == []
+        assert token_has_scope(api_token, "anything") is False
+
+    def test_independent_of_allowed_models(self, admin_user):
+        # allowed_models and allowed_scopes are orthogonal checks — neither
+        # leaks into the other.
+        from snapadmin.api.authentication import token_has_scope
+        from snapadmin.models import APIToken
+        t = APIToken.create_for_user(
+            admin_user, "Both",
+            allowed_models=["demo.Product"],
+            allowed_scopes=["reports:read"],
+        )
+        assert t.can_access_model("demo", "Product") is True
+        assert t.can_access_model("demo", "Customer") is False
+        assert token_has_scope(t, "reports:read") is True
+        assert token_has_scope(t, "reports:write") is False
+        # A model grant does not imply a scope grant, and vice versa.
+        assert t.can_access_model("other_app", "Whatever") is False
+        assert token_has_scope(t, "demo.Product") is False
+
+
+# ── #TOK2b: rotate ─────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestTokenRotateModelMethod:
+    def test_returns_a_new_40_char_key(self, api_token):
+        old_key = api_token.token_key
+        new_key = api_token.rotate()
+        assert len(new_key) == 40
+        assert new_key != old_key
+
+    def test_row_identity_survives(self, api_token):
+        pk = api_token.pk
+        api_token.rotate()
+        assert api_token.pk == pk
+
+    def test_scopes_and_history_survive(self, admin_user):
+        from snapadmin.models import APIToken
+        t = APIToken.create_for_user(
+            admin_user, "Rotate Me",
+            allowed_models=["demo.Product"], allowed_scopes=["reports:read"],
+        )
+        created_at = t.created_at
+        t.rotate()
+        t.refresh_from_db()
+        assert t.allowed_models == ["demo.Product"]
+        assert t.allowed_scopes == ["reports:read"]
+        assert t.created_at == created_at
+
+    def test_old_key_stops_authenticating(self, api_token):
+        old_key = api_token.token_key
+        api_token.rotate()
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Token {old_key}")
+        assert c.get("/api/tokens/").status_code == 401
+
+    def test_new_key_authenticates(self, api_token):
+        new_key = api_token.rotate()
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Token {new_key}")
+        assert c.get("/api/tokens/").status_code == 200
+
+    def test_rotate_written_to_audit_log(self, api_token):
+        from snapadmin.models import SnapadminAuditLog
+        before = SnapadminAuditLog.objects.count()
+        api_token.rotate()
+        assert SnapadminAuditLog.objects.count() == before + 1
+        entry = SnapadminAuditLog.objects.latest("timestamp")
+        assert entry.action == SnapadminAuditLog.Action.UPDATE
+        assert entry.model == "apitoken"
+        # The raw key must never reach the audit trail, only the prefix.
+        assert "token_digest" in entry.changes
+        for side in ("old", "new"):
+            assert api_token.token_key not in str(entry.changes["token_digest"][side])
+
+
+@pytest.mark.django_db
+class TestTokenRotateEndpoint:
+    def test_rotate_returns_200_with_new_key(self, auth_client, api_token):
+        r = auth_client.post(f"/api/tokens/{api_token.pk}/rotate/")
+        assert r.status_code == 200
+        assert len(r.json()["token_key"]) == 40
+        assert r.json()["token_key"] != api_token.token_key
+
+    def test_rotate_persists(self, auth_client, api_token):
+        r = auth_client.post(f"/api/tokens/{api_token.pk}/rotate/")
+        new_key = r.json()["token_key"]
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Token {new_key}")
+        assert c.get("/api/tokens/").status_code == 200
+
+    def test_rotate_requires_authentication(self, anon_client, api_token):
+        r = anon_client.post(f"/api/tokens/{api_token.pk}/rotate/")
+        assert r.status_code in (401, 403)
+
+    def test_owner_can_rotate_own_token_without_superuser(self, db, regular_user):
+        from snapadmin.models import APIToken
+        token = APIToken.create_for_user(regular_user, "Mine")
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Token {token.token_key}")
+        r = c.post(f"/api/tokens/{token.pk}/rotate/")
+        assert r.status_code == 200
+
+    def test_non_owner_cannot_rotate_others_token(self, db, regular_user, api_token):
+        from snapadmin.models import APIToken
+        other = APIToken.create_for_user(regular_user, "Not Yours")
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Token {other.token_key}")
+        r = c.post(f"/api/tokens/{api_token.pk}/rotate/")
+        assert r.status_code in (403, 404)
+
+
+# ── #TOK2c: deactivate — the documented revocation path ────────────────────────
+
+@pytest.mark.django_db
+class TestTokenDeactivateEndpoint:
+    def test_deactivate_flips_is_active_false(self, auth_client, api_token):
+        r = auth_client.post(f"/api/tokens/{api_token.pk}/deactivate/")
+        assert r.status_code == 200
+        assert r.json()["is_active"] is False
+        api_token.refresh_from_db()
+        assert api_token.is_active is False
+
+    def test_deactivate_keeps_the_row(self, auth_client, api_token):
+        from snapadmin.models import APIToken
+        auth_client.post(f"/api/tokens/{api_token.pk}/deactivate/")
+        assert APIToken.objects.filter(pk=api_token.pk).exists()
+
+    def test_deactivated_token_stops_authenticating(self, auth_client, api_token):
+        auth_client.post(f"/api/tokens/{api_token.pk}/deactivate/")
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Token {api_token.token_key}")
+        assert c.get("/api/tokens/").status_code == 401
+
+    def test_owner_can_deactivate_own_token_without_superuser(self, db, regular_user):
+        from snapadmin.models import APIToken
+        token = APIToken.create_for_user(regular_user, "Mine")
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Token {token.token_key}")
+        r = c.post(f"/api/tokens/{token.pk}/deactivate/")
+        assert r.status_code == 200
+
+    def test_non_owner_cannot_deactivate_others_token(self, db, regular_user, api_token):
+        from snapadmin.models import APIToken
+        other = APIToken.create_for_user(regular_user, "Not Yours")
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Token {other.token_key}")
+        r = c.post(f"/api/tokens/{api_token.pk}/deactivate/")
+        assert r.status_code in (403, 404)

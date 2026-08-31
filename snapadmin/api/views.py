@@ -12,6 +12,8 @@ from django.http import StreamingHttpResponse
 from django.urls import reverse
 from django.utils.module_loading import import_string
 from rest_framework import mixins, permissions, status, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import NotFound
 from rest_framework.filters import BaseFilterBackend, OrderingFilter
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -114,9 +116,14 @@ class APITokenViewSet(
 ):
     """Self-service CRUD for the caller's own API tokens (``/api/tokens/``).
 
-    List, create and delete only — a token cannot be edited. The plaintext key is
-    returned **once**, in the create response; only its hash is stored. A regular
-    user sees their own tokens; a superuser sees every token.
+    List, create, delete, rotate and deactivate — a token's other fields
+    cannot be edited (no PUT/PATCH). The plaintext key is returned **once**,
+    in the create and rotate responses; only its hash is stored. A regular
+    user manages their own tokens (``token.user == request.user``) without
+    needing to be a superuser — scoped by :meth:`get_queryset` and enforced
+    again by :class:`IsTokenOwnerOrAdmin` on every object lookup, not by a
+    separate permission class per action. A superuser sees and manages every
+    token.
     """
 
     permission_classes = [permissions.IsAuthenticated, IsTokenOwnerOrAdmin]
@@ -138,6 +145,34 @@ class APITokenViewSet(
         token = serializer.save()
         output = APITokenSerializer(token)
         return Response(output.data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(summary="Rotate a token's secret, keeping the row")
+    @action(detail=True, methods=["post"])
+    def rotate(self, request, *args, **kwargs):
+        """Mint a new secret for this token in place.
+
+        The row, its id, scopes and history all survive; only the key
+        material changes. The old key stops authenticating immediately. See
+        :meth:`snapadmin.models.APIToken.rotate` — this is the supported
+        response to a leaked key (``SECURITY.md``).
+        """
+        token = self.get_object()
+        token.rotate(request=request)
+        return Response(APITokenSerializer(token).data)
+
+    @extend_schema(summary="Deactivate a token without deleting it")
+    @action(detail=True, methods=["post"])
+    def deactivate(self, request, *args, **kwargs):
+        """Flip ``is_active`` off — the recommended revocation path.
+
+        Deactivating keeps the row (id, scopes, history) intact and can be
+        reversed by a superuser through the admin; ``destroy`` remains for
+        administrators who want the row gone outright.
+        """
+        token = self.get_object()
+        token.is_active = False
+        token.save(update_fields=["is_active"])
+        return Response(APITokenSerializer(token).data)
 
 
 # HTTP-method sets the per-model policy resolves to.
@@ -208,24 +243,33 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         always added — wins when set) or ``api_read_only`` (``True`` -> only
         GET/HEAD/OPTIONS); otherwise full CRUD. A disallowed verb is rejected with
         ``405`` in dispatch before any handler runs (so a read-only model never gets
-        a blank-row insert), and is pruned from the ``OPTIONS`` ``Allow`` header. A
-        missing/unknown model falls back to full CRUD.
+        a blank-row insert), and is pruned from the ``OPTIONS`` ``Allow`` header.
+
+        An **unresolvable model** — kwargs naming an unknown app, an unknown
+        model, or a model that is not ``@snap_model``-registered — denies
+        every verb (the empty list), never full CRUD: a permissive fallback
+        here is exactly what let a disallowed verb (e.g. ``PATCH``) reach a
+        handler for a model that does not exist. In practice a live request
+        never reaches this fallback for that case: :meth:`initial` already
+        raises ``404`` before the verb check is consulted, so this is
+        defence in depth, not the live guard.
+
+        **Missing kwargs entirely** (no ``app_label``/``model_name`` at
+        all — e.g. an instance built for introspection with no URL match)
+        is a different case and keeps the historical full-CRUD default.
         """
-        model = self._model_for_method_policy()
-        if model is None:
+        kwargs = getattr(self, "kwargs", None) or {}
+        if "app_label" not in kwargs or "model_name" not in kwargs:
             return list(_FULL_HTTP_METHOD_NAMES)
+        model = self._get_model_class()
+        if model is None:
+            return []
         explicit = get_model_meta(model, "api_http_method_names", None)
         if explicit is not None:
             return sorted({name.lower() for name in explicit} | {"head", "options"})
         if get_model_meta(model, "api_read_only", False):
             return list(_SAFE_HTTP_METHOD_NAMES)
         return list(_FULL_HTTP_METHOD_NAMES)
-
-    def _model_for_method_policy(self):
-        kwargs = getattr(self, "kwargs", None) or {}
-        if "app_label" not in kwargs or "model_name" not in kwargs:
-            return None
-        return self._get_model_class()
 
     def _get_model_class(self):
         app_label  = self.kwargs["app_label"]
@@ -250,6 +294,33 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             and get_model_meta(model_class, "es_query_routing", True)
             and getattr(settings, "ELASTICSEARCH_ENABLED", False)
         )
+
+    def initial(self, request, *args, **kwargs):
+        """Resolve the target model once, before any handler runs.
+
+        ``retrieve``, ``update`` and ``partial_update`` are provided by DRF
+        without an explicit override, so before this guard existed only the
+        five actions that called :meth:`_get_model_class` themselves
+        (``create``, ``list``, ``destroy``, ``count``, ``export``) answered
+        an unknown or unregistered model with a clean, consistent 404 — the
+        other three fell through to ``get_object()`` filtering an empty
+        queryset. Resolving here means every current action, and anything
+        ``@snap_action`` adds later, inherits the same 404 from one place
+        instead of six.
+
+        Runs *after* ``super().initial()`` — authentication and permission
+        checks — so an anonymous or unauthorized caller always gets
+        401/403 regardless of whether the named model exists. Checking model
+        existence first would let the 404-vs-401 difference tell an
+        unauthenticated prober which models are registered without needing
+        any credentials at all; that ordering is asserted by a dedicated
+        test, not just assumed.
+        """
+        super().initial(request, *args, **kwargs)
+        if self._get_model_class() is None:
+            app_label = self.kwargs.get("app_label", "")
+            model_name = self.kwargs.get("model_name", "")
+            raise NotFound(f"Model '{model_name}' not found in app '{app_label}'.")
 
     def _get_search_query(self) -> str:
         return self.request.query_params.get(api_settings.SEARCH_PARAM, "").strip()
@@ -395,22 +466,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         except LookupError:
             return None
 
-    def create(self, request, *args, **kwargs):
-        model_class = self._get_model_class()
-        if model_class is None:
-            return Response(
-                {"detail": f"Model '{kwargs.get('model_name')}' not found in app '{kwargs.get('app_label')}'."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-        return super().create(request, *args, **kwargs)
-
     def list(self, request, *args, **kwargs):
-        model_class = self._get_model_class()
-        if model_class is None:
-            return Response(
-                {"detail": f"Model '{kwargs.get('model_name')}' not found in app '{kwargs.get('app_label')}'."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
         response = super().list(request, *args, **kwargs)
         if get_setting("SNAPADMIN_QUERY_BACKEND_HEADER", True):
             response["X-Snap-Query-Backend"] = self._query_backend
@@ -440,12 +496,6 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         return True
 
     def destroy(self, request, *args, **kwargs):
-        model_class = self._get_model_class()
-        if model_class is None:
-            return Response(
-                {"detail": f"Model '{kwargs.get('model_name')}' not found in app '{kwargs.get('app_label')}'."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
         instance = self.get_object()
         if not self._deletion_allowed(request, instance):
             return Response(
@@ -499,12 +549,6 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         returns only ``{"count": N}`` — a cheap way for a frontend to size a
         result set (or a paginator) without pulling any rows.
         """
-        model_class = self._get_model_class()
-        if model_class is None:
-            return Response(
-                {"detail": f"Model '{kwargs.get('model_name')}' not found in app '{kwargs.get('app_label')}'."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
         queryset = self.filter_queryset(self.get_queryset())
         response = Response({"count": queryset.count()})
         if get_setting("SNAPADMIN_QUERY_BACKEND_HEADER", True):
@@ -531,12 +575,6 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         async export endpoint (``POST /api/exports/``) instead.
         """
         model_class = self._get_model_class()
-        if model_class is None:
-            return Response(
-                {"detail": f"Model '{kwargs.get('model_name')}' not found in app '{kwargs.get('app_label')}'."},
-                status=status.HTTP_404_NOT_FOUND,
-            )
-
         queryset = self.filter_queryset(self.get_queryset())
         try:
             limit = self._parse_export_limit(request)

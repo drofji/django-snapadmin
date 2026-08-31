@@ -130,3 +130,27 @@ def token_has_permission(
 
     perm_codename = f"{app_label}.{action}_{model_name.lower()}"
     return user.has_perm(perm_codename)
+
+
+def token_has_scope(token: APIToken, scope: str) -> bool:
+    """Whether ``token`` carries the free-form, project-defined ``scope``.
+
+    For a project's own endpoints — SnapAdmin's generated model routes are
+    gated by :func:`token_has_permission` instead, which this function does
+    not touch. ``allowed_scopes`` means whatever the calling project decides;
+    SnapAdmin only stores it and checks membership.
+
+    Unlike ``allowed_models`` (empty delegates to Django permissions), an
+    **empty** ``allowed_scopes`` denies every scope: there is no
+    Django-permission equivalent an opaque, project-defined string could
+    delegate to, so "nothing granted" can only mean "nothing allowed" — the
+    fail-closed choice, and the one that makes a newly minted token gate
+    something by default rather than passing every check until a project
+    remembers to restrict it.
+
+    Callers should AND this with their own authorization (Django
+    permissions, object-level checks, …) — it narrows what a token may do
+    and must never be the only thing standing between a request and a
+    protected view.
+    """
+    return scope in (token.allowed_scopes or [])

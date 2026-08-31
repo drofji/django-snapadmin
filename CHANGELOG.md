@@ -82,6 +82,16 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 - `SnapModel.get_admin_media()` — the base admin `(js, css)` asset lists as a public, typed
   classmethod, so a project overriding `register_admin()` can extend the real lists instead of
   copying a snapshot that rots at the next release.
+- `APIToken.allowed_scopes` (new field, one migration) plus `token_has_scope()` scope a token to a
+  project's own endpoints, not just SnapAdmin's generated model routes — SnapAdmin only stores and
+  matches the free-form strings, the meaning is the project's. Empty denies every scope check
+  (fail-closed), unlike `allowed_models`.
+- `POST /api/tokens/<id>/rotate/` (also `APIToken.rotate()`) replaces a token's secret in place —
+  same row, id, scopes and history — and returns the new raw key once; the old key stops
+  authenticating immediately. Written to the audit trail.
+- `POST /api/tokens/<id>/deactivate/` flips `is_active` off without deleting the row — the
+  documented revocation path. A regular user manages their own tokens (list, rotate, deactivate)
+  without needing to be a superuser.
 
 ### Changed
 - The shipped `admin.js`'s select2 initialisation is opt-in now — see Breaking, above, for the
@@ -117,6 +127,10 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 - `create_db_dump()` (and the AGE-encrypted path) now supports MySQL via `mysqldump`, alongside the
   existing PostgreSQL and SQLite support — the credential handled the same way as the PostgreSQL
   branch (`MYSQL_PWD` environment variable, never a command-line argument).
+- The dynamic model API answers an unknown or unregistered model the same way on every action,
+  including `retrieve`/`update`/`partial_update` — previously provided by DRF without an explicit
+  guard, so they fell through to filtering an empty queryset instead of the consistent 404 body the
+  other five actions already built for themselves. The check now runs once in `initial()`.
 
 ### Security
 - `snap_field(field, wysiwyg=True)` now sanitizes on write, matching `SnapRichTextField` — closing
@@ -124,6 +138,10 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 - Backing up `env` with no `SNAPADMIN_BACKUP_AGE_RECIPIENTS` configured is refused fail-closed
   (system check `snapadmin.E007` plus a matching runtime guard) — a `.env` file's secrets are never
   written to a backup destination unencrypted.
+- An unresolvable model on the dynamic API now denies every HTTP verb instead of falling back to
+  full CRUD (`_resolve_http_method_names()`), and the 404 guard runs after authentication and
+  permission checks — asserted by a dedicated test — so an anonymous probe cannot use a 404-vs-401
+  difference to enumerate registered models without credentials.
 
 ## 0.1.0b7 — 2026-08-25
 

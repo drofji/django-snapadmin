@@ -85,6 +85,7 @@ class APITokenSerializer(serializers.ModelSerializer):
             "owner_username",
             "expiration_date",
             "allowed_models",
+            "allowed_scopes",
             "is_active",
             "is_expired",
             "is_valid",
@@ -103,7 +104,7 @@ class APITokenCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = APIToken
-        fields = ["token_name", "allowed_models", "expires_in_days"]
+        fields = ["token_name", "allowed_models", "allowed_scopes", "expires_in_days"]
 
     def create(self, validated_data):
         expires_in_days = validated_data.pop("expires_in_days", None)
@@ -112,6 +113,7 @@ class APITokenCreateSerializer(serializers.ModelSerializer):
             user=request.user,
             token_name=validated_data["token_name"],
             allowed_models=validated_data.get("allowed_models", []),
+            allowed_scopes=validated_data.get("allowed_scopes", []),
             expires_in_days=expires_in_days,
         )
 

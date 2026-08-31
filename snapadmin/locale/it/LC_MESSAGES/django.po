@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-20 23:06+0000\n"
+"POT-Creation-Date: 2026-08-31 05:19+0000\n"
 "Language: it\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -68,6 +68,13 @@ msgstr "Formato del modello non valido: '%(item)s'."
 msgid "Model '%(item)s' does not exist."
 msgstr "Il modello '%(item)s' non esiste."
 
+msgid "Allowed scopes must be a list."
+msgstr "Gli ambiti consentiti devono essere un elenco."
+
+#, python-format
+msgid "Invalid scope: '%(item)s'."
+msgstr "Ambito non valido: '%(item)s'."
+
 msgid "Token Name"
 msgstr "Nome del token"
 
@@ -110,6 +117,19 @@ msgstr "Modelli consentiti"
 msgid "List of 'app_label.ModelName' strings this token can access."
 msgstr ""
 "Elenco di stringhe 'app_label.ModelName' a cui questo token può accedere."
+
+msgid "Allowed Scopes"
+msgstr "Ambiti consentiti"
+
+msgid ""
+"Free-form strings a project's own views may check with token_has_scope() — "
+"SnapAdmin stores and exposes them, the meaning is the project's. Empty "
+"denies every scope check (fail-closed), unlike an empty Allowed Models."
+msgstr ""
+"Stringhe libere che le view del progetto possono verificare con "
+"token_has_scope() — SnapAdmin si limita a memorizzarle ed esporle, il "
+"significato è del progetto. Un valore vuoto nega ogni verifica dell'ambito "
+"(chiuso per difetto), a differenza di Modelli consentiti vuoti."
 
 msgid "Is Active"
 msgstr "È attivo"
@@ -239,6 +259,26 @@ msgstr "Non riuscito"
 msgid "Cancelled"
 msgstr "Annullato"
 
+msgid "Total Rows"
+msgstr "Righe totali"
+
+msgid "Processed Rows"
+msgstr "Righe elaborate"
+
+msgid "Rows written so far — drives progress-percent and ETA reporting."
+msgstr ""
+"Righe scritte finora — determina la percentuale di avanzamento e la stima "
+"del tempo rimanente."
+
+msgid "Error"
+msgstr "Errore"
+
+msgid "Started At"
+msgstr "Avviato il"
+
+msgid "Finished At"
+msgstr "Terminato il"
+
 msgid "Format"
 msgstr "Formato"
 
@@ -256,17 +296,6 @@ msgid ""
 msgstr ""
 "Nome registrato in SNAPADMIN_EXPORT_SOURCES; vuoto usa la sorgente ORM "
 "predefinita."
-
-msgid "Total Rows"
-msgstr "Righe totali"
-
-msgid "Processed Rows"
-msgstr "Righe elaborate"
-
-msgid "Rows written so far — drives progress-percent and ETA reporting."
-msgstr ""
-"Righe scritte finora — determina la percentuale di avanzamento e la stima "
-"del tempo rimanente."
 
 msgid "Resume Cursor (PK)"
 msgstr "Cursore di ripresa (PK)"
@@ -286,17 +315,8 @@ msgstr "Lunghezza in byte del file di lavoro confermata a cursor_pk."
 msgid "File Name"
 msgstr "Nome del file"
 
-msgid "Error"
-msgstr "Errore"
-
 msgid "Requested By"
 msgstr "Richiesto da"
-
-msgid "Started At"
-msgstr "Avviato il"
-
-msgid "Finished At"
-msgstr "Terminato il"
 
 msgid "Export Job"
 msgstr "Attività di esportazione"
@@ -326,8 +346,7 @@ msgid "After"
 msgstr "Dopo"
 
 msgid "No field-level diff was recorded for this action."
-msgstr ""
-"Per questa azione non è stata registrata alcuna differenza per campo."
+msgstr "Per questa azione non è stata registrata alcuna differenza per campo."
 
 msgid "Back to the audit log"
 msgstr "Torna al registro di audit"
@@ -341,7 +360,8 @@ msgid ""
 "Showing the %(limit)s most recent entries. Use <code>manage.py "
 "snapadmin_audit_export</code> for the full history."
 msgstr ""
-"Vengono mostrate le %(limit)s voci più recenti. Usa <code>manage.py snapadmin_audit_export</code> per la cronologia completa."
+"Vengono mostrate le %(limit)s voci più recenti. Usa <code>manage.py "
+"snapadmin_audit_export</code> per la cronologia completa."
 
 msgid "anonymous"
 msgstr "anonimo"

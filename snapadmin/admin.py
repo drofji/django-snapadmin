@@ -93,7 +93,7 @@ class APITokenAdmin(ModelAdmin):
             "fields": ["token_name", "user", "full_key"],
         }),
         (_("Access Control"), {
-            "fields": ["is_active", "expiration_date", "allowed_models"],
+            "fields": ["is_active", "expiration_date", "allowed_models", "allowed_scopes"],
         }),
         (_("Audit"), {
             "fields": ["created_at", "last_used_at"],

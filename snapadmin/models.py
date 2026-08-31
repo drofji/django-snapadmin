@@ -108,6 +108,17 @@ def validate_allowed_models(value):
         except LookupError:
             raise ValidationError(_("Model '%(item)s' does not exist."), params={"item": item})
 
+
+def validate_allowed_scopes(value):
+    """Every entry must be a non-blank string — SnapAdmin never inspects what
+    a scope *means* (that is entirely the project's), only its shape.
+    """
+    if not isinstance(value, list):
+        raise ValidationError(_("Allowed scopes must be a list."))
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            raise ValidationError(_("Invalid scope: '%(item)s'."), params={"item": item})
+
 TOKEN_KEY_LENGTH = 40
 TOKEN_PREFIX_LENGTH = 8
 
@@ -139,6 +150,7 @@ class APIToken(models.Model):
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="api_tokens", verbose_name=_("Owner"))
     expiration_date = models.DateTimeField(null=True, blank=True, verbose_name=_("Expiration Date"), help_text=_("Leave blank for a token that never expires."))
     allowed_models = models.JSONField(default=list, blank=True, validators=[validate_allowed_models], verbose_name=_("Allowed Models"), help_text=_("List of 'app_label.ModelName' strings this token can access."))
+    allowed_scopes = models.JSONField(default=list, blank=True, validators=[validate_allowed_scopes], verbose_name=_("Allowed Scopes"), help_text=_("Free-form strings a project's own views may check with token_has_scope() — SnapAdmin stores and exposes them, the meaning is the project's. Empty denies every scope check (fail-closed), unlike an empty Allowed Models."))
     is_active = models.BooleanField(default=True, verbose_name=_("Is Active"), help_text=_("Inactive tokens are rejected without being deleted."))
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Created At"))
     last_used_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Last Used At"))
@@ -201,18 +213,52 @@ class APIToken(models.Model):
     def touch(self) -> None:
         APIToken.objects.filter(pk=self.pk).update(last_used_at=timezone.now())
 
+    def rotate(self, request=None) -> str:
+        """Replace the secret in place: same row, id, scopes and history.
+
+        Clearing ``token_digest`` before saving re-triggers the same minting
+        branch :meth:`save` already uses on first create, so create and
+        rotate can never mint a key two different ways. The new raw key is
+        returned exactly once — the way creation does — and the old key
+        stops authenticating immediately, since a lookup is by digest, not
+        against a list of historically valid keys.
+
+        Written to the audit trail as an update (never the raw key — only
+        the prefix, which is not secret). ``request`` threads through when
+        the caller has one (the ``rotate`` viewset action always does);
+        called as a bare model method with no request, the row still
+        records the rotation, just with no identifiable actor.
+        """
+        old_prefix = self.token_prefix
+        self.token_digest = ""
+        self.save(update_fields=["token_prefix", "token_digest"])
+
+        from snapadmin import audit
+        audit.record_audit(
+            request, audit.UPDATE, self,
+            {"token_digest": {"old": f"prefix {old_prefix}", "new": f"prefix {self.token_prefix}"}},
+        )
+        return self.token_key
+
     @classmethod
     def create_for_user(
         cls,
         user: AbstractBaseUser,
         token_name: str,
         allowed_models: list[str] | None = None,
+        allowed_scopes: list[str] | None = None,
         expires_in_days: int | None = None,
     ) -> "APIToken":
         expiration_date = None
         if expires_in_days is not None:
             expiration_date = timezone.now() + timedelta(days=expires_in_days)
-        return cls.objects.create(user=user, token_name=token_name, allowed_models=allowed_models or [], expiration_date=expiration_date)
+        return cls.objects.create(
+            user=user,
+            token_name=token_name,
+            allowed_models=allowed_models or [],
+            allowed_scopes=allowed_scopes or [],
+            expiration_date=expiration_date,
+        )
 
 # ===========================================================================
 # Error Monitoring

@@ -196,6 +196,26 @@ Added
   that rots at the next release. See `Extending the generated admin
   <https://drofji.github.io/django-snapadmin/#admin-extension-surface>`_.
 
+* **API tokens can be scoped to a project's own endpoints, not just SnapAdmin's generated model
+  routes.** ``APIToken.allowed_scopes`` (new field, one migration) carries free-form strings a
+  custom view checks with ``token_has_scope(token, "reports:read")`` — SnapAdmin only stores and
+  matches them, the meaning is entirely the project's. Unlike ``allowed_models``, an **empty**
+  ``allowed_scopes`` denies every scope check (fail-closed): there is no Django-permission
+  equivalent an opaque, project-defined string could delegate to, so a freshly minted token gates
+  something by default instead of passing every check until explicitly restricted.
+
+* **``POST /api/tokens/<id>/rotate/`` — replace a leaked key without losing the row.** Mints a new
+  secret in place: same row, id, scopes and history survive; the new raw key is returned exactly
+  once, the way creation returns it, and the old key stops authenticating immediately. Also
+  available as ``APIToken.rotate()``. Every rotation is written to the audit trail (never the raw
+  key — only the non-secret prefix).
+
+* **``POST /api/tokens/<id>/deactivate/`` — the documented revocation path that doesn't delete the
+  row.** Flips ``is_active`` off; ``DELETE`` remains for administrators who want the row gone
+  outright. A regular user manages their own tokens — list, create, rotate, deactivate — without
+  needing to be a superuser, scoped by the existing ``token.user == request.user`` queryset filter
+  rather than a new permission class.
+
 Changed
 -------
 
@@ -249,6 +269,14 @@ Fixed
   never appear in ``ps`` output. Previously only PostgreSQL and SQLite were supported; a MySQL-backed
   install could not use the backup feature at all.
 
+* **The dynamic model API answers an unknown or unregistered model the same way on every action,
+  including ``retrieve``/``update``/``partial_update``.** Those three are provided by DRF without an
+  explicit override, so they used to fall through to filtering an empty queryset instead of the
+  clean, consistent 404 body (``{"detail": "Model 'X' not found in app 'Y'."}``) the other five
+  actions already built for themselves. The check now runs once, in ``initial()``, before any
+  handler runs — every current action and anything added later inherits it automatically instead of
+  needing its own copy of the same guard.
+
 Security
 --------
 
@@ -262,3 +290,10 @@ Security
   sanitization guarantee with no error and no warning. ``safe_html=True`` and
   ``auto_sanitize=False`` opt out identically on both routes; ``QuerySet.update()`` stays
   uncovered on both, as before (Django never calls ``pre_save()`` for it).
+
+* **An unresolvable model on the dynamic API now denies every HTTP verb instead of falling back to
+  full CRUD.** ``_resolve_http_method_names()``'s own docstring used to document the permissive
+  fallback as intentional; combined with the 404 gap above, that was the exact combination that let
+  a disallowed verb reach a handler for a model that does not exist. The 404 guard now runs *after*
+  authentication and permission checks (asserted by a dedicated test), so an anonymous probe cannot
+  use a 404-vs-401 difference to enumerate which models are registered without any credentials.

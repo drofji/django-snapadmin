@@ -98,6 +98,7 @@ PUBLIC_IMPORTS = [
     # Integrator pass (v0.1.0a6)
     "snapadmin.api.authentication.get_api_authentication_classes",
     "snapadmin.api.authentication.SnapAPIAuthMixin",
+    "snapadmin.api.authentication.token_has_scope",
     "snapadmin.etl.upsert_from_source",
     "snapadmin.etl.stale_sync",
     "snapadmin.etl.StaleSyncAbort",
@@ -284,9 +285,10 @@ def test_apitoken_signatures():
     from snapadmin.models import APIToken
 
     assert _params(APIToken.create_for_user) == [
-        "user", "token_name", "allowed_models", "expires_in_days",
+        "user", "token_name", "allowed_models", "allowed_scopes", "expires_in_days",
     ]
     assert _params(APIToken.can_access_model) == ["self", "app_label", "model_name"]
+    assert _params(APIToken.rotate) == ["self", "request"]
 
 
 def test_monitoring_signatures():

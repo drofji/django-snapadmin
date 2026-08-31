@@ -140,6 +140,97 @@ class TestNonSnapModelRejected:
         assert view._get_model_class() is Product
 
 
+# ── #API3a — dispatch-level 404 guard: every action, every unresolvable case ──
+#
+# ``DynamicModelViewSet.initial()`` resolves the target model once, before any
+# handler runs, so an unknown app, an unknown model, and a real-but-unregistered
+# model all answer the same 404 on every action — including retrieve/update/
+# partial_update, which DRF provides without an explicit override and which
+# used to fall through to ``get_object()`` filtering an empty queryset instead
+# of a guard.
+
+UNRESOLVABLE_MODEL_CASES = [
+    pytest.param("ghost_app", "Product", id="unknown-app"),
+    pytest.param("demo", "GhostModel", id="unknown-model"),
+    pytest.param("auth", "User", id="unregistered-model"),
+]
+
+
+def _unresolvable_detail(app_label, model_name):
+    return {"detail": f"Model '{model_name}' not found in app '{app_label}'."}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("app_label, model_name", UNRESOLVABLE_MODEL_CASES)
+class TestUnresolvableModelGuardEveryAction:
+    """The 404 body is the single, historical shape every action used to
+    build itself — byte-identical whether the action is one of the five that
+    used to guard itself or one of the three DRF provides for free.
+    """
+
+    def test_list(self, auth_client, app_label, model_name):
+        r = auth_client.get(f"/api/models/{app_label}/{model_name}/")
+        assert r.status_code == 404
+        assert r.json() == _unresolvable_detail(app_label, model_name)
+
+    def test_create(self, auth_client, app_label, model_name):
+        r = auth_client.post(f"/api/models/{app_label}/{model_name}/", {}, format="json")
+        assert r.status_code == 404
+        assert r.json() == _unresolvable_detail(app_label, model_name)
+
+    def test_retrieve(self, auth_client, app_label, model_name):
+        r = auth_client.get(f"/api/models/{app_label}/{model_name}/1/")
+        assert r.status_code == 404
+        assert r.json() == _unresolvable_detail(app_label, model_name)
+
+    def test_update(self, auth_client, app_label, model_name):
+        r = auth_client.put(f"/api/models/{app_label}/{model_name}/1/", {}, format="json")
+        assert r.status_code == 404
+        assert r.json() == _unresolvable_detail(app_label, model_name)
+
+    def test_partial_update(self, auth_client, app_label, model_name):
+        r = auth_client.patch(f"/api/models/{app_label}/{model_name}/1/", {}, format="json")
+        assert r.status_code == 404
+        assert r.json() == _unresolvable_detail(app_label, model_name)
+
+    def test_destroy(self, auth_client, app_label, model_name):
+        r = auth_client.delete(f"/api/models/{app_label}/{model_name}/1/")
+        assert r.status_code == 404
+        assert r.json() == _unresolvable_detail(app_label, model_name)
+
+    def test_count(self, auth_client, app_label, model_name):
+        r = auth_client.get(f"/api/models/{app_label}/{model_name}/count/")
+        assert r.status_code == 404
+        assert r.json() == _unresolvable_detail(app_label, model_name)
+
+    def test_export(self, auth_client, app_label, model_name):
+        r = auth_client.get(f"/api/models/{app_label}/{model_name}/export/")
+        assert r.status_code == 404
+        assert r.json() == _unresolvable_detail(app_label, model_name)
+
+
+@pytest.mark.django_db
+class TestUnresolvableModelGuardOrderingAndScope:
+    def test_guard_runs_after_authentication(self, anon_client):
+        # An anonymous probe must not be able to use the 404-vs-401 split to
+        # enumerate which models are registered: both a real model and an
+        # unresolvable one answer identically (401) with no credentials at
+        # all, because permission checks (inside super().initial()) run
+        # before this guard ever resolves the model.
+        known = anon_client.get("/api/models/demo/Product/")
+        unknown = anon_client.get("/api/models/demo/GhostModel/")
+        assert known.status_code == 401
+        assert unknown.status_code == 401
+
+    def test_guard_does_not_affect_other_viewsets_in_the_module(self, auth_client):
+        # APITokenViewSet, ModelSchemaView, SSOProviderView etc. live in the
+        # same module but don't inherit DynamicModelViewSet.initial() — a
+        # regression here would 404 routes that have nothing to do with the
+        # dynamic model CRUD surface.
+        assert auth_client.get("/api/tokens/").status_code == 200
+        assert auth_client.get("/api/models/schema/").status_code == 200
+
+
 # ── DynamicModelViewSet – Customer ───────────────────────────────────────────
 
 @pytest.mark.django_db
@@ -1077,8 +1168,19 @@ class TestApiReadOnlyAndMethodAllowlist:
         assert isinstance(methods, list)
         assert {"get", "post", "put", "patch", "delete"} <= set(methods)
 
-    def test_property_unknown_model_returns_full_crud(self):
-        assert "post" in self._viewset("demo", "NoSuchModel").http_method_names
+    def test_property_unknown_model_denies_every_verb(self):
+        # #API3a: an unresolvable model (kwargs present, nothing to resolve)
+        # denies every verb rather than falling back to full CRUD — that
+        # permissive fallback used to be what let a disallowed verb reach a
+        # handler for a model that doesn't exist. Distinct from "no kwargs
+        # at all" above, which keeps the historical full-CRUD default.
+        assert self._viewset("demo", "NoSuchModel").http_method_names == []
+
+    def test_property_unknown_app_denies_every_verb(self):
+        assert self._viewset("ghost_app", "Product").http_method_names == []
+
+    def test_property_unregistered_model_denies_every_verb(self):
+        assert self._viewset("auth", "User").http_method_names == []
 
 
 # ── DynamicModelViewSet – always-on pagination (#SEC4) ────────────────────────

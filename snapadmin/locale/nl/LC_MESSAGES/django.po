@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-20 23:06+0000\n"
+"POT-Creation-Date: 2026-08-31 05:19+0000\n"
 "Language: nl\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -70,6 +70,13 @@ msgstr "Ongeldig modelformaat: '%(item)s'."
 msgid "Model '%(item)s' does not exist."
 msgstr "Model '%(item)s' bestaat niet."
 
+msgid "Allowed scopes must be a list."
+msgstr "Toegestane bereiken moeten een lijst zijn."
+
+#, python-format
+msgid "Invalid scope: '%(item)s'."
+msgstr "Ongeldig bereik: '%(item)s'."
+
 msgid "Token Name"
 msgstr "Tokennaam"
 
@@ -111,6 +118,19 @@ msgstr "Toegestane modellen"
 msgid "List of 'app_label.ModelName' strings this token can access."
 msgstr ""
 "Lijst met 'app_label.ModelName'-tekenreeksen waartoe dit token toegang heeft."
+
+msgid "Allowed Scopes"
+msgstr "Toegestane bereiken"
+
+msgid ""
+"Free-form strings a project's own views may check with token_has_scope() — "
+"SnapAdmin stores and exposes them, the meaning is the project's. Empty "
+"denies every scope check (fail-closed), unlike an empty Allowed Models."
+msgstr ""
+"Vrije tekststrings die de eigen views van een project kunnen controleren "
+"met token_has_scope() — SnapAdmin slaat ze alleen op en toont ze, de "
+"betekenis is aan het project. Een lege lijst weigert elke bereikcontrole "
+"(standaard geweigerd), in tegenstelling tot lege Toegestane modellen."
 
 msgid "Is Active"
 msgstr "Is actief"
@@ -240,6 +260,25 @@ msgstr "Mislukt"
 msgid "Cancelled"
 msgstr "Geannuleerd"
 
+msgid "Total Rows"
+msgstr "Totaal aantal rijen"
+
+msgid "Processed Rows"
+msgstr "Verwerkte rijen"
+
+msgid "Rows written so far — drives progress-percent and ETA reporting."
+msgstr ""
+"Tot nu toe geschreven rijen — bepaalt voortgangspercentage en ETA-rapportage."
+
+msgid "Error"
+msgstr "Fout"
+
+msgid "Started At"
+msgstr "Gestart op"
+
+msgid "Finished At"
+msgstr "Voltooid op"
+
 msgid "Format"
 msgstr "Formaat"
 
@@ -257,16 +296,6 @@ msgid ""
 msgstr ""
 "Geregistreerde SNAPADMIN_EXPORT_SOURCES-naam; leeg gebruikt de standaard ORM-"
 "bron."
-
-msgid "Total Rows"
-msgstr "Totaal aantal rijen"
-
-msgid "Processed Rows"
-msgstr "Verwerkte rijen"
-
-msgid "Rows written so far — drives progress-percent and ETA reporting."
-msgstr ""
-"Tot nu toe geschreven rijen — bepaalt voortgangspercentage en ETA-rapportage."
 
 msgid "Resume Cursor (PK)"
 msgstr "Hervattingscursor (PK)"
@@ -286,17 +315,8 @@ msgstr "Bytelengte van het werkbestand bevestigd bij cursor_pk."
 msgid "File Name"
 msgstr "Bestandsnaam"
 
-msgid "Error"
-msgstr "Fout"
-
 msgid "Requested By"
 msgstr "Aangevraagd door"
-
-msgid "Started At"
-msgstr "Gestart op"
-
-msgid "Finished At"
-msgstr "Voltooid op"
 
 msgid "Export Job"
 msgstr "Exporttaak"
@@ -340,7 +360,8 @@ msgid ""
 "Showing the %(limit)s most recent entries. Use <code>manage.py "
 "snapadmin_audit_export</code> for the full history."
 msgstr ""
-"De %(limit)s meest recente vermeldingen worden getoond. Gebruik <code>manage.py snapadmin_audit_export</code> voor de volledige geschiedenis."
+"De %(limit)s meest recente vermeldingen worden getoond. Gebruik "
+"<code>manage.py snapadmin_audit_export</code> voor de volledige geschiedenis."
 
 msgid "anonymous"
 msgstr "anoniem"

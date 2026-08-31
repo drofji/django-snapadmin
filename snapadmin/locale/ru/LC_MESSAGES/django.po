@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-20 23:06+0000\n"
+"POT-Creation-Date: 2026-08-31 05:19+0000\n"
 "Language: ru\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -69,6 +69,13 @@ msgstr "Неверный формат модели: '%(item)s'."
 msgid "Model '%(item)s' does not exist."
 msgstr "Модель '%(item)s' не существует."
 
+msgid "Allowed scopes must be a list."
+msgstr "Разрешённые области должны быть списком."
+
+#, python-format
+msgid "Invalid scope: '%(item)s'."
+msgstr "Неверная область: '%(item)s'."
+
 msgid "Token Name"
 msgstr "Имя токена"
 
@@ -109,6 +116,19 @@ msgstr "Разрешённые модели"
 
 msgid "List of 'app_label.ModelName' strings this token can access."
 msgstr "Список строк 'app_label.ModelName', к которым этот токен имеет доступ."
+
+msgid "Allowed Scopes"
+msgstr "Разрешённые области"
+
+msgid ""
+"Free-form strings a project's own views may check with token_has_scope() — "
+"SnapAdmin stores and exposes them, the meaning is the project's. Empty "
+"denies every scope check (fail-closed), unlike an empty Allowed Models."
+msgstr ""
+"Произвольные строки, которые проект проверяет в своих представлениях через "
+"token_has_scope() — SnapAdmin только хранит и сопоставляет их, смысл "
+"определяет сам проект. Пустой список запрещает любую проверку области (по "
+"умолчанию запрет), в отличие от пустого списка разрешённых моделей."
 
 msgid "Is Active"
 msgstr "Активен"
@@ -233,6 +253,26 @@ msgstr "Ошибка"
 msgid "Cancelled"
 msgstr "Отменено"
 
+msgid "Total Rows"
+msgstr "Всего строк"
+
+msgid "Processed Rows"
+msgstr "Обработано строк"
+
+msgid "Rows written so far — drives progress-percent and ETA reporting."
+msgstr ""
+"Записано строк на данный момент — определяет процент выполнения и оценку "
+"времени."
+
+msgid "Error"
+msgstr "Ошибка"
+
+msgid "Started At"
+msgstr "Начато"
+
+msgid "Finished At"
+msgstr "Завершено"
+
 msgid "Format"
 msgstr "Формат"
 
@@ -251,17 +291,6 @@ msgstr ""
 "Имя из SNAPADMIN_EXPORT_SOURCES; пусто — используется стандартный ORM-"
 "источник."
 
-msgid "Total Rows"
-msgstr "Всего строк"
-
-msgid "Processed Rows"
-msgstr "Обработано строк"
-
-msgid "Rows written so far — drives progress-percent and ETA reporting."
-msgstr ""
-"Записано строк на данный момент — определяет процент выполнения и оценку "
-"времени."
-
 msgid "Resume Cursor (PK)"
 msgstr "Курсор возобновления (PK)"
 
@@ -279,17 +308,8 @@ msgstr "Длина рабочего файла в байтах, подтверж
 msgid "File Name"
 msgstr "Имя файла"
 
-msgid "Error"
-msgstr "Ошибка"
-
 msgid "Requested By"
 msgstr "Запрошено"
-
-msgid "Started At"
-msgstr "Начато"
-
-msgid "Finished At"
-msgstr "Завершено"
 
 msgid "Export Job"
 msgstr "Задание экспорта"
@@ -332,7 +352,8 @@ msgid ""
 "Showing the %(limit)s most recent entries. Use <code>manage.py "
 "snapadmin_audit_export</code> for the full history."
 msgstr ""
-"Показаны %(limit)s последних записей. Полная история — через <code>manage.py snapadmin_audit_export</code>."
+"Показаны %(limit)s последних записей. Полная история — через <code>manage.py "
+"snapadmin_audit_export</code>."
 
 msgid "anonymous"
 msgstr "аноним"
