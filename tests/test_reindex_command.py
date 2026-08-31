@@ -217,3 +217,167 @@ class TestEsDisabled:
         with override_settings(ELASTICSEARCH_ENABLED=False):
             call_command("snapadmin_reindex", "--model", "demo.Product", stdout=out)
         assert "skipped" in out.getvalue().lower()
+
+
+@pytest.mark.django_db
+class TestVerifyFlag:
+    @pytest.fixture(autouse=True)
+    def _enable_es(self, settings):
+        settings.ELASTICSEARCH_ENABLED = True
+
+    def test_matching_verify_reports_success(self, products, es_client):
+        from demo.apps.shop.models import Product
+        es_client.count.return_value = {"count": 5}
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
+            out = StringIO()
+            call_command("snapadmin_reindex", "--model", "demo.Product", "--verify", stdout=out)
+        assert "verified" in out.getvalue().lower()
+
+    def test_mismatch_raises_commanderror(self, products, es_client):
+        from demo.apps.shop.models import Product
+        es_client.count.return_value = {"count": 2}
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
+            with pytest.raises(CommandError, match="finished with errors"):
+                call_command("snapadmin_reindex", "--model", "demo.Product", "--verify", stdout=StringIO())
+
+    def test_mismatch_output_names_the_counts(self, products, es_client):
+        from demo.apps.shop.models import Product
+        es_client.count.return_value = {"count": 2}
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
+            out = StringIO()
+            with pytest.raises(CommandError):
+                call_command("snapadmin_reindex", "--model", "demo.Product", "--verify", stdout=out)
+        text = out.getvalue()
+        assert "MISMATCH" in text and "2" in text and "5" in text
+
+    def test_es_only_model_reports_skipped_not_applicable(self, db, es_client):
+        from demo.apps.shop.models import SearchLog
+        from snapadmin.models import EsQuerySet
+        hit = MagicMock()
+        hit.pk = 1
+        hit.get_es_document.return_value = {"id": 1}
+        with patch.object(SearchLog, "objects") as mgr, \
+             patch.object(SearchLog, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
+            mgr.all.return_value = EsQuerySet(SearchLog, hits=[hit])
+            out = StringIO()
+            call_command("snapadmin_reindex", "--model", "demo.SearchLog", "--verify", stdout=out)
+        assert "verify skipped" in out.getvalue().lower()
+
+    def test_without_the_flag_no_verification_runs(self, products, es_client):
+        from demo.apps.shop.models import Product
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
+            out = StringIO()
+            call_command("snapadmin_reindex", "--model", "demo.Product", stdout=out)
+        assert es_client.count.call_count == 0
+        assert "verified" not in out.getvalue().lower()
+
+    def test_verify_count_failure_raises_commanderror(self, products, es_client):
+        from demo.apps.shop.models import Product
+        es_client.count.side_effect = Exception("cluster unreachable")
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
+            out = StringIO()
+            with pytest.raises(CommandError):
+                call_command("snapadmin_reindex", "--model", "demo.Product", "--verify", stdout=out)
+        assert "cluster unreachable" in out.getvalue()
+
+
+class TestThrottledProgress:
+    """Unit tests for the command's progress-line rate limiter, with a fake clock."""
+
+    def _job(self, *, finished=False):
+        job = MagicMock()
+        job.is_finished = finished
+        return job
+
+    def test_first_call_always_emits(self):
+        from snapadmin.management.commands.snapadmin_reindex import _ThrottledProgress
+        seen = []
+        throttled = _ThrottledProgress(seen.append, interval=10, clock=lambda: 0.0)
+        throttled(self._job())
+        assert len(seen) == 1
+
+    def test_calls_within_the_interval_are_dropped(self):
+        from snapadmin.management.commands.snapadmin_reindex import _ThrottledProgress
+        seen = []
+        clock = iter([0.0, 1.0, 2.0, 3.0]).__next__
+        throttled = _ThrottledProgress(seen.append, interval=10, clock=clock)
+        for _ in range(4):
+            throttled(self._job())
+        assert len(seen) == 1  # only the first call, at t=0
+
+    def test_calls_past_the_interval_emit_again(self):
+        from snapadmin.management.commands.snapadmin_reindex import _ThrottledProgress
+        seen = []
+        clock = iter([0.0, 4.0, 11.0, 12.0, 25.0]).__next__
+        throttled = _ThrottledProgress(seen.append, interval=10, clock=clock)
+        for _ in range(5):
+            throttled(self._job())
+        # t=0 (first), t=4 (dropped), t=11 (>=10 since last emit at 0), t=12 (dropped), t=25 (>=10 since 11)
+        assert len(seen) == 3
+
+    def test_finished_job_always_emits_even_within_the_interval(self):
+        from snapadmin.management.commands.snapadmin_reindex import _ThrottledProgress
+        seen = []
+        clock = iter([0.0, 1.0]).__next__
+        throttled = _ThrottledProgress(seen.append, interval=1000, clock=clock)
+        throttled(self._job(finished=False))
+        throttled(self._job(finished=True))
+        assert len(seen) == 2  # the huge interval would otherwise have dropped the second call
+
+
+@pytest.mark.django_db
+class TestProgressIntervalFlag:
+    @pytest.fixture(autouse=True)
+    def _enable_es(self, settings):
+        settings.ELASTICSEARCH_ENABLED = True
+
+    def test_flag_is_forwarded_to_the_throttle(self, products, es_client):
+        from demo.apps.shop.models import Product
+        import snapadmin.management.commands.snapadmin_reindex as cmd
+        captured = {}
+        orig_cls = cmd._ThrottledProgress
+
+        def spy(emit, *, interval, clock=None):
+            captured["interval"] = interval
+            return orig_cls(emit, interval=interval)
+
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok), \
+             patch.object(cmd, "_ThrottledProgress", side_effect=spy):
+            call_command("snapadmin_reindex", "--model", "demo.Product",
+                         "--progress-interval", "42", stdout=StringIO())
+        assert captured["interval"] == 42.0
+
+    def test_default_interval_is_the_module_default(self, products, es_client):
+        from demo.apps.shop.models import Product
+        import snapadmin.management.commands.snapadmin_reindex as cmd
+        captured = {}
+        orig_cls = cmd._ThrottledProgress
+
+        def spy(emit, *, interval, clock=None):
+            captured["interval"] = interval
+            return orig_cls(emit, interval=interval)
+
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok), \
+             patch.object(cmd, "_ThrottledProgress", side_effect=spy):
+            call_command("snapadmin_reindex", "--model", "demo.Product", stdout=StringIO())
+        assert captured["interval"] == cmd.DEFAULT_PROGRESS_INTERVAL
+
+    def test_final_progress_line_survives_a_huge_interval(self, products, es_client):
+        # A huge --progress-interval must still show the run finished — it must
+        # never look like a hang because a live-progress line never printed.
+        from demo.apps.shop.models import Product
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
+            out = StringIO()
+            call_command("snapadmin_reindex", "--model", "demo.Product",
+                         "--chunk-size", "1", "--progress-interval", "99999", stdout=out)
+        text = out.getvalue()
+        assert "5/5" in text and "100%" in text

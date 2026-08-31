@@ -216,6 +216,21 @@ Added
   needing to be a superuser, scoped by the existing ``token.user == request.user`` queryset filter
   rather than a new permission class.
 
+* **``manage.py snapadmin_reindex --verify`` catches a reindex that quietly came up short.** The
+  command used to report success on the strength of its own loop counter, which looks identical
+  whether the index ended up complete or fell short. ``--verify`` asks Elasticsearch for the
+  index's actual document count once a model's run finishes and compares it against the source row
+  count the run itself recorded (honouring ``--limit``), discounting documents Elasticsearch itself
+  rejected — those were never going to be indexed regardless of how correct the run was — and
+  skipping the check entirely for ``ES_ONLY`` models, which have no independent source to compare
+  against. **A mismatch exits non-zero**, the same as any other per-model failure.
+
+* **``--progress-interval SECONDS`` (default 5) throttles the reindex command's progress line.**
+  Previously one line was printed per chunk — for a multi-hour run in a detached container, the
+  standard way these are run, that meant tens of thousands of log lines. The first line and the
+  line reporting a model's completion, cancellation or failure always print regardless of the
+  interval, so a run's outcome is never swallowed by the throttle.
+
 Changed
 -------
 

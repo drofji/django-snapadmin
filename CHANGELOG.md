@@ -92,6 +92,14 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 - `POST /api/tokens/<id>/deactivate/` flips `is_active` off without deleting the row — the
   documented revocation path. A regular user manages their own tokens (list, rotate, deactivate)
   without needing to be a superuser.
+- `snapadmin_reindex --verify` compares the Elasticsearch document count against the source row
+  count once a model's run finishes (discounting documents ES itself rejected, and skipped
+  entirely for `ES_ONLY` models, which have no independent source to compare against) and exits
+  non-zero on a mismatch — a run that reports success on the strength of its own loop counter no
+  longer looks identical to one that quietly came up short. `--progress-interval` (default 5s)
+  throttles the per-chunk progress line so a multi-hour run in a detached container doesn't fill
+  the log with one line per chunk; the line reporting a model's completion, cancellation or
+  failure always prints regardless of the throttle.
 
 ### Changed
 - The shipped `admin.js`'s select2 initialisation is opt-in now — see Breaking, above, for the

@@ -30,6 +30,14 @@ on every write. This module reuses the async-export job pattern
   ``helpers.parallel_bulk`` (``thread_count=N``) instead of ``helpers.bulk``.
   Parallelism is bounded *within* a chunk and the pk cursor only advances once a
   chunk fully completes, so out-of-order completions never corrupt the checkpoint.
+* **Verification** (``--verify``) — a run reports success on the strength of its
+  own loop counter, which looks identical whether the index ended up complete or
+  quietly short. :func:`verify_index` asks Elasticsearch for the index's actual
+  document count and compares it against the source count the run itself
+  recorded, discounting documents Elasticsearch rejected (those were never
+  going to be there) and skipping the check entirely for ``ES_ONLY`` models
+  (the index *is* the source there, so there is nothing independent to compare
+  against). A mismatch is a non-zero command exit, not a line in the output.
 """
 
 from __future__ import annotations
@@ -333,3 +341,73 @@ def _finish(job, errors_total: int, on_progress) -> dict:
         errors=errors_total,
     )
     return {"indexed": job.processed_rows, "errors": errors_total}
+
+
+def verify_index(job, *, rejected: int = 0) -> dict:
+    """Compare the ES document count for ``job``'s model against its source count.
+
+    ``job.total_rows`` is the source count the run itself already computed —
+    ``qs.count()`` for a DB-backed model, honouring ``--limit`` and whatever a
+    project's own manager filters out, or the ES hit count for an ``ES_ONLY``
+    model. That means the source side of this comparison is honest about
+    "legitimate skew" for free: a filtered project queryset was never counted
+    as more than it produced in the first place.
+
+    Two more legitimate reasons the index can be short of that number without
+    the run having failed:
+
+    * ``ES_ONLY`` models have no independent source to check against — the
+      "source" *is* the index, so a comparison would only ever tell us whether
+      ES agrees with itself. Returned as ``{"applicable": False, ...}`` rather
+      than a false-positive mismatch.
+    * ``rejected`` — documents Elasticsearch itself refused (a mapping
+      conflict, an oversized field, …), already surfaced in the run's summary
+      as ``errors``. Those rows were never going to appear in the index no
+      matter how correct the run was, so they are subtracted from the expected
+      count before comparing, not counted as missing.
+
+    Returns a dict: ``applicable`` (False only for ``ES_ONLY``), ``match``
+    (True when the delta is zero), ``expected``, ``actual``, ``delta``
+    (``expected - actual``; positive means the index came up short, negative
+    means it holds more documents than the source accounts for — e.g. stale
+    documents left behind by rows since deleted from the source), plus
+    ``source_count`` and ``rejected`` for the message. When the ES count
+    itself cannot be fetched (cluster unreachable, index missing, …) this
+    reports ``match: False`` with an ``error`` key instead of raising — a
+    verify step that cannot confirm success must not be silently skipped.
+    """
+    from snapadmin.models import EsStorageMode
+    from snapadmin.registry import get_model_meta
+
+    model = job.target_model()
+    if get_model_meta(model, "es_storage_mode", EsStorageMode.DB_ONLY) == EsStorageMode.ES_ONLY:
+        return {"applicable": False, "match": True}
+
+    source_count = job.total_rows
+    expected = max(0, source_count - rejected)
+    try:
+        es = model.get_es_client()
+        raw = es.count(index=model.get_es_index_name())
+        actual = raw["count"] if isinstance(raw, dict) else raw.body["count"]
+    except Exception as exc:
+        logger.warning("snapadmin.reindex.verify_failed", job=str(job.pk), error=str(exc))
+        return {
+            "applicable": True,
+            "match": False,
+            "error": str(exc),
+            "expected": expected,
+            "actual": None,
+            "source_count": source_count,
+            "rejected": rejected,
+        }
+
+    delta = expected - actual
+    return {
+        "applicable": True,
+        "match": delta == 0,
+        "expected": expected,
+        "actual": actual,
+        "delta": delta,
+        "source_count": source_count,
+        "rejected": rejected,
+    }

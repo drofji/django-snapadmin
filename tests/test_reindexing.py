@@ -474,6 +474,80 @@ class TestReindexOnlyRestriction:
 
 # ── --limit: bound a probe / canary run ───────────────────────────────────────
 
+# ── --verify: index count vs source count ───────────────────────────────────
+
+@pytest.mark.django_db
+class TestVerifyIndex:
+    @pytest.fixture(autouse=True)
+    def _enable_es(self, settings):
+        settings.ELASTICSEARCH_ENABLED = True
+
+    def _job(self, model="Product", **kw):
+        from snapadmin.models import SnapReindexJob
+        return SnapReindexJob.objects.create(app_label="demo", model=model, **kw)
+
+    def test_equal_counts_match(self, products, es_client):
+        from demo.apps.shop.models import Product
+        from snapadmin.reindexing import verify_index
+        job = self._job(total_rows=5)
+        es_client.count.return_value = {"count": 5}
+        with patch.object(Product, "get_es_client", return_value=es_client):
+            result = verify_index(job)
+        assert result == {
+            "applicable": True, "match": True, "expected": 5, "actual": 5,
+            "delta": 0, "source_count": 5, "rejected": 0,
+        }
+
+    def test_short_index_is_a_mismatch(self, products, es_client):
+        from demo.apps.shop.models import Product
+        from snapadmin.reindexing import verify_index
+        job = self._job(total_rows=5)
+        es_client.count.return_value = {"count": 3}
+        with patch.object(Product, "get_es_client", return_value=es_client):
+            result = verify_index(job)
+        assert result["match"] is False
+        assert result["delta"] == 2
+
+    def test_extra_documents_are_also_a_mismatch(self, products, es_client):
+        from demo.apps.shop.models import Product
+        from snapadmin.reindexing import verify_index
+        job = self._job(total_rows=5)
+        es_client.count.return_value = {"count": 7}
+        with patch.object(Product, "get_es_client", return_value=es_client):
+            result = verify_index(job)
+        assert result["match"] is False
+        assert result["delta"] == -2
+
+    def test_rejected_documents_are_discounted(self, products, es_client):
+        # 5 source rows, 1 rejected by ES → an index holding 4 is a legitimate
+        # (non-crying-wolf) match, not a mismatch.
+        from demo.apps.shop.models import Product
+        from snapadmin.reindexing import verify_index
+        job = self._job(total_rows=5)
+        es_client.count.return_value = {"count": 4}
+        with patch.object(Product, "get_es_client", return_value=es_client):
+            result = verify_index(job, rejected=1)
+        assert result["match"] is True
+        assert result["expected"] == 4
+
+    def test_es_only_model_is_not_applicable(self, db):
+        from snapadmin.reindexing import verify_index
+        job = self._job(model="SearchLog", total_rows=3)
+        result = verify_index(job)
+        assert result == {"applicable": False, "match": True}
+
+    def test_count_failure_reports_a_non_matching_error(self, products, es_client):
+        from demo.apps.shop.models import Product
+        from snapadmin.reindexing import verify_index
+        job = self._job(total_rows=5)
+        es_client.count.side_effect = Exception("cluster unreachable")
+        with patch.object(Product, "get_es_client", return_value=es_client):
+            result = verify_index(job)
+        assert result["applicable"] is True
+        assert result["match"] is False
+        assert "cluster unreachable" in result["error"]
+
+
 @pytest.mark.django_db
 class TestReindexLimit:
     @pytest.fixture(autouse=True)
