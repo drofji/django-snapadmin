@@ -21,6 +21,7 @@ from itertools import count
 import pytest
 from django.apps import apps as global_apps
 from django.db import models as django_models
+from django.test import override_settings
 from django.test.utils import isolate_apps
 from django.utils.safestring import SafeString
 
@@ -378,7 +379,17 @@ class TestHonestAbsences:
         registry.register(Ledger, data_retention_days=1)
         monkeypatch.setattr(global_apps, "get_models", lambda: [Ledger])
 
-        assert purge_expired_data() == {"purged": {}, "total": 0, "errors": {}}
+        # SNAPADMIN_AUDIT_RETENTION_DAYS=0 keeps this test focused on its own
+        # question (a plain @snap_model-decorated model is skipped) — without
+        # it, purge_expired_data()'s separate SnapadminAuditLog sweep (#RET2a)
+        # would also run here and need real database access this test does
+        # not set up, which is no part of what this test is checking.
+        with override_settings(SNAPADMIN_AUDIT_RETENTION_DAYS=0):
+            result = purge_expired_data()
+        assert result["purged"] == {}
+        assert result["total"] == 0
+        assert result["errors"] == {}
+        assert result["status"] == "noop"
 
 
 # ── #PAR1d — the model-side mirror of the field parity drift guard ───────────
@@ -553,7 +564,9 @@ class TestSnapPropertyOnASnapModelSubclass:
         _, list_display, _, _, _ = Gadget.get_admin_fields()
 
         assert "SnapFunctionFieldLine_total" in list_display
-        assert "SnapFunctionFieldLine_total" in Gadget.admin_overrides
+        # Generated, so it lives in the internal stash, not the project's own
+        # admin_overrides (#ADM2a) — see register_admin()'s merge order.
+        assert "SnapFunctionFieldLine_total" in Gadget._admin_generated_overrides
 
 
 class TestSnapPropertyOnADecoratedPlainModel:

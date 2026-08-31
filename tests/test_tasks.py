@@ -12,6 +12,7 @@ from decimal import Decimal
 from unittest.mock import patch
 
 import pytest
+from django.test import override_settings
 from django.utils import timezone
 
 
@@ -78,6 +79,256 @@ class TestPurgeExpiredTokens:
         result = purge_expired_tokens()
         # api_token never expires – nothing should be deleted
         assert result["deleted"] == 0
+
+    def test_reports_ok_status(self, db):
+        """A real DB failure here already propagates naturally (no swallowed
+        exception around the bulk delete), so this task always reports "ok"
+        — see the outcome convention in the module docstring."""
+        from snapadmin.tasks import purge_expired_tokens
+        result = purge_expired_tokens()
+        assert result["status"] == "ok"
+        assert result["failed"] == []
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# snapadmin.tasks.purge_expired_data — the outcome convention (#OPS2c)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestPurgeExpiredDataOutcome:
+    """Status/failed/raise on top of the retention sweep — see
+    tests/test_data_retention.py for the retention behaviour itself.
+
+    ``apps.get_models()`` is monkeypatched to an explicit, small model set in
+    every test here rather than relying on however many demo models happen to
+    have ``data_retention_days`` set today — that count is not this test's
+    concern and changes independently (#RET2/#RET2c dogfood models). Only
+    ``SnapadminAuditLog`` (#RET2a) and the export-job sweep (#RET2b) are
+    always considered outside that loop; ``SNAPADMIN_EXPORT_RETENTION_DAYS``
+    is unset by default (opt-in), so only the audit log needs neutralising
+    via ``SNAPADMIN_AUDIT_RETENTION_DAYS=0`` where a test wants "nothing but
+    the model(s) it names" considered.
+    """
+
+    def test_noop_when_nothing_has_retention_configured(self, monkeypatch):
+        from django.apps import apps
+        from snapadmin.tasks import purge_expired_data
+
+        monkeypatch.setattr(apps, "get_models", lambda: [])
+        with override_settings(SNAPADMIN_AUDIT_RETENTION_DAYS=0):
+            result = purge_expired_data()
+        assert result["status"] == "noop"
+        assert result["failed"] == []
+
+    def test_ok_when_every_considered_model_succeeds(self, monkeypatch):
+        from django.apps import apps
+        from demo.apps.shop.models import AuditLog
+        from snapadmin.tasks import purge_expired_data
+
+        monkeypatch.setattr(apps, "get_models", lambda: [AuditLog])
+        with override_settings(SNAPADMIN_AUDIT_RETENTION_DAYS=0):
+            result = purge_expired_data()
+        assert result["status"] == "ok"
+        assert result["failed"] == []
+
+    def test_partial_when_some_but_not_every_model_fails(self, monkeypatch):
+        """demo.AuditLog fails; SnapadminAuditLog (also considered, since its
+        own retention is left at its default here) succeeds — some, not
+        every, unit failed, so this must never raise (D1)."""
+        from django.apps import apps
+        from demo.apps.shop.models import AuditLog
+        from snapadmin.tasks import purge_expired_data
+
+        monkeypatch.setattr(apps, "get_models", lambda: [AuditLog])
+        with patch.object(AuditLog, "purge_expired", side_effect=RuntimeError("db locked")):
+            result = purge_expired_data()
+        assert result["status"] == "partial"
+        assert result["failed"] == ["demo.AuditLog"]
+
+    def test_total_failure_raises(self, monkeypatch):
+        """The only model considered fails outright — every unit failed, so
+        this raises SnapPurgeError instead of returning (D1)."""
+        from django.apps import apps
+        from demo.apps.shop.models import AuditLog
+        from snapadmin.models import SnapPurgeError
+        from snapadmin.tasks import purge_expired_data
+
+        monkeypatch.setattr(apps, "get_models", lambda: [AuditLog])
+        with override_settings(SNAPADMIN_AUDIT_RETENTION_DAYS=0), \
+                patch.object(AuditLog, "purge_expired", side_effect=RuntimeError("db locked")):
+            with pytest.raises(SnapPurgeError, match="demo.AuditLog"):
+                purge_expired_data()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# snapadmin.tasks.send_error_digest — the outcome convention (#OPS2c)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSendErrorDigestOutcome:
+    def test_sent_is_ok(self):
+        from snapadmin.tasks import send_error_digest
+
+        fake = {"sent": True, "errors": 3, "groups": 1, "channels": "email", "purged": 0}
+        with patch("snapadmin.monitoring.send_error_digest", return_value=fake):
+            result = send_error_digest()
+        assert result["status"] == "ok"
+        assert result["failed"] == []
+
+    @pytest.mark.parametrize("reason", ["disabled", "no_recipients"])
+    def test_disabled_or_no_recipients_is_disabled_status(self, reason):
+        from snapadmin.tasks import send_error_digest
+
+        fake = {"sent": False, "reason": reason, "errors": 0, "purged": 0}
+        with patch("snapadmin.monitoring.send_error_digest", return_value=fake):
+            result = send_error_digest()
+        assert result["status"] == "disabled"
+
+    def test_no_errors_is_noop(self):
+        from snapadmin.tasks import send_error_digest
+
+        fake = {"sent": False, "reason": "no_errors", "errors": 0, "purged": 0}
+        with patch("snapadmin.monitoring.send_error_digest", return_value=fake):
+            result = send_error_digest()
+        assert result["status"] == "noop"
+
+    def test_delivery_failed_raises(self):
+        """Every channel failed to deliver — a total failure (D1), so this
+        raises instead of returning a value a monitor could read as sent."""
+        from snapadmin.alerts import AlertDeliveryError
+        from snapadmin.tasks import send_error_digest
+
+        fake = {"sent": False, "reason": "delivery_failed", "errors": 5, "groups": 1, "purged": 0}
+        with patch("snapadmin.monitoring.send_error_digest", return_value=fake):
+            with pytest.raises(AlertDeliveryError):
+                send_error_digest()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# snapadmin.tasks.run_es_reindex — the outcome convention (#OPS2c)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestRunEsReindexOutcome:
+    def test_noop_when_nothing_was_attempted(self):
+        from snapadmin.tasks import run_es_reindex
+
+        fake = {
+            "models": 1, "indexed_models": 0, "errored_models": 0,
+            "results": {"demo.Product": {"skipped": True, "reason": "Elasticsearch not available"}},
+        }
+        with patch("snapadmin.models.run_reindex", return_value=fake):
+            result = run_es_reindex()
+        assert result["status"] == "noop"
+        assert result["failed"] == []
+
+    def test_ok_when_every_attempted_model_succeeds(self):
+        from snapadmin.tasks import run_es_reindex
+
+        fake = {
+            "models": 1, "indexed_models": 1, "errored_models": 0,
+            "results": {"demo.Product": {"indexed": 10}},
+        }
+        with patch("snapadmin.models.run_reindex", return_value=fake):
+            result = run_es_reindex()
+        assert result["status"] == "ok"
+        assert result["failed"] == []
+
+    def test_partial_when_some_models_error_including_rejected_documents(self):
+        """A model with some rejected documents (indexed > 0 alongside a
+        non-empty errors list) is partial, never ok — see #OPS2c."""
+        from snapadmin.tasks import run_es_reindex
+
+        fake = {
+            "models": 2, "indexed_models": 1, "errored_models": 1,
+            "results": {
+                "demo.Product": {"indexed": 10},
+                "demo.Customer": {"indexed": 8, "errors": ["doc rejected: mapping mismatch"]},
+            },
+        }
+        with patch("snapadmin.models.run_reindex", return_value=fake):
+            result = run_es_reindex()
+        assert result["status"] == "partial"
+        assert result["failed"] == ["demo.Customer"]
+
+    def test_total_failure_raises(self):
+        from snapadmin.tasks import ReindexError, run_es_reindex
+
+        fake = {
+            "models": 1, "indexed_models": 0, "errored_models": 1,
+            "results": {"demo.Product": {"indexed": 0, "errors": ["connection refused"]}},
+        }
+        with patch("snapadmin.models.run_reindex", return_value=fake):
+            with pytest.raises(ReindexError, match="demo.Product"):
+                run_es_reindex()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# snapadmin.tasks.send_health_alert — the outcome convention (#OPS2c)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSendHealthAlertOutcome:
+    def test_sent_is_ok(self):
+        from snapadmin.tasks import send_health_alert
+
+        fake = {"sent": True, "checked": 4, "failing": 1, "failing_names": "database"}
+        with patch("snapadmin.health.send_health_alert", return_value=fake):
+            result = send_health_alert()
+        assert result["status"] == "ok"
+
+    def test_healthy_is_ok(self):
+        from snapadmin.tasks import send_health_alert
+
+        fake = {"sent": False, "reason": "healthy", "checked": 4, "failing": 0}
+        with patch("snapadmin.health.send_health_alert", return_value=fake):
+            result = send_health_alert()
+        assert result["status"] == "ok"
+
+    @pytest.mark.parametrize("reason", ["disabled", "no_recipients"])
+    def test_disabled_or_no_recipients_is_disabled_status(self, reason):
+        from snapadmin.tasks import send_health_alert
+
+        fake = {"sent": False, "reason": reason, "checked": 4, "failing": 1}
+        with patch("snapadmin.health.send_health_alert", return_value=fake):
+            result = send_health_alert()
+        assert result["status"] == "disabled"
+
+    def test_cooldown_is_noop(self):
+        """A persistent outage under cooldown: nothing new to report on this
+        run — the original alert already went out when the cooldown armed."""
+        from snapadmin.tasks import send_health_alert
+
+        fake = {"sent": False, "reason": "cooldown", "checked": 4, "failing": 1}
+        with patch("snapadmin.health.send_health_alert", return_value=fake):
+            result = send_health_alert()
+        assert result["status"] == "noop"
+
+    def test_delivery_failed_raises(self):
+        from snapadmin.alerts import AlertDeliveryError
+        from snapadmin.tasks import send_health_alert
+
+        fake = {
+            "sent": False, "reason": "delivery_failed", "checked": 4, "failing": 1,
+            "failing_names": "database",
+        }
+        with patch("snapadmin.health.send_health_alert", return_value=fake):
+            with pytest.raises(AlertDeliveryError):
+                send_health_alert()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# snapadmin.tasks.run_db_backups — thin pass-through, see tests/test_backup.py
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestRunDbBackupsOutcome:
+    def test_pass_through_carries_status_and_failed(self):
+        """run_due_backups() already applies the outcome convention and is
+        exhaustively tested in tests/test_backup.py — this just pins that
+        the task returns it unmodified."""
+        from snapadmin.tasks import run_db_backups
+
+        fake = {"ran": False, "reason": "disabled", "results": {}, "status": "disabled", "failed": []}
+        with patch("snapadmin.backup.run_due_backups", return_value=fake):
+            result = run_db_backups()
+        assert result == fake
 
 
 # ─────────────────────────────────────────────────────────────────────────────

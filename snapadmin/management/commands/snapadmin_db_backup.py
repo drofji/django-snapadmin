@@ -13,6 +13,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from snapadmin.backup import (
     DESTINATIONS,
+    BackupError,
     _active_destinations,
     get_backup_config,
     run_backup,
@@ -37,12 +38,19 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         config = get_backup_config()
-        if options["destination"]:
-            summary = run_backup([options["destination"]], config=config)
-        elif options["force"]:
-            summary = run_backup(_active_destinations(config), config=config)
-        else:
-            summary = run_due_backups()
+        try:
+            if options["destination"]:
+                summary = run_backup([options["destination"]], config=config)
+            elif options["force"]:
+                summary = run_backup(_active_destinations(config), config=config)
+            else:
+                summary = run_due_backups()
+        except BackupError as exc:
+            # Mirrors snapadmin_reindex.py's CommandError-on-failure pattern —
+            # every destination failed, or the dump itself could not be
+            # built, must reach cron as a clean non-zero exit, not a raw
+            # traceback (see run_backup()'s docstring in backup.py).
+            raise CommandError(str(exc)) from exc
 
         if not summary["ran"]:
             self.stdout.write(f"No backup performed ({summary['reason']}).")
