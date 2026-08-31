@@ -11,12 +11,28 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
 ## Unreleased
 
 ### Breaking
-- None in this release. `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` are deprecated
+- The shipped `admin.js`'s select2 auto-init is now **opt-in**: only a `<select>` carrying a
+  `snapadmin-select2` class (or `data-snapadmin-select2` attribute) gets initialised, not every
+  `<select>` on the page. The old broad selector reached the changelist's own action dropdown and
+  silently broke bulk actions on a theme that binds it through Alpine. Add the class to a field's
+  widget to opt it back in.
+- `SNAPADMIN_CONNECTIVITY_ENABLED` now defaults to `False` (previously always on): the admin-wide
+  health poll, save-blocking guard and sidebar sync badge no longer load unless explicitly enabled
+  *and* at least one registered model has `offline_mode = True`. A deployment with
+  `SNAPADMIN_REST_API_ENABLED = False` used to poll a 404ing `/api/health/` forever and block every
+  Save button — set `SNAPADMIN_CONNECTIVITY_ENABLED = True` to restore the previous behaviour.
+- `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` are deprecated
   to default to `False` at `1.0` — see the deprecation warning and migration note below.
 - Retro-note (this heading is new): `SnapModel.get_admin_fields()`'s return arity silently grew
   from four values to five in an earlier pre-1.0 release with no changelog entry — now pinned so
   it cannot shift silently again. `django-admin-rangefilter` stopped being a dependency in
   `0.1.0b6`, already documented there under `Removed` — see that entry rather than duplicating it.
+- `snapadmin.backup.run_backup()` / `run_due_backups()`, and the `purge_expired_data` /
+  `send_error_digest` / `run_es_reindex` / `send_health_alert` Celery tasks, now **raise** instead
+  of returning a dict when every unit of work failed (previously reported as a normal, if
+  unhelpful, return value). Code calling these directly and branching on the return value for a
+  total-failure case must now catch the exception instead (`BackupError`, `SnapPurgeError`,
+  `AlertDeliveryError`, `ReindexError`) — see the task-outcome convention under Fixed, below.
 
 ### Added
 - `snap_field()` now accepts every `Snap*Field` constructor kwarg — `required` and the file-upload
@@ -51,6 +67,56 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   snapshots the current live state before touching anything (aborting the restore if the snapshot
   itself fails), and `snapadmin_rollback [<id>]` restores it back. Its own short retention
   (`SNAPADMIN_RESTORE_SNAPSHOT_KEEP`, default 3) is separate from `SNAPADMIN_BACKUP_KEEP`.
+- A fifth backup destination: any S3-compatible object store (`SNAPADMIN_BACKUP_S3_*`, the new
+  optional `[s3]` extra, `boto3`) — AWS S3, MinIO, Backblaze B2, Hetzner Object Storage or Wasabi via
+  `SNAPADMIN_BACKUP_S3_ENDPOINT_URL`. Supports the ambient AWS credential chain when no explicit key
+  is set. A worked SFTP recipe for Hetzner Storage Box (a different, non-S3 product) is now in the
+  docs. New check `snapadmin.W011` flags an incompletely configured S3 destination.
+- `snapadmin_info` gains a `backups` section (destinations, last run per destination, encryption
+  status, recipient fingerprints); the `features` section's backup line now also names the active
+  destinations and whether a restore has ever run.
+- `SnapModel.get_admin_fields()` returns a pinned `AdminFieldSets` named tuple (`form_fields`,
+  `list_display`, `search_fields`, `list_filter`, `autocomplete_fields`) instead of a bare 5-tuple —
+  backward-compatible by construction, since positional unpacking, indexing and `len()` all keep
+  working; a future sixth member stays a breaking change, just an announced one.
+- `SnapModel.get_admin_media()` — the base admin `(js, css)` asset lists as a public, typed
+  classmethod, so a project overriding `register_admin()` can extend the real lists instead of
+  copying a snapshot that rots at the next release.
+
+### Changed
+- The shipped `admin.js`'s select2 initialisation is opt-in now — see Breaking, above, for the
+  migration note.
+- `SNAPADMIN_CONNECTIVITY_ENABLED` gates the admin-wide connectivity layer and now defaults to
+  `False` — see Breaking, above.
+
+### Fixed
+- A project's own `admin_overrides["get_readonly_fields"]` / `admin_overrides["safe_html_<field>"]`
+  no longer get silently clobbered by the generator: the generated callables are merged onto the
+  admin class before `admin_overrides`, never written into it, so a project's own override always
+  wins regardless of write order. Previously a project's own `get_readonly_fields` could vanish,
+  taking every change form on the site down with `FieldError: Unknown field(s)`, with nothing logged.
+- Off `DEBUG`, the shipped media no longer downloads jQuery twice: the base admin JS now picks
+  `jquery.js` / `jquery.min.js` the same way Django's own `ModelAdmin.media` does, so the two media
+  lists collapse into a single entry on merge.
+- The system dashboard's GitHub link pointed at the retired `drofji/snapadmin` (dead) instead of
+  `drofji/django-snapadmin`.
+- **A scheduled task that did nothing, or half-failed, no longer looks like a success.** All six
+  Celery tasks (`run_db_backups`, `purge_expired_data`, `purge_expired_tokens`, `send_error_digest`,
+  `run_es_reindex`, `send_health_alert`) now return a `status` key — `"ok"` / `"partial"` /
+  `"noop"` / `"disabled"` — and a `failed` list alongside every existing key (purely additive), and
+  **raise** instead of returning when every unit of work failed. One monitoring rule now covers all
+  six: alert when `status != "ok"`, page when the Celery task state is `FAILURE`. Fixes the reported
+  incident where a disabled backup schedule ran "successfully" for weeks with no backup ever taken,
+  and a silently-failing offsite destination never surfaced anywhere but a log line.
+- `run_db_backups`'s due-time check (`_is_due()`) no longer skips a day when a run completes even
+  slightly later than the previous day's ideal slot — a small tolerance (2% of the destination's own
+  interval) absorbs realistic scheduler jitter without materially changing when a backup actually
+  runs. A new check, `snapadmin.W010`, warns when the Celery Beat entry for `run_db_backups` runs
+  less often than the shortest configured `SNAPADMIN_BACKUP_*_EVERY_HOURS` — that combination
+  silently drops days regardless of the tolerance above.
+- `create_db_dump()` (and the AGE-encrypted path) now supports MySQL via `mysqldump`, alongside the
+  existing PostgreSQL and SQLite support — the credential handled the same way as the PostgreSQL
+  branch (`MYSQL_PWD` environment variable, never a command-line argument).
 
 ### Security
 - `snap_field(field, wysiwyg=True)` now sanitizes on write, matching `SnapRichTextField` — closing

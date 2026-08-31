@@ -118,7 +118,11 @@ Operations
         (``SNAPADMIN_MASKING_RULES``) — ``mask_field()`` is the choke point
         every masking surface goes through.
     ``snapadmin.backup``
-        3-2-1 backups (local / network / SFTP / FTP). ``SNAPADMIN_BACKUP_INCLUDE``
+        3-2-1 backups (local / network / SFTP / FTP / S3-compatible via the
+        ``s3`` extra — AWS, MinIO, Backblaze B2, Hetzner Object Storage,
+        Wasabi). Hetzner Storage Box (SFTP/SCP/WebDAV, a different product
+        from Object Storage) uses the ``sftp`` destination.
+        ``SNAPADMIN_BACKUP_INCLUDE``
         (default ``["db"]``) optionally bundles ``media`` and an AGE-encrypted
         ``env`` alongside the database — loose per-part files sharing one run's
         timestamp, plus an always-unencrypted ``manifest.json`` sidecar.
@@ -238,6 +242,7 @@ The base install carries only permissive licences (MIT/BSD/Apache) and is safe
 for commercial use. ``pip install django-snapadmin[<extra>]``:
 ``theme`` (Unfold UI), ``elasticsearch``, ``celery``, ``backup`` (SFTP),
 ``age`` (pyrage, for encrypted backups — ``SNAPADMIN_BACKUP_AGE_RECIPIENTS``),
+``s3`` (boto3, for S3-compatible offsite backups — ``SNAPADMIN_BACKUP_S3_*``),
 ``extra-settings``, ``wysiwyg`` (CKEditor 5 — GPL/commercial, hence optional),
 ``autocomplete-filter``, ``xlsx`` (openpyxl, for ``export_format="xlsx"``), or
 ``all``. Each is imported lazily and raises a pointed ``ImproperlyConfigured``

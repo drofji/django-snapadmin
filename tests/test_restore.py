@@ -17,6 +17,7 @@ from django.core.exceptions import ImproperlyConfigured
 from django.core.management import CommandError, call_command
 from django.test import override_settings
 
+from snapadmin import backup as backup_module
 from snapadmin import crypto
 from snapadmin import restore as restore_module
 from snapadmin.backup import (
@@ -26,14 +27,17 @@ from snapadmin.backup import (
     run_backup,
 )
 from snapadmin.restore import (
+    RESTORE_STATE_FILENAME,
     RestoreError,
     check_version_compatibility,
     fetch_parts,
     identity_required_message,
+    last_restore_run,
     list_bundles,
     parse_source,
     perform_restore,
     plan_restore,
+    record_restore_run,
     resolve_source,
     restore_db,
     restore_env,
@@ -137,6 +141,48 @@ def _manifest_path(bundle_dir: Path) -> str:
     return str(bundle_dir / _manifest_name(bundle_dir))
 
 
+class FakeS3Client:
+    """Minimal stand-in for a boto3 S3 client — the calls a real backup+restore
+    round-trip through the s3 destination needs (#BKP1f): upload/download,
+    a paginated list, and delete (retention)."""
+
+    shared_objects: dict[str, bytes] = {}
+
+    def __init__(self, **kwargs):
+        # A shared reference, not a copy — every client talks to the same
+        # bucket, so a write through one instance must be visible to the
+        # next one, exactly like real S3.
+        self.objects = FakeS3Client.shared_objects
+
+    def upload_file(self, Filename, Bucket, Key):
+        self.objects[Key] = Path(Filename).read_bytes()
+
+    def download_file(self, Bucket, Key, Filename):
+        if Key not in self.objects:
+            raise Exception(f"NoSuchKey: {Key!r}")
+        Path(Filename).write_bytes(self.objects[Key])
+
+    def list_objects_v2(self, Bucket, Prefix="", ContinuationToken=None):
+        keys = sorted(k for k in self.objects if k.startswith(Prefix))
+        return {"Contents": [{"Key": k} for k in keys]} if keys else {}
+
+    def delete_object(self, Bucket, Key):
+        self.objects.pop(Key, None)
+
+
+class FakeBoto3Module:
+    @staticmethod
+    def client(service_name, **kwargs):
+        return FakeS3Client(**kwargs)
+
+
+@pytest.fixture
+def fake_s3(monkeypatch):
+    FakeS3Client.shared_objects = {}
+    monkeypatch.setattr(backup_module, "_load_boto3", lambda: FakeBoto3Module)
+    return FakeBoto3Module
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Source parsing
 # ─────────────────────────────────────────────────────────────────────────────
@@ -145,7 +191,7 @@ class TestParseSource:
     def test_local_path(self):
         assert parse_source("snapadmin-manifest-20260826-000000.json") == (None, "snapadmin-manifest-20260826-000000.json")
 
-    @pytest.mark.parametrize("dest", ["local", "network", "remote", "sftp"])
+    @pytest.mark.parametrize("dest", ["local", "network", "remote", "sftp", "s3"])
     def test_destination_prefix(self, dest):
         assert parse_source(f"{dest}:snapadmin-manifest-x.json") == (dest, "snapadmin-manifest-x.json")
 
@@ -192,6 +238,22 @@ class TestListAndResolve:
             assert len(names) == 1
             resolved = resolve_source(f"network:{names[0]}", tmp_path / "work", config)
         assert resolved.destination == "network"
+        assert "db" in resolved.manifest["parts"]
+
+    def test_list_and_resolve_from_s3(self, tmp_path, sqlite_db, fake_s3):
+        """S3 exercises the exact same LIST_FUNCTIONS/FETCH_FUNCTIONS branch a
+        real remote/sftp destination does — the restore-fetch side of #BKP1f's
+        wiring requirement, proven end to end through a real backup+restore
+        round-trip rather than by inspecting the dicts directly."""
+        with override_settings(
+            SNAPADMIN_BACKUP_ENABLED=True, SNAPADMIN_BACKUP_S3_BUCKET="my-bucket",
+        ):
+            run_backup(["s3"])
+            config = get_backup_config()
+            names = list_bundles("s3", config)
+            assert len(names) == 1
+            resolved = resolve_source(f"s3:{names[0]}", tmp_path / "work", config)
+        assert resolved.destination == "s3"
         assert "db" in resolved.manifest["parts"]
 
     def test_fetch_one_remote_wraps_backup_error(self, tmp_path, sqlite_db):
@@ -458,6 +520,22 @@ class TestRestoreEnv:
             restore_env(tmp_path / "x", "")
 
 
+class TestRestoreState:
+    def test_none_when_never_run(self, tmp_path):
+        config = replace(get_backup_config(), local_dir=tmp_path)
+        assert last_restore_run(config) is None
+
+    def test_record_and_read_back(self, tmp_path):
+        config = replace(get_backup_config(), local_dir=tmp_path)
+        record_restore_run(config)
+        assert last_restore_run(config) is not None
+
+    def test_corrupt_state_file_reads_as_none(self, tmp_path):
+        config = replace(get_backup_config(), local_dir=tmp_path)
+        (tmp_path / RESTORE_STATE_FILENAME).write_text("{not json")
+        assert last_restore_run(config) is None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # perform_restore — decryption, identity handling
 # ─────────────────────────────────────────────────────────────────────────────
@@ -473,6 +551,18 @@ class TestPerformRestore:
 
         assert results["db"] == "restored"
         assert sqlite_db.read_bytes() == original_content
+
+    def test_records_that_a_restore_ran(self, tmp_path, sqlite_db):
+        """The "have you ever restored?" report (#BKP1g) is written only once
+        a restore actually completes — never for a dry-run plan, which never
+        calls perform_restore() at all."""
+        with _BackupEnv(tmp_path) as env:
+            config = env.config()
+            assert last_restore_run(config) is None
+            run_backup(["local"])
+            resolved = env.resolve()
+            perform_restore(resolved, ["db"], config)
+        assert last_restore_run(config) is not None
 
     def test_part_absent_from_manifest_is_skipped_not_applied(self, tmp_path, sqlite_db):
         with _BackupEnv(tmp_path) as env:

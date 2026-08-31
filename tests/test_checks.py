@@ -6,6 +6,7 @@ actionable hint, and stay quiet when a feature is unconfigured or correct.
 """
 
 import re
+from datetime import timedelta
 
 import pytest
 from django.core.management import call_command
@@ -381,6 +382,193 @@ class TestBackupEnvRequiresEncryption:
     def test_env_with_empty_recipients_list_is_e007(self):
         result = checks.check_backup_env_requires_encryption(None)
         assert [e.id for e in result] == ["snapadmin.E007"]
+
+
+# ── backup beat cadence vs. shortest destination interval (W010) ────────────
+
+class TestBackupScheduleCadence:
+    def test_backups_disabled_is_clean(self):
+        assert checks.check_backup_schedule_cadence(None) == []
+
+    @override_settings(SNAPADMIN_BACKUP_ENABLED=True)
+    def test_enabled_with_no_matching_beat_entry_is_clean(self):
+        assert checks.check_backup_schedule_cadence(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        CELERY_BEAT_SCHEDULE={
+            "other-task": {"task": "snapadmin.purge_expired_data", "schedule": 3600},
+        },
+    )
+    def test_beat_schedule_without_the_backup_task_is_clean(self):
+        assert checks.check_backup_schedule_cadence(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS=24,
+        CELERY_BEAT_SCHEDULE={
+            "run-db-backups": {
+                "task": "snapadmin.run_db_backups",
+                "schedule": object(),  # not a timedelta, no remaining_estimate()
+            },
+        },
+    )
+    def test_unrecognisable_schedule_type_is_clean(self):
+        """Cannot determine the period → stay silent rather than risk a false
+        positive on a schedule shape this check does not understand."""
+        assert checks.check_backup_schedule_cadence(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS=24,
+        CELERY_BEAT_SCHEDULE={
+            "run-db-backups": {
+                "task": "snapadmin.run_db_backups",
+                "schedule": timedelta(hours=1),
+            },
+        },
+    )
+    def test_beat_more_frequent_than_shortest_interval_is_clean(self):
+        assert checks.check_backup_schedule_cadence(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS=24,
+        CELERY_BEAT_SCHEDULE={
+            "run-db-backups": {
+                "task": "snapadmin.run_db_backups",
+                "schedule": timedelta(hours=48),
+            },
+        },
+    )
+    def test_beat_slower_than_shortest_interval_warns(self):
+        result = checks.check_backup_schedule_cadence(None)
+        assert [w.id for w in result] == ["snapadmin.W010"]
+        assert "24" in result[0].msg
+
+    def test_frequent_crontab_is_clean(self):
+        crontab = pytest.importorskip("celery.schedules").crontab
+        settings = {
+            "SNAPADMIN_BACKUP_ENABLED": True,
+            "SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS": 24,
+            "CELERY_BEAT_SCHEDULE": {
+                "run-db-backups": {
+                    "task": "snapadmin.run_db_backups",
+                    "schedule": crontab(minute="*/5"),
+                },
+            },
+        }
+        with override_settings(**settings):
+            assert checks.check_backup_schedule_cadence(None) == []
+
+    def test_weekly_crontab_slower_than_daily_interval_warns(self):
+        crontab = pytest.importorskip("celery.schedules").crontab
+        settings = {
+            "SNAPADMIN_BACKUP_ENABLED": True,
+            "SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS": 24,
+            "CELERY_BEAT_SCHEDULE": {
+                "run-db-backups": {
+                    "task": "snapadmin.run_db_backups",
+                    "schedule": crontab(hour=0, minute=0, day_of_week=1),
+                },
+            },
+        }
+        with override_settings(**settings):
+            result = checks.check_backup_schedule_cadence(None)
+        assert [w.id for w in result] == ["snapadmin.W010"]
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS=48,
+        SNAPADMIN_BACKUP_NETWORK_EVERY_HOURS=1,
+        CELERY_BEAT_SCHEDULE={
+            "run-db-backups": {
+                "task": "snapadmin.run_db_backups",
+                "schedule": timedelta(hours=24),
+            },
+        },
+    )
+    def test_crontab_that_never_fires_is_clean(self):
+        """February 31st never exists — the simulation exhausts its window
+        without finding two occurrences and must degrade to "cannot
+        determine" rather than crash or claim a bogus period."""
+        crontab = pytest.importorskip("celery.schedules").crontab
+        settings = {
+            "SNAPADMIN_BACKUP_ENABLED": True,
+            "SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS": 24,
+            "CELERY_BEAT_SCHEDULE": {
+                "run-db-backups": {
+                    "task": "snapadmin.run_db_backups",
+                    "schedule": crontab(day_of_month=31, month_of_year=2),
+                },
+            },
+        }
+        with override_settings(**settings):
+            assert checks.check_backup_schedule_cadence(None) == []
+
+    def test_inactive_destination_interval_is_not_used_as_the_shortest(self):
+        """SNAPADMIN_BACKUP_NETWORK_EVERY_HOURS=1 would make a 24h beat read
+        as "too slow" if network's interval counted — but network has no
+        SNAPADMIN_BACKUP_NETWORK_DIR configured, so it is not an active
+        destination. Only 'local' (48h) counts, and 24h comfortably covers
+        that: this must stay clean, not warn on an interval nothing uses."""
+        assert checks.check_backup_schedule_cadence(None) == []
+
+
+# ── S3 destination configuration (W011) ──────────────────────────────────────
+
+class TestBackupS3Configuration:
+    def test_unset_is_clean(self):
+        assert checks.check_backup_s3_configuration(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_S3_BUCKET="my-bucket",
+        SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID="AKIDEXAMPLE",
+        SNAPADMIN_BACKUP_S3_SECRET_ACCESS_KEY="secret",
+    )
+    def test_explicit_credentials_are_clean(self):
+        assert checks.check_backup_s3_configuration(None) == []
+
+    @override_settings(SNAPADMIN_BACKUP_S3_BUCKET="my-bucket")
+    def test_no_credentials_and_no_ambient_signal_warns(self, monkeypatch):
+        import snapadmin.backup as backup_module
+        monkeypatch.setattr(backup_module, "s3_ambient_credentials_likely", lambda: False)
+        result = checks.check_backup_s3_configuration(None)
+        assert [w.id for w in result] == ["snapadmin.W011"]
+        assert "ACCESS_KEY_ID" in result[0].msg
+
+    @override_settings(SNAPADMIN_BACKUP_S3_BUCKET="my-bucket")
+    def test_no_explicit_credentials_but_ambient_signal_is_clean(self, monkeypatch):
+        import snapadmin.backup as backup_module
+        monkeypatch.setattr(backup_module, "s3_ambient_credentials_likely", lambda: True)
+        assert checks.check_backup_s3_configuration(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_S3_BUCKET="my-bucket",
+        SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID="AKIDEXAMPLE",
+        SNAPADMIN_BACKUP_S3_SECRET_ACCESS_KEY="secret",
+        SNAPADMIN_BACKUP_S3_ENDPOINT_URL="not-a-url",
+    )
+    def test_malformed_endpoint_url_warns(self):
+        result = checks.check_backup_s3_configuration(None)
+        assert [w.id for w in result] == ["snapadmin.W011"]
+        assert "ENDPOINT_URL" in result[0].msg
+
+    @override_settings(
+        SNAPADMIN_BACKUP_S3_BUCKET="my-bucket",
+        SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID="AKIDEXAMPLE",
+        SNAPADMIN_BACKUP_S3_SECRET_ACCESS_KEY="secret",
+        SNAPADMIN_BACKUP_S3_ENDPOINT_URL="https://s3.eu-central-1.wasabisys.com",
+    )
+    def test_well_formed_endpoint_url_is_clean(self):
+        assert checks.check_backup_s3_configuration(None) == []
+
+    @override_settings(SNAPADMIN_BACKUP_S3_BUCKET="my-bucket", SNAPADMIN_BACKUP_S3_ENDPOINT_URL="not-a-url")
+    def test_bad_endpoint_and_missing_credentials_reports_both(self, monkeypatch):
+        import snapadmin.backup as backup_module
+        monkeypatch.setattr(backup_module, "s3_ambient_credentials_likely", lambda: False)
+        result = checks.check_backup_s3_configuration(None)
+        assert [w.id for w in result] == ["snapadmin.W011", "snapadmin.W011"]
 
 
 class TestMaskingRules:

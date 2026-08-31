@@ -11,6 +11,7 @@ each check is a no-op when its feature is unconfigured.
 """
 
 import re
+from datetime import timedelta
 from urllib.parse import urlparse
 
 from django.apps import apps
@@ -394,6 +395,172 @@ def check_backup_env_requires_encryption(app_configs, **kwargs):
     )]
 
 
+#: Days simulated forward when timing a crontab's period — far enough for any
+#: schedule saner than "once a year" (the worst realistic beat entry), bounded
+#: so a pathological one degrades to "cannot determine" rather than a slow
+#: system check on every ``manage.py`` invocation.
+_CRONTAB_SIMULATION_DAYS = 400
+
+
+def _crontab_period_hours(schedule) -> float | None:
+    """Time a ``celery.schedules.crontab``'s period by direct simulation over
+    its declared field sets (``minute``/``hour``/``day_of_week``/
+    ``day_of_month``/``month_of_year`` — plain ``set[int]`` attributes).
+
+    Deliberately does **not** call the schedule's own ``remaining_estimate()``
+    / ``is_due()`` — both anchor their result against the real wall-clock
+    time the call happens to run at (verified by reading
+    ``celery.schedules.crontab.remaining_delta``'s source: it calls
+    ``self.now()`` internally), which makes them unusable for "how far apart
+    are two consecutive fires", a question that must not depend on when it is
+    asked. Walking from a fixed, arbitrary reference date instead — 2024-01-01
+    is a Monday, matching this function's own day-of-week arithmetic — makes
+    the result a pure function of the schedule.
+    """
+    from datetime import date, datetime as dt
+
+    # No try/except here: the caller (_schedule_period_hours) only reaches
+    # this function after isinstance(schedule, crontab), and every real
+    # crontab instance sets all five fields in __init__ — there is no path
+    # through which one could be missing.
+    month_of_year = schedule.month_of_year
+    day_of_month = schedule.day_of_month
+    day_of_week = schedule.day_of_week
+    hour = schedule.hour
+    minute = schedule.minute
+
+    occurrences: list[dt] = []
+    day = date(2024, 1, 1)
+    for _ in range(_CRONTAB_SIMULATION_DAYS):
+        # Celery's own convention (crontab.remaining_delta): Sunday is 0.
+        if (
+            day.month in month_of_year
+            and day.day in day_of_month
+            and (day.isoweekday() % 7) in day_of_week
+        ):
+            for h in sorted(hour):
+                for m in sorted(minute):
+                    occurrences.append(dt(day.year, day.month, day.day, h, m))
+                    if len(occurrences) == 2:
+                        return (occurrences[1] - occurrences[0]).total_seconds() / 3600
+        day += timedelta(days=1)
+    return None
+
+
+def _schedule_period_hours(schedule) -> float | None:
+    """Best-effort: how often a ``CELERY_BEAT_SCHEDULE`` entry's ``schedule``
+    value fires, in hours. ``None`` when it cannot be determined (an unknown
+    schedule type, or a pathological one whose period could not be timed
+    within :data:`_CRONTAB_SIMULATION_DAYS`) — the caller must treat that as
+    "nothing to warn about", never as a 0-hour period, since a false W010 on
+    an unrecognised schedule shape would be worse than staying silent.
+    """
+    if isinstance(schedule, timedelta):
+        return schedule.total_seconds() / 3600
+    try:
+        from celery.schedules import crontab
+    except ImportError:  # pragma: no cover - celery is the [celery] extra
+        return None
+    if not isinstance(schedule, crontab):
+        return None
+    return _crontab_period_hours(schedule)
+
+
+def check_backup_schedule_cadence(app_configs, **kwargs):
+    """Warn when Celery Beat checks ``snapadmin.run_db_backups`` less often
+    than the shortest configured ``SNAPADMIN_BACKUP_*_EVERY_HOURS`` among the
+    active destinations.
+
+    A destination's own interval only ever gets checked when Beat wakes the
+    task up — see ``snapadmin/backup.py``'s module docstring and
+    ``_is_due()``'s grace margin. A daily destination behind a weekly beat
+    entry silently loses six days out of every seven; this check exists so
+    that combination is caught at ``manage.py check`` instead of discovered
+    the day someone needs a backup that was never taken.
+    """
+    from snapadmin.backup import _active_destinations, get_backup_config
+
+    config = get_backup_config()
+    if not config.enabled:
+        return []
+
+    beat_schedule = getattr(settings, "CELERY_BEAT_SCHEDULE", None) or {}
+    entry = next(
+        (info for info in beat_schedule.values() if info.get("task") == "snapadmin.run_db_backups"),
+        None,
+    )
+    if entry is None:
+        return []
+
+    beat_hours = _schedule_period_hours(entry.get("schedule"))
+    if beat_hours is None:
+        return []
+
+    intervals = {
+        "local": config.local_every_hours,
+        "network": config.network_every_hours,
+        "remote": config.remote_every_hours,
+        "sftp": config.sftp_every_hours,
+    }
+    shortest = min(intervals[dest] for dest in _active_destinations(config))
+    if beat_hours <= shortest:
+        return []
+    return [Warning(
+        f"The 'snapadmin.run_db_backups' Celery Beat entry runs about every "
+        f"{beat_hours:.1f}h, less often than the shortest configured backup "
+        f"interval ({shortest}h).",
+        hint="A destination's own *_EVERY_HOURS check only runs when Beat wakes "
+             "the task up, so this combination silently drops days. Schedule "
+             "'snapadmin.run_db_backups' at least as often as your shortest "
+             "SNAPADMIN_BACKUP_*_EVERY_HOURS setting, or raise that setting to "
+             "match the Beat cadence.",
+        id="snapadmin.W010",
+    )]
+
+
+def check_backup_s3_configuration(app_configs, **kwargs):
+    """Warn about an S3 destination that is configured but incompletely.
+
+    Deliberately advisory, like every other check here: a half-configured S3
+    destination should not stop an otherwise-working project from starting,
+    just as a malformed AGE recipient (``snapadmin.W008``) does not. No-op
+    when ``SNAPADMIN_BACKUP_S3_BUCKET`` is unset — the destination is simply
+    off.
+    """
+    from snapadmin.backup import s3_ambient_credentials_likely
+
+    bucket = get_setting("SNAPADMIN_BACKUP_S3_BUCKET", "") or ""
+    if not bucket:
+        return []
+
+    warnings = []
+    endpoint_url = get_setting("SNAPADMIN_BACKUP_S3_ENDPOINT_URL", "") or ""
+    if endpoint_url and not endpoint_url.startswith(("http://", "https://")):
+        warnings.append(Warning(
+            f"SNAPADMIN_BACKUP_S3_ENDPOINT_URL = {endpoint_url!r} does not look like a URL.",
+            hint="Set it to a full endpoint URL, e.g. "
+                 "'https://s3.eu-central-1.wasabisys.com', or leave it unset to use "
+                 "AWS's own default endpoint.",
+            id="snapadmin.W011",
+        ))
+
+    access_key = get_setting("SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID", "") or ""
+    secret_key = get_setting("SNAPADMIN_BACKUP_S3_SECRET_ACCESS_KEY", "") or ""
+    if not access_key and not secret_key and not s3_ambient_credentials_likely():
+        warnings.append(Warning(
+            "SNAPADMIN_BACKUP_S3_BUCKET is set, but no SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID / "
+            "_SECRET_ACCESS_KEY is configured and no ambient AWS credential source "
+            "(environment variables, a shared credentials file, an ECS/IRSA role) was "
+            "detected — S3 backups will silently never upload.",
+            hint="Set SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID/_SECRET_ACCESS_KEY, or ignore this "
+                 "warning on a host that authenticates purely through an EC2 instance "
+                 "profile — that case cannot be detected without a network call, so this "
+                 "check does not attempt it.",
+            id="snapadmin.W011",
+        ))
+    return warnings
+
+
 def check_snapadmin_profile(app_configs, **kwargs):
     """Error: ``SNAPADMIN_PROFILE`` set to a name the package does not know.
 
@@ -454,6 +621,8 @@ ALL_CHECKS = [
     check_api_read_only,
     check_backup_age_recipients,
     check_backup_env_requires_encryption,
+    check_backup_s3_configuration,
+    check_backup_schedule_cadence,
     check_unfold_theme,
     check_snapadmin_profile,
     check_snapadmin_profile_contradiction,

@@ -123,6 +123,7 @@ _CURATED: tuple[LicenseInfo, ...] = (
     ),
     LicenseInfo("paramiko", "LGPL-2.1", extra="backup", guidance=_LGPL_NOTE),
     LicenseInfo("pyrage", "MIT", extra="age"),
+    LicenseInfo("boto3", "Apache-2.0", extra="s3"),
     LicenseInfo(
         "django-ckeditor-5",
         "GPL-2.0-or-later OR Commercial",

@@ -93,18 +93,28 @@ def _masking_detail(masked_fields: int, ruled_fields: int) -> str:
 
 
 def _backup_detail() -> str:
-    """``"db, encrypted"``, ``"db+media+env, encrypted"``, or ``"db"`` unencrypted.
+    """``"db, encrypted (2 recipients), destinations: local+sftp, restored"``.
 
-    Reports what a run actually bundles (SNAPADMIN_BACKUP_INCLUDE) and
-    whether AGE encryption is configured — never the identity, only the
-    boolean and the recipient count, both safe to print.
+    Reports what a run actually bundles (SNAPADMIN_BACKUP_INCLUDE), whether
+    AGE encryption is configured, which destinations are active and whether
+    a restore has ever completed — never the identity, only booleans, counts
+    and destination names, all safe to print. The destinations/restore
+    clauses are added only while backups are enabled — otherwise "local"
+    (always the nominal staging destination) would print as "active" for a
+    feature that is in fact off.
     """
-    include = list(get_setting("SNAPADMIN_BACKUP_INCLUDE", None) or ["db"])
-    recipients = list(get_setting("SNAPADMIN_BACKUP_AGE_RECIPIENTS", None) or [])
-    parts = "+".join(include)
-    if not recipients:
-        return parts
-    return f"{parts}, encrypted ({_count(len(recipients), 'recipient')})"
+    from snapadmin.backup import _active_destinations, get_backup_config
+    from snapadmin.restore import last_restore_run
+
+    config = get_backup_config()
+    detail = "+".join(config.include)
+    if config.age_recipients:
+        detail += f", encrypted ({_count(len(config.age_recipients), 'recipient')})"
+    if config.enabled:
+        detail += f", destinations: {'+'.join(_active_destinations(config))}"
+        if last_restore_run(config):
+            detail += ", restored"
+    return detail
 
 
 def _capabilities() -> list[tuple[str, bool, str]]:
@@ -136,6 +146,12 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     # the models the ES reindex and the retention purge deliberately skip. The
     # ``inventory`` section breaks this down per model (door + exact gap list, #PAR1e).
     decorated = sum(1 for m in models if not hasattr(m, "register_admin"))
+    offline_models = sum(1 for m in models if get_model_meta(m, "offline_mode", False))
+    # "on" means the layer actually loads somewhere: the setting is enabled AND
+    # at least one model has offline_mode=True (SnapModel.get_admin_media()'s
+    # own gate, #JS2e) — the setting alone is not enough to mean anything is
+    # actually running.
+    connectivity_on = bool(get_setting("SNAPADMIN_CONNECTIVITY_ENABLED", False)) and offline_models > 0
 
     return [
         ("rest_api", bool(get_setting("SNAPADMIN_REST_API_ENABLED", True)), ""),
@@ -154,6 +170,7 @@ def _capabilities() -> list[tuple[str, bool, str]]:
         ("write_allowlist", write_allowlist > 0, _count(write_allowlist, "model")),
         ("delete_guard", bool(get_setting("SNAPADMIN_API_DELETE_GUARD", None)), ""),
         ("decorated_models", decorated > 0, _count(decorated, "plain model")),
+        ("connectivity_awareness", connectivity_on, _count(offline_models, "offline-capable model") if offline_models else ""),
         ("sso", *_sso()),
         ("profile", *_profile()),
     ]

@@ -286,6 +286,11 @@ SNAPADMIN_DASHBOARD_PUBLIC = env_bool('SNAPADMIN_DASHBOARD_PUBLIC', False)
 # is *exactly* Django's is replaced, so a custom UserAdmin is never touched.
 # False = leave the auth admin alone.
 SNAPADMIN_THEME_AUTH_ADMIN = env_bool('SNAPADMIN_THEME_AUTH_ADMIN', True)
+# The connectivity/offline layer (health poll, save-blocking guard, sidebar
+# sync badge) is opt-in and defaults to False upstream (#JS2e) — it only loads
+# when at least one registered model has offline_mode=True. The demo turns it
+# on explicitly to dogfood Customer's offline_mode=True below.
+SNAPADMIN_CONNECTIVITY_ENABLED = env_bool('SNAPADMIN_CONNECTIVITY_ENABLED', True)
 
 # --- API capacity & abuse protection -----------------------------------------
 # These bound how much work one request can cost and how fast callers may issue
@@ -444,6 +449,13 @@ SNAPADMIN_EXPORT_STORAGE = os.getenv('SNAPADMIN_EXPORT_STORAGE', '')
 SNAPADMIN_EXPORT_SOURCES = {
     'product_catalog': 'demo.apps.shop.export_sources.product_catalog_source',
 }
+# Unset (default) — export/reindex job housekeeping is opt-in: set a positive
+# integer to delete finished SnapExportJob/SnapReindexJob rows and their
+# published files once they are this many days past finished_at (plus a sweep
+# for any export file left behind with no job row at all). Runs from the same
+# purge-expired-data beat entry as the GDPR/audit retention below — see #gdpr
+# in the docs for the full table of what runs where.
+SNAPADMIN_EXPORT_RETENTION_DAYS = int(os.getenv('SNAPADMIN_EXPORT_RETENTION_DAYS', '0')) or None
 
 # GraphQL security: require authentication + per-model view permission on every
 # resolver (mirrors the REST API contract). Never disable in production.
@@ -581,6 +593,20 @@ SNAPADMIN_BACKUP_SFTP_KEY_FILE = os.getenv('SNAPADMIN_BACKUP_SFTP_KEY_FILE', '')
 SNAPADMIN_BACKUP_SFTP_DIR = os.getenv('SNAPADMIN_BACKUP_SFTP_DIR', '/')
 SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = int(os.getenv('SNAPADMIN_BACKUP_SFTP_EVERY_HOURS', '168'))
 
+# Copy 3 (alternative) — any S3-compatible object store; needs the optional boto3
+# dependency ([s3] extra). ENDPOINT_URL is what makes this work for AWS, MinIO,
+# Backblaze B2, Hetzner Object Storage and Wasabi alike — leave it unset for AWS.
+# Hetzner Storage Box is SFTP, not S3 — see SNAPADMIN_BACKUP_SFTP_* above for it.
+SNAPADMIN_BACKUP_S3_BUCKET = os.getenv('SNAPADMIN_BACKUP_S3_BUCKET', '')
+SNAPADMIN_BACKUP_S3_PREFIX = os.getenv('SNAPADMIN_BACKUP_S3_PREFIX', '')
+SNAPADMIN_BACKUP_S3_ENDPOINT_URL = os.getenv('SNAPADMIN_BACKUP_S3_ENDPOINT_URL', '')
+SNAPADMIN_BACKUP_S3_REGION = os.getenv('SNAPADMIN_BACKUP_S3_REGION', '')
+# Leave both unset to use boto3's ambient credential chain (env vars, shared config,
+# an IAM role / instance profile) instead — the right choice on AWS.
+SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID = os.getenv('SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID', '')
+SNAPADMIN_BACKUP_S3_SECRET_ACCESS_KEY = os.getenv('SNAPADMIN_BACKUP_S3_SECRET_ACCESS_KEY', '')
+SNAPADMIN_BACKUP_S3_EVERY_HOURS = int(os.getenv('SNAPADMIN_BACKUP_S3_EVERY_HOURS', '168'))
+
 # Encryption at rest — a list of age (age1…) and/or SSH public keys. Every dump is
 # streamed straight through age before a byte reaches disk when this is non-empty;
 # empty (the default) changes nothing. The identity (private key) is never a setting —
@@ -706,7 +732,8 @@ CELERY_BEAT_SCHEDULE = {
     "purge-expired-data": {
         "task": "snapadmin.purge_expired_data",
         "schedule": crontab(hour=1, minute=0),  # daily 1am
-        "description": _("GDPR — delete records older than data_retention_days on each model"),
+        "description": _("GDPR — data_retention_days on each model, the audit log "
+                          "and (if set) SNAPADMIN_EXPORT_RETENTION_DAYS job cleanup"),
     },
     "generate-daily-stats": {
         "task": "demo.tasks.generate_daily_stats",

@@ -1084,6 +1084,28 @@ SnapModel.register_all_admins()</code></pre>
     The <code>APIToken</code> admin is also registered automatically when <code>register_all_admins()</code> is called.
   </div>
 
+  <h3 id="admin-extension-surface">Extending the generated admin</h3>
+  <p><code>register_admin()</code> builds and registers a <code>ModelAdmin</code> from a model's Snap
+  field flags; two of its building blocks are public so a project can extend rather than replace them:</p>
+  <ul>
+    <li><code>get_admin_fields()</code> returns an <code>AdminFieldSets</code> named tuple —
+      <code>(form_fields, list_display, search_fields, list_filter, autocomplete_fields)</code>, in
+      that order. It is a plain 5-tuple by construction (positional unpacking, indexing and
+      <code>len()</code> all keep working), with named access added on top. A sixth member would still
+      be a breaking change — the point of pinning the shape is that such a change is announced, not
+      discovered as a silent <code>ValueError</code> at admin autodiscover.</li>
+    <li><code>get_admin_media()</code> returns the base <code>(js, css)</code> asset lists —
+      theme-sheet selection, the <code>connectivity.js</code>/<code>offline.js</code> gating and
+      de-duplication with <code>js_admin_files</code>/<code>css_admin_files</code> all included. A
+      project overriding <code>register_admin()</code> can call it to extend the real lists instead of
+      copying a snapshot that rots at the next release.</li>
+  </ul>
+  <p><strong><code>admin_overrides</code> always wins.</strong> It is merged onto the generated
+  <code>ModelAdmin</code> <em>last</em>, so a project's own <code>get_readonly_fields</code> or
+  <code>safe_html_&lt;field&gt;</code> display method always takes precedence over the one SnapAdmin
+  generates — regardless of write order, because the generated versions never touch
+  <code>admin_overrides</code> in the first place.</p>
+
   <!-- ═══════════════════════ GROUP: Use The Data ═══════════════════════ -->
   <!-- ── API REST ──────────────────────────────────────────────────────────── -->
   <h2 id="api-rest">🌐 REST API</h2>
@@ -1643,28 +1665,39 @@ token = APIToken.create_for_user(
   <div class="callout callout-warn">
     <strong>Tokens are hashed at rest</strong>
     Only a SHA-256 digest and the 8-character <code>token_prefix</code> are stored — the raw key is
-    <em>never</em> persisted. It is returned exactly once: in the <code>POST /api/tokens/</code> response
-    (and shown once in the admin when you create a token). Copy it then; it cannot be recovered later.
-    On every subsequent read <code>token_key</code> is <code>null</code> and only <code>token_prefix</code>
-    identifies the token.
+    <em>never</em> persisted. It is returned exactly once: in the <code>POST /api/tokens/</code> response,
+    once more in the <code>POST /api/tokens/{id}/rotate/</code> response (and shown once in the admin
+    when you create a token). Copy it then; it cannot be recovered later. On every subsequent read
+    <code>token_key</code> is <code>null</code> and only <code>token_prefix</code> identifies the token.
   </div>
 
   <h3>Token REST Endpoints</h3>
-  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/tokens/</span><span class="endpoint-desc">List tokens owned by the current user</span></div>
+  <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/tokens/</span><span class="endpoint-desc">List tokens owned by the current user (every token for a superuser)</span></div>
   <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/tokens/</span><span class="endpoint-desc">Create a new token</span></div>
   <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/tokens/{id}/</span><span class="endpoint-desc">Retrieve a token</span></div>
-  <div class="endpoint-row"><span class="method delete">DELETE</span><span class="endpoint-path">/api/tokens/{id}/</span><span class="endpoint-desc">Revoke (delete) a token</span></div>
+  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/tokens/{id}/rotate/</span><span class="endpoint-desc">Replace the secret in place — same row, id, scopes and history; the new raw key is returned once</span></div>
+  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/tokens/{id}/deactivate/</span><span class="endpoint-desc">Flip <code>is_active</code> off — the recommended revocation path</span></div>
+  <div class="endpoint-row"><span class="method delete">DELETE</span><span class="endpoint-path">/api/tokens/{id}/</span><span class="endpoint-desc">Delete a token outright (administrators; prefer deactivate for routine revocation)</span></div>
+  <p>A regular user manages their own tokens — list, create, retrieve, rotate, deactivate, delete —
+  without needing to be a superuser; each lookup is scoped to <code>token.user == request.user</code>
+  (a superuser sees and manages every token).</p>
 
   <h3>Token Fields</h3>
   <table>
     <tr><th>Field</th><th>Description</th></tr>
     <tr><td><code>token_name</code></td><td>Human-readable label (e.g. <em>"Read-only dashboard"</em>)</td></tr>
-    <tr><td><code>token_key</code></td><td>40-character secret key — treat like a password. Hashed at rest; returned only once, at creation</td></tr>
+    <tr><td><code>token_key</code></td><td>40-character secret key — treat like a password. Hashed at rest; returned only once, at creation or rotation</td></tr>
     <tr><td><code>token_prefix</code></td><td>First 8 characters of the key (not secret) — identifies a stored token in lists and the admin</td></tr>
-    <tr><td><code>allowed_models</code></td><td>List of <code>"app_label.ModelName"</code> strings the token may target. <strong>Empty ≠ unrestricted</strong>: it means "any model the owning user already has Django permissions for". Token scope is always AND-ed with <code>user.has_perm</code>, so a non-empty list <em>narrows</em> access further</td></tr>
+    <tr><td><code>allowed_models</code></td><td>List of <code>"app_label.ModelName"</code> strings the token may target on SnapAdmin's generated model API. <strong>Empty ≠ unrestricted</strong>: it means "any model the owning user already has Django permissions for". Token scope is always AND-ed with <code>user.has_perm</code>, so a non-empty list <em>narrows</em> access further</td></tr>
+    <tr><td><code>allowed_scopes</code></td><td>List of free-form strings <em>your own</em> views check with <code>token_has_scope(token, "reports:read")</code> — SnapAdmin only stores and matches them, the meaning is yours. Unlike <code>allowed_models</code>, an <strong>empty</strong> list denies every scope check (fail-closed): there is no Django-permission equivalent an opaque string could delegate to</td></tr>
     <tr><td><code>expiration_date</code></td><td>Optional expiry; leave blank for non-expiring tokens</td></tr>
-    <tr><td><code>is_active</code></td><td>Deactivate without deleting the token</td></tr>
+    <tr><td><code>is_active</code></td><td>Deactivate without deleting the token — set via <code>POST /api/tokens/{id}/deactivate/</code> or the admin</td></tr>
   </table>
+
+  <p>Rotating a leaked key from Python:</p>
+  <pre><code>token = APIToken.objects.get(token_prefix="ab12cd34")
+new_raw_key = token.rotate()   # old key stops authenticating immediately
+# new_raw_key is shown once — store it now, it is not recoverable afterwards</code></pre>
 
   <!-- ── Elasticsearch ──────────────────────────────────────────────────────── -->
   <h2 id="elasticsearch">🔍 Elasticsearch Integration</h2>
@@ -1876,20 +1909,40 @@ reindex_products_to_elasticsearch.delay()</code></pre>
   </table>
 
   <h3>Real backend health checks</h3>
-  <p>Connectivity is decided by whether the <strong>Django backend actually answers</strong>, not by the OS network flag — a laptop can hold a Wi-Fi link while the server is down or the VPN dropped. A lightweight <code>connectivity.js</code> loads on all SnapModel admin pages:</p>
+  <p>Connectivity is decided by whether the <strong>Django backend actually answers</strong>, not by the OS network flag — a laptop can hold a Wi-Fi link while the server is down or the VPN dropped.</p>
+
+  <div class="callout callout-warn">
+    <strong>Opt-in, off by default</strong>
+    The connectivity layer (<code>snapadmin/js/connectivity.js</code>) only loads when
+    <code>SNAPADMIN_CONNECTIVITY_ENABLED = True</code> <strong>and</strong> at least one registered
+    model has <code>offline_mode = True</code> — an install with neither gets no health poll, no
+    toast, no badge and no save-blocking guard; the script is absent from the page entirely. This
+    changed in the same release that pinned <code>SNAPADMIN_CONNECTIVITY_ENABLED</code>'s default to
+    <code>False</code>: a health poll running against a deployment with
+    <code>SNAPADMIN_REST_API_ENABLED = False</code> (a documented, supported combination —
+    <code>SNAPADMIN_PROFILE = "admin"</code> produces it) used to 404 forever and brick every Save
+    button. Set <code>SNAPADMIN_CONNECTIVITY_ENABLED = True</code> to restore the old always-on
+    behaviour.
+  </div>
+
+  <p>With the layer on, a lightweight <code>connectivity.js</code> loads on every SnapModel admin page:</p>
   <table>
     <tr><th>Behavior</th><th>Detail</th></tr>
-    <tr><td>Health polling</td><td>Polls <code>GET /api/health/</code> every 15s by default (override via <code>window.SNAPADMIN_HEALTH_INTERVAL</code>) with a short timeout, and re-checks immediately on <code>online</code>/<code>offline</code> events and tab refocus. The backend is "up" only when it responds.</td></tr>
+    <tr><td>Health polling</td><td>Polls <code>GET /api/health/</code> every 15s by default (override via <code>window.SNAPADMIN_HEALTH_INTERVAL</code>) with a short timeout, and re-checks immediately on <code>online</code>/<code>offline</code> events and tab refocus.</td></tr>
+    <tr><td>404 stands down</td><td>A <code>404</code> means "no health route on this deployment", not "the backend is down" — the script logs one <code>console.debug</code> line and stops polling for the rest of the page's lifetime, never a toast, never a guard.</td></tr>
+    <tr><td>Down requires proof</td><td>The backend is only declared "down" after <strong>≥ 2 consecutive failed probes</strong> <em>and</em> at least one earlier successful probe. A probe that has never succeeded is "unknown", and unknown never blocks a save — a single slow first request is not proof the backend is down.</td></tr>
     <tr><td>Shared state</td><td>Publishes one resolved state as a <code>snapadmin:connectivity</code> DOM event, so the connectivity layer and the per-model engine always agree.</td></tr>
     <tr><td>Dynamic toasts</td><td>Backend-lost / restored, <em>"objects can't be shown right now"</em> (non-cached pages), and <em>"synced N changes"</em> surface as auto-dismissing toasts — no static banners.</td></tr>
-    <tr><td>Save guard</td><td>On a non-offline model, an unreachable backend blocks form submission and disables the Save buttons until it returns, while leaving the already-rendered page intact.</td></tr>
-    <tr><td>Sidebar badges</td><td>Each model link gets a green <strong>sync icon</strong> (spins while the backend is down) if it is offline-capable, or a muted <strong>no-offline icon</strong> otherwise — so you can see at a glance which records survive a disconnect.</td></tr>
+    <tr><td>Save guard</td><td>On a non-offline model, a <strong>confirmed-down</strong> backend blocks form submission and disables the Save buttons until it returns, while leaving the already-rendered page intact.</td></tr>
+    <tr><td>Sidebar badges</td><td>Only offline-capable models get a badge — a green <strong>sync icon</strong> (spins while confirmed down). A model without <code>offline_mode</code> gets no badge at all.</td></tr>
   </table>
   <p>The badge list and per-model cache limits come from <code>GET /api/offline-models/</code> (authenticated), with a <code>localStorage</code> fallback so badges still render while offline.</p>
 
   <div class="callout callout-info">
-    <strong>Zero configuration</strong>
-    No settings, migrations, or extra dependencies. The <code>offline_mode</code> flag is purely client-side and gated per model; non-offline models still get the connectivity warnings but ship no caching JS.
+    <strong>Zero configuration for offline_mode itself</strong>
+    No migrations or extra dependencies either way. <code>offline_mode</code> is purely client-side
+    and gated per model; <code>SNAPADMIN_CONNECTIVITY_ENABLED</code> is the one setting that gates
+    the shared health-poll layer all offline-capable models rely on.
   </div>
   </details>
 
@@ -2093,13 +2146,42 @@ for order in Order.objects.select_related("customer"):   # 1 query, total
   up. Where this site calls a feature "automatic", it means <em>automatic once wired</em>; the table
   below is what wiring it means.</p>
 
+  <h3 id="task-outcomes">Task outcomes &amp; monitoring</h3>
+  <p>Every scheduled task below except <code>run_export</code> (which tracks its own status on the
+  <code>SnapExportJob</code> row) returns a summary dict carrying a <code>status</code> key with one
+  of exactly four values, plus a <code>failed</code> list (<code>[]</code> when nothing failed) —
+  every existing key on every task's summary keeps its name and shape, this is purely additive:</p>
+  <table>
+    <tr><th><code>status</code></th><th>Meaning</th><th>Raises?</th><th>Log marker</th></tr>
+    <tr><td><code>"ok"</code></td><td>ran, every unit succeeded</td><td>no</td><td><code>snapadmin_task_ok</code> (info)</td></tr>
+    <tr><td><code>"partial"</code></td><td>ran, <strong>some</strong> units failed (<code>failed</code> non-empty)</td><td><strong>no</strong></td><td><code>snapadmin_task_partial</code> (error)</td></tr>
+    <tr><td><code>"noop"</code></td><td>nothing was due / nothing to do</td><td>no</td><td><code>snapadmin_task_noop</code> (info)</td></tr>
+    <tr><td><code>"disabled"</code></td><td>switched off (or unusably misconfigured) by settings</td><td>no</td><td><code>snapadmin_task_disabled</code> (info)</td></tr>
+    <tr><td><em>(total failure)</em></td><td>every unit failed, or the task could not start at all</td><td><strong>yes</strong></td><td><code>snapadmin_task_failed</code> (error)</td></tr>
+  </table>
+  <p>A total failure raises (<code>BackupError</code> / <code>SnapPurgeError</code> /
+  <code>AlertDeliveryError</code> / <code>ReindexError</code>) instead of returning — a raised
+  exception is the only thing Celery itself records as a task failure, which is what a task-status
+  monitor watches. Retrying a <em>partial</em> failure would redo the units that already succeeded
+  (e.g. re-uploading a backup that already shipped to two of three destinations), so partial never
+  raises — it is loud instead: <code>status="partial"</code>, a populated <code>failed</code> list,
+  and one <code>error</code>-level log line with a stable marker.</p>
+  <div class="callout callout-success">
+    <strong>One monitoring rule covers all six tasks:</strong> alert when <code>status != "ok"</code>,
+    page when the Celery task state is <code>FAILURE</code>.
+  </div>
+  <p>This closes a reported incident: a disabled backup schedule ran "successfully" for weeks with no
+  backup ever taken (the task returned <code>{"ran": False, "reason": "disabled"}</code> and Celery
+  recorded a clean success every time), and a silently-failing offsite destination never surfaced
+  anywhere but a log line while the task still reported overall success.</p>
+
   <details class="info">
   <summary><span class="info-glyph">?</span> Every built-in task, the rename notice, and the Beat schedule</summary>
 
   <h3>Built-in tasks and what triggers each</h3>
   <table>
     <tr><th>Task</th><th>Trigger</th><th>Purpose</th></tr>
-    <tr><td><code>snapadmin.purge_expired_data</code></td><td><strong>You schedule it</strong></td><td>GDPR — delete rows past each model's <code>data_retention_days</code></td></tr>
+    <tr><td><code>snapadmin.purge_expired_data</code></td><td><strong>You schedule it</strong></td><td>GDPR — every registered model's <code>data_retention_days</code> (and <code>data_retention_files</code>), the audit log's <code>SNAPADMIN_AUDIT_RETENTION_DAYS</code>, and — if set — <code>SNAPADMIN_EXPORT_RETENTION_DAYS</code> job/file cleanup. See <a href="#retention-table">the full purge table</a></td></tr>
     <tr><td><code>snapadmin.purge_expired_tokens</code></td><td><strong>You schedule it</strong></td><td>Delete <code>APIToken</code> rows past their expiry (an expired token stops authenticating immediately either way — this only reclaims the rows)</td></tr>
     <tr><td><code>snapadmin.send_error_digest</code></td><td><strong>You schedule it</strong></td><td>Daily grouped digest of captured error events</td></tr>
     <tr><td><code>snapadmin.send_health_alert</code></td><td><strong>You schedule it</strong> (e.g. every 5 min)</td><td>Probe subsystem health (DB / Elasticsearch / REST API / GraphQL, each skipped when its feature is off) and email an alert when one is down; a cooldown limits a persistent outage to one email</td></tr>
@@ -2164,7 +2246,7 @@ CELERY_BEAT_SCHEDULE = {
     "purge-expired-data": {
         "task": "snapadmin.purge_expired_data",
         "schedule": crontab(hour=1, minute=0),   # daily 1am
-        "description": "GDPR — delete records older than data_retention_days",
+        "description": "GDPR — data_retention_days, the audit log, and job/file cleanup",
     },
     "purge-expired-tokens": {
         "task": "snapadmin.purge_expired_tokens",
@@ -2187,6 +2269,13 @@ CELERY_BEAT_SCHEDULE = {
         "description": "3-2-1 database backups (each destination when due)",
     },
 }</code></pre>
+  <p>The <code>run-db-backups</code> entry above must fire at least as often as your shortest
+  <code>SNAPADMIN_BACKUP_*_EVERY_HOURS</code> — a destination's own interval only ever gets checked
+  when Beat wakes the task up, so scheduling it less often than that silently drops days. A new
+  check, <code>snapadmin.W010</code>, warns at <code>manage.py check</code> when the two disagree.
+  Separately, a run that completes even slightly later than its ideal wall-clock slot no longer
+  skips the following day: the due-time check applies a small (2% of the interval) tolerance for
+  exactly that jitter.</p>
 
   </details>
   <p>No Celery? Every scheduled task above can be driven from system <code>cron</code> instead —
@@ -2209,8 +2298,8 @@ beat:
   <h2 id="backups">💾 3-2-1 Database Backups</h2>
   <p>Built-in database backups following the classic <strong>3-2-1 rule</strong> — <strong>3</strong> copies
   of your data, on <strong>2</strong> different machines, <strong>1</strong> of them offsite. Dumps are
-  gzip-compressed (file copy for SQLite, <code>pg_dump</code> for PostgreSQL) and shipped to up to four
-  destinations, <strong>each on its own interval</strong>:</p>
+  gzip-compressed (file copy for SQLite, <code>pg_dump</code> for PostgreSQL, <code>mysqldump</code> for
+  MySQL) and shipped to up to five destinations, <strong>each on its own interval</strong>:</p>
 
   <div class="callout callout-warn">
     <strong>These do not run until you schedule them.</strong>
@@ -2227,8 +2316,9 @@ beat:
     <tr><th>Copy</th><th>Destination</th><th>Where it lives</th><th>Due every</th></tr>
     <tr><td>1</td><td><code>local</code></td><td>Directory on the <strong>same server</strong> (<code>SNAPADMIN_BACKUP_LOCAL_DIR</code>)</td><td>every 24 h</td></tr>
     <tr><td>2</td><td><code>network</code></td><td>Directory on <strong>another server on your network</strong> — a mounted NFS/SMB share (<code>SNAPADMIN_BACKUP_NETWORK_DIR</code>; empty = off)</td><td>every 24 h</td></tr>
-    <tr><td>3</td><td><code>remote</code></td><td><strong>Offsite server</strong> anywhere in the world, via FTP/FTPS (<code>SNAPADMIN_BACKUP_FTP_*</code>; empty host = off)</td><td>every 168 h (weekly)</td></tr>
-    <tr><td>3 (alt)</td><td><code>sftp</code></td><td>Same offsite copy over <strong>SSH/SFTP</strong> (<code>SNAPADMIN_BACKUP_SFTP_*</code>) — encrypted transport, password or SSH-key auth. Needs <code>pip install django-snapadmin[backup]</code>. Use instead of, or alongside, <code>remote</code>.</td><td>every 168 h (weekly)</td></tr>
+    <tr><td>3</td><td><code>remote</code></td><td><strong>Offsite server</strong> anywhere in the world, via FTP/FTPS (<code>SNAPADMIN_BACKUP_FTP_*</code>; empty host = off). Plain FTP ships credentials in clear text — set <code>SNAPADMIN_BACKUP_FTP_TLS = True</code> (FTPS) or use <code>sftp</code>/<code>s3</code> instead.</td><td>every 168 h (weekly)</td></tr>
+    <tr><td>3 (alt)</td><td><code>sftp</code></td><td>Same offsite copy over <strong>SSH/SFTP</strong> (<code>SNAPADMIN_BACKUP_SFTP_*</code>) — encrypted transport, password or SSH-key auth. Needs <code>pip install django-snapadmin[backup]</code>. Use instead of, or alongside, <code>remote</code>. This is also the destination for <a href="#storage-box"><strong>Hetzner Storage Box</strong></a>.</td><td>every 168 h (weekly)</td></tr>
+    <tr><td>3 (alt)</td><td><code>s3</code></td><td>Any <strong>S3-compatible object store</strong> (<code>SNAPADMIN_BACKUP_S3_*</code>) — AWS S3, MinIO, Backblaze&nbsp;B2, <strong>Hetzner Object Storage</strong> or Wasabi, picked by <code>SNAPADMIN_BACKUP_S3_ENDPOINT_URL</code>. Needs <code>pip install django-snapadmin[s3]</code>.</td><td>every 168 h (weekly)</td></tr>
   </table>
 
   <h3>Configuration</h3>
@@ -2258,7 +2348,58 @@ SNAPADMIN_BACKUP_SFTP_PORT = 22
 SNAPADMIN_BACKUP_SFTP_USER = "backup"
 SNAPADMIN_BACKUP_SFTP_KEY_FILE = "/etc/snapadmin/id_ed25519"  # key auth; or set _PASSWORD
 SNAPADMIN_BACKUP_SFTP_DIR = "/snapadmin"
-SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = 168       # weekly</code></pre>
+SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = 168       # weekly
+
+# Copy 3 (alternative) — any S3-compatible object store; pip install django-snapadmin[s3]
+SNAPADMIN_BACKUP_S3_BUCKET = "my-backups-bucket"
+SNAPADMIN_BACKUP_S3_PREFIX = "snapadmin/"           # optional key prefix inside the bucket
+SNAPADMIN_BACKUP_S3_REGION = "eu-central-1"
+# ENDPOINT_URL is the one setting that turns this into a transport for five
+# providers — leave it unset for AWS, or point it at MinIO / Backblaze B2 /
+# Hetzner Object Storage / Wasabi:
+SNAPADMIN_BACKUP_S3_ENDPOINT_URL = "https://s3.eu-central-1.wasabisys.com"
+# Leave both unset to use the ambient credential chain instead (env vars, a
+# shared config file, or an IAM role / instance profile) — the right choice
+# on AWS; a static key there would be a downgrade.
+SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID = "AKIA..."
+SNAPADMIN_BACKUP_S3_SECRET_ACCESS_KEY = "..."
+SNAPADMIN_BACKUP_S3_EVERY_HOURS = 168               # weekly</code></pre>
+
+  <div class="callout callout-info">
+    <strong>Retention on S3 is a fallback, not the whole story.</strong> SnapAdmin prunes to the
+    newest <code>SNAPADMIN_BACKUP_KEEP</code> objects per part the same way it does for SFTP/FTP
+    (list, sort by the timestamped name, delete the rest) — but a real deployment is usually better
+    served by a <strong>bucket lifecycle rule</strong> (expire objects under the configured prefix
+    after N days), which runs server-side with no dependency on a backup task ever completing.
+  </div>
+
+  <h3 id="storage-box">Hetzner Storage Box — a worked SFTP recipe</h3>
+  <div class="callout callout-warn">
+    <strong>Storage Box is not S3.</strong> It speaks SFTP/SCP/WebDAV — use the <code>sftp</code>
+    destination above, not <code>s3</code>. <strong>Hetzner Object Storage</strong> is the
+    S3-compatible product; that one uses <code>s3</code> with <code>SNAPADMIN_BACKUP_S3_ENDPOINT_URL</code>
+    pointed at your Hetzner region. Building a second transport for Storage Box would be redundant —
+    it is already exactly what <code>sftp</code> is for.
+  </div>
+  <p>A Storage Box account works with the existing SFTP destination once four things are right:</p>
+  <pre><code>SNAPADMIN_BACKUP_SFTP_HOST = "u123456.your-storagebox.de"
+SNAPADMIN_BACKUP_SFTP_PORT = 23                              # not 22 — Storage Box's external SSH port
+SNAPADMIN_BACKUP_SFTP_USER = "u123456-sub1"                  # a sub-account, not the main account
+SNAPADMIN_BACKUP_SFTP_KEY_FILE = "/etc/snapadmin/id_ed25519"  # key-based auth</code></pre>
+  <ol>
+    <li><strong>Port 23</strong>, not the SSH default 22 — Storage Box's external SFTP/SCP endpoint.</li>
+    <li>A <strong>sub-account</strong> (Hetzner Robot → Storage Box → Sub-accounts) scoped to its own
+      subdirectory, so a leaked key can't reach the whole box.</li>
+    <li><strong>Key-based auth</strong> — upload the sub-account's public key in the Robot panel; set
+      <code>SNAPADMIN_BACKUP_SFTP_KEY_FILE</code> to the matching private key's path.</li>
+    <li><strong>Pre-populate <code>known_hosts</code></strong> — SnapAdmin's SFTP transport rejects an
+      unknown host key on purpose (no trust-on-first-use), so the host key has to already be there
+      before the first backup runs:
+      <pre><code>ssh-keyscan -p 23 -H u123456.your-storagebox.de &gt;&gt; ~/.ssh/known_hosts</code></pre>
+      Run this once as the same user the backup process runs as (e.g. during deployment), or make one
+      manual <code>sftp -P 23 u123456-sub1@u123456.your-storagebox.de</code> connection and accept the
+      prompt.</li>
+  </ol>
 
   <h3>Running the backups</h3>
   <p>Backups run as a <strong>separate process</strong> from your web workers — via Celery Beat or cron.
@@ -2291,7 +2432,7 @@ python manage.py snapadmin_db_backup --destination remote   # one destination, n
   </div>
   <p>Set <code>SNAPADMIN_BACKUP_AGE_RECIPIENTS</code> and every dump is encrypted with
   <a href="https://age-encryption.org">age</a> <strong>in-stream</strong>, before a single byte reaches
-  disk — <code>pg_dump</code>/SQLite → gzip → age → the <code>.age</code>-suffixed file. No plaintext
+  disk — <code>pg_dump</code>/<code>mysqldump</code>/SQLite → gzip → age → the <code>.age</code>-suffixed file. No plaintext
   or plain-gzip artefact is ever written, not even transiently, and a mid-pipeline failure leaves
   nothing behind rather than a partial or corrupt one. With the setting empty (the default), nothing
   changes — this is exactly today's behaviour.</p>
@@ -3016,7 +3157,9 @@ python manage.py snapadmin_reindex --limit 1000          # probe run — first 1
 python manage.py snapadmin_reindex --tune                # relax refresh/replicas for the load
 python manage.py snapadmin_reindex --no-tune             # force tuning off (overrides the setting)
 python manage.py snapadmin_reindex --parallel 4          # fan out with helpers.parallel_bulk
-python manage.py snapadmin_reindex --resume              # continue a crashed run from its checkpoint</code></pre>
+python manage.py snapadmin_reindex --resume              # continue a crashed run from its checkpoint
+python manage.py snapadmin_reindex --verify               # count the index against the source afterwards
+python manage.py snapadmin_reindex --progress-interval 30 # at most one progress line per 30s</code></pre>
   <p>Every run is tracked on a <code>SnapReindexJob</code> row (the async-export job pattern), so a large
   reindex is <strong>observable, resumable, and cancellable</strong>: the command prints
   <code>processed/total (percent%) ETA Ns</code> per chunk; DB-backed models are paged by a
@@ -3042,6 +3185,19 @@ python manage.py snapadmin_reindex --resume              # continue a crashed ru
     <code>SNAPADMIN_REINDEX_TUNE_DEFAULT</code> setting (default <code>False</code>), so a project that
     always wants a mass load to relax the index can set it once; <code>--no-tune</code> forces it off for
     a single run.</li>
+    <li><strong><code>--progress-interval SECONDS</code></strong> (default <code>5</code>) throttles the
+    per-chunk progress line to at most one per interval, so a multi-hour run in a detached container
+    doesn't fill the log with tens of thousands of lines. The very first line and the line reporting a
+    model's completion, cancellation or failure always print, whatever the interval — a run's outcome is
+    never swallowed by the throttle.</li>
+    <li><strong><code>--verify</code></strong> asks Elasticsearch for the index's actual document count
+    once a model finishes and compares it against the source row count the run itself recorded (with
+    <code>--limit</code>, that's the limited count). Documents Elasticsearch rejected are subtracted from
+    the expected count first — they were never going to be there, and reporting them as "missing" would
+    make the check cry wolf. <code>ES_ONLY</code> models have no independent source to compare against and
+    are reported as not applicable rather than a false mismatch. <strong>A mismatch exits non-zero</strong>
+    (<code>CommandError</code>, same as any other per-model failure) — the whole point is that a short
+    index must stop looking like a clean run.</li>
   </ul>
 
   <h3>Reindex over HTTP (admin only, opt-in)</h3>
@@ -3236,6 +3392,7 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset, same as
     <tr><td><code>SNAPADMIN_DASHBOARD_PUBLIC</code></td><td><code>False</code></td><td>Serve the system dashboard without the default staff gate</td></tr>
     <tr><td><code>SNAPADMIN_USER_API_ENABLED</code></td><td><code>False</code></td><td>Serve the admin-only user-management API (<code>/api/users/</code>, <code>/api/permissions/</code>)</td></tr>
     <tr><td><code>SNAPADMIN_THEME_AUTH_ADMIN</code></td><td><code>True</code></td><td>With the optional Unfold theme installed, re-register Django's stock <code>User</code>/<code>Group</code> admins with Unfold's theme and forms (see <a href="#themed-auth-admin">Themed auth admin</a>)</td></tr>
+    <tr><td><code>SNAPADMIN_CONNECTIVITY_ENABLED</code></td><td><code>False</code></td><td>Load the admin-wide health-poll/save-guard/sidebar-badge layer (<code>snapadmin/js/connectivity.js</code>) — only takes effect when at least one registered model also has <code>offline_mode = True</code> (see <a href="#offline">Offline Mode</a>)</td></tr>
   </table>
 
   <h3>API behaviour, auth &amp; limits</h3>
@@ -3318,6 +3475,16 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset, same as
     <tr><td><code>SNAPADMIN_BACKUP_FTP_DIR</code></td><td><code>/</code></td><td>Target directory on the FTP server</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_FTP_TLS</code></td><td><code>False</code></td><td>Use FTPS (recommended for offsite)</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_REMOTE_EVERY_HOURS</code></td><td><code>168</code></td><td>How often the offsite copy becomes due (weekly)</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_SFTP_HOST</code> / <code>_PORT</code></td><td>— / <code>22</code></td><td>Copy 3 (alt): offsite SFTP server (empty host = off) — <a href="#storage-box">port 23 for Hetzner Storage Box</a></td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_SFTP_USER</code> / <code>_PASSWORD</code> / <code>_KEY_FILE</code></td><td>—</td><td>SFTP credentials — key file wins over password when both are set</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_SFTP_DIR</code></td><td><code>/</code></td><td>Target directory on the SFTP server</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_SFTP_EVERY_HOURS</code></td><td><code>168</code></td><td>How often the SFTP copy becomes due (weekly)</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_S3_BUCKET</code></td><td>—</td><td>Copy 3 (alt): S3-compatible bucket name (empty = off)</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_S3_PREFIX</code></td><td>—</td><td>Optional key prefix inside the bucket</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_S3_ENDPOINT_URL</code></td><td>—</td><td>AWS's own endpoint if unset; set to target MinIO/Backblaze&nbsp;B2/Hetzner Object Storage/Wasabi</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_S3_REGION</code></td><td>—</td><td>AWS region (or the provider's equivalent)</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID</code> / <code>_SECRET_ACCESS_KEY</code></td><td>—</td><td>Explicit credentials; leave both unset to use boto3's ambient credential chain (env vars, shared config, an IAM role)</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_S3_EVERY_HOURS</code></td><td><code>168</code></td><td>How often the S3 copy becomes due (weekly)</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_AGE_RECIPIENTS</code></td><td><code>[]</code></td><td>List of age/SSH public keys — encrypts every dump in-stream when non-empty (see <a href="#backup-encryption">Encrypting backups</a>)</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_AGE_IDENTITY_FILE</code></td><td>—</td><td>Restore-only: path to a private-key file (never the key material itself)</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_AGE_BACKEND</code></td><td><code>"auto"</code></td><td><code>"auto"</code> / <code>"pyrage"</code> / <code>"binary"</code> — which AGE implementation to use</td></tr>
@@ -3386,6 +3553,14 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset, same as
   admin assets under the <code>snapadmin/</code> static namespace (<code>snapadmin/js/admin.js</code>,
   <code>snapadmin/css/admin.css</code>, …); when migrating from the predecessor package, update any
   hardcoded <code>drofji_autoadmin/…</code> (or bare <code>admin.js</code>) static path to it.</p>
+
+  <p><strong>select2 is opt-in, not automatic, on a plain <code>&lt;select&gt;</code>.</strong> The
+  shipped <code>admin.js</code> only initialises select2 on an element carrying a
+  <code>snapadmin-select2</code> class (or a <code>data-snapadmin-select2</code> attribute) — add that
+  class to a form field's widget <code>attrs</code> to opt it in. This is deliberately narrow: an
+  earlier, broader selector reached the changelist's own action dropdown, and select2 taking over an
+  Alpine-bound <code>&lt;select&gt;</code> (as the Unfold theme renders it) silently broke bulk
+  actions.</p>
 
   <h3>Package matrix</h3>
   <table>
@@ -3803,6 +3978,7 @@ urlpatterns = [*router.urls, path("", include("snapadmin.urls"))]</code></pre>
     <tr><th>To change…</th><th>Set</th></tr>
     <tr><td>Who can call the API (JWT / session / custom)</td><td><code>SNAPADMIN_API_AUTHENTICATION_CLASSES</code> — see <a href="#integrating">Integrating</a></td></tr>
     <tr><td>Which model a token may touch</td><td><code>APIToken.allowed_models</code> (AND-ed with Django perms)</td></tr>
+    <tr><td>Whether a token may call your own endpoint</td><td><code>APIToken.allowed_scopes</code> + <code>token_has_scope()</code> — see <a href="#api-tokens">Token Management</a></td></tr>
     <tr><td>How the Elasticsearch client is built</td><td><code>ELASTICSEARCH_KWARGS</code> / <code>SNAPADMIN_ES_CLIENT_FACTORY</code></td></tr>
     <tr><td>GraphQL auth / GraphiQL exposure</td><td><code>SNAPADMIN_GRAPHQL_REQUIRE_AUTH</code> / <code>SNAPADMIN_GRAPHIQL_ENABLED</code></td></tr>
     <tr><td>Hiding fields from every API surface</td><td><code>api_exclude_fields</code> on the model</td></tr>
@@ -3899,7 +4075,7 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
     no JavaScript. It states what SnapAdmin is, carries the three-step quickstart, lists the facts an
     assistant should not have to infer — snap-only field kwargs add no migration, import paths are the
     public contract, the Unfold theme is optional, misconfiguration surfaces as
-    <code>snapadmin.W001</code>–<code>W009</code> and <code>snapadmin.E001</code>–<code>E007</code> —
+    <code>snapadmin.W001</code>–<code>W011</code> and <code>snapadmin.E001</code>–<code>E007</code> —
     and then links every section of this page with a
     line describing what it covers.
   </p>

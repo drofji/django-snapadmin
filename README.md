@@ -320,7 +320,7 @@ The questions a tech lead or a manager asks before approving a dependency:
 | **Will it survive our load?** | Read-replica routing, estimated counts, paging caps, streaming exports. [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) |
 | **Single sign-on?** | [SSO / OAuth2 login helper](https://drofji.github.io/django-snapadmin/#enterprise-config); auth is pluggable — JWT, session, or your own |
 | **How do we know it is up?** | Health probes, error-spike alerts and daily digests to email, Slack, Discord, Teams or Telegram. `snapadmin-info --health-check` exits non-zero for your monitoring |
-| **Backups?** | [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, offsite over FTPS/SFTP, optionally **AGE-encrypted** in-stream so a compromised destination never sees plaintext. `SNAPADMIN_BACKUP_INCLUDE` optionally bundles media and an encrypted `.env` alongside the database, with a checksummed manifest and a [restore command](https://drofji.github.io/django-snapadmin/#restore) — dry-run by default, with an automatic pre-restore snapshot and a matching [rollback command](https://drofji.github.io/django-snapadmin/#restore-rollback) |
+| **Backups?** | [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, offsite over FTPS/SFTP/S3-compatible (AWS, MinIO, Backblaze B2, Hetzner Object Storage, Wasabi — [Storage Box is SFTP, not S3](https://drofji.github.io/django-snapadmin/#storage-box)), optionally **AGE-encrypted** in-stream so a compromised destination never sees plaintext. `SNAPADMIN_BACKUP_INCLUDE` optionally bundles media and an encrypted `.env` alongside the database, with a checksummed manifest and a [restore command](https://drofji.github.io/django-snapadmin/#restore) — dry-run by default, with an automatic pre-restore snapshot and a matching [rollback command](https://drofji.github.io/django-snapadmin/#restore-rollback) |
 | **Are we locked in?** | No. It is ordinary Django underneath — models, `ModelAdmin`, DRF viewsets. Override any piece, or stop using the generated ones. Your models need not even inherit from ours: [`@snap_model`](https://drofji.github.io/django-snapadmin/#snap-model-decorator) opts a plain `models.Model` in from the outside |
 
 ---
@@ -455,6 +455,7 @@ is safe for commercial and proprietary use. Everything with a licence caveat is 
 | `celery` | `celery`, `django-celery-beat`, `django-celery-results` | Background tasks: async export, GDPR purge, digests, backups |
 | `backup` | `paramiko` | SFTP offsite database backups |
 | `age` | `pyrage` | AGE-encrypted backups (MIT — or skip this extra and use the `age` CLI instead) |
+| `s3` | `boto3` | S3-compatible offsite database backups (AWS, MinIO, Backblaze B2, Hetzner Object Storage, Wasabi) |
 | `extra-settings` | `django-extra-settings` | An in-admin dynamic key/value `Setting` model |
 | `wysiwyg` | `django-ckeditor-5` | Rich-text fields — **bundles CKEditor 5 (GPL-or-commercial)** |
 | `autocomplete-filter` | `django-admin-autocomplete-filter` | `AutocompleteFilter` list filters (LGPL) |
@@ -476,16 +477,17 @@ matrix, extras gotchas, and the MySQL driver licence note.
 Every surface is a plain Django setting. Switching one off removes its routes entirely:
 
 ```python
-SNAPADMIN_REST_API_ENABLED = True   # REST CRUD endpoints
-SNAPADMIN_GRAPHQL_ENABLED  = True   # GraphQL endpoint
-SNAPADMIN_SWAGGER_ENABLED  = True   # Swagger UI + ReDoc
-SNAPADMIN_URL_PREFIX       = ""     # relocate the whole API surface
+SNAPADMIN_REST_API_ENABLED       = True    # REST CRUD endpoints
+SNAPADMIN_GRAPHQL_ENABLED        = True    # GraphQL endpoint
+SNAPADMIN_SWAGGER_ENABLED        = True    # Swagger UI + ReDoc
+SNAPADMIN_URL_PREFIX             = ""      # relocate the whole API surface
+SNAPADMIN_CONNECTIVITY_ENABLED   = False   # admin-wide health poll + offline save-guard (opt-in)
 ```
 
 Don't want to decide all ~90 of them? `SNAPADMIN_PROFILE = "admin"` (or `"api"` / `"full"`) picks
 sane defaults for the handful that actually matter — an explicit setting always overrides it.
 
-Misconfiguration shows up **at startup** as a Django system check (`snapadmin.W001`–`W009`,
+Misconfiguration shows up **at startup** as a Django system check (`snapadmin.W001`–`W011`,
 `E001`–`E007`), not as a mystery at request time.
 
 → [Every setting, with defaults](https://drofji.github.io/django-snapadmin/#env-vars) ·

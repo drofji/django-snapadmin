@@ -28,6 +28,10 @@ counts as a promise and what does not.
 - **Import paths** — everything importable from `snapadmin.*` without a leading underscore, and the
   blessed top-level re-exports (`from snapadmin import SnapModel, SnapCharField, …`).
 - **`SnapModel` class attributes and `Snap*Field` keyword arguments**, and their defaults.
+- **The generated-admin extension surface** — `register_admin()`, `admin_overrides` (a project's own
+  callable here always wins over anything the generator produces), `get_admin_fields()`'s return
+  shape (the `AdminFieldSets` named tuple: `form_fields`, `list_display`, `search_fields`,
+  `list_filter`, `autocomplete_fields`, in that order), `get_admin_media()` and `formatted_id`.
 - **`SNAPADMIN_*` settings** — names, defaults and meaning.
 - **Management command names** and their documented flags.
 - **REST and GraphQL routes and their URL names**, as reversed by `reverse()`.
@@ -123,12 +127,26 @@ Key protections:
   [`SNAPADMIN_PROFILE` presets](https://drofji.github.io/django-snapadmin/#profiles).
 
 ### API tokens
-- Tokens are **hashed with SHA-256 at rest** — the raw key is shown **once** at creation and never
-  stored. Stored tokens expose only a non-secret 8-char `token_prefix` for identification.
+- Tokens are **hashed with SHA-256 at rest** — the raw key is shown **once** at creation (and once
+  again on rotation) and never stored. Stored tokens expose only a non-secret 8-char `token_prefix`
+  for identification.
 - Optional **expiry** (`expiration_date`) and **per-token model scoping** (`allowed_models`). The token
   scope is **AND-ed with the owning user's Django permissions** — a token can never grant more than the
   user has. An empty `allowed_models` delegates entirely to the user's permissions (it is *not* a
   wildcard bypass).
+- **`allowed_scopes`** carries free-form, project-defined strings a custom view checks with
+  `token_has_scope()` — SnapAdmin only stores and matches them, the meaning is the project's. Unlike
+  `allowed_models`, an **empty** `allowed_scopes` denies every scope check (fail-closed): there is no
+  Django-permission equivalent an opaque string could delegate to.
+- **Rotation is the supported response to a leaked key.** `POST /api/tokens/<id>/rotate/` (or the
+  `APIToken.rotate()` model method) replaces the secret **in place** — same row, id, scopes and
+  history — and the old key stops authenticating immediately. The new raw key is returned once, the
+  same way creation returns it, and every rotation is written to the audit trail.
+- **Deactivation, not deletion, is the recommended revocation path.** `POST
+  /api/tokens/<id>/deactivate/` flips `is_active` off without losing the row; `DELETE` remains
+  available for administrators who want it gone outright. A regular user manages their own tokens —
+  list, rotate, deactivate — without needing to be a superuser; a superuser sees and manages every
+  token.
 
 ### Injection / XSS
 - **Wysiwyg (rich-text) values are sanitized with `nh3` on write and on render.** The field's
@@ -234,11 +252,22 @@ Key protections:
   rendered it read-only and unmasked next to the masked copy (fixed in the current release).
 - **Immutable audit trail** (`SNAPADMIN_AUDIT_LOG_ENABLED`) records every admin create/update/delete;
   retention via `SNAPADMIN_AUDIT_RETENTION_DAYS` and `snapadmin_audit_export` for SIEM ingestion.
-- **Backups** — 3-2-1 database backups with local/network/FTP(S)/SFTP targets; transport credentials
-  come from `SNAPADMIN_BACKUP_*` settings/env, never hard-coded.
+- **Backups** — 3-2-1 database backups with local/network/FTP(S)/SFTP/S3-compatible targets; transport
+  credentials come from `SNAPADMIN_BACKUP_*` settings/env, never hard-coded. The S3 destination
+  supports the ambient AWS credential chain (environment variables, a shared config file, an IAM
+  role / instance profile) when `SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID`/`_SECRET_ACCESS_KEY` are left
+  unset — the recommended setup on AWS, since a static key there is a downgrade from a rotating
+  instance-profile credential. `manage.py check` warns (`snapadmin.W011`) when a bucket is configured
+  with neither an explicit key pair nor a detectable ambient signal, and again when
+  `SNAPADMIN_BACKUP_S3_ENDPOINT_URL` is set to something that is not a URL — a half-configured S3
+  destination silently never uploading is the same class of failure as everything else in this list.
+  Plain FTP ships credentials in clear text; use FTPS (`SNAPADMIN_BACKUP_FTP_TLS`), SFTP or S3 for an
+  offsite copy instead. Hetzner Storage Box is an SFTP/SCP/WebDAV service — it uses the `sftp`
+  destination, never `s3`; the S3 destination is for genuinely S3-compatible services (AWS, MinIO,
+  Backblaze B2, Hetzner **Object Storage**, Wasabi).
 - **Backup encryption (AGE)** — set `SNAPADMIN_BACKUP_AGE_RECIPIENTS` (one or more age/SSH public
-  keys) and every dump is encrypted **in-stream** — `pg_dump`/SQLite → gzip → age → the `.age`-suffixed
-  file — before a single byte reaches disk; no plaintext or plain-gzip artefact is ever written, not
+  keys) and every dump is encrypted **in-stream** — `pg_dump`/`mysqldump`/SQLite → gzip → age → the
+  `.age`-suffixed file — before a single byte reaches disk; no plaintext or plain-gzip artefact is ever written, not
   even transiently, and a mid-pipeline failure leaves nothing behind rather than a partial/corrupt one.
   With the setting empty (the default) nothing changes.
   - **What this protects against:** a compromised or merely readable backup *destination* — a rented
@@ -322,8 +351,10 @@ Key protections:
 - Serve everything over **HTTPS** — API tokens and session cookies are bearer credentials.
 - Keep the dashboard gated (leave `SNAPADMIN_DASHBOARD_PUBLIC` unset/`False`).
 - Keep `SNAPADMIN_GRAPHIQL_ENABLED` off in production and `SNAPADMIN_GRAPHQL_REQUIRE_AUTH = True`.
-- Scope API tokens with `allowed_models` and set an `expiration_date`; rotate leaked tokens (delete +
-  reissue — the raw key cannot be recovered).
+- Scope API tokens with `allowed_models` (and `allowed_scopes` for your own endpoints) and set an
+  `expiration_date`; rotate a leaked token with `POST /api/tokens/<id>/rotate/` rather than deleting
+  and reissuing it — the row, its scopes and its history survive, and the old key stops authenticating
+  immediately.
 - Leave the user-management API and ES-reindex endpoints disabled unless needed; gate any you enable.
 - Put backup/SFTP/SMTP credentials **and alert webhook URLs** in environment variables, not in
   committed settings.

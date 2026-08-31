@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Callable
 
 from django.conf import settings
+from django.utils import timezone
 
 from snapadmin import __version__, crypto
 from snapadmin.backup import (
@@ -46,6 +47,11 @@ logger = get_logger(__name__)
 
 #: Parts a restore may select via --only/--skip.
 RESTORE_PARTS = ("db", "media", "env")
+
+#: Records that a restore has completed at least once, for the `features` and
+#: `snapadmin_info` "have you ever restored?" reports (#BKP1g) — lives next to
+#: the backup state file, never touched by a dry-run plan.
+RESTORE_STATE_FILENAME = ".snapadmin-restore-state.json"
 
 
 class RestoreError(Exception):
@@ -73,7 +79,7 @@ def parse_source(source: str) -> tuple[str | None, str]:
     """
     if ":" in source:
         prefix, _, rest = source.partition(":")
-        if prefix in ("local", "network", "remote", "sftp"):
+        if prefix in ("local", "network", "remote", "sftp", "s3"):
             return prefix, rest
     return None, source
 
@@ -350,6 +356,29 @@ def plan_restore(resolved: ResolvedSource, parts: list[str]) -> list[str]:
     return lines
 
 
+def _restore_state_path(config: BackupConfig) -> Path:
+    return config.local_dir / RESTORE_STATE_FILENAME
+
+
+def record_restore_run(config: BackupConfig) -> None:
+    """Persist that a restore has completed, for the feature-adoption report.
+
+    Written once :func:`perform_restore` finishes without raising — a
+    dry-run plan (no ``--confirm``) never reaches this, only a real, applied
+    restore does. Lives next to :mod:`snapadmin.backup`'s own state file.
+    """
+    config.local_dir.mkdir(parents=True, exist_ok=True)
+    _restore_state_path(config).write_text(json.dumps({"last_run": timezone.now().isoformat()}))
+
+
+def last_restore_run(config: BackupConfig) -> str | None:
+    """ISO timestamp of the most recently completed restore, or None if none has run."""
+    try:
+        return json.loads(_restore_state_path(config).read_text()).get("last_run")
+    except (OSError, ValueError):
+        return None
+
+
 def perform_restore(
     resolved: ResolvedSource,
     parts: list[str],
@@ -387,6 +416,7 @@ def perform_restore(
                 restore_env(decrypted, config.env_file)
                 results["env"] = "restored"
             logger.info("restore_part_applied", part=part)
+        record_restore_run(config)
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
     return results

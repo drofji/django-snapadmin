@@ -10,7 +10,23 @@ Each notable change should be a paragraph or bullet, explaining what changed and
 Breaking
 --------
 
-None in this release. ``SNAPADMIN_REST_API_ENABLED`` / ``SNAPADMIN_GRAPHQL_ENABLED`` are
+* **The shipped ``admin.js``'s select2 auto-init is now opt-in.** Only a ``<select>`` carrying a
+  ``snapadmin-select2`` class (or ``data-snapadmin-select2`` attribute) gets initialised — not
+  every ``<select>`` on the page minus a denylist. The old broad selector reached the changelist's
+  own action dropdown; a themed admin renders that dropdown through Alpine, and select2 taking the
+  element over silently broke bulk actions, with no error anywhere. Add the class to a field's
+  widget to opt it back in.
+
+* **``SNAPADMIN_CONNECTIVITY_ENABLED`` now defaults to ``False`` (previously always on).** The
+  admin-wide health poll, save-blocking guard and sidebar sync badge no longer load unless
+  explicitly enabled *and* at least one registered model has ``offline_mode = True``. A deployment
+  with ``SNAPADMIN_REST_API_ENABLED = False`` (a documented, supported combination —
+  ``SNAPADMIN_PROFILE = "admin"`` produces it) used to poll a permanently-404ing ``/api/health/``
+  and block every Save button after the first interval. Set
+  ``SNAPADMIN_CONNECTIVITY_ENABLED = True`` to restore the previous behaviour. See `Offline Mode
+  <https://drofji.github.io/django-snapadmin/#offline>`_.
+
+``SNAPADMIN_REST_API_ENABLED`` / ``SNAPADMIN_GRAPHQL_ENABLED`` are
 **deprecated** to default to ``False`` at ``1.0`` — see Deprecated, below, for the warning this
 release adds and the migration-guide paragraph pinning today's behaviour.
 
@@ -144,6 +160,94 @@ Added
   never compete with the real backup policy for disk. ``--no-snapshot`` exists for the operator who
   knows better and prints a loud warning when used. See `The pre-restore safety net
   <https://drofji.github.io/django-snapadmin/#restore-rollback>`_.
+
+* **A fifth backup destination: any S3-compatible object store.** Set
+  ``SNAPADMIN_BACKUP_S3_BUCKET`` (new optional ``[s3]`` extra, ``boto3``) and dumps ship there too,
+  on their own schedule (``SNAPADMIN_BACKUP_S3_EVERY_HOURS``). ``SNAPADMIN_BACKUP_S3_ENDPOINT_URL``
+  is the one setting that turns this into a transport for AWS S3, MinIO, Backblaze B2, Hetzner
+  **Object Storage** or Wasabi — leave it unset for AWS. Uploads go through boto3's own managed
+  transfer (``upload_file``), which multiparts automatically above its default threshold, so a large
+  media bundle needs no special handling. Leaving ``SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID``/
+  ``_SECRET_ACCESS_KEY`` unset uses boto3's ambient credential chain (environment variables, a shared
+  config file, an IAM role / instance profile) — the right choice on AWS, where a static key would be
+  a downgrade. A new check, ``snapadmin.W011``, warns when a bucket is configured with neither an
+  explicit key pair nor a detectable ambient credential source, or with a malformed
+  ``SNAPADMIN_BACKUP_S3_ENDPOINT_URL``. **Hetzner Storage Box is not S3** — it speaks SFTP/SCP/WebDAV
+  and already had a home in the ``sftp`` destination; the docs now carry a worked recipe for it (port
+  23, a sub-account, key auth, pre-populating ``known_hosts``). See `3-2-1 Database Backups
+  <https://drofji.github.io/django-snapadmin/#backups>`_.
+
+* **``snapadmin_info`` reports on backups, and the feature-adoption checklist knows about restores.**
+  A new ``backups`` section lists every active destination, its last-run time, whether AGE encryption
+  is on (with recipient fingerprints — never the identity) and whether a restore has ever completed.
+  The existing ``features`` section's backup line now also names the active destinations and reports
+  once a restore has run.
+
+* **``SnapModel.get_admin_fields()`` returns a pinned ``AdminFieldSets`` named tuple** —
+  ``(form_fields, list_display, search_fields, list_filter, autocomplete_fields)`` — instead of a
+  bare 5-tuple. Backward-compatible by construction: positional unpacking, indexing and ``len()``
+  all keep working exactly as before; a future sixth member is still a breaking change, just an
+  announced one now instead of a silent ``ValueError`` at admin autodiscover.
+
+* **``SnapModel.get_admin_media()``** — the base admin ``(js, css)`` asset lists (theme-sheet
+  selection, the ``connectivity.js``/``offline.js`` gating and de-duplication with
+  ``js_admin_files``/``css_admin_files`` all included) as a public, typed classmethod. A project
+  overriding ``register_admin()`` can call it to extend the real lists instead of copying a snapshot
+  that rots at the next release. See `Extending the generated admin
+  <https://drofji.github.io/django-snapadmin/#admin-extension-surface>`_.
+
+Changed
+-------
+
+* The shipped ``admin.js``'s select2 initialisation is opt-in now — see Breaking, above, for the
+  migration note.
+
+* ``SNAPADMIN_CONNECTIVITY_ENABLED`` gates the admin-wide connectivity layer and now defaults to
+  ``False`` — see Breaking, above.
+
+Fixed
+-----
+
+* **A project's own ``admin_overrides`` no longer loses to the generated admin.** The generated
+  ``get_readonly_fields`` and ``safe_html_<field>`` display methods are now merged onto the admin
+  class *before* ``admin_overrides``, never written into ``admin_overrides`` itself — so a
+  project's own callable of the same name always wins, regardless of write order. Previously, a
+  project's own ``get_readonly_fields`` (adding display-only virtual methods to the read-only set)
+  could be silently replaced by the generated one, taking every change form on the site down with
+  ``FieldError: Unknown field(s)`` — nothing logged, nothing warned.
+
+* **Off ``DEBUG``, the shipped media no longer downloads jQuery twice.** The base admin JS now
+  picks ``jquery.js`` / ``jquery.min.js`` the same way Django's own ``ModelAdmin.media`` does
+  (``"" if settings.DEBUG else ".min"``), so the two media lists collapse into a single entry when
+  merged with a stock ``ModelAdmin``'s.
+
+* The system dashboard's GitHub link pointed at the retired ``drofji/snapadmin`` slug (dead)
+  instead of ``drofji/django-snapadmin``.
+
+* **A scheduled task that did nothing, or half-failed, no longer looks like a success.** All six
+  Celery tasks (``run_db_backups``, ``purge_expired_data``, ``purge_expired_tokens``,
+  ``send_error_digest``, ``run_es_reindex``, ``send_health_alert``) now return a ``status`` key —
+  ``"ok"`` / ``"partial"`` / ``"noop"`` / ``"disabled"`` — and a ``failed`` list alongside every
+  existing key (purely additive), and **raise** instead of returning when every unit of work failed.
+  One monitoring rule now covers all six: alert when ``status != "ok"``, page when the Celery task
+  state is ``FAILURE``. Fixes the reported incident where a disabled backup schedule ran
+  "successfully" for weeks with no backup ever taken, and a silently-failing offsite destination
+  never surfaced anywhere but a log line. See `Celery & Periodic Tasks
+  <https://drofji.github.io/django-snapadmin/#celery>`_.
+
+* **``run_db_backups``'s due-time check no longer skips a day** when a run completes even slightly
+  later than the previous day's ideal slot — ``_is_due()`` now applies a small tolerance (2% of the
+  destination's own interval) that absorbs realistic scheduler jitter without materially changing
+  when a backup actually runs. A new check, ``snapadmin.W010``, warns when the Celery Beat entry for
+  ``run_db_backups`` runs less often than the shortest configured
+  ``SNAPADMIN_BACKUP_*_EVERY_HOURS`` — that combination silently drops days regardless of the
+  tolerance above.
+
+* **A third database engine for backups: MySQL.** ``create_db_dump()`` (and the AGE-encrypted path)
+  now shells out to ``mysqldump`` the same way the existing branch shells out to ``pg_dump`` —
+  credentials via the ``MYSQL_PWD`` environment variable, never a command-line argument, so they
+  never appear in ``ps`` output. Previously only PostgreSQL and SQLite were supported; a MySQL-backed
+  install could not use the backup feature at all.
 
 Security
 --------

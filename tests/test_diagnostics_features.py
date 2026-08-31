@@ -53,7 +53,7 @@ class TestSettingsGatedCapabilities:
     @override_settings(SNAPADMIN_BACKUP_ENABLED=True)
     def test_backup_detail_defaults_to_db_unencrypted(self):
         data = _collect(verbose=True)
-        assert data["details"]["backups"] == "db"
+        assert data["details"]["backups"] == "db, destinations: local"
 
     @override_settings(
         SNAPADMIN_BACKUP_ENABLED=True,
@@ -61,7 +61,7 @@ class TestSettingsGatedCapabilities:
     )
     def test_backup_detail_reports_every_included_part(self):
         data = _collect(verbose=True)
-        assert data["details"]["backups"] == "db+media+env"
+        assert data["details"]["backups"] == "db+media+env, destinations: local"
 
     @override_settings(
         SNAPADMIN_BACKUP_ENABLED=True,
@@ -69,7 +69,7 @@ class TestSettingsGatedCapabilities:
     )
     def test_backup_detail_reports_encryption_and_recipient_count(self):
         data = _collect(verbose=True)
-        assert data["details"]["backups"] == "db, encrypted (2 recipients)"
+        assert data["details"]["backups"] == "db, encrypted (2 recipients), destinations: local"
 
     def test_backup_detail_never_reports_identity(self):
         """No setting or code path here ever touches the identity file's
@@ -82,6 +82,27 @@ class TestSettingsGatedCapabilities:
             data = _collect(verbose=True)
         assert "identity" not in data["details"]["backups"]
         assert "/secret/identity.txt" not in json.dumps(data)
+
+    def test_backup_detail_omits_destinations_while_disabled(self):
+        """`local` is the nominal staging destination even with backups off —
+        it must not print as an "active" destination for a disabled feature."""
+        data = _collect(verbose=True)
+        assert data["details"]["backups"] == "db"
+
+    @override_settings(SNAPADMIN_BACKUP_ENABLED=True, SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com")
+    def test_backup_detail_lists_every_active_destination(self):
+        data = _collect(verbose=True)
+        assert data["details"]["backups"] == "db, destinations: local+sftp"
+
+    @override_settings(SNAPADMIN_BACKUP_ENABLED=True)
+    def test_backup_detail_reports_restore_once_one_has_run(self, tmp_path):
+        from snapadmin.backup import get_backup_config
+        from snapadmin.restore import record_restore_run
+
+        with override_settings(SNAPADMIN_BACKUP_LOCAL_DIR=str(tmp_path)):
+            record_restore_run(get_backup_config())
+            data = _collect(verbose=True)
+        assert data["details"]["backups"] == "db, destinations: local, restored"
 
     @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.customer": ["email", "origin"]})
     def test_pii_masking_counts_fields(self):
@@ -150,6 +171,35 @@ class TestSettingsGatedCapabilities:
         data = _collect(verbose=True)
         assert data["elasticsearch"] is False
         assert "elasticsearch" not in data.get("details", {})
+
+
+class TestConnectivityAwareness:
+    """#JS2e: "on" requires both the setting and an offline-capable model."""
+
+    def test_on_via_demo_s_own_dogfooding(self):
+        # demo/core/settings.py explicitly turns this on to dogfood
+        # Customer's offline_mode=True — the ambient test settings already
+        # exercise the "on" path with no override needed, the same pattern
+        # TestProfile uses for SNAPADMIN_PROFILE.
+        data = _collect(verbose=True)
+        assert data["connectivity_awareness"] is True
+        assert "offline-capable model" in data["details"]["connectivity_awareness"]
+
+    @override_settings(SNAPADMIN_CONNECTIVITY_ENABLED=False)
+    def test_off_when_setting_is_off(self):
+        assert _collect()["connectivity_awareness"] is False
+
+    def test_off_by_default_with_no_dogfooding_override(self, monkeypatch):
+        # Without demo's own explicit True (and with no profile entry for this
+        # setting — "full" never overrides it), the package's built-in default
+        # applies: off.
+        from snapadmin import conf as conf_module
+        monkeypatch.delattr(conf_module.settings, "SNAPADMIN_CONNECTIVITY_ENABLED", raising=False)
+        assert _collect()["connectivity_awareness"] is False
+
+    def test_off_when_no_model_is_offline_capable(self, monkeypatch):
+        monkeypatch.setattr(features_collector, "_concrete_snap_models", lambda: [])
+        assert _collect()["connectivity_awareness"] is False
 
 
 @pytest.mark.django_db

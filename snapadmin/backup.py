@@ -15,9 +15,18 @@ The 3-2-1 rule — **3** copies of your data, on **2** different machines/media,
                    password or private-key auth. Requires the optional ``paramiko``
                    dependency (``pip install django-snapadmin[backup]``). Use this
                    instead of — or alongside — plain FTP for an encrypted offsite copy.
+                   Hetzner Storage Box is an SFTP/SCP/WebDAV service, **not S3** —
+                   this is the destination for it (host ``uXXXXXX.your-storagebox.de``,
+                   port 23).
+  5. ``s3``      — any S3-compatible object store (``SNAPADMIN_BACKUP_S3_*``):
+                   AWS S3, MinIO, Backblaze B2, Hetzner **Object Storage** (a
+                   different product from Storage Box) or Wasabi, selected via
+                   ``SNAPADMIN_BACKUP_S3_ENDPOINT_URL``. Requires the optional
+                   ``boto3`` dependency (``pip install django-snapadmin[s3]``).
 
 Each destination has its own frequency (``SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS`` /
-``_NETWORK_EVERY_HOURS`` / ``_REMOTE_EVERY_HOURS`` / ``_SFTP_EVERY_HOURS``):
+``_NETWORK_EVERY_HOURS`` / ``_REMOTE_EVERY_HOURS`` / ``_SFTP_EVERY_HOURS`` /
+``_S3_EVERY_HOURS``):
 ``run_due_backups()`` — called
 by the ``snapadmin.run_db_backups`` Celery Beat task or from cron via
 ``manage.py snapadmin_db_backup`` — creates one dump and ships it only to the destinations
@@ -32,6 +41,12 @@ AGE/SSH public keys) and every dump is streamed straight through :mod:`snapadmin
 before a single byte reaches disk: ``pg_dump``/SQLite → gzip → age → the ``.age``-suffixed
 file. No plaintext or plain-gzip artefact is ever written, even transiently. With the
 setting empty (the default) nothing changes — this is the exact behaviour described above.
+
+**Task-status outcome convention** — :func:`run_due_backups` / :func:`run_backup` report
+``status`` (``"ok"`` / ``"partial"`` / ``"noop"`` / ``"disabled"``) and ``failed`` alongside
+the existing keys, and **raise** :class:`BackupError` when every destination failed or the
+dump itself could not be built — see :mod:`snapadmin.tasks`'s module docstring for the full
+convention shared by every scheduled task.
 """
 
 from __future__ import annotations
@@ -53,6 +68,7 @@ from typing import BinaryIO, Callable
 
 import django
 from django.conf import settings
+from django.core.exceptions import ImproperlyConfigured
 from django.utils import timezone
 
 from snapadmin import __version__, crypto
@@ -61,7 +77,7 @@ from snapadmin.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-DESTINATIONS = ("local", "network", "remote", "sftp")
+DESTINATIONS = ("local", "network", "remote", "sftp", "s3")
 BACKUP_PREFIX = "snapadmin-db-"
 STATE_FILENAME = ".snapadmin-backup-state.json"
 
@@ -107,6 +123,13 @@ class BackupConfig:
     sftp_key_file: str
     sftp_dir: str
     sftp_every_hours: int
+    s3_bucket: str
+    s3_prefix: str
+    s3_endpoint_url: str
+    s3_region: str
+    s3_access_key_id: str
+    s3_secret_access_key: str
+    s3_every_hours: int
     age_recipients: list[str]
     age_identity_file: str
     age_backend: str
@@ -140,6 +163,13 @@ def get_backup_config() -> BackupConfig:
         sftp_key_file=str(get_setting("SNAPADMIN_BACKUP_SFTP_KEY_FILE", "")),
         sftp_dir=str(get_setting("SNAPADMIN_BACKUP_SFTP_DIR", "/")),
         sftp_every_hours=int(get_setting("SNAPADMIN_BACKUP_SFTP_EVERY_HOURS", 168)),
+        s3_bucket=str(get_setting("SNAPADMIN_BACKUP_S3_BUCKET", "")),
+        s3_prefix=str(get_setting("SNAPADMIN_BACKUP_S3_PREFIX", "")),
+        s3_endpoint_url=str(get_setting("SNAPADMIN_BACKUP_S3_ENDPOINT_URL", "")),
+        s3_region=str(get_setting("SNAPADMIN_BACKUP_S3_REGION", "")),
+        s3_access_key_id=str(get_setting("SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID", "")),
+        s3_secret_access_key=str(get_setting("SNAPADMIN_BACKUP_S3_SECRET_ACCESS_KEY", "")),
+        s3_every_hours=int(get_setting("SNAPADMIN_BACKUP_S3_EVERY_HOURS", 168)),
         age_recipients=list(get_setting("SNAPADMIN_BACKUP_AGE_RECIPIENTS", None) or []),
         age_identity_file=str(get_setting("SNAPADMIN_BACKUP_AGE_IDENTITY_FILE", "")),
         age_backend=str(get_setting("SNAPADMIN_BACKUP_AGE_BACKEND", "auto")),
@@ -195,6 +225,36 @@ def _copy_postgres_into(db: dict, writer: BinaryIO) -> None:
         raise BackupError(f"pg_dump failed: {stderr_output.decode(errors='replace')}")
 
 
+def _mysql_dump_command(db: dict) -> tuple[list[str], dict]:
+    command = [
+        "mysqldump",
+        "-h", str(db.get("HOST") or "localhost"),
+        "-P", str(db.get("PORT") or "3306"),
+        "-u", str(db.get("USER") or ""),
+        str(db.get("NAME") or ""),
+    ]
+    # MYSQL_PWD, never a command-line argument — mirrors PGPASSWORD above so
+    # the password never appears in `ps`/process-list output.
+    env = {**os.environ, "MYSQL_PWD": str(db.get("PASSWORD") or "")}
+    return command, env
+
+
+def _copy_mysql_into(db: dict, writer: BinaryIO) -> None:
+    command, env = _mysql_dump_command(db)
+    # Stream mysqldump's stdout straight into the writer, same reasoning as
+    # the Postgres branch above — a large database must never have to fit in
+    # memory at once.
+    try:
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    except FileNotFoundError as exc:
+        raise BackupError("mysqldump is not installed or not on PATH.") from exc
+    shutil.copyfileobj(process.stdout, writer)
+    stderr_output = process.stderr.read()
+    returncode = process.wait()
+    if returncode != 0:
+        raise BackupError(f"mysqldump failed: {stderr_output.decode(errors='replace')}")
+
+
 def create_db_dump(target_dir: Path) -> Path:
     """Produce a gzip-compressed dump of the default database in target_dir."""
     db = settings.DATABASES["default"]
@@ -213,6 +273,16 @@ def create_db_dump(target_dir: Path) -> Path:
         try:
             with gzip.open(out, "wb") as dst:
                 _copy_postgres_into(db, dst)
+        except BackupError:
+            out.unlink(missing_ok=True)
+            raise
+        return out
+
+    if "mysql" in engine:
+        out = target_dir / f"{BACKUP_PREFIX}{stamp}.sql.gz"
+        try:
+            with gzip.open(out, "wb") as dst:
+                _copy_mysql_into(db, dst)
         except BackupError:
             out.unlink(missing_ok=True)
             raise
@@ -308,6 +378,9 @@ def create_encrypted_db_dump(target_dir: Path, config: BackupConfig) -> Path:
         suffix = "sqlite3.gz.age"
     elif "postgresql" in engine:
         copy_fn = functools.partial(_copy_postgres_into, db)
+        suffix = "sql.gz.age"
+    elif "mysql" in engine:
+        copy_fn = functools.partial(_copy_mysql_into, db)
         suffix = "sql.gz.age"
     else:
         raise BackupError(f"Unsupported database engine for backups: {engine}")
@@ -697,11 +770,147 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
     return f"sftp://{config.sftp_host}:{config.sftp_port}{config.sftp_dir.rstrip('/')}/{dump.name}"
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# S3 (and any S3-compatible object store) — #BKP1f
+#
+# One transport, five providers: AWS S3, MinIO, Backblaze B2, Hetzner Object
+# Storage and Wasabi all speak the same S3 API, so SNAPADMIN_BACKUP_S3_ENDPOINT_URL
+# is the only thing that changes between them. Hetzner Storage Box is a
+# *different* product (SFTP/SCP/WebDAV) and is served by the existing sftp
+# destination instead — see the module docstring.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@functools.lru_cache(maxsize=1)
+def _load_boto3():
+    """Return the imported ``boto3`` package, imported lazily and cached.
+
+    Mirrors ``crypto._load_pyrage()`` / ``exporting._load_openpyxl()``: the
+    import is attempted only once the s3 destination is actually used, and
+    ``ImportError`` becomes an actionable ``ImproperlyConfigured`` naming
+    exactly what to install, instead of a bare ``ModuleNotFoundError``
+    surfacing from inside a backup run.
+    """
+    try:
+        import boto3
+    except ImportError as exc:
+        raise ImproperlyConfigured(
+            "S3 backups need the boto3 library. Install it "
+            "(`pip install django-snapadmin[s3]`)."
+        ) from exc
+    return boto3
+
+
+def _s3_prefix(config: BackupConfig) -> str:
+    """The configured key prefix, normalised to no leading slash and exactly
+    one trailing slash when non-empty — so it composes with an object name by
+    plain string concatenation, in both directions (building a key, and
+    stripping a listed key back down to a bare name)."""
+    prefix = config.s3_prefix.strip("/")
+    return f"{prefix}/" if prefix else ""
+
+
+def _s3_key(config: BackupConfig, name: str) -> str:
+    return f"{_s3_prefix(config)}{name}"
+
+
+def s3_ambient_credentials_likely() -> bool:
+    """Best-effort, no-network signal that boto3's own credential chain might resolve.
+
+    Checks the environment variables boto3's provider chain itself consults
+    (including the ECS/IRSA markers a container role sets) plus the default
+    shared-credentials-file location. Used by the startup system check
+    (:data:`snapadmin.checks.check_backup_s3_configuration`) to decide
+    whether a bucket configured with no explicit access key is plausibly
+    still going to authenticate.
+
+    Deliberately does **not** try to confirm a bare EC2 instance profile —
+    that can only be confirmed with a call to the instance metadata service,
+    which a synchronous system check must never make (it can hang for
+    seconds on a host that is not on AWS at all). A host that relies purely
+    on an instance profile with no other ambient signal will see the check's
+    warning fire; its hint says so.
+    """
+    env_markers = (
+        "AWS_ACCESS_KEY_ID",
+        "AWS_PROFILE",
+        "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+        "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+        "AWS_WEB_IDENTITY_TOKEN_FILE",
+        "AWS_ROLE_ARN",
+    )
+    if any(os.environ.get(name) for name in env_markers):
+        return True
+    return (Path.home() / ".aws" / "credentials").is_file()
+
+
+def _s3_client(config: BackupConfig):
+    """Build a boto3 S3 client for `config`.
+
+    When no explicit access key is configured, the client is built with no
+    static credentials at all, so boto3's own provider chain resolves them —
+    environment variables, a shared config file, or an IAM role / instance
+    profile. Requiring a static key on AWS would be a downgrade from that.
+    """
+    boto3 = _load_boto3()
+    kwargs: dict = {}
+    if config.s3_region:
+        kwargs["region_name"] = config.s3_region
+    if config.s3_endpoint_url:
+        kwargs["endpoint_url"] = config.s3_endpoint_url
+    if config.s3_access_key_id:
+        kwargs["aws_access_key_id"] = config.s3_access_key_id
+        kwargs["aws_secret_access_key"] = config.s3_secret_access_key
+    return boto3.client("s3", **kwargs)
+
+
+def _s3_list_keys(client, bucket: str, prefix: str) -> list[str]:
+    """Every object key under `prefix`, paginated (list_objects_v2 caps at 1000/page)."""
+    keys: list[str] = []
+    kwargs: dict = {"Bucket": bucket, "Prefix": prefix}
+    while True:
+        response = client.list_objects_v2(**kwargs)
+        keys.extend(obj["Key"] for obj in response.get("Contents", []))
+        if not response.get("IsTruncated"):
+            return keys
+        kwargs["ContinuationToken"] = response["NextContinuationToken"]
+
+
+def store_s3(dump: Path, config: BackupConfig) -> str:
+    """Upload the dump to an S3-compatible bucket.
+
+    ``upload_file`` is boto3's own managed transfer, not a single ``PUT`` —
+    it multiparts automatically once an object crosses its default 8 MiB
+    threshold, which a media bundle routinely does, so no multipart logic is
+    hand-rolled here. Requires the optional ``boto3`` dependency — install
+    ``django-snapadmin[s3]``.
+    """
+    if not config.s3_bucket:
+        raise BackupError("SNAPADMIN_BACKUP_S3_BUCKET is not configured.")
+    client = _s3_client(config)
+    key = _s3_key(config, dump.name)
+    try:
+        client.upload_file(str(dump), config.s3_bucket, key)
+    except Exception as exc:
+        raise BackupError(f"Could not upload {dump.name!r} to S3: {exc}") from exc
+
+    # Retention on the remote end: timestamped names sort chronologically,
+    # pruned per part prefix so media/env/manifest don't share db's budget —
+    # the same convention every other destination follows. A lifecycle rule
+    # configured on the bucket itself is the better answer for a real
+    # deployment; this is a fallback for providers/setups without one.
+    part_prefix = f"{_s3_prefix(config)}{_part_prefix_for(dump.name)}"
+    keys = sorted(_s3_list_keys(client, config.s3_bucket, part_prefix))
+    for stale in (keys[:-config.keep] if config.keep > 0 else keys):
+        client.delete_object(Bucket=config.s3_bucket, Key=stale)
+    return f"s3://{config.s3_bucket}/{key}"
+
+
 _STORE_FUNCTIONS = {
     "local": store_local,
     "network": store_network,
     "remote": store_remote_ftp,
     "sftp": store_remote_sftp,
+    "s3": store_s3,
 }
 
 
@@ -843,11 +1052,35 @@ def _connect_sftp(config: BackupConfig):
     return client, client.open_sftp()
 
 
+def list_s3(config: BackupConfig) -> list[str]:
+    if not config.s3_bucket:
+        raise BackupError("SNAPADMIN_BACKUP_S3_BUCKET is not configured.")
+    client = _s3_client(config)
+    prefix = _s3_prefix(config)
+    keys = _s3_list_keys(client, config.s3_bucket, prefix)
+    return sorted(key[len(prefix):] for key in keys)
+
+
+def fetch_s3(name: str, target_dir: Path, config: BackupConfig) -> Path:
+    if not config.s3_bucket:
+        raise BackupError("SNAPADMIN_BACKUP_S3_BUCKET is not configured.")
+    client = _s3_client(config)
+    key = _s3_key(config, name)
+    target = target_dir / name
+    try:
+        client.download_file(config.s3_bucket, key, str(target))
+    except Exception as exc:
+        target.unlink(missing_ok=True)
+        raise BackupError(f"Could not fetch {name!r} from S3: {exc}") from exc
+    return target
+
+
 LIST_FUNCTIONS = {
     "local": list_local,
     "network": list_network,
     "remote": list_remote_ftp,
     "sftp": list_remote_sftp,
+    "s3": list_s3,
 }
 
 FETCH_FUNCTIONS = {
@@ -855,6 +1088,7 @@ FETCH_FUNCTIONS = {
     "network": fetch_network,
     "remote": fetch_remote_ftp,
     "sftp": fetch_remote_sftp,
+    "s3": fetch_s3,
 }
 
 
@@ -878,11 +1112,31 @@ def _save_state(config: BackupConfig, state: dict) -> None:
     _state_path(config).write_text(json.dumps(state))
 
 
+#: Fraction of a destination's own interval treated as tolerance before the
+#: exact boundary. Without it, a destination becomes "not due" whenever the
+#: check lands even slightly before the theoretical deadline — which happens
+#: routinely, because ``last_run`` is the *actual* run time, not the ideal
+#: schedule slot. For a daily destination checked by a beat entry that also
+#: fires once a day, a run that completes even a few seconds later than the
+#: previous day's ideal slot pushes the next check just under 24h since that
+#: actual run, so it reads "not due" and the whole day is skipped; the day
+#: after, ~48h have elapsed and it fires again — "every second day is
+#: skipped", exactly as reported. A flat grace (e.g. "always allow an hour
+#: early") would be safe for a daily/weekly destination but would defeat an
+#: hourly one entirely, so the tolerance scales with the interval instead.
+#: This is the "grace margin" of the two options considered for the fix (the
+#: alternative, anchoring due windows to wall-clock slots instead of time
+#: since the actual last run, removes drift entirely but is considerably more
+#: code for a problem this margin already closes) — see #OPS2d.
+DUE_GRACE_FRACTION = 0.02
+
+
 def _is_due(last_run_iso: str | None, every_hours: int, now: datetime) -> bool:
     if not last_run_iso:
         return True
     last_run = datetime.fromisoformat(last_run_iso)
-    return now - last_run >= timedelta(hours=every_hours)
+    threshold = timedelta(hours=every_hours) * (1 - DUE_GRACE_FRACTION)
+    return now - last_run >= threshold
 
 
 def _active_destinations(config: BackupConfig) -> list[str]:
@@ -893,6 +1147,8 @@ def _active_destinations(config: BackupConfig) -> list[str]:
         active.append("remote")
     if config.sftp_host:
         active.append("sftp")
+    if config.s3_bucket:
+        active.append("s3")
     return active
 
 
@@ -906,6 +1162,7 @@ def due_destinations(config: BackupConfig | None = None) -> list[str]:
         "network": config.network_every_hours,
         "remote": config.remote_every_hours,
         "sftp": config.sftp_every_hours,
+        "s3": config.s3_every_hours,
     }
     return [
         dest
@@ -918,6 +1175,22 @@ def due_destinations(config: BackupConfig | None = None) -> list[str]:
 # Entry points
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _log_backup_outcome(status: str, **fields) -> None:
+    """Log the shared outcome marker/level for ``snapadmin.run_db_backups``.
+
+    See ``snapadmin/tasks.py``'s module docstring for the full convention
+    (D1 in the round-3 decisions log): one of ``ok`` / ``partial`` / ``noop`` /
+    ``disabled`` / a raise, so one monitoring rule covers every scheduled
+    task. Logged here rather than in ``tasks.py`` because the raise path
+    (every destination failed, or the dump could not be built at all) never
+    reaches that task wrapper — the marker has to be emitted at the point of
+    failure, so every path is logged from this one function for consistency.
+    """
+    marker = f"snapadmin_task_{status}"
+    log = logger.error if status in ("partial", "failed") else logger.info
+    log(marker, task="run_db_backups", **fields)
+
+
 def run_backup(destinations: list[str], *, config: BackupConfig | None = None) -> dict:
     """Build one backup bundle and ship every part of it to the given destinations.
 
@@ -929,9 +1202,19 @@ def run_backup(destinations: list[str], *, config: BackupConfig | None = None) -
     db dump plus its manifest — the sole new artefact next to today's dump,
     the dump itself is byte-for-byte what create_db_dump()/
     create_encrypted_db_dump() has always produced.
+
+    The return dict carries ``status`` (``"ok"`` / ``"partial"``) and
+    ``failed`` (the destinations that failed, ``[]`` when none did) alongside
+    the existing ``ran`` / ``dump`` / ``results`` keys, purely additive so
+    every existing caller keeps working. **Every destination failing, or the
+    dump/bundle itself failing to build, raises :class:`BackupError` instead
+    of returning** — that total-failure case is the one a monitor watching
+    Celery task status must be able to see, and a return value it can also
+    read as "backed up" would defeat the point (#OPS2b).
     """
     config = config or get_backup_config()
     results: dict[str, str] = {}
+    failed_destinations: list[str] = []
 
     staging = Path(tempfile.mkdtemp(prefix="snapadmin-backup-"))
     try:
@@ -939,7 +1222,8 @@ def run_backup(destinations: list[str], *, config: BackupConfig | None = None) -
             parts = build_backup_bundle(staging, config)
         except BackupError as exc:
             logger.error("db_backup_dump_failed", error=str(exc))
-            return {"ran": False, "reason": str(exc), "results": {}}
+            _log_backup_outcome("failed", reason=str(exc))
+            raise
 
         # The part named in the summary's "results" entry per destination —
         # "db" when present (matches every existing caller/test's expectation
@@ -960,20 +1244,38 @@ def run_backup(destinations: list[str], *, config: BackupConfig | None = None) -
                 results[dest] = locations[primary_part]
             except Exception as exc:
                 results[dest] = f"error: {exc}"
+                failed_destinations.append(dest)
                 logger.error("db_backup_store_failed", destination=dest, error=str(exc))
         _save_state(config, state)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
-    return {"ran": True, "dump": parts[primary_part].name, "results": results}
+    if failed_destinations and len(failed_destinations) == len(destinations):
+        _log_backup_outcome("failed", failed=failed_destinations)
+        raise BackupError(
+            f"All backup destinations failed: {', '.join(failed_destinations)} "
+            f"(dump: {parts[primary_part].name})."
+        )
+
+    status = "partial" if failed_destinations else "ok"
+    _log_backup_outcome(status, failed=failed_destinations)
+    return {
+        "ran": True,
+        "dump": parts[primary_part].name,
+        "results": results,
+        "status": status,
+        "failed": failed_destinations,
+    }
 
 
 def run_due_backups() -> dict:
     """Back up to every destination whose interval has elapsed (Beat/cron hook)."""
     config = get_backup_config()
     if not config.enabled:
-        return {"ran": False, "reason": "disabled", "results": {}}
+        _log_backup_outcome("disabled")
+        return {"ran": False, "reason": "disabled", "results": {}, "status": "disabled", "failed": []}
     due = due_destinations(config)
     if not due:
-        return {"ran": False, "reason": "not_due", "results": {}}
+        _log_backup_outcome("noop")
+        return {"ran": False, "reason": "not_due", "results": {}, "status": "noop", "failed": []}
     return run_backup(due, config=config)

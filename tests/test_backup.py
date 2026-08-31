@@ -8,6 +8,7 @@ Tests for the 3-2-1 database backup stack (v0.1.0a5):
 import gzip
 import json
 import shutil
+import sys
 from datetime import timedelta
 from io import BytesIO, StringIO
 from pathlib import Path
@@ -33,13 +34,17 @@ from snapadmin.backup import (
     create_env_bundle,
     create_media_bundle,
     due_destinations,
+    fetch_s3,
     get_backup_config,
+    list_s3,
     run_backup,
     run_due_backups,
+    s3_ambient_credentials_likely,
     store_local,
     store_network,
     store_remote_ftp,
     store_remote_sftp,
+    store_s3,
     write_manifest,
 )
 
@@ -286,6 +291,85 @@ def fake_sftp(monkeypatch):
     return FakeSSHClient
 
 
+class FakeS3ClientError(Exception):
+    """Stand-in for a botocore ClientError — store_s3/fetch_s3 only need it
+    to be *some* exception they wrap in BackupError, never a specific type."""
+
+
+class FakeS3Client:
+    """Stand-in for a boto3 S3 client — covers exactly the calls
+    store_s3/list_s3/fetch_s3 make: upload_file, download_file,
+    list_objects_v2 (paginated), delete_object.
+
+    ``shared_objects`` seeds server-side state before the code under test
+    builds its own client (same "flip a class toggle" pattern FakeFTP/FakeSFTP
+    use above); ``client_kwargs`` records every ``boto3.client("s3", **kwargs)``
+    call so a test can assert on region/endpoint_url/credentials.
+    """
+
+    instances: list["FakeS3Client"] = []
+    shared_objects: dict[str, bytes] = {}
+    client_kwargs: list[dict] = []
+    page_size = 1000  # overridden by a test to exercise pagination
+
+    def __init__(self, **kwargs):
+        FakeS3Client.client_kwargs.append(kwargs)
+        self.kwargs = kwargs
+        # A shared reference, not a copy — every client talks to the same
+        # bucket, so a write through one instance must be visible to the
+        # next one, exactly like real S3.
+        self.objects = FakeS3Client.shared_objects
+        self.uploaded: list[tuple[str, str, str]] = []
+        self.downloaded: list[tuple[str, str, str]] = []
+        self.deleted: list[str] = []
+        self.list_calls: list[tuple[str, str]] = []
+        FakeS3Client.instances.append(self)
+
+    def upload_file(self, Filename, Bucket, Key):
+        self.uploaded.append((Filename, Bucket, Key))
+        self.objects[Key] = Path(Filename).read_bytes()
+
+    def download_file(self, Bucket, Key, Filename):
+        self.downloaded.append((Bucket, Key, Filename))
+        if Key not in self.objects:
+            raise FakeS3ClientError(f"NoSuchKey: {Key!r}")
+        Path(Filename).write_bytes(self.objects[Key])
+
+    def list_objects_v2(self, Bucket, Prefix="", ContinuationToken=None):
+        self.list_calls.append((Bucket, Prefix))
+        keys = sorted(k for k in self.objects if k.startswith(Prefix))
+        start = int(ContinuationToken) if ContinuationToken else 0
+        page = keys[start:start + self.page_size]
+        response = {"Contents": [{"Key": k} for k in page]} if page else {}
+        if start + self.page_size < len(keys):
+            response["IsTruncated"] = True
+            response["NextContinuationToken"] = str(start + self.page_size)
+        return response
+
+    def delete_object(self, Bucket, Key):
+        self.deleted.append(Key)
+        self.objects.pop(Key, None)
+
+
+class FakeBoto3Module:
+    """Stand-in for the top-level `boto3` module — only `client()` is used."""
+
+    @staticmethod
+    def client(service_name, **kwargs):
+        assert service_name == "s3"
+        return FakeS3Client(**kwargs)
+
+
+@pytest.fixture
+def fake_s3(monkeypatch):
+    FakeS3Client.instances = []
+    FakeS3Client.shared_objects = {}
+    FakeS3Client.client_kwargs = []
+    FakeS3Client.page_size = 1000
+    monkeypatch.setattr(backup_module, "_load_boto3", lambda: FakeBoto3Module)
+    return FakeBoto3Module
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Config
 # ─────────────────────────────────────────────────────────────────────────────
@@ -306,6 +390,14 @@ def test_config_defaults():
     assert config.sftp_dir == "/"
     assert config.sftp_key_file == ""
     assert config.sftp_every_hours == 168
+    # S3-compatible offsite destination
+    assert config.s3_bucket == ""
+    assert config.s3_prefix == ""
+    assert config.s3_endpoint_url == ""
+    assert config.s3_region == ""
+    assert config.s3_access_key_id == ""
+    assert config.s3_secret_access_key == ""
+    assert config.s3_every_hours == 168
     # AGE encryption — disabled by default, byte-for-byte today's behaviour
     assert config.age_recipients == []
     assert config.age_identity_file == ""
@@ -378,6 +470,62 @@ class TestCreateDump:
             with pytest.raises(BackupError, match="Unsupported"):
                 create_db_dump(tmp_path)
 
+    def test_mysql_dump_uses_mysqldump(self, tmp_path, monkeypatch):
+        recorded = {}
+
+        def fake_popen(command, stdout, stderr, env):
+            recorded["command"] = command
+            recorded["env"] = env
+            return FakePopen(stdout=b"MySQL SQL", stderr=b"", returncode=0)
+
+        monkeypatch.setattr(backup_module.subprocess, "Popen", fake_popen)
+        databases = {
+            "default": {
+                "ENGINE": "django.db.backends.mysql",
+                "NAME": "snap", "USER": "u", "PASSWORD": "pw",
+                "HOST": "db", "PORT": "3307",
+            }
+        }
+        with override_settings(DATABASES=databases):
+            dump = create_db_dump(tmp_path)
+        # Same shape as the Postgres case — indistinguishable by filename.
+        assert dump.name.endswith(".sql.gz")
+        assert gzip.decompress(dump.read_bytes()) == b"MySQL SQL"
+        assert recorded["command"][0] == "mysqldump"
+        assert recorded["command"][-1] == "snap"
+        assert "-h" in recorded["command"] and "db" in recorded["command"]
+        # Password via environment, never argv — mirrors PGPASSWORD, so it
+        # never appears in `ps` output.
+        assert "pw" not in recorded["command"]
+        assert recorded["env"]["MYSQL_PWD"] == "pw"
+
+    def test_mysql_dump_failure_raises_and_cleans_up_partial(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            backup_module.subprocess,
+            "Popen",
+            lambda command, stdout, stderr, env: FakePopen(
+                stdout=b"partial dump", stderr=b"access denied", returncode=1
+            ),
+        )
+        databases = {"default": {"ENGINE": "django.db.backends.mysql", "NAME": "snap"}}
+        with override_settings(DATABASES=databases):
+            with pytest.raises(BackupError, match="access denied"):
+                create_db_dump(tmp_path)
+        assert list(tmp_path.glob(f"{BACKUP_PREFIX}*")) == []
+
+    def test_mysql_missing_binary_raises_clear_backup_error(self, tmp_path, monkeypatch):
+        """A missing mysqldump binary must not surface as a bare
+        FileNotFoundError traceback — a clear BackupError instead."""
+        def fake_popen(command, stdout, stderr, env):
+            raise FileNotFoundError("[Errno 2] No such file or directory: 'mysqldump'")
+
+        monkeypatch.setattr(backup_module.subprocess, "Popen", fake_popen)
+        databases = {"default": {"ENGINE": "django.db.backends.mysql", "NAME": "snap"}}
+        with override_settings(DATABASES=databases):
+            with pytest.raises(BackupError, match="mysqldump is not installed"):
+                create_db_dump(tmp_path)
+        assert list(tmp_path.glob(f"{BACKUP_PREFIX}*")) == []
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Encrypted dump creation — #BKP1b
@@ -423,6 +571,19 @@ def _fake_pg_dump_popen(monkeypatch, stdout: bytes, stderr: bytes, returncode: i
     def fake_popen(*args, **kwargs):
         command = args[0] if args else kwargs.get("args")
         if command and command[0] == "pg_dump":
+            return FakePopen(stdout=stdout, stderr=stderr, returncode=returncode)
+        return real_popen(*args, **kwargs)
+
+    monkeypatch.setattr(backup_module.subprocess, "Popen", fake_popen)
+
+
+def _fake_mysqldump_popen(monkeypatch, stdout: bytes, stderr: bytes, returncode: int):
+    """Same pattern as _fake_pg_dump_popen, for the mysqldump invocation."""
+    real_popen = backup_module.subprocess.Popen
+
+    def fake_popen(*args, **kwargs):
+        command = args[0] if args else kwargs.get("args")
+        if command and command[0] == "mysqldump":
             return FakePopen(stdout=stdout, stderr=stderr, returncode=returncode)
         return real_popen(*args, **kwargs)
 
@@ -478,6 +639,27 @@ class TestCreateEncryptedDump:
         with open(dump, "rb") as reader, open(out, "wb") as writer:
             crypto.decrypt_stream(reader, writer, str(identity_path), backend=backend)
         assert gzip.decompress(out.read_bytes()) == b"PG SQL DUMP"
+
+    @pytest.mark.parametrize("backend", BACKENDS)
+    def test_mysql_roundtrips(self, backend, out_dir, monkeypatch, age_keypairs):
+        identity_path, recipient = age_keypairs[0]
+        _fake_mysqldump_popen(monkeypatch, stdout=b"MYSQL SQL DUMP", stderr=b"", returncode=0)
+        databases = {
+            "default": {
+                "ENGINE": "django.db.backends.mysql",
+                "NAME": "snap", "USER": "u", "PASSWORD": "pw",
+                "HOST": "db", "PORT": "3307",
+            }
+        }
+        with override_settings(DATABASES=databases):
+            config = _with_age(get_backup_config(), recipients=[recipient], backend=backend)
+            dump = create_encrypted_db_dump(out_dir, config)
+        assert dump.name.endswith(".sql.gz.age")  # same shape as Postgres
+
+        out = out_dir / "decrypted.gz"
+        with open(dump, "rb") as reader, open(out, "wb") as writer:
+            crypto.decrypt_stream(reader, writer, str(identity_path), backend=backend)
+        assert gzip.decompress(out.read_bytes()) == b"MYSQL SQL DUMP"
 
     def test_three_recipients_each_identity_decrypts_alone(self, out_dir, sqlite_db, age_keypairs):
         recipients = [recipient for _path, recipient in age_keypairs]
@@ -950,6 +1132,26 @@ class TestDestinations:
         assert location == f"sftp://offsite.example.com:22/dumps/{source.name}"
 
     @override_settings(
+        SNAPADMIN_BACKUP_SFTP_HOST="u123456.your-storagebox.de",
+        SNAPADMIN_BACKUP_SFTP_PORT=23,
+        SNAPADMIN_BACKUP_SFTP_USER="u123456-sub1",
+        SNAPADMIN_BACKUP_SFTP_KEY_FILE="/keys/id_ed25519",
+    )
+    def test_store_sftp_hetzner_storage_box_recipe(self, tmp_path, fake_sftp):
+        """The docs' worked Storage Box recipe (#BKP1f) — port 23, a sub-account,
+        key auth — needs no new transport, just the right settings on the
+        existing sftp destination. Proven end to end against a mocked server."""
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+        location = store_remote_sftp(source, get_backup_config())
+        client = fake_sftp.instances[0]
+        assert client.connect_kwargs["hostname"] == "u123456.your-storagebox.de"
+        assert client.connect_kwargs["port"] == 23
+        assert client.connect_kwargs["key_filename"] == "/keys/id_ed25519"
+        assert client.policy == "reject-policy"  # known_hosts must be pre-populated
+        assert location == f"sftp://u123456.your-storagebox.de:23/{source.name}"
+
+    @override_settings(
         SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
         SNAPADMIN_BACKUP_SFTP_KEY_FILE="/keys/id_ed25519",
     )
@@ -980,6 +1182,148 @@ class TestDestinations:
             store_remote_sftp(source, get_backup_config())
         # nothing was uploaded to the untrusted host
         assert fake_sftp.instances[0].sftp is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# S3 (and any S3-compatible object store) — #BKP1f
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestLoadBoto3:
+    def test_missing_dependency_raises_improperly_configured(self):
+        backup_module._load_boto3.cache_clear()
+        try:
+            with mock.patch.dict(sys.modules, {"boto3": None}):
+                with pytest.raises(ImproperlyConfigured, match=r"\[s3\]"):
+                    backup_module._load_boto3()
+        finally:
+            backup_module._load_boto3.cache_clear()
+
+    def test_present_returns_and_caches_the_module(self):
+        backup_module._load_boto3.cache_clear()
+        try:
+            with mock.patch.dict(sys.modules, {"boto3": FakeBoto3Module}):
+                first = backup_module._load_boto3()
+                second = backup_module._load_boto3()
+            assert first is FakeBoto3Module
+            assert second is FakeBoto3Module
+            assert backup_module._load_boto3.cache_info().hits >= 1
+        finally:
+            backup_module._load_boto3.cache_clear()
+
+
+class TestS3AmbientCredentials:
+    def test_no_signal_is_false(self, monkeypatch, tmp_path):
+        for name in (
+            "AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+            "AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN",
+        ):
+            monkeypatch.delenv(name, raising=False)
+        monkeypatch.setattr(backup_module.Path, "home", classmethod(lambda cls: tmp_path))
+        assert s3_ambient_credentials_likely() is False
+
+    def test_env_marker_is_true(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(backup_module.Path, "home", classmethod(lambda cls: tmp_path))
+        monkeypatch.setenv("AWS_PROFILE", "default")
+        assert s3_ambient_credentials_likely() is True
+
+    def test_shared_credentials_file_is_true(self, monkeypatch, tmp_path):
+        for name in ("AWS_ACCESS_KEY_ID", "AWS_PROFILE"):
+            monkeypatch.delenv(name, raising=False)
+        (tmp_path / ".aws").mkdir()
+        (tmp_path / ".aws" / "credentials").write_text("[default]\n")
+        monkeypatch.setattr(backup_module.Path, "home", classmethod(lambda cls: tmp_path))
+        assert s3_ambient_credentials_likely() is True
+
+
+class TestS3Destination:
+    def test_store_s3_requires_configuration(self, tmp_path, sqlite_db):
+        source = tmp_path / f"{BACKUP_PREFIX}x.gz"
+        source.write_bytes(b"x")
+        with pytest.raises(BackupError, match="S3_BUCKET"):
+            store_s3(source, get_backup_config())
+
+    @override_settings(SNAPADMIN_BACKUP_S3_BUCKET="my-bucket", SNAPADMIN_BACKUP_KEEP=1)
+    def test_store_s3_uploads_via_upload_file_and_prunes_by_prefix(self, tmp_path, fake_s3):
+        """`upload_file` (not `put_object`) is boto3's own managed transfer —
+        it multiparts automatically above its default threshold, so this is
+        the call that gives S3 backups multipart support for free."""
+        FakeS3Client.shared_objects = {
+            f"{BACKUP_PREFIX}00000000-000000.sql.gz": b"old",
+            f"{PART_PREFIXES['manifest']}00000000-000000.json": b"{}",  # different part, own budget
+        }
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"newdump")
+        location = store_s3(source, get_backup_config())
+        client = FakeS3Client.instances[0]
+        assert client.uploaded == [(str(source), "my-bucket", source.name)]
+        # keep=1 → the pre-existing older db dump is pruned, the manifest (a
+        # different part prefix) is left alone — retention is per part.
+        assert client.deleted == [f"{BACKUP_PREFIX}00000000-000000.sql.gz"]
+        assert f"{PART_PREFIXES['manifest']}00000000-000000.json" not in client.deleted
+        assert location == f"s3://my-bucket/{source.name}"
+
+    @override_settings(
+        SNAPADMIN_BACKUP_S3_BUCKET="my-bucket",
+        SNAPADMIN_BACKUP_S3_PREFIX="prod/backups/",
+        SNAPADMIN_BACKUP_S3_ENDPOINT_URL="https://s3.eu-central-1.wasabisys.com",
+        SNAPADMIN_BACKUP_S3_REGION="eu-central-1",
+        SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID="AKIDEXAMPLE",
+        SNAPADMIN_BACKUP_S3_SECRET_ACCESS_KEY="secret",
+        SNAPADMIN_BACKUP_KEEP=5,
+    )
+    def test_store_s3_endpoint_url_prefix_and_explicit_credentials(self, tmp_path, fake_s3):
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+        location = store_s3(source, get_backup_config())
+        client_kwargs = FakeS3Client.client_kwargs[-1]
+        assert client_kwargs["endpoint_url"] == "https://s3.eu-central-1.wasabisys.com"
+        assert client_kwargs["region_name"] == "eu-central-1"
+        assert client_kwargs["aws_access_key_id"] == "AKIDEXAMPLE"
+        assert client_kwargs["aws_secret_access_key"] == "secret"
+        client = FakeS3Client.instances[-1]
+        assert client.uploaded[0][2] == f"prod/backups/{source.name}"
+        assert location == f"s3://my-bucket/prod/backups/{source.name}"
+
+    @override_settings(SNAPADMIN_BACKUP_S3_BUCKET="my-bucket")
+    def test_store_s3_ambient_credentials_when_no_explicit_key(self, tmp_path, fake_s3):
+        """No SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID/_SECRET_ACCESS_KEY configured
+        → the client is built with no static credentials at all, so boto3's
+        own provider chain (env vars, shared config, an IAM role / instance
+        profile) resolves them. A static key would be a downgrade on AWS."""
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+        store_s3(source, get_backup_config())
+        client_kwargs = FakeS3Client.client_kwargs[-1]
+        assert "aws_access_key_id" not in client_kwargs
+        assert "aws_secret_access_key" not in client_kwargs
+
+    @override_settings(SNAPADMIN_BACKUP_S3_BUCKET="my-bucket")
+    def test_store_s3_upload_failure_wrapped_in_backup_error(self, tmp_path, fake_s3, monkeypatch):
+        source = tmp_path / f"{BACKUP_PREFIX}x.gz"
+        source.write_bytes(b"x")
+
+        def failing_upload(self, Filename, Bucket, Key):
+            raise FakeS3ClientError("AccessDenied")
+
+        monkeypatch.setattr(FakeS3Client, "upload_file", failing_upload)
+        with pytest.raises(BackupError, match="Could not upload"):
+            store_s3(source, get_backup_config())
+
+    @override_settings(SNAPADMIN_BACKUP_S3_BUCKET="my-bucket", SNAPADMIN_BACKUP_KEEP=2)
+    def test_store_s3_pagination_across_list_objects_pages(self, tmp_path, fake_s3):
+        """list_objects_v2 caps at 1000 keys per page — retention must not
+        silently see (and therefore keep) only the first page."""
+        FakeS3Client.page_size = 2
+        FakeS3Client.shared_objects = {
+            f"{BACKUP_PREFIX}0000000{i}-000000.sql.gz": b"x" for i in range(5)
+        }
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"new")
+        store_s3(source, get_backup_config())
+        client = FakeS3Client.instances[-1]
+        # 6 objects total (5 seeded + 1 just uploaded), keep=2 → 4 pruned
+        assert len(client.deleted) == 4
+        assert len(client.list_calls) >= 3  # paginated across multiple calls
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1131,6 +1475,39 @@ class TestFetching:
         assert client.connect_kwargs["key_filename"] == "/keys/id_ed25519"
         assert "password" not in client.connect_kwargs
 
+    def test_list_s3_requires_configuration(self, sqlite_db):
+        with pytest.raises(BackupError, match="S3_BUCKET"):
+            list_s3(get_backup_config())
+
+    def test_fetch_s3_requires_configuration(self, tmp_path, sqlite_db):
+        with pytest.raises(BackupError, match="S3_BUCKET"):
+            fetch_s3("x.gz", tmp_path, get_backup_config())
+
+    @override_settings(SNAPADMIN_BACKUP_S3_BUCKET="my-bucket")
+    def test_list_and_fetch_s3(self, tmp_path, fake_s3):
+        FakeS3Client.shared_objects = {f"{BACKUP_PREFIX}20260101-000000.sql.gz": b"s3data"}
+        config = get_backup_config()
+
+        names = list_s3(config)
+        assert names == [f"{BACKUP_PREFIX}20260101-000000.sql.gz"]
+
+        fetched = fetch_s3(f"{BACKUP_PREFIX}20260101-000000.sql.gz", tmp_path, config)
+        assert fetched.read_bytes() == b"s3data"
+
+    @override_settings(SNAPADMIN_BACKUP_S3_BUCKET="my-bucket", SNAPADMIN_BACKUP_S3_PREFIX="prod/")
+    def test_list_s3_strips_the_configured_prefix(self, fake_s3):
+        FakeS3Client.shared_objects = {
+            f"prod/{BACKUP_PREFIX}20260101-000000.sql.gz": b"x",
+            f"other/{BACKUP_PREFIX}20260102-000000.sql.gz": b"y",  # outside the prefix
+        }
+        names = list_s3(get_backup_config())
+        assert names == [f"{BACKUP_PREFIX}20260101-000000.sql.gz"]
+
+    @override_settings(SNAPADMIN_BACKUP_S3_BUCKET="my-bucket")
+    def test_fetch_s3_missing_raises(self, tmp_path, fake_s3):
+        with pytest.raises(BackupError, match="Could not fetch"):
+            fetch_s3("nope.gz", tmp_path, get_backup_config())
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Scheduling
@@ -1147,6 +1524,10 @@ class TestScheduling:
     @override_settings(SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com")
     def test_sftp_active_when_host_configured(self, backup_env):
         assert due_destinations() == ["local", "network", "sftp"]
+
+    @override_settings(SNAPADMIN_BACKUP_S3_BUCKET="my-bucket")
+    def test_s3_active_when_bucket_configured(self, backup_env):
+        assert due_destinations() == ["local", "network", "s3"]
 
     def test_destination_not_due_within_interval(self, backup_env):
         config = get_backup_config()
@@ -1170,32 +1551,132 @@ class TestScheduling:
         assert due_destinations() == ["local", "network"]
 
 
+class TestIsDueGraceMargin:
+    """#OPS2d — a run that slips even slightly past its ideal wall-clock slot
+    must not push the *next* check just under the full interval, or a beat
+    entry that fires once a day skips every second day (see the module
+    docstring on DUE_GRACE_FRACTION for the exact failure mechanism)."""
+
+    def test_exactly_on_the_boundary_is_due(self):
+        now = timezone.now()
+        last_run = (now - timedelta(hours=24)).isoformat()
+        assert backup_module._is_due(last_run, 24, now) is True
+
+    def test_a_small_slip_past_the_ideal_slot_is_still_due(self):
+        """Simulates the reported failure: a daily run that completed a few
+        minutes later than the day before's ideal slot. Without the grace
+        margin, checking again exactly 24h after that (now slightly early
+        relative to the *actual* last run) would read "not due" and skip
+        the day entirely."""
+        now = timezone.now()
+        last_run = (now - timedelta(hours=24) + timedelta(minutes=10)).isoformat()
+        assert backup_module._is_due(last_run, 24, now) is True
+
+    def test_a_slip_larger_than_the_grace_is_correctly_not_due_yet(self):
+        """The margin absorbs realistic scheduler jitter, not an early
+        arbitrary check — well before the interval has elapsed, it must
+        still say no."""
+        now = timezone.now()
+        last_run = (now - timedelta(hours=12)).isoformat()
+        assert backup_module._is_due(last_run, 24, now) is False
+
+    def test_no_day_is_skipped_across_a_slipped_daily_run(self):
+        """Drives a simulated clock across several daily beat ticks, one of
+        which lands slightly late (as a real worker/queue delay would cause),
+        and asserts every day still fires — the exact scenario reported."""
+        every_hours = 24
+        last_run = timezone.now().replace(microsecond=0)
+        run_count = 0
+        for day in range(10):
+            # The beat tick for "the next day" — deliberately not offset by
+            # the previous run's own drift, matching a fixed daily crontab.
+            tick = last_run + timedelta(hours=every_hours)
+            if day == 3:
+                tick += timedelta(minutes=5)  # one run slips a little late
+            assert backup_module._is_due(last_run.isoformat(), every_hours, tick) is True, (
+                f"day {day} was skipped"
+            )
+            last_run = tick
+            run_count += 1
+        assert run_count == 10
+
+    def test_grace_scales_with_the_interval_so_hourly_still_works(self):
+        """A flat grace (e.g. "always allow an hour early") would make an
+        hourly destination due immediately after every run. The fraction
+        must scale down for a short interval."""
+        now = timezone.now()
+        last_run = (now - timedelta(minutes=30)).isoformat()  # half the interval
+        assert backup_module._is_due(last_run, 1, now) is False
+
+    def test_never_run_before_is_always_due(self):
+        assert backup_module._is_due(None, 24, timezone.now()) is True
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Entry points
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestRunBackups:
     def test_run_due_backups_disabled(self, sqlite_db):
-        assert run_due_backups() == {"ran": False, "reason": "disabled", "results": {}}
+        assert run_due_backups() == {
+            "ran": False, "reason": "disabled", "results": {}, "status": "disabled", "failed": [],
+        }
 
     def test_run_due_backups_ships_and_records_state(self, backup_env):
         summary = run_due_backups()
         assert summary["ran"] is True
+        assert summary["status"] == "ok"
+        assert summary["failed"] == []
         assert set(summary["results"]) == {"local", "network"}
         assert list(backup_env["local"].glob(f"{BACKUP_PREFIX}*"))
         assert list(backup_env["network"].glob(f"{BACKUP_PREFIX}*"))
         state = json.loads((backup_env["local"] / STATE_FILENAME).read_text())
         assert "local" in state and "network" in state
         # Immediately afterwards nothing is due any more
-        assert run_due_backups() == {"ran": False, "reason": "not_due", "results": {}}
+        assert run_due_backups() == {
+            "ran": False, "reason": "not_due", "results": {}, "status": "noop", "failed": [],
+        }
 
     def test_run_backup_reports_dump_failure(self, backup_env, monkeypatch):
+        """A dump/bundle that cannot be built is a total failure (D1) — it
+        raises rather than returning, so a monitor watching Celery task
+        status can see it."""
         monkeypatch.setattr(
             backup_module, "create_db_dump",
             lambda target_dir: (_ for _ in ()).throw(BackupError("disk full")),
         )
-        summary = run_backup(["local"])
-        assert summary == {"ran": False, "reason": "disk full", "results": {}}
+        with pytest.raises(BackupError, match="disk full"):
+            run_backup(["local"])
+
+    def test_run_backup_all_destinations_failed_raises(self, backup_env, monkeypatch):
+        """Every destination failing is also a total failure (D1) — distinct
+        from a partial failure, which must never raise (it would redo work
+        that already succeeded on the destinations that did work)."""
+        monkeypatch.setattr(
+            backup_module, "store_local",
+            lambda dump, config: (_ for _ in ()).throw(OSError("disk full")),
+        )
+        monkeypatch.setattr(
+            backup_module, "store_network",
+            lambda dump, config: (_ for _ in ()).throw(OSError("share offline")),
+        )
+        monkeypatch.setitem(backup_module._STORE_FUNCTIONS, "local", backup_module.store_local)
+        monkeypatch.setitem(backup_module._STORE_FUNCTIONS, "network", backup_module.store_network)
+        with pytest.raises(BackupError, match="All backup destinations failed"):
+            run_backup(["local", "network"])
+
+    def test_run_backup_partial_failure_never_raises(self, backup_env, monkeypatch):
+        """One failed destination alongside a successful one is `status="partial"`,
+        never a raise — retrying would redo the destination that already succeeded."""
+        monkeypatch.setattr(
+            backup_module, "store_network",
+            lambda dump, config: (_ for _ in ()).throw(OSError("share offline")),
+        )
+        monkeypatch.setitem(backup_module._STORE_FUNCTIONS, "network", backup_module.store_network)
+        summary = run_backup(["local", "network"])
+        assert summary["ran"] is True
+        assert summary["status"] == "partial"
+        assert summary["failed"] == ["network"]
 
     def test_failed_destination_reported_and_retried(self, backup_env, monkeypatch):
         monkeypatch.setattr(
@@ -1323,14 +1804,16 @@ class TestBackupEntryPoints:
     @override_settings(
         SNAPADMIN_BACKUP_FTP_HOST="backup.example.com",
         SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_S3_BUCKET="my-bucket",
     )
-    def test_command_force_covers_all_configured(self, backup_env, fake_ftp, fake_sftp):
+    def test_command_force_covers_all_configured(self, backup_env, fake_ftp, fake_sftp, fake_s3):
         out = StringIO()
         call_command("snapadmin_db_backup", "--force", stdout=out)
         assert "local:" in out.getvalue()
         assert "network:" in out.getvalue()
         assert "remote: ftp://backup.example.com" in out.getvalue()
         assert "sftp: sftp://offsite.example.com" in out.getvalue()
+        assert "s3: s3://my-bucket" in out.getvalue()
 
     def test_command_fails_on_destination_error(self, backup_env, monkeypatch):
         monkeypatch.setitem(
@@ -1341,6 +1824,19 @@ class TestBackupEntryPoints:
         with pytest.raises(CommandError, match="Some backup destinations failed"):
             call_command("snapadmin_db_backup", "--force", stdout=out)
         assert "network: error: share offline" in out.getvalue()
+
+    def test_command_converts_total_failure_to_command_error(self, backup_env, monkeypatch):
+        """A total failure (every destination down, or the dump itself could
+        not be built — D1) reaches cron as a clean CommandError, never a raw
+        traceback out of run_backup()'s BackupError."""
+        from snapadmin.management.commands import snapadmin_db_backup as db_backup_command
+
+        monkeypatch.setattr(
+            db_backup_command, "run_due_backups",
+            lambda: (_ for _ in ()).throw(BackupError("All backup destinations failed: local, network")),
+        )
+        with pytest.raises(CommandError, match="All backup destinations failed"):
+            call_command("snapadmin_db_backup", stdout=StringIO())
 
     def test_celery_task(self, backup_env):
         from snapadmin.tasks import run_db_backups as backup_task
