@@ -1,28 +1,40 @@
 // snapadmin/static/snapadmin/js/connectivity.js
 //
-// Admin-wide connectivity awareness. Loaded on every SnapModel admin page.
+// Admin-wide connectivity awareness. Opt-in: SnapModel.get_admin_media() only
+// attaches this file when SNAPADMIN_CONNECTIVITY_ENABLED is on *and* at least
+// one registered model has offline_mode = True — there is nothing here to
+// drive on an install with neither, so it does not load at all (#JS2e).
 //
 // Connectivity is decided by whether the Django backend actually answers, not by
 // navigator.onLine alone: a laptop can hold a Wi-Fi link while the server is down,
 // the VPN dropped, or the box is unreachable. We therefore poll GET /api/health/
-// (with a short timeout) and treat the backend as "up" only when it responds.
-// navigator.onLine + visibility changes are used as cheap triggers to re-check
-// sooner, never as the source of truth.
+// (with a short timeout) and react to the resolved state, not the raw signal.
+//
+// Two rules keep a flaky network or an absent route from lying to the user:
+//   * A 404 means "this deployment has no health route" (e.g. a supported
+//     SNAPADMIN_REST_API_ENABLED = False), never "the backend is down". The
+//     probe stands down permanently on a 404 — one console.debug line, no
+//     toast, no guard — instead of polling a route that will never answer.
+//   * The backend is only declared "down" after >= FAILURE_THRESHOLD
+//     consecutive failed probes *and* at least one earlier successful probe.
+//     A probe that has never succeeded is "unknown", and unknown must never
+//     block a save — a page that has simply not resolved a health check yet
+//     is not proof the backend is down.
 //
 // The resolved state is published as a single `snapadmin:connectivity` DOM event
 // ({up: bool}) so connectivity.js and the per-model engine (offline.js) always
 // agree. Notifications are dynamic, auto-dismissing toasts (window.SnapAdminToast)
 // rather than static banners.
 //
-// Behaviour when the backend goes down:
+// Behaviour once the backend is confirmed down:
 //   * Offline-capable models (offline_mode = True) load offline.js, which shows a
 //     reassuring "cached / will sync" toast and a saved-objects panel. connectivity.js
-//     only marks the body offline so sidebar badges animate.
+//     only marks the body offline so its sidebar badge animates.
 //   * Every other model gets a warning toast ("objects can't be shown right now")
 //     plus a hard guard: form submits are blocked and Save buttons disabled until
 //     the backend returns. Already-rendered content is left untouched.
-//   * Sidebar links are badged: green sync icon for offline-capable models (spins
-//     while the backend is down), muted "no-offline" icon for the rest.
+//   * The sidebar badges only offline-capable models (a green sync icon, spinning
+//     while confirmed down) — a model without offline_mode gets no badge at all.
 
 (function () {
     "use strict";
@@ -33,10 +45,14 @@
     var DEFAULT_INTERVAL = 15000;   // ms between health polls while visible
     var HIDDEN_INTERVAL = 60000;    // slower cadence when the tab is hidden
     var HEALTH_TIMEOUT = 4000;      // ms before a health probe is considered failed
+    var FAILURE_THRESHOLD = 2;      // consecutive failures required before "down"
 
     var blocked = false;
-    var isBackendUp = true;         // optimistic until the first probe proves otherwise
+    var isBackendUp = true;         // optimistic until confirmed otherwise
     var probed = false;             // has at least one probe completed?
+    var everSucceeded = false;      // has any probe ever actually succeeded?
+    var consecutiveFailures = 0;    // failed probes in a row since the last success
+    var stoodDown = false;          // true forever once a 404 proves there is no route
     var pollTimer = null;
 
     // ---- Model identity helpers ---------------------------------------------
@@ -148,8 +164,6 @@
             "vertical-align:middle;width:14px;height:14px}",
             ".snap-conn-badge svg{width:14px;height:14px}",
             ".snap-sync-badge{color:#10b981}",
-            ".snap-nooffline-badge{color:#9ca3af;display:none}",
-            "body.snap-offline .snap-nooffline-badge{display:inline-flex}",
             "body.snap-offline .snap-sync-badge svg{animation:snap-spin 1s linear infinite}",
             ".snap-save-disabled{opacity:.5;pointer-events:none;cursor:not-allowed}",
             "@keyframes snap-spin{to{transform:rotate(360deg)}}"
@@ -158,7 +172,6 @@
     }
 
     var SYNC_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
-    var NOOFF_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A6.5 6.5 0 0 1 18 16.5a4.5 4.5 0 0 1-1.55 3.4"/><path d="M5 19a4.5 4.5 0 0 1-1.6-8.7 8 8 0 0 1 4-5.2"/></svg>';
 
     // ---- Toasts (dynamic notifications) -------------------------------------
     function toastContainer() {
@@ -229,6 +242,8 @@
         return span;
     }
 
+    // Only offline-capable models get a badge (#JS2e) — a model without
+    // offline_mode gets nothing, not even a muted icon.
     function decorateSidebar() {
         var capable = capableSet();
         var anchors = document.querySelectorAll(
@@ -237,14 +252,9 @@
         anchors.forEach(function (a) {
             if (a.querySelector(".snap-conn-badge")) return; // already decorated
             var key = linkModelKey(a.getAttribute("href"));
-            if (!key) return;
-            if (capable.indexOf(key) !== -1) {
-                a.appendChild(makeBadge("snap-sync-badge", SYNC_SVG,
-                    "Syncs offline — changes are cached and sent on reconnect"));
-            } else {
-                a.appendChild(makeBadge("snap-nooffline-badge", NOOFF_SVG,
-                    "No offline support — changes are not saved without a connection"));
-            }
+            if (!key || capable.indexOf(key) === -1) return;
+            a.appendChild(makeBadge("snap-sync-badge", SYNC_SVG,
+                "Syncs offline — changes are cached and sent on reconnect"));
         });
     }
 
@@ -281,9 +291,40 @@
     }
 
     // ---- Connectivity state -------------------------------------------------
-    // Probe the backend. Resolves to true when /api/health/ answers, false otherwise.
+    // A 404 means "no health route here" — stand down permanently, quietly.
+    // Never treated as "down": there is nothing to recover from.
+    function standDown() {
+        if (stoodDown) return true;
+        stoodDown = true;
+        consecutiveFailures = 0;
+        if (window.console && window.console.debug) {
+            window.console.debug(
+                "snapadmin: /api/health/ returned 404 (no health route on this " +
+                "deployment) — connectivity checks disabled for this page."
+            );
+        }
+        return applyState(true);
+    }
+
+    function handleSuccess() {
+        everSucceeded = true;
+        consecutiveFailures = 0;
+        return applyState(true);
+    }
+
+    // A failed probe is only "down" after FAILURE_THRESHOLD in a row AND at
+    // least one earlier success. A never-succeeded probe is "unknown", and
+    // unknown must never block a save (#JS2e/DECISIONS.md D18).
+    function handleFailure() {
+        consecutiveFailures += 1;
+        var confirmedDown = everSucceeded && consecutiveFailures >= FAILURE_THRESHOLD;
+        return applyState(!confirmedDown);
+    }
+
+    // Probe the backend. Resolves to the (possibly optimistic) up/down state.
     function checkBackend() {
-        if (!navigator.onLine) return Promise.resolve(applyState(false));
+        if (stoodDown) return Promise.resolve(true);
+        if (!navigator.onLine) return Promise.resolve(handleFailure());
 
         var controller = ("AbortController" in window) ? new AbortController() : null;
         var timer = controller && window.setTimeout(function () { controller.abort(); }, HEALTH_TIMEOUT);
@@ -296,10 +337,11 @@
 
         return fetch(apiBase() + "health/", opts).then(function (r) {
             if (timer) window.clearTimeout(timer);
-            return applyState(!!r && r.ok);
+            if (r && r.status === 404) return standDown();
+            return (r && r.ok) ? handleSuccess() : handleFailure();
         }).catch(function () {
             if (timer) window.clearTimeout(timer);
-            return applyState(false);
+            return handleFailure();
         });
     }
 
@@ -344,6 +386,7 @@
     }
 
     function scheduleNext() {
+        if (stoodDown) return; // nothing left to poll — see standDown()
         if (pollTimer) window.clearTimeout(pollTimer);
         pollTimer = window.setTimeout(poll, currentInterval());
     }
@@ -353,6 +396,7 @@
     }
 
     function triggerImmediateCheck() {
+        if (stoodDown) return;
         if (pollTimer) window.clearTimeout(pollTimer);
         poll();
     }

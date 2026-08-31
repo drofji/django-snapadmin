@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from datetime import timedelta
 from enum import Enum
-from typing import Any, NoReturn
+from typing import Any, NamedTuple, NoReturn
 
 from django.apps import apps
 from django.core.exceptions import FieldDoesNotExist, FieldError, ImproperlyConfigured, ValidationError
@@ -696,6 +696,39 @@ def formatted_id(obj):
         return [val, None, None]
     return val
 
+
+class AdminFieldSets(NamedTuple):
+    """:meth:`SnapModel.get_admin_fields`'s return shape (#ADM2b).
+
+    A plain 5-tuple by construction, so existing positional unpacking,
+    indexing and ``len()`` all keep working unchanged; new code can use the
+    named members instead. Adding a sixth member remains a breaking change —
+    the point of pinning this shape is that such a change is now announced
+    (release notes, this docstring) rather than discovered as a silent
+    ``ValueError`` at admin autodiscover.
+    """
+    form_fields: list[str]
+    list_display: list[str]
+    search_fields: list[str]
+    list_filter: list[Any]
+    autocomplete_fields: list[str]
+
+
+def _any_offline_capable_model() -> bool:
+    """Whether any Snap-registered model has ``offline_mode = True`` (#JS2e).
+
+    ``connectivity.js`` is only worth loading when at least one model actually
+    has an offline layer for it to drive — otherwise it is a health poll and a
+    save-blocking guard with nothing behind them. Reads ``get_model_meta`` so a
+    plain ``@snap_model``-decorated model (which accepts ``offline_mode`` as a
+    decorator keyword rather than a class attribute) counts too.
+    """
+    return any(
+        get_model_meta(model, "offline_mode", False)
+        for model in apps.get_models()
+        if is_registered(model)
+    )
+
 # ===========================================================================
 # Admin Mixin
 # ===========================================================================
@@ -888,6 +921,10 @@ class SnapModel(models.Model):
     admin_enabled = True
     js_admin_files = []
     css_admin_files = []
+    # Attributes/methods merged onto the generated ModelAdmin last, so they
+    # always win over everything register_admin() itself produces (#ADM2a) —
+    # e.g. {"list_per_page": 25} or a project's own get_readonly_fields.
+    admin_overrides = {}
     snap_inlines = []
     admin_sections = []
     # Ecosystem compatibility: extra ModelAdmin base classes prepended
@@ -1430,7 +1467,7 @@ class SnapModel(models.Model):
             return cls._tag_search_backend(EsQuerySet(cls, []), "elasticsearch")
 
         query_string = query_string or ""
-        _, _, search_fields, _, _ = cls.get_admin_fields()
+        search_fields = cls.get_admin_fields().search_fields
         q_objects = models.Q()
         for field in search_fields:
             if field == "id":
@@ -2278,7 +2315,7 @@ class SnapModel(models.Model):
         return super().__str__()
 
     @classmethod
-    def get_admin_fields(cls):
+    def get_admin_fields(cls) -> AdminFieldSets:
         meta_fields = {f.name: f for f in cls._meta.get_fields() if hasattr(f, "name") and not (f.one_to_many or f.one_to_one or f.many_to_many)}
         meta_fields_related = {f.name: f for f in cls._meta.get_fields() if hasattr(f, "name") and (f.many_to_one or f.many_to_many)}
         attr_fields = {fn: fo for fn, fo in cls.__dict__.items()}
@@ -2295,8 +2332,16 @@ class SnapModel(models.Model):
         def dynamic_get_readonly_fields(self, request, obj=None):
             return [fn for fn, fo in all_fields_for_readonly.items() if fn in editable_fields or (fn in updatable_fields and obj and obj.pk)]
 
-        if not hasattr(cls, SnapModelAttributeEnum.ADMIN_OVERRIDES.value): cls.admin_overrides = {}
-        cls.admin_overrides["get_readonly_fields"] = dynamic_get_readonly_fields
+        # Generated callables (this one, the wysiwyg safe_html_<field> displays
+        # below, and the SnapFunctionField displays further down) are stashed
+        # here rather than written into cls.admin_overrides. admin_overrides is
+        # the project's own dict; register_admin() merges this stash into
+        # admin_attrs first and admin_overrides last, so a project override
+        # always wins by construction instead of by who wrote into the shared
+        # dict first (#ADM2a). Rebuilt from scratch on every call, so a re-run
+        # (e.g. after a field's safe_html flag changes) always reflects the
+        # current field state.
+        generated_overrides: dict[str, Callable] = {"get_readonly_fields": dynamic_get_readonly_fields}
 
         list_filter = []
         for field_name, field in meta_fields.items():
@@ -2329,7 +2374,7 @@ class SnapModel(models.Model):
                         return mark_safe(sanitize_html(raw))
                     return _display
 
-                cls.admin_overrides[method_name] = make_wysiwyg_display(fn)
+                generated_overrides[method_name] = make_wysiwyg_display(fn)
                 list_display[idx] = method_name
 
         for attr_name, attr_value in attr_fields.items():
@@ -2343,17 +2388,84 @@ class SnapModel(models.Model):
                         return [val, None, None]
                     return val
                 return _display
-            cls.admin_overrides.setdefault(method_name, _make_display_method(attr_value))
+            generated_overrides[method_name] = _make_display_method(attr_value)
             list_display.append(method_name)
 
         if "id" in list_display: list_display.remove("id")
         list_display.insert(0, "id")
-        return form_fields, list_display, search_fields, list_filter, autocomplete_fields
+        cls._admin_generated_overrides = generated_overrides
+        return AdminFieldSets(form_fields, list_display, search_fields, list_filter, autocomplete_fields)
+
+    @classmethod
+    def get_admin_media(cls) -> tuple[list[str], list[str]]:
+        """The ``(js, css)`` asset lists ``register_admin()`` builds the admin's
+        ``Media`` class from — theme-sheet selection, the ``connectivity.js`` /
+        ``offline.js`` gating and de-duplication with ``js_admin_files`` /
+        ``css_admin_files`` all included (#ADM2c). Public so a project
+        overriding ``register_admin()`` can extend the real lists instead of
+        copying a snapshot that rots at the next release.
+        """
+        jquery_extra = "" if settings.DEBUG else ".min"
+        js = [
+            f"admin/js/vendor/jquery/jquery{jquery_extra}.js",
+            "admin/js/jquery.init.js",
+            "snapadmin/js/jquery_bridge.js",
+            "snapadmin/js/select2.min.js",
+            "snapadmin/js/admin.js",
+        ]
+        # connectivity.js is opt-in and off by default (#JS2e/DECISIONS.md D18):
+        # it polls /api/health/ and, on a confirmed-down backend, shows a warning
+        # toast and blocks form submits so a user does not lose what they typed.
+        # An always-on client for what is an opt-in offline layer was the bug —
+        # a project with SNAPADMIN_REST_API_ENABLED=False (a documented, supported
+        # setting) got a health poll that 404s forever and a bricked admin. Two
+        # conditions must both hold before it loads: the setting is on, and at
+        # least one registered model actually has offline_mode=True — otherwise
+        # there is no offline layer for it to drive. It also owns
+        # window.SnapAdminToast, which offline.js borrows for its own
+        # "cached / will sync" toast, so it must load before offline.js when both
+        # are present; see tests/test_offline.py::TestConnectivityJsInjection.
+        if get_setting("SNAPADMIN_CONNECTIVITY_ENABLED", False) and _any_offline_capable_model():
+            js.append("snapadmin/js/connectivity.js")
+
+        css = ["snapadmin/css/select2.min.css", "snapadmin/css/admin.css"]
+        # The two theme layers are mutually exclusive, and that is the whole
+        # scoping mechanism: neither sheet carries a theme prefix, so exactly
+        # one of them must reach the page. `admin-stock.css` gives Django's
+        # built-in admin a modern form layout; loading it next to a theme
+        # overrides the theme's own layout instead of complementing it.
+        # `admin-unfold.css` fills the few gaps Unfold leaves. Both come after
+        # `admin.css` so they win the cascade over the shared cosmetics.
+        css.append(
+            "snapadmin/css/admin-unfold.css" if UNFOLD_INSTALLED
+            else "snapadmin/css/admin-stock.css"
+        )
+
+        extra_js = [cls.js_admin_files] if isinstance(cls.js_admin_files, str) else list(cls.js_admin_files)
+        extra_css = [cls.css_admin_files] if isinstance(cls.css_admin_files, str) else list(cls.css_admin_files)
+        final_js = list(dict.fromkeys(js + extra_js))
+        if cls.offline_mode:
+            final_js.append("snapadmin/js/offline.js")
+        final_css = list(dict.fromkeys(css + extra_css))
+        return final_js, final_css
 
     @classmethod
     def register_admin(cls) -> None:
+        """Build and register this model's ``ModelAdmin`` from its Snap field flags.
+
+        ``admin_overrides`` is merged in last, so it always wins over every
+        attribute or method the generator itself produces — including the
+        callables :meth:`get_admin_fields` stashes internally, such as
+        ``get_readonly_fields`` and the wysiwyg ``safe_html_<field>`` display
+        methods (#ADM2a).
+        """
         if not cls.admin_enabled: return
-        form_fields, list_display, search_fields, list_filter, autocomplete_fields = cls.get_admin_fields()
+        admin_fields = cls.get_admin_fields()
+        form_fields = admin_fields.form_fields
+        list_display = admin_fields.list_display
+        search_fields = admin_fields.search_fields
+        list_filter = admin_fields.list_filter
+        autocomplete_fields = admin_fields.autocomplete_fields
 
         # Build fieldsets based on 'tab' and 'row' attributes
         tabs_map = {}
@@ -2406,32 +2518,7 @@ class SnapModel(models.Model):
                 "classes": ("tab",)
             }))
 
-        # connectivity.js is unconditional (not gated by offline_mode) on purpose:
-        # it polls /api/health/ and, for models WITHOUT offline_mode, shows a
-        # warning toast and blocks form submits so a user does not lose what they
-        # typed while the backend is down — a safeguard that exists only for the
-        # non-offline-capable majority. It also owns window.SnapAdminToast, which
-        # offline.js borrows for its own "cached / will sync" toast. Do not move it
-        # behind offline_mode; see tests/test_offline.py::TestConnectivityJsInjection.
-        BASE_JS = ["admin/js/vendor/jquery/jquery.js", "admin/js/jquery.init.js", "snapadmin/js/jquery_bridge.js", "snapadmin/js/select2.min.js", "snapadmin/js/admin.js", "snapadmin/js/connectivity.js"]
-        BASE_CSS = ["snapadmin/css/select2.min.css", "snapadmin/css/admin.css"]
-        # The two theme layers are mutually exclusive, and that is the whole
-        # scoping mechanism: neither sheet carries a theme prefix, so exactly
-        # one of them must reach the page. `admin-stock.css` gives Django's
-        # built-in admin a modern form layout; loading it next to a theme
-        # overrides the theme's own layout instead of complementing it.
-        # `admin-unfold.css` fills the few gaps Unfold leaves. Both come after
-        # `admin.css` so they win the cascade over the shared cosmetics.
-        BASE_CSS.append(
-            "snapadmin/css/admin-unfold.css" if UNFOLD_INSTALLED
-            else "snapadmin/css/admin-stock.css"
-        )
-        extra_js = [cls.js_admin_files] if isinstance(cls.js_admin_files, str) else list(cls.js_admin_files)
-        extra_css = [cls.css_admin_files] if isinstance(cls.css_admin_files, str) else list(cls.css_admin_files)
-        final_js = list(dict.fromkeys(BASE_JS + extra_js))
-        if cls.offline_mode:
-            final_js.append("snapadmin/js/offline.js")
-        final_css = list(dict.fromkeys(BASE_CSS + extra_css))
+        final_js, final_css = cls.get_admin_media()
 
         # Auto-derive list_select_related from the ForeignKey columns actually shown
         # in the list view. Rendering an FK column (or a __str__ that walks it) without
@@ -2520,6 +2607,9 @@ class SnapModel(models.Model):
 
         admin_attrs["formfield_for_dbfield"] = formfield_for_dbfield
         admin_attrs["get_fieldsets"] = get_fieldsets
+        # Generated callables first, the project's own admin_overrides last —
+        # merge order is the precedence rule (#ADM2a).
+        admin_attrs.update(getattr(cls, "_admin_generated_overrides", {}))
         admin_attrs.update(getattr(cls, "admin_overrides", {}))
 
         # Ecosystem admin mixins come first in the MRO so their

@@ -270,7 +270,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             return tuple(declared) or None
         if not hasattr(model_class, "get_admin_fields"):
             return None
-        _, _, search_fields, _, _ = model_class.get_admin_fields()
+        search_fields = model_class.get_admin_fields().search_fields
         return tuple(search_fields) or None
 
     def _masked_fields_for_request(self, model_class) -> set[str]:

@@ -328,7 +328,7 @@ class TestFunctionFieldDisplayNoUnfold:
                 abstract = True
 
         ModelWithFn.get_admin_fields()
-        method = ModelWithFn.admin_overrides["SnapFunctionFieldLabel"]
+        method = ModelWithFn._admin_generated_overrides["SnapFunctionFieldLabel"]
 
         with patch.object(models_module, "UNFOLD_INSTALLED", False):
             result = method(None, object())
@@ -347,7 +347,9 @@ class TestRegisterAdminFieldDoesNotExist:
         # Feed register_admin a form_fields list containing a name that is not a
         # real model field so both FieldDoesNotExist branches (row grouping and
         # tab grouping) execute.
-        fake_fields = (["ghost_field"], ["id"], ["id"], [], [])
+        from snapadmin.models import AdminFieldSets
+
+        fake_fields = AdminFieldSets(["ghost_field"], ["id"], ["id"], [], [])
         with patch.object(Product, "get_admin_fields", return_value=fake_fields):
             # register_admin swallows AlreadyRegistered internally.
             Product.register_admin()

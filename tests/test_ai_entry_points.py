@@ -204,3 +204,43 @@ class TestLlmsTxt:
     def test_readme_advertises_it(self):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         assert f"{DOCS_BASE}llms.txt" in readme
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Shipped-package hygiene (#JS2d) — the retired package's name/link must never
+# resurface in code that ships to every install.
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: The retired predecessor's repo slug (github.com/drofji/snapadmin — missing
+#: the "django-" prefix). One shipped file linked it after the rename; this
+#: pins that it cannot happen again without failing the suite.
+_WRONG_REPO_LINK = re.compile(r"github\.com/drofji/snapadmin\b")
+
+_SHIPPED_TEXT_SUFFIXES = {".py", ".js", ".html", ".css", ".txt"}
+
+
+def _shipped_package_files():
+    package_root = Path(snapadmin.__file__).resolve().parent
+    for path in package_root.rglob("*"):
+        if path.is_dir() or "locale" in path.parts:
+            continue
+        if path.suffix not in _SHIPPED_TEXT_SUFFIXES:
+            continue
+        yield path
+
+
+class TestShippedPackageLinkHygiene:
+    def test_no_reference_to_the_retired_import_root(self):
+        offenders = [
+            str(path) for path in _shipped_package_files()
+            if "drofji_admin" in path.read_text(encoding="utf-8", errors="ignore")
+        ]
+        assert offenders == [], f"retired 'drofji_admin' import root referenced in: {offenders}"
+
+    def test_no_link_to_the_retired_repo_slug(self):
+        """github.com/drofji/snapadmin is not this repository — django-snapadmin is."""
+        offenders = [
+            str(path) for path in _shipped_package_files()
+            if _WRONG_REPO_LINK.search(path.read_text(encoding="utf-8", errors="ignore"))
+        ]
+        assert offenders == [], f"dead link to the wrong repo slug in: {offenders}"

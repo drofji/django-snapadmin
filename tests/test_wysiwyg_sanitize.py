@@ -70,7 +70,10 @@ class TestWysiwygSafeHtmlFlag:
 class TestWysiwygChangelistRender:
     def _display_for(self, model, field_name):
         model.get_admin_fields()
-        return model.admin_overrides[f"safe_html_{field_name}"]
+        # The generated safe_html_<field> display method is stashed apart from
+        # admin_overrides (#ADM2a) so a project's own override always wins;
+        # read it from the generated stash rather than the project dict.
+        return model._admin_generated_overrides[f"safe_html_{field_name}"]
 
     def test_changelist_sanitizes_by_default(self):
         from demo.apps.shop.models import Product
@@ -345,7 +348,10 @@ class TestWysiwygSaveFailsClosedWithoutNh3:
 class TestWysiwygChangelistFailsClosedWithoutNh3:
     def _display_for(self, model, field_name):
         model.get_admin_fields()
-        return model.admin_overrides[f"safe_html_{field_name}"]
+        # The generated safe_html_<field> display method is stashed apart from
+        # admin_overrides (#ADM2a) so a project's own override always wins;
+        # read it from the generated stash rather than the project dict.
+        return model._admin_generated_overrides[f"safe_html_{field_name}"]
 
     def test_render_raises_improperly_configured(self, nh3_unavailable):
         from demo.apps.shop.models import Product

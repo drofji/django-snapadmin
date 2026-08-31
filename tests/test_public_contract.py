@@ -30,6 +30,8 @@ PUBLIC_IMPORTS = [
     "snapadmin.models.SnapEsUnavailable",
     "snapadmin.models.SnapSaveMixin",
     "snapadmin.models.hash_token_key",
+    # get_admin_fields()'s pinned return shape (#ADM2b)
+    "snapadmin.models.AdminFieldSets",
     # Opting a plain models.Model in (#RFC1b)
     "snapadmin.models.snap_model",
     # A computed column as a method, on either door (#RFC1d)
@@ -133,6 +135,7 @@ def test_snapmodel_attribute_defaults():
         "admin_enabled": True,
         "js_admin_files": [],
         "css_admin_files": [],
+        "admin_overrides": {},
         "snap_inlines": [],
         "admin_sections": [],
         "admin_tabs": [],
@@ -168,6 +171,46 @@ def test_esstoragemode_members():
     assert EsStorageMode.DB_ONLY.value == "db_only"
     assert EsStorageMode.DUAL.value == "dual"
     assert EsStorageMode.ES_ONLY.value == "es_only"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The admin extension surface (#ADM2b, #ADM2d): the names a project actually
+# binds to when it extends the generated admin. Renaming one, or letting
+# get_admin_fields()'s return shape drift, is a breaking change that must be
+# announced rather than discovered at admin autodiscover.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_get_admin_fields_returns_a_pinned_named_tuple():
+    from snapadmin.models import AdminFieldSets
+
+    assert AdminFieldSets._fields == (
+        "form_fields", "list_display", "search_fields", "list_filter", "autocomplete_fields",
+    )
+
+
+@pytest.mark.django_db
+def test_get_admin_fields_return_value_is_that_named_tuple():
+    from demo.apps.shop.models import Product
+    from snapadmin.models import AdminFieldSets
+
+    result = Product.get_admin_fields()
+    assert isinstance(result, AdminFieldSets)
+    # Backward-compatible by construction: positional unpacking, indexing and
+    # len() all still work exactly as they did with the bare 5-tuple.
+    form_fields, list_display, search_fields, list_filter, autocomplete_fields = result
+    assert result[0] is form_fields
+    assert len(result) == 5
+
+
+def test_admin_extension_surface_exists():
+    """Every name SECURITY.md's public-API list promises for admin extension."""
+    from snapadmin.models import SnapModel, formatted_id
+
+    assert hasattr(SnapModel, "register_admin")
+    assert hasattr(SnapModel, "admin_overrides")
+    assert hasattr(SnapModel, "get_admin_fields")
+    assert hasattr(SnapModel, "get_admin_media")
+    assert callable(formatted_id)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

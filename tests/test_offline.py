@@ -8,10 +8,12 @@ verify the wiring (attribute defaults, conditional JS injection) and that the
 shipped JS asset contains the expected offline machinery.
 """
 
+import re
 from pathlib import Path
 
 import pytest
 from django.contrib import admin
+from django.test import override_settings
 
 from snapadmin.models import SnapModel
 
@@ -140,11 +142,22 @@ class TestOfflineJsAsset:
 # ─────────────────────────────────────────────────────────────────────────────
 
 class TestConnectivityJsInjection:
-    def test_connectivity_js_loaded_on_offline_model(self):
+    """#JS2e: the layer is opt-in — SNAPADMIN_CONNECTIVITY_ENABLED (default
+    False) *and* at least one registered model with offline_mode=True must
+    both hold before connectivity.js reaches any page. A project with
+    SNAPADMIN_REST_API_ENABLED=False (no /api/health/ route — the exact shape
+    of SNAPADMIN_PROFILE="admin") must never see a save button blocked."""
+
+    def test_loaded_when_enabled_and_an_offline_capable_model_exists(self):
+        # demo/core/settings.py turns the setting on to dogfood Customer's
+        # offline_mode=True — the ambient test settings already exercise the
+        # "on" path with no override needed.
         from demo.apps.shop.models import Customer
         assert CONNECTIVITY_JS in _media_js(Customer)
 
-    def test_connectivity_js_loaded_on_non_offline_model(self):
+    def test_loaded_even_for_a_non_offline_model_when_globally_enabled(self):
+        # The gate is global — Product itself has no offline_mode, but
+        # Customer elsewhere does, so the whole admin still needs the layer.
         from demo.apps.shop.models import Product
         assert CONNECTIVITY_JS in _media_js(Product)
 
@@ -153,6 +166,50 @@ class TestConnectivityJsInjection:
         from demo.apps.shop.models import Customer
         js = _media_js(Customer)
         assert js.index(CONNECTIVITY_JS) < js.index(OFFLINE_JS)
+
+    def test_absent_when_setting_is_off(self):
+        from demo.apps.shop.models import Customer
+        with override_settings(SNAPADMIN_CONNECTIVITY_ENABLED=False):
+            admin.site.unregister(Customer)
+            try:
+                Customer.register_admin()
+                assert CONNECTIVITY_JS not in _media_js(Customer)
+            finally:
+                admin.site.unregister(Customer)
+                Customer.register_admin()
+
+    def test_absent_when_no_registered_model_is_offline_capable(self):
+        """Nothing to serve ⇒ do not load, even with the setting on."""
+        from demo.apps.shop.models import Customer, Product
+        original = Customer.offline_mode
+        try:
+            Customer.offline_mode = False
+            admin.site.unregister(Product)
+            Product.register_admin()
+            assert CONNECTIVITY_JS not in _media_js(Product)
+        finally:
+            Customer.offline_mode = original
+            admin.site.unregister(Product)
+            Product.register_admin()
+
+    def test_admin_profile_with_connectivity_on_never_blocks_a_save(self):
+        """SNAPADMIN_PROFILE="admin" turns the REST API off, so /api/health/
+        does not exist — the exact combination that used to brick every save
+        button. With connectivity awareness on and an offline-capable model,
+        the asset still loads (that half of the feature keeps working); the
+        no-route handling that keeps it from blocking saves lives in
+        connectivity.js itself (see TestConnectivityJsAsset) and is checked
+        end-to-end by the standing manual demo walkthrough for this lane.
+        """
+        from demo.apps.shop.models import Customer
+        with override_settings(SNAPADMIN_REST_API_ENABLED=False, SNAPADMIN_CONNECTIVITY_ENABLED=True):
+            admin.site.unregister(Customer)
+            try:
+                Customer.register_admin()
+                assert CONNECTIVITY_JS in _media_js(Customer)
+            finally:
+                admin.site.unregister(Customer)
+                Customer.register_admin()
 
 
 class TestConnectivityJsAsset:
@@ -189,10 +246,12 @@ class TestConnectivityJsAsset:
         assert "SNAPADMIN_OFFLINE_CAPABLE" in source
         assert "isCurrentCapable" in source
 
-    def test_badges_sidebar(self, source):
+    def test_badges_only_offline_capable_models(self, source):
+        """#JS2e: no badge at all for a model without offline_mode — the muted
+        "no-offline" icon is gone, not just hidden by CSS."""
         assert "decorateSidebar" in source
         assert "snap-sync-badge" in source
-        assert "snap-nooffline-badge" in source
+        assert "snap-nooffline-badge" not in source
 
     def test_fetches_offline_model_list(self, source):
         assert "offline-models/" in source
@@ -200,6 +259,30 @@ class TestConnectivityJsAsset:
 
     def test_exposes_test_hooks(self, source):
         assert "window.SnapAdminConnectivity" in source
+
+    def test_a_404_stands_down_instead_of_reporting_down(self, source):
+        """A missing /api/health/ route (e.g. SNAPADMIN_REST_API_ENABLED=False)
+        means "no health route here", never "the backend is down" (#JS2e)."""
+        assert "standDown" in source
+        assert "status === 404" in source
+
+    def test_stood_down_state_never_blocks_or_warns(self, source):
+        assert "function standDown" in source
+        body = re.search(r"function standDown\s*\([^)]*\)\s*\{(.*?)\n    \}", source, re.S)
+        assert body, "standDown() body not found"
+        assert "showToast" not in body.group(1)
+        assert "setSaveBlocked" not in body.group(1)
+
+    def test_down_requires_consecutive_failures_after_a_success(self, source):
+        assert "FAILURE_THRESHOLD" in source
+        assert "everSucceeded" in source
+        assert "consecutiveFailures" in source
+
+    def test_a_never_succeeded_probe_is_unknown_not_down(self, source):
+        """A probe that has never succeeded must never confirm "down" — see
+        handleFailure(), which only calls applyState(false) once
+        everSucceeded is true and the failure streak has met the threshold."""
+        assert "everSucceeded && consecutiveFailures >= FAILURE_THRESHOLD" in source
 
 
 # ─────────────────────────────────────────────────────────────────────────────
