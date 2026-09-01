@@ -108,6 +108,24 @@ It fetches only the ES-mapped columns (`Product` maps `name`/`price`/`available`
 so its large `description` body is skipped); `--limit N` bounds a probe/canary run;
 and `--tune` defaults to `SNAPADMIN_REINDEX_TUNE_DEFAULT` (use `--no-tune` to override).
 
+Round-trip a bulk import against the same `Category` model export produces —
+column mapping, the natural-key duplicate rule and the crash-safe chunked report
+are all real here, not simulated:
+
+```bash
+python demo/manage.py shell -c "
+from demo.apps.shop.models import Category
+import csv
+with open('/tmp/categories.csv', 'w', newline='') as f:
+    w = csv.DictWriter(f, fieldnames=['name', 'slug', 'is_active'])
+    w.writeheader()
+    w.writerow({'name': 'Outdoor', 'slug': 'outdoor', 'is_active': 'True'})
+"
+python demo/manage.py snapadmin_import --model demo.Category --file /tmp/categories.csv
+python demo/manage.py snapadmin_import --model demo.Category --file /tmp/categories.csv \
+    --natural-key name --on-conflict update   # re-run: updates the same row instead of failing
+```
+
 Run `python demo/manage.py snapadmin_info` against this project to see the diagnostics
 report — version, the database/Elasticsearch/Celery status, and the demo's registered
 models with their storage modes — or `snapadmin_info --health-check` for a probe-only

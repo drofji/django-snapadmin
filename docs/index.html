@@ -281,6 +281,7 @@
       <li><a href="#api-graphql">GraphQL API</a></li>
       <li><a href="#api-tokens">Token Management</a></li>
       <li><a href="#quotas">Quotas &amp; Rate Limits</a></li>
+      <li><a href="#bulk-import">Bulk Import</a></li>
       <li><a href="#elasticsearch">Elasticsearch (ES)</a></li>
       <li><a href="#offline">Offline Mode</a></li>
     </ul>
@@ -1455,6 +1456,60 @@ class AuditEvent(SnapModel):
   <code>api_read_only</code> when both are set; both default to full CRUD. A model that is
   field-read-only (<code>api_write_fields = []</code>) yet still write-exposed is flagged by the
   <code>snapadmin.W007</code> check, nudging it toward <code>api_read_only</code>.</p>
+
+  <h3 id="snap-action">🎬 User-defined REST actions — <code>@snap_action</code></h3>
+  <p>CRUD covers create/read/update/delete; a real model usually also needs a handful of
+  <em>operations</em> — approve, refund, recalculate, archive. <code>@snap_action</code> turns a
+  model method into a callable REST endpoint, without hand-wiring a view:</p>
+  <pre><code>class Order(SnapModel):
+    total = snap_fields.SnapDecimalField(max_digits=10, decimal_places=2)
+
+    @snap_action()
+    def recalculate_total(self, request):
+        self.total = sum(item.quantity * item.price for item in self.items.all())
+        self.save(update_fields=["total"])
+        return {"total": str(self.total)}</code></pre>
+  <p>reachable at <code>POST /api/models/demo/Order/&lt;pk&gt;/recalculate_total/</code>. Works
+  identically on a <code>SnapModel</code> subclass or a <code>@snap_model</code>-decorated plain
+  model — the decorator reads the method straight off the class, no field or registry machinery
+  involved.</p>
+
+  <table>
+  <tr><th>Keyword</th><th>Default</th><th>Meaning</th></tr>
+  <tr><td><code>detail</code></td><td><code>True</code></td>
+      <td>Per-object (needs a <code>pk</code>) or list-level (<code>detail=False</code>, receives
+      the model <em>class</em> as the first argument instead of an instance). One decorator call
+      expresses one scope, mirroring DRF's own <code>@action(detail=...)</code>.</td></tr>
+  <tr><td><code>methods</code></td><td><code>("post",)</code></td>
+      <td>Lowercase HTTP verbs this action accepts.</td></tr>
+  <tr><td><code>permission</code></td><td><em>derived</em></td>
+      <td>An explicit <code>"app_label.codename"</code>. Left unset, the permission is derived from
+      <code>methods</code>: <code>view_&lt;model&gt;</code> when every method is safe
+      (GET/HEAD/OPTIONS), <code>change_&lt;model&gt;</code> otherwise.</td></tr>
+  </table>
+
+  <p><strong>An action can never widen a model's own policy.</strong> Every action URL is wired to
+  every HTTP verb, but Django REST Framework rejects a verb outside the view's
+  <code>http_method_names</code> — the same descriptor <code>api_read_only</code>/
+  <code>api_http_method_names</code> already drive — with <code>405</code> before a handler is even
+  selected. A <code>POST</code>-only action therefore structurally cannot reach a model configured
+  <code>api_read_only = True</code>; there is nothing to bypass. New check
+  <strong><code>snapadmin.E008</code></strong> catches the same conflict at boot — an action whose
+  declared methods the model's own policy would always reject — before it ships as dead
+  configuration.</p>
+
+  <p>Return a plain <code>dict</code> (wrapped as a <code>200</code> response) or a
+  <code>rest_framework.response.Response</code> you build yourself, for a custom status or headers.
+  Raise <code>snapadmin.api.views.SnapActionError("message", status=409)</code> to answer with an
+  error — turned into the same <code>{"detail": "message"}</code> envelope every other error path in
+  the API already uses. Every model's registered actions (name, scope, methods, URL) are listed at
+  <a href="#api-rest"><code>GET /api/models/schema/</code></a> — the concrete, per-model action set
+  drf-spectacular's static schema cannot enumerate for the one generic dispatcher operation it
+  documents instead.</p>
+
+  <p><strong>GraphQL has no mutation counterpart, and none is planned.</strong> The GraphQL schema is
+  read-only by design (see <a href="#api-graphql">GraphQL API</a>) — <code>@snap_action</code> is a
+  REST-only surface, stated here explicitly rather than left to be discovered.</p>
 
   <details class="info">
   <summary><span class="info-glyph">?</span> Filter configuration in depth — lookups, JSON columns, swapping the backend</summary>
@@ -3029,6 +3084,50 @@ SNAPADMIN_MASKING_RULES = {
   field that does not exist would instead fail <em>open</em>, so it is a startup error
   (<code>snapadmin.E003</code>–<code>E005</code>) rather than a silent no-op.</p>
 
+  <h3 id="field-permissions">🔐 Field-level permission guards — <code>api_field_permissions</code></h3>
+  <p>Masking says <em>how</em> an already-visible field is displayed; <code>api_field_permissions</code>
+  says <em>whether it is visible or writable at all</em> — a different, orthogonal question. Declare a
+  Django permission per field, per side:</p>
+  <pre><code>class Employee(SnapModel):
+    salary = snap_fields.SnapDecimalField(max_digits=10, decimal_places=2)
+
+    api_field_permissions = {
+        "salary": {"read": "hr.view_salary", "write": "hr.change_salary"},
+    }</code></pre>
+  <p>A caller lacking the named permission never sees the field's existence: <strong>absent</strong>
+  from a REST response (not <code>null</code>, not an error — the key itself is gone) or
+  <strong>nulled</strong> in GraphQL (the schema is built once at import time, so a per-request field
+  cannot be removed from the response <em>shape</em> the way REST's serializer can — a documented,
+  deliberate asymmetry, not an inconsistency). A denied <strong>write</strong> answers an explicit
+  <code>400</code> naming the field, because a silently dropped write is a data-loss bug the caller
+  cannot detect — a required field a role can't write simply cannot be created by that role, which is
+  the correct, if blunt, outcome.</p>
+
+  <table>
+  <tr><th>Order</th><th>Guard</th><th>On denial</th></tr>
+  <tr><td>1</td><td><code>api_exclude_fields</code> (absolute)</td>
+      <td>Field does not exist on the serializer/type at all — nothing below this ever runs for it.</td></tr>
+  <tr><td>2</td><td><code>api_field_permissions</code> (this feature)</td>
+      <td>Read: absent/null (see above). Write: <code>400</code> naming the field.</td></tr>
+  <tr><td>3</td><td><code>api_write_fields</code> allowlist</td>
+      <td>Write only: forced read-only, client value <strong>silently ignored</strong> — its own,
+      older, deliberately different contract; this feature does not change it.</td></tr>
+  <tr><td>4</td><td><code>SNAPADMIN_MASKING_RULES</code> per-field <code>permission</code></td>
+      <td>Field present but starred/redacted unless the grant unlocks it.</td></tr>
+  </table>
+  <p>Rows 2 and 4, precisely: the permission gate decides <strong>whether the field appears at
+  all</strong>; masking decides <strong>whether what appears is raw or starred</strong>. Gate first,
+  mask second — a field can carry both a permission rule and a masking rule at once, and the two
+  compose in that fixed order rather than racing.</p>
+  <p>Works on both doors: a <code>SnapModel</code> subclass sets it as a plain class attribute; a
+  <code>@snap_model</code>-decorated plain model sets it via
+  <code>registry.register(Model, api_field_permissions={...})</code> (the decorator's own
+  <code>api_field_permissions=</code> keyword is a follow-up). Applied so far to the two surfaces an
+  external API consumer actually reaches — <strong>REST</strong> (the serializer, plus the
+  <code>?field=</code>/<code>?ordering=</code>/<code>?search=</code> oracle-prevention filters, same
+  precedent as PII masking above) and <strong>GraphQL</strong>; the admin form and background export
+  are a follow-up.</p>
+
   <h3>SSO / OAuth2 login buttons</h3>
   <p>SnapAdmin only <em>renders</em> the providers you already wired into
   <code>AUTHENTICATION_BACKENDS</code> / URLconf (django-allauth, social-auth, mozilla-django-oidc) —
@@ -3212,6 +3311,49 @@ def product_catalog_source(job):
   document exposes protected fields — use <code>snapadmin.masking.mask_field(app_label, model, field,
   value, user)</code>, the same choke point the built-in source goes through, so
   <a href="#masking-rules">configured rules</a> apply to your rows too.</p>
+
+  <!-- ── Bulk Import ───────────────────────────────────────────────────────── -->
+  <h2 id="bulk-import">📥 Bulk Import</h2>
+  <p>The write-side counterpart to async export, mirroring its architecture (chunking, progress,
+  resumability) for the opposite direction: reading rows from a CSV or NDJSON file into a model, via
+  <code>manage.py snapadmin_import</code> and a <code>SnapImportJob</code> (see
+  <code>snapadmin.importing</code> for the full contract).</p>
+  <pre><code>python manage.py snapadmin_import --model demo.Product --file products.csv
+python manage.py snapadmin_import --model demo.Product --file p.json --format json
+python manage.py snapadmin_import --model demo.Product --file p.csv \
+    --map '{"Product Name": "name"}' --natural-key name --on-conflict update
+python manage.py snapadmin_import --model demo.Product --file products.csv --resume</code></pre>
+  <ul>
+    <li><strong>Column mapping</strong> is header-name matching by default (case/whitespace/underscore-
+    insensitive, against both the field name and its <code>verbose_name</code>), plus an optional
+    explicit <code>--map</code> that wins wherever a header is named in it. An unmapped column is
+    reported in the run's summary and skipped — never guessed at, never a hard failure.</li>
+    <li><strong>The duplicate key</strong> (<code>--natural-key</code>) is a field name or a comma-separated
+    list. Left unset it defaults to the model's first <code>unique=True</code> field, or the primary
+    key if the file actually carries a mapped column for it; with neither, every row is a create (there
+    is nothing to detect a duplicate with).</li>
+    <li><strong><code>--on-conflict</code></strong> is <code>fail</code> (the default), <code>skip</code> or
+    <code>update</code>. <strong>The default is <code>fail</code></strong> — an import that silently
+    overwrites production rows because nobody passed a flag is the same class of bug this project's
+    write-surface hardening exists to close. A "fail" duplicate is reported as a <em>failed row</em>,
+    never a failed run — one bad or duplicate row must never abort a run processing a million others.</li>
+    <li><strong>Validation runs through the model's own field validators</strong> — <code>full_clean()</code>
+    on the constructed (or updated) instance, so every <code>Snap*Field</code>'s extension/size/format
+    rule applies for free. No parallel validation layer.</li>
+    <li><strong>The report</strong> is one NDJSON line per row — <code>{"row": N, "action":
+    "created"|"updated"|"skipped"|"failed", "pk": …, "errors": {...}}</code> — plus one
+    <code>{"summary": {...}}</code> line at the end, written through the same storage seam the export
+    API downloads from. Its path is printed when the command finishes.</li>
+    <li><strong>Crash-safe, chunk-checkpointed resume</strong> (<code>--resume</code>): every row's write,
+    the job's own progress counters and the report's confirmed byte length commit together as one
+    transaction per chunk — a crash loses at most one chunk's progress, and a resumed run can never
+    re-create a row an earlier attempt already committed.</li>
+    <li><strong>A write surface from the first line, not a follow-up.</strong> A column targeting a field
+    outside <code>api_write_fields</code>, inside <code>api_exclude_fields</code>, or a masked/PII field
+    with no <code>--requested-by</code> user holding PII access, fails the whole run up front, naming the
+    field — never a silent write. A model that is <code>api_read_only</code> (or whose
+    <code>api_http_method_names</code> excludes every write verb) refuses the import entirely.</li>
+  </ul>
 
   <!-- ── Integrating ───────────────────────────────────────────────────────── -->
   <h2 id="integrating">🧩 Integrating with Your Project</h2>
@@ -3544,6 +3686,7 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset, same as
     <tr><td><code>SNAPADMIN_EXPORT_STORAGE</code></td><td>—</td><td>Dotted path to a <code>Storage</code> subclass export files are published to and downloaded from; unset uses local <code>FileSystemStorage</code> rooted at <code>SNAPADMIN_EXPORT_DIR</code></td></tr>
     <tr><td><code>SNAPADMIN_EXPORT_MAX_ROWS</code></td><td><code>0</code></td><td>Row ceiling for the synchronous <code>.../export/</code> when no valid <code>?limit=</code> is passed; <code>0</code> = unlimited. Exceeding it responds <code>413</code> and points the caller at <code>POST /api/exports/</code></td></tr>
     <tr><td><code>SNAPADMIN_EXPORT_LIMIT_MAX</code></td><td><code>0</code></td><td>Hard cap an explicit <code>?limit=</code> on <code>.../export/</code> is clamped down to; <code>0</code> = no clamp</td></tr>
+    <tr><td><code>SNAPADMIN_IMPORT_CHUNK_SIZE</code></td><td><code>1000</code></td><td>Rows per import chunk — the checkpoint/resume granularity for <code>manage.py snapadmin_import</code> (see <a href="#bulk-import">Bulk Import</a>)</td></tr>
   </table>
 
   <h3>Audit trail, GDPR &amp; large tables</h3>

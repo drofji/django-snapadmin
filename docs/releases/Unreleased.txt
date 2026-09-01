@@ -302,6 +302,89 @@ Added
   purge table <https://drofji.github.io/django-snapadmin/#retention-table>`_ lists all five: what
   table, what setting, what removes it, and the recommended schedule.
 
+* **``@snap_action`` — a user-defined REST action on the generated viewset.** A decorated model
+  method becomes a callable endpoint::
+
+      class Order(SnapModel):
+          @snap_action()
+          def recalculate_total(self, request):
+              self.total = sum(item.quantity * item.price for item in self.items.all())
+              self.save(update_fields=["total"])
+              return {"total": str(self.total)}
+
+  reachable at ``POST /api/models/<app_label>/<Model>/<pk>/recalculate_total/`` (detail-level, the
+  default) or the list-level route with ``detail=False``. Bound by the model's own
+  ``api_read_only``/``api_http_method_names`` policy through the same ``http_method_names``
+  descriptor a regular ``PATCH``/``DELETE`` is measured against — a write action can never reach a
+  model configured read-only, structurally, not via a second check that could drift out of sync —
+  and by a Django permission (``view_<model>``/``change_<model>``, derived from the action's own
+  methods, or an explicit ``permission="app_label.codename"``). Works on both a ``SnapModel``
+  subclass and a ``@snap_model``-decorated plain model, since discovery reads the method straight
+  off the class, no model-class machinery involved. **GraphQL has no mutation counterpart and none
+  is planned** — the schema is read-only by design; this is a REST-only surface, stated explicitly
+  rather than left to be discovered. Every model's registered actions (name, scope, methods, URL)
+  are listed at ``GET /api/models/schema/``. New check ``snapadmin.E008`` catches an action whose
+  declared methods conflict with its own model's CRUD policy at boot — dead configuration that would
+  otherwise always answer ``405`` at first request. See `User-Defined REST Actions
+  <https://drofji.github.io/django-snapadmin/#snap-action>`_.
+
+* **``api_field_permissions`` — declarative field-level read/write guards for REST and GraphQL.**
+  A model-level mapping, resolved through ``get_model_meta`` exactly like ``api_write_fields``/
+  ``api_exclude_fields`` already are::
+
+      class Employee(SnapModel):
+          salary = SnapDecimalField(...)
+          api_field_permissions = {
+              "salary": {"read": "hr.view_salary", "write": "hr.change_salary"},
+          }
+
+  A caller lacking the named permission never sees the field at all — **absent** from a REST
+  response (not ``null``, not an error) or **nulled** in GraphQL (the schema is built once at
+  import time, so a per-request field cannot be removed from the response shape the way REST's
+  serializer can — a documented, deliberate asymmetry) — and a denied **write** answers an explicit
+  ``400`` naming the field, because a silently dropped write is a data-loss bug the caller cannot
+  detect. This is a **third**, orthogonal guard alongside ``api_exclude_fields`` (absolute, wins
+  over everything) and ``api_write_fields`` (silently forces a field read-only, its older,
+  deliberately different contract, left unchanged) — and it composes with PII masking in one fixed
+  order: the permission gate decides whether a field appears at all, masking decides whether what
+  appears is raw or starred. Extends the same permission mechanism ``SNAPADMIN_MASKING_RULES``' own
+  per-field ``permission`` grant already established, rather than a second, incompatible one. Wired
+  into REST (the serializer, plus the ``?field=``/``?ordering=``/``?search=`` oracle-prevention
+  filters) and GraphQL this round; the admin form and background export gain the identical guard in
+  a follow-up (both hooks are already named precisely in the design). See `Field-Level Permission
+  Guards <https://drofji.github.io/django-snapadmin/#field-permissions>`_.
+
+* **``manage.py snapadmin_import`` — CSV/NDJSON import, the write-side counterpart to async
+  export.** The export side was complete — jobs, formats, streaming, resumability, pluggable
+  sources — with no import at all, so every project feeding master data in from another system
+  wrote the same thing from scratch. A new ``SnapImportJob`` (one migration) mirrors
+  ``SnapExportJob``'s architecture in reverse::
+
+      python manage.py snapadmin_import --model demo.Product --file products.csv
+      python manage.py snapadmin_import --model demo.Product --file p.csv \
+          --map '{"Product Name": "name"}' --natural-key name --on-conflict update
+
+  Column mapping is header-name matching by default (case/whitespace/underscore-insensitive,
+  against the field name and its ``verbose_name``), plus an explicit ``--map`` override; an
+  unmapped column is reported and skipped, never guessed at. The duplicate key
+  (``--natural-key``) defaults to the model's first ``unique=True`` field, or the mapped primary
+  key, or nothing (every row a create) if neither applies. **``--on-conflict`` defaults to
+  ``fail``** — ``skip``/``update`` are opt-in — because an import that silently overwrites
+  production rows over a missing flag is exactly the class of bug this project's write-surface
+  hardening exists to close; a "fail" duplicate is reported as a failed *row*, never a failed
+  *run*. Validation runs through the model's own ``full_clean()`` — no parallel layer. The run's
+  report is one NDJSON line per row (``row``/``action``/``pk``/``errors``) plus a summary line,
+  written through the same storage seam the export API downloads from. **Crash-safe, chunked
+  resume:** every row's write, the job's own progress counters and the report's confirmed byte
+  length commit together as one transaction per chunk, so a crash loses at most one chunk's
+  progress and ``--resume`` can never re-create a row an earlier attempt already committed.
+  **The import path is a write surface from the first line, not a follow-up** —
+  ``api_write_fields``, ``api_exclude_fields``, ``api_read_only``/``api_http_method_names`` and PII
+  masking are enforced against the resolved column mapping before a single row is processed; a
+  column targeting an excluded, non-allowlisted or (with no ``--requested-by`` user holding PII
+  access) masked field fails the whole run, naming the field, rather than writing it silently. See
+  `Bulk Import <https://drofji.github.io/django-snapadmin/#bulk-import>`_.
+
 Changed
 -------
 

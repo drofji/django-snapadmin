@@ -130,6 +130,28 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   its setting, and its recommended schedule — the audit log, error events, export/reindex jobs,
   expired API tokens and model-level `data_retention_days` were previously documented separately,
   each looking automatic on its own with no way to see what the whole picture actually covers.
+- `@snap_action` turns a model method into a user-defined REST action —
+  `POST /api/models/<app_label>/<Model>/<pk>/<name>/` for a `detail=True` action (the default), or
+  the list-level route with `detail=False`. Bound by the model's own `api_read_only`/
+  `api_http_method_names` policy (a write action can never reach a read-only model) and a Django
+  permission, derived from the action's methods or given explicitly. Discoverable per model via
+  `GET /api/models/schema/`. New check `snapadmin.E008` catches an action whose methods conflict
+  with its own model's CRUD policy at boot instead of at first request.
+- `api_field_permissions` (model-level metadata, e.g. `{"salary": {"read": "hr.view_salary",
+  "write": "hr.change_salary"}}`) gates a field's very presence in a REST/GraphQL response and
+  rejects a denied write with a `400` naming the field — orthogonal to PII masking, which only
+  controls whether an already-present field is raw or starred. Wired into REST (serializer +
+  filter/ordering/search) and GraphQL this round; the admin form and export gain the same guard in
+  a follow-up.
+- `manage.py snapadmin_import` — CSV/NDJSON import, the write-side counterpart to async export,
+  backed by a new `SnapImportJob` (one migration) mirroring the export job's architecture: header-name
+  column mapping (plus an explicit `--map` override), a configurable natural-key duplicate rule,
+  `--on-conflict fail|skip|update` (default `fail` — never a silent overwrite), validation through the
+  model's own `full_clean()`, and a per-row NDJSON report plus a summary line. Crash-safe: every row's
+  write, the job's counters and the report's confirmed byte length commit together per chunk, so
+  `--resume` can never re-create a row an earlier attempt already committed. Write-surface rules
+  (`api_write_fields`/`api_exclude_fields`/`api_read_only`/masking) are enforced up front, not as a
+  follow-up.
 
 ### Changed
 - The shipped `admin.js`'s select2 initialisation is opt-in now — see Breaking, above, for the

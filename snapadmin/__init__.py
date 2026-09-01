@@ -120,6 +120,10 @@ APIs
         guards an inbound endpoint and an outbound client call alike.
     ``snapadmin.api.exports`` · ``snapadmin.exporting``
         Async row exports; pluggable sources via ``SNAPADMIN_EXPORT_SOURCES``.
+    ``snapadmin.importing``
+        CSV/NDJSON import — the write-side counterpart, mirroring the export
+        job's architecture in reverse (``SnapImportJob``, chunked crash-safe
+        resume, an NDJSON report). Backs ``manage.py snapadmin_import``.
     ``snapadmin.api.users`` · ``snapadmin.api.health`` · ``snapadmin.api.reindex``
     ``snapadmin.api.offline``
         Optional endpoints, each behind its own setting.
@@ -231,8 +235,8 @@ Tooling
 
 Management commands
     ``snapadmin_info``, ``snapadmin_license_check``, ``snapadmin_reindex``,
-    ``snapadmin_audit_export``, ``snapadmin_health_alert``, ``snapadmin_db_backup``,
-    ``snapadmin_purge_expired_data``, ``snapadmin_send_error_digest``,
+    ``snapadmin_import``, ``snapadmin_audit_export``, ``snapadmin_health_alert``,
+    ``snapadmin_db_backup``, ``snapadmin_purge_expired_data``, ``snapadmin_send_error_digest``,
     ``snapadmin_restore``, ``snapadmin_rollback``. The three GDPR/error-digest ones
     were once unprefixed (``db_backup``, ``purge_expired_data``,
     ``send_error_digest``); those names still work as deprecated aliases that print

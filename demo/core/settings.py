@@ -462,6 +462,12 @@ SNAPADMIN_EXPORT_SOURCES = {
 # in the docs for the full table of what runs where.
 SNAPADMIN_EXPORT_RETENTION_DAYS = int(os.getenv('SNAPADMIN_EXPORT_RETENTION_DAYS', '0')) or None
 
+# Rows per snapadmin_import chunk — the checkpoint/resume granularity (see
+# snapadmin.importing). Every row's write, the job's counters and the report's
+# confirmed byte length commit together per chunk, so this is also the most a
+# crash can lose.
+SNAPADMIN_IMPORT_CHUNK_SIZE = int(os.getenv('SNAPADMIN_IMPORT_CHUNK_SIZE', '1000'))
+
 # GraphQL security: require authentication + per-model view permission on every
 # resolver (mirrors the REST API contract). Never disable in production.
 SNAPADMIN_GRAPHQL_REQUIRE_AUTH = env_bool('SNAPADMIN_GRAPHQL_REQUIRE_AUTH', True)

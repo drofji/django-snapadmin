@@ -521,6 +521,65 @@ class SnapReindexJob(SnapJobBase):
         verbose_name_plural = _("Reindex Jobs")
 
 
+class SnapImportJob(SnapJobBase):
+    """A background CSV / NDJSON import of rows into a model, mirroring
+    :class:`SnapExportJob`'s architecture for the opposite direction.
+
+    Created via ``manage.py snapadmin_import``; the runner in
+    :mod:`snapadmin.importing` fills it in chunk by chunk, updating
+    ``processed_rows`` (and the per-outcome counters below) so the command can
+    report live progress. Fault-tolerant: unlike the export/reindex jobs, a
+    row here needs no cursor into the *target* model — ``processed_rows``
+    itself is the resume cursor into the *input file* (skip that many rows
+    from the top and continue), because rows are read from the file strictly
+    in order. The run's own NDJSON report (one line per row plus a summary
+    line) is checkpointed the same crash-safe way :class:`SnapExportJob`'s
+    line-based writer is (``report_cursor_bytes`` truncates any
+    uncheckpointed tail before a resume appends further), through the same
+    storage seam (:func:`snapadmin.exporting.get_export_storage`). Cancellable:
+    setting ``status`` to ``cancelled`` stops the runner between chunks. See
+    :mod:`snapadmin.importing`.
+    """
+
+    job_label = "Import"
+
+    class Format(models.TextChoices):
+        CSV = "csv", "CSV"
+        JSON = "json", "JSON"
+
+    class OnConflict(models.TextChoices):
+        # The default is FAIL, deliberately — see snapadmin.importing's module
+        # docstring: an import that silently overwrites production rows
+        # because nobody passed a flag is the same class of bug this whole
+        # batch of fixes exists to close.
+        FAIL = "fail", _("Fail")
+        SKIP = "skip", _("Skip")
+        UPDATE = "update", _("Update")
+
+    import_format = models.CharField(max_length=8, choices=Format.choices, default=Format.CSV, verbose_name=_("Format"))
+    source_name = models.CharField(max_length=255, blank=True, verbose_name=_("Source File"), help_text=_("Display-only name of the input file this job reads."))
+    # Explicit header -> field-name overrides (see snapadmin.importing.resolve_column_map).
+    # Header-name matching fills in every column not named here.
+    column_map = models.JSONField(default=dict, blank=True, verbose_name=_("Column Map"), help_text=_("Explicit CSV/JSON header -> field name overrides; header-name matching fills the rest."))
+    # A field name or list of field names; blank resolves the default at run time
+    # (the model's first unique=True field, or the pk if the file carries it).
+    natural_key = models.JSONField(default=list, blank=True, verbose_name=_("Natural Key"), help_text=_("Field name(s) that identify a duplicate row; blank resolves the default at run time."))
+    on_conflict = models.CharField(max_length=8, choices=OnConflict.choices, default=OnConflict.FAIL, verbose_name=_("On Conflict"))
+    # Crash-safe resume checkpoint for the NDJSON report file — see the class
+    # docstring. Stored the same way SnapExportJob.cursor_bytes is.
+    report_file_name = models.CharField(max_length=255, blank=True, verbose_name=_("Report File"))
+    report_cursor_bytes = models.PositiveBigIntegerField(default=0, verbose_name=_("Report Resume Byte Offset"), help_text=_("Byte length of the report file confirmed as written."))
+    created_count = models.PositiveIntegerField(default=0, verbose_name=_("Created"))
+    updated_count = models.PositiveIntegerField(default=0, verbose_name=_("Updated"))
+    skipped_count = models.PositiveIntegerField(default=0, verbose_name=_("Skipped"))
+    failed_count = models.PositiveIntegerField(default=0, verbose_name=_("Failed"))
+    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+", verbose_name=_("Requested By"), help_text=_("Used for PII-access checks on masked target fields; blank is treated as no PII access."))
+
+    class Meta(SnapJobBase.Meta):
+        verbose_name = _("Import Job")
+        verbose_name_plural = _("Import Jobs")
+
+
 # ===========================================================================
 # Enums & Helpers
 # ===========================================================================

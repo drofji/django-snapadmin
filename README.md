@@ -220,7 +220,7 @@ snapadmin-license-check --critical-only      # only what blocks commercial use
 Every spelling works — `snapadmin-info` ≡ `python manage.py snapadmin_info`.
 
 Opt-in background commands, none of which run on their own: `snapadmin_reindex`,
-`snapadmin_health_alert`, `snapadmin_db_backup`, `snapadmin_send_error_digest`,
+`snapadmin_import`, `snapadmin_health_alert`, `snapadmin_db_backup`, `snapadmin_send_error_digest`,
 `snapadmin_purge_expired_data`, `snapadmin_audit_export`.
 
 > ⏱ **Nothing runs on a schedule by itself.** SnapAdmin ships no daemon — backups, digests and the
@@ -241,8 +241,10 @@ connection
 **🔌 APIs** — [REST CRUD](https://drofji.github.io/django-snapadmin/#api-rest) with Swagger and
 auto-derived filters · [GraphQL](https://drofji.github.io/django-snapadmin/#api-graphql) with
 permissions on every traversed relation ·
-[API tokens](https://drofji.github.io/django-snapadmin/#api-tokens) hashed at rest · per-model guards
-for what may be read and written
+[API tokens](https://drofji.github.io/django-snapadmin/#api-tokens) hashed at rest · per-model and
+[per-field](https://drofji.github.io/django-snapadmin/#field-permissions) guards for what may be
+read and written · [`@snap_action`](https://drofji.github.io/django-snapadmin/#snap-action) exposes
+a business operation — approve, refund, recalculate — as a permission-checked endpoint, not just CRUD
 
 **🔍 Search** *(optional)* — [Elasticsearch](https://drofji.github.io/django-snapadmin/#elasticsearch)
 with the index mapping derived from your fields · `?search=`
@@ -315,6 +317,7 @@ The questions a tech lead or a manager asks before approving a dependency:
 | **Who changed that record?** | An [immutable audit trail](https://drofji.github.io/django-snapadmin/#audit-trail) with per-field `old → new` diffs and a per-object timeline |
 | **GDPR / data retention?** | Declare `data_retention_days` (+ `data_retention_files` to take uploaded files with the row) per model; the same purge also covers the audit log and, if you opt in, finished export/reindex job files. [Full purge table](https://drofji.github.io/django-snapadmin/#retention-table) |
 | **Personal data in the API?** | [PII masking](https://drofji.github.io/django-snapadmin/#pii-masking) — declare a field sensitive once and it is masked in the admin, REST, GraphQL, exports **and** the audit diff. Per-field rules can unlock one field for one permission |
+| **Only HR should see salary?** | [`api_field_permissions`](https://drofji.github.io/django-snapadmin/#field-permissions) gates a field's very presence, per Django permission — absent from a response for anyone lacking it, an explicit `400` naming the field on a denied write, orthogonal to masking (which only controls display) |
 | **Is it tested?** | **100% line coverage** on the shipped package, enforced in CI. The matrix runs Python 3.10–3.13 × Django 5.2/6.0 on every push |
 | **Will it break on upgrade?** | A written [API-stability policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md): deprecations warn before removal and name their replacement. Still beta — pin an exact version in production |
 | **Will it survive our load?** | Read-replica routing, estimated counts, paging caps, streaming exports, and a reusable [quota primitive](https://drofji.github.io/django-snapadmin/#quotas) (`snapadmin.limits.reserve()`) for per-tenant windows, concurrency caps and outbound-call cooldowns. [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) |
@@ -533,7 +536,7 @@ PyPI — only `snapadmin/` is.
 | Topic | |
 |-------|--|
 | Getting started | [Installation](https://drofji.github.io/django-snapadmin/#installation) · [New project](https://drofji.github.io/django-snapadmin/#scaffold) · [Existing project](https://drofji.github.io/django-snapadmin/#snapadmin-init) · [SnapModel](https://drofji.github.io/django-snapadmin/#snap-model) · [Field types](https://drofji.github.io/django-snapadmin/#snap-fields) · [Admin registration](https://drofji.github.io/django-snapadmin/#admin-registration) |
-| APIs | [REST](https://drofji.github.io/django-snapadmin/#api-rest) · [GraphQL](https://drofji.github.io/django-snapadmin/#api-graphql) · [Tokens](https://drofji.github.io/django-snapadmin/#api-tokens) · [Auth / JWT / ETL](https://drofji.github.io/django-snapadmin/#integrating) |
+| APIs | [REST](https://drofji.github.io/django-snapadmin/#api-rest) · [GraphQL](https://drofji.github.io/django-snapadmin/#api-graphql) · [Tokens](https://drofji.github.io/django-snapadmin/#api-tokens) · [Bulk import](https://drofji.github.io/django-snapadmin/#bulk-import) · [Auth / JWT / ETL](https://drofji.github.io/django-snapadmin/#integrating) |
 | Search | [Elasticsearch modes](https://drofji.github.io/django-snapadmin/#elasticsearch) · [Query routing](https://drofji.github.io/django-snapadmin/#es-routing) · [Filters](https://drofji.github.io/django-snapadmin/#es-filter) · [Facets](https://drofji.github.io/django-snapadmin/#es-aggregate) · [Deep scan](https://drofji.github.io/django-snapadmin/#es-scan) |
 | Operations | [Diagnostics](https://drofji.github.io/django-snapadmin/#snapadmin-info) · [Licence audit](https://drofji.github.io/django-snapadmin/#license-check) · [Celery & scheduling](https://drofji.github.io/django-snapadmin/#celery) · [GDPR](https://drofji.github.io/django-snapadmin/#gdpr) · [Backups](https://drofji.github.io/django-snapadmin/#backups) · [Error monitoring](https://drofji.github.io/django-snapadmin/#error-monitoring) · [Performance](https://drofji.github.io/django-snapadmin/#performance) |
 | Reference | [All settings](https://drofji.github.io/django-snapadmin/#env-vars) · [Theming](https://drofji.github.io/django-snapadmin/#theming) · [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) · [Extending](https://drofji.github.io/django-snapadmin/#extending) · [Migration guides](https://drofji.github.io/django-snapadmin/#migration-guides) |
