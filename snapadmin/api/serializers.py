@@ -7,7 +7,7 @@ DRF serializers for the SnapAdmin auto-generated REST API.
 from django.apps import apps
 from rest_framework import serializers
 
-from snapadmin.masking import get_masked_fields, mask_field, user_can_view_pii
+from snapadmin.masking import get_masked_fields, mask_field, user_can_access_field, user_can_view_pii
 from snapadmin.models import APIToken
 from snapadmin.registry import get_model_meta
 
@@ -40,6 +40,59 @@ class PIIMaskingSerializerMixin:
                     model._meta.app_label, model._meta.model_name, field, data[field], user
                 )
         return data
+
+
+class FieldPermissionSerializerMixin:
+    """Enforces ``api_field_permissions`` reads and writes (#FUT3b).
+
+    A **third**, orthogonal guard alongside the two above, with a deliberately
+    different (louder) contract. Precedence, relative to the other two on this
+    same serializer:
+
+    * ``api_exclude_fields`` (``Meta.exclude``, unchanged) removes a field from
+      the serializer entirely and wins absolutely — this mixin never even sees
+      an excluded field.
+    * ``api_write_fields`` (:class:`WriteFieldAllowlistSerializerMixin`,
+      unchanged) *silently* forces a non-allowlisted field read-only; that
+      older contract is untouched by this mixin.
+    * ``api_field_permissions`` (this mixin): a field named here whose caller
+      lacks the declared permission is **absent** from a read response (never
+      ``null``, never an error — see ``to_representation``) and rejected with
+      an explicit ``400`` naming the field on a write (see ``validate``).
+      Silence on read (nothing leaked about the field's existence), noise on
+      write (a dropped write is a data-loss bug the caller cannot detect
+      otherwise) — a deliberate asymmetry, not an inconsistency.
+
+    Composes with :class:`PIIMaskingSerializerMixin` in a fixed order (base
+    class order in ``build_model_serializer``): the permission gate removes
+    denied fields first: masking then only ever runs on what survives.
+    """
+
+    _snap_model = None  # set by build_model_serializer
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        model = self._snap_model
+        if model is None:  # pragma: no cover - defensive; always set in practice
+            return data
+        user = getattr(self.context.get("request"), "user", None)
+        for field in list(data):
+            if not user_can_access_field(user, model, field, write=False):
+                data.pop(field, None)
+        return data
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        model = self._snap_model
+        if model is None:  # pragma: no cover - defensive; always set in practice
+            return attrs
+        user = getattr(self.context.get("request"), "user", None)
+        denied = [field for field in attrs if not user_can_access_field(user, model, field, write=True)]
+        if denied:
+            raise serializers.ValidationError({
+                field: "You do not have permission to set this field." for field in denied
+            })
+        return attrs
 
 
 class WriteFieldAllowlistSerializerMixin:
@@ -131,7 +184,12 @@ def build_model_serializer(model_class):
     write_fields = get_model_meta(model_class, "api_write_fields", None)
     serializer_class = type(
         f"{model_class.__name__}Serializer",
-        (WriteFieldAllowlistSerializerMixin, PIIMaskingSerializerMixin, serializers.ModelSerializer),
+        (
+            WriteFieldAllowlistSerializerMixin,
+            PIIMaskingSerializerMixin,
+            FieldPermissionSerializerMixin,
+            serializers.ModelSerializer,
+        ),
         {
             "Meta": meta_class,
             "_snap_model": model_class,

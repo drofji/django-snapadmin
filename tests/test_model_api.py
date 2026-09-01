@@ -347,6 +347,23 @@ class TestModelSchemaView:
     def test_schema_unauthenticated_denied(self, anon_client):
         assert anon_client.get("/api/models/schema/").status_code in (401, 403)
 
+    def test_schema_lists_snap_actions(self, auth_client):
+        # #RFC1h answer (e): the concrete @snap_action set is discoverable
+        # here, since drf-spectacular's schema can only describe the generic
+        # dispatch_action operation, not per-model action names.
+        r = auth_client.get("/api/models/schema/")
+        order_entry = next(m for m in r.json()["models"] if m["model_name"] == "Order")
+        actions = {a["name"]: a for a in order_entry["actions"]}
+        assert "recalculate_total" in actions
+        assert actions["recalculate_total"]["detail"] is True
+        assert actions["recalculate_total"]["methods"] == ["post"]
+        assert "/recalculate_total/" in actions["recalculate_total"]["url"]
+
+    def test_schema_actions_list_empty_for_model_without_actions(self, auth_client):
+        r = auth_client.get("/api/models/schema/")
+        product_entry = next(m for m in r.json()["models"] if m["model_name"] == "Product")
+        assert product_entry["actions"] == []
+
     def test_schema_verbose_names_present(self, auth_client):
         r = auth_client.get("/api/models/schema/")
         product_entry = next(m for m in r.json()["models"] if m["model_name"] == "Product")
@@ -1625,3 +1642,74 @@ class TestMaskedFieldsExcludedFromApiQuerying:
         assert r.status_code == 200
         names = [row["name"] for row in r.json()["results"]]
         assert "UniqueWidgetXYZ" in names
+
+
+# ── api_field_permissions excluded from filter/ordering/search (#FUT3b) ────
+
+@pytest.mark.django_db
+class TestFieldPermissionsExcludedFromApiQuerying:
+    """Same oracle-prevention rule as masking (#SEC6), for the read-permission
+    gate: a field the response body never reveals to this caller must not be
+    usable as a ?field=/?ordering=/?search= oracle either."""
+
+    NAME_READ_GATED = {"name": {"read": "demo.change_product"}}
+
+    @staticmethod
+    def _regular_client_with_product_view(regular_user):
+        from django.contrib.auth.models import Permission
+        from django.contrib.auth import get_user_model
+        from snapadmin.models import APIToken
+        regular_user.user_permissions.add(Permission.objects.get(codename="view_product"))
+        fresh = get_user_model().objects.get(pk=regular_user.pk)
+        token = APIToken.create_for_user(fresh, "Reg")
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.token_key}")
+        return client
+
+    def test_filter_on_denied_field_ignored(self, monkeypatch, regular_user):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_field_permissions", self.NAME_READ_GATED, raising=False)
+        laptop = Product.objects.create(name="Laptop", price=Decimal("10.00"))
+        desktop = Product.objects.create(name="Desktop", price=Decimal("20.00"))
+        client = self._regular_client_with_product_view(regular_user)
+
+        r = client.get("/api/models/demo/Product/?name=Laptop")
+        assert r.status_code == 200
+        ids = {row["id"] for row in r.json()["results"]}
+        assert ids == {laptop.pk, desktop.pk}  # filter silently ignored
+
+    def test_filter_on_denied_field_still_applies_once_granted(self, monkeypatch, regular_user):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_field_permissions", self.NAME_READ_GATED, raising=False)
+        Product.objects.create(name="Laptop", price=Decimal("10.00"))
+        Product.objects.create(name="Desktop", price=Decimal("20.00"))
+        client = self._regular_client_with_product_view(regular_user)
+        from django.contrib.auth.models import Permission
+        regular_user.user_permissions.add(Permission.objects.get(codename="change_product"))
+
+        r = client.get("/api/models/demo/Product/?name=Laptop")
+        assert r.status_code == 200
+        names = {row["name"] for row in r.json()["results"]}
+        assert names == {"Laptop"}
+
+    def test_ordering_by_denied_field_ignored(self, monkeypatch, regular_user):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_field_permissions", self.NAME_READ_GATED, raising=False)
+        alpha = Product.objects.create(name="Alpha", price=Decimal("1"))
+        bravo = Product.objects.create(name="Bravo", price=Decimal("2"))
+        client = self._regular_client_with_product_view(regular_user)
+
+        r = client.get("/api/models/demo/Product/?ordering=name")
+        assert r.status_code == 200
+        ids = [row["id"] for row in r.json()["results"]]
+        assert ids == [bravo.pk, alpha.pk]  # falls back to -pk, not alphabetical
+
+    def test_search_on_denied_field_ignored(self, monkeypatch, regular_user):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_field_permissions", self.NAME_READ_GATED, raising=False)
+        Product.objects.create(name="UniqueWidgetXYZ", price=Decimal("1"))
+        client = self._regular_client_with_product_view(regular_user)
+
+        r = client.get("/api/models/demo/Product/?search=UniqueWidgetXYZ")
+        assert r.status_code == 200
+        assert r.json()["results"] == []

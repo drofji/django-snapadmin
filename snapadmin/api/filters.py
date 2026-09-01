@@ -23,7 +23,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.filters import BaseFilterBackend, OrderingFilter, SearchFilter
 
 from snapadmin.conf import get_setting
-from snapadmin.masking import get_masked_fields, user_can_view_pii
+from snapadmin.masking import get_masked_fields, user_can_access_field, user_can_view_pii
 from snapadmin.registry import get_model_meta
 
 _filterset_cache: dict = {}
@@ -322,30 +322,42 @@ class SnapAdminFilterBackend(DjangoFilterBackend):
         return super().filter_queryset(request, queryset, view)
 
     def get_filterset_kwargs(self, request, queryset, view):
-        """Drop any query param that targets a masked field the caller can't see.
+        """Drop any query param targeting a field the caller can't see.
 
         Only reached once :meth:`get_filterset_class` has already resolved a
         concrete model (``get_filterset`` short-circuits to a no-op otherwise),
         so ``view._get_model_class()`` is guaranteed non-``None`` here.
 
-        A masked field must not be filterable at all: even an exact match lets
-        a caller use match/no-match (or the returned row count, for
-        ``__icontains``) as an oracle to recover a value they'd only ever see
-        starred in the response body. The masked param is silently dropped
-        (as if never sent) rather than rejected with 400 — consistent with an
-        unknown query param, and it doesn't confirm the field is masked vs.
-        simply unfiltered.
+        A field the caller cannot see at all must not be filterable either:
+        even an exact match lets a caller use match/no-match (or the returned
+        row count, for ``__icontains``) as an oracle to recover a value the
+        response body never reveals. The param is silently dropped (as if
+        never sent) rather than rejected with 400 — consistent with an
+        unknown query param, and it doesn't confirm *why* the field is
+        unfilterable. Two independent reasons feed the same drop set: PII
+        masking (unless the caller holds ``view_raw_pii``) and #FUT3b's
+        ``api_field_permissions`` read guard (a separate axis, unaffected by
+        PII privilege).
         """
         kwargs = super().get_filterset_kwargs(request, queryset, view)
         model_class = view._get_model_class()
-        masked = set(get_masked_fields(model_class._meta.app_label, model_class._meta.model_name))
-        if not masked or user_can_view_pii(request.user):
+        app_label, model_name = model_class._meta.app_label, model_class._meta.model_name
+        user = request.user
+        hidden = set() if user_can_view_pii(user) else set(get_masked_fields(app_label, model_name))
+        permissions = get_model_meta(model_class, "api_field_permissions", {}) or {}
+        hidden |= {
+            field
+            for field, rule in permissions.items()
+            if isinstance(rule, dict) and rule.get("read")
+            and not user_can_access_field(user, model_class, field, write=False)
+        }
+        if not hidden:
             return kwargs
 
         data = kwargs["data"].copy()
         for key in list(data.keys()):
             field_name = key.split("__", 1)[0]
-            if field_name in masked:
+            if field_name in hidden:
                 del data[key]
         kwargs["data"] = data
         return kwargs

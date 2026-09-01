@@ -1,10 +1,13 @@
 # demo/models.py
 
+from decimal import Decimal
+
 from django.utils.translation import gettext_lazy as _
 from django.db import models as django_models
 from snapadmin import fields as snap_fields, models as snap_models
 from snapadmin import validators
 from snapadmin.admin import SnapTabularInline, SnapStackedInline
+from snapadmin.api.views import snap_action
 import uuid
 
 # ── api_write_fields, on every model below ───────────────────────────────────
@@ -220,6 +223,22 @@ class Order(snap_models.SnapModel):
     # created_at is auto_now_add (never client-supplied), so the allowlist is
     # just the two fields an order actually carries.
     api_write_fields = ["customer", "total"]
+
+    # @snap_action (#RFC1h) — a user-defined REST action, POST-only,
+    # detail-level: POST /api/models/shop/Order/<pk>/recalculate_total/.
+    # A real, migration-free action reusing existing fields (quantity, price
+    # on the related OrderItems) rather than adding a new column just to
+    # dogfood the feature. Default permission (no explicit override):
+    # "shop.change_order", derived from methods=("post",) not being a
+    # read-only method set.
+    @snap_action()
+    def recalculate_total(self, request):
+        self.total = sum(
+            (item.quantity * item.price for item in self.items.all()),
+            Decimal("0"),
+        )
+        self.save(update_fields=["total"])
+        return {"total": str(self.total)}
 
     class Meta:
         verbose_name = _("Order")

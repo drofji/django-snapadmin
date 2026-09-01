@@ -168,6 +168,32 @@ if REST_API_ENABLED:
             }),
             name="model-detail",
         ),
+
+        # User-defined REST actions (@snap_action, #RFC1h) — registered after
+        # every literal route above (count/export/<int:pk>) so Django's
+        # first-match ordering never lets a numeric pk be swallowed by the
+        # generic <str:action_name> list-level pattern below; the detail-level
+        # pattern is unambiguous with <int:pk>/ (a different segment count).
+        # The concrete action name/method/permission match happens inside
+        # dispatch_action() itself, since the action set is dynamic per model.
+        path(
+            "models/<str:app_label>/<str:model_name>/<int:pk>/<str:action_name>/",
+            DynamicModelViewSet.as_view({
+                "get": "dispatch_action", "post": "dispatch_action",
+                "put": "dispatch_action", "patch": "dispatch_action",
+                "delete": "dispatch_action",
+            }),
+            name="model-action-detail",
+        ),
+        path(
+            "models/<str:app_label>/<str:model_name>/<str:action_name>/",
+            DynamicModelViewSet.as_view({
+                "get": "dispatch_action", "post": "dispatch_action",
+                "put": "dispatch_action", "patch": "dispatch_action",
+                "delete": "dispatch_action",
+            }),
+            name="model-action-list",
+        ),
     ]
 
 if SWAGGER_ENABLED:

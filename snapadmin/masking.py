@@ -41,6 +41,22 @@ Who sees raw data is a permission decision, evaluated per request:
 The same rules drive the admin (list view + change form + the audit-log diff),
 the API serializer, GraphQL and background exports, so an external frontend
 consuming the API receives already-masked data.
+
+A second, orthogonal concept lives here too: field-level *permission* guards
+(#FUT3), declared with ``api_field_permissions`` (model-level metadata, not a
+setting)::
+
+    class Employee(SnapModel):
+        salary = SnapDecimalField(...)
+        api_field_permissions = {
+            "salary": {"read": "hr.view_salary", "write": "hr.change_salary"},
+        }
+
+Where masking decides *how* a visible field is displayed, this decides
+*whether it is visible/writable at all* — :func:`user_can_access_field` is the
+gate, checked upstream of masking on every enforcement point (REST, GraphQL;
+see #FUT3b's roadmap entry for the full precedence table and which surfaces
+are wired up this round).
 """
 
 from __future__ import annotations
@@ -172,6 +188,55 @@ def user_can_view_pii(
         return True
     permission = (_rule_for(field, app_label, model_name) or {}).get("permission")
     return bool(permission) and bool(user.has_perm(str(permission)))
+
+
+def user_can_access_field(
+    user: UserLike,
+    model: type,
+    field: str,
+    *,
+    write: bool = False,
+) -> bool:
+    """Whether ``user`` may read (or write) ``field`` on ``model`` at all.
+
+    Reads the model's ``api_field_permissions`` mapping (#FUT3a/#FUT3b) via
+    :func:`snapadmin.registry.get_model_meta` — a plain dict declared once,
+    identically for a :class:`~snapadmin.models.SnapModel` subclass (class
+    attribute) or a ``@snap_model``-decorated model (registry entry)::
+
+        api_field_permissions = {
+            "salary": {"read": "hr.view_salary", "write": "hr.change_salary"},
+        }
+
+    A field absent from the mapping, or missing the side being checked
+    (``"read"``/``"write"``), is unrestricted by this mechanism — ``True``.
+    A field *with* a rule for that side requires the named permission:
+    anonymous or inactive users are denied (fail closed), superusers and
+    holders of the permission are allowed.
+
+    This is deliberately the **same shape** as :func:`user_can_view_pii` — a
+    permission grant unlocks one field — but gates something upstream of it:
+    whether the field is present/writable at all, not whether its *display*
+    is raw or masked. The two compose in one fixed order (this function
+    first, masking second) — see ``mask_field``'s callers, which only ever
+    run once a field has already passed this gate.
+    """
+    from snapadmin.registry import get_model_meta
+
+    rules = get_model_meta(model, "api_field_permissions", {}) or {}
+    rule = rules.get(str(field))
+    if not isinstance(rule, dict):
+        return True
+    permission = rule.get("write" if write else "read")
+    if not permission:
+        return True
+    if user is None or not getattr(user, "is_authenticated", False):
+        return False
+    if not user.is_active:
+        return False
+    if user.is_superuser:
+        return True
+    return bool(user.has_perm(str(permission)))
 
 
 def _has_nested_quantifier(pattern: str) -> bool:

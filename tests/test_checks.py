@@ -7,6 +7,7 @@ actionable hint, and stay quiet when a feature is unconfigured or correct.
 
 import re
 from datetime import timedelta
+from unittest.mock import patch
 
 import pytest
 from django.core.management import call_command
@@ -689,6 +690,133 @@ class TestSnapadminProfileContradiction:
     def test_unrecognised_profile_is_ignored_here(self):
         """check_snapadmin_profile (E006) owns reporting an invalid profile name."""
         assert checks.check_snapadmin_profile_contradiction(None) == []
+
+
+# ── retention purge scheduled (W012) ─────────────────────────────────────────
+
+class TestRetentionPurgeScheduled:
+    def _no_model_retention(self):
+        """Neutralise the two demo models that carry a permanent
+        data_retention_days (AuditLog, Showcase) so a test can exercise the
+        "nothing configured at all" branch without disabling anything real."""
+        from demo.apps.shop.models import AuditLog, Showcase
+        return (
+            patch.object(AuditLog, "data_retention_days", None),
+            patch.object(Showcase, "data_retention_days", None),
+        )
+
+    @override_settings(SNAPADMIN_AUDIT_RETENTION_DAYS=0)
+    def test_nothing_configured_is_clean(self):
+        p1, p2 = self._no_model_retention()
+        with p1, p2:
+            assert checks.check_retention_purge_scheduled(None) == []
+
+    def test_audit_default_alone_triggers_when_unscheduled(self):
+        # SNAPADMIN_AUDIT_RETENTION_DAYS defaults to 365 (on) — this is the
+        # exact "the audit log always is" case from the check's own docstring.
+        p1, p2 = self._no_model_retention()
+        with p1, p2, override_settings(CELERY_BEAT_SCHEDULE={}):
+            result = checks.check_retention_purge_scheduled(None)
+        assert [w.id for w in result] == ["snapadmin.W012"]
+
+    @override_settings(SNAPADMIN_AUDIT_RETENTION_DAYS=0, CELERY_BEAT_SCHEDULE={})
+    def test_export_retention_alone_triggers_when_unscheduled(self):
+        p1, p2 = self._no_model_retention()
+        with p1, p2, override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30):
+            result = checks.check_retention_purge_scheduled(None)
+        assert [w.id for w in result] == ["snapadmin.W012"]
+
+    @override_settings(SNAPADMIN_AUDIT_RETENTION_DAYS=0, CELERY_BEAT_SCHEDULE={})
+    def test_model_retention_alone_triggers_when_unscheduled(self):
+        from demo.apps.shop.models import Showcase
+        with patch.object(Showcase, "data_retention_days", 90):
+            result = checks.check_retention_purge_scheduled(None)
+        assert [w.id for w in result] == ["snapadmin.W012"]
+
+    def test_scheduled_beat_entry_is_clean(self):
+        # The demo project's own CELERY_BEAT_SCHEDULE already carries this
+        # entry — the default config must stay clean.
+        assert checks.check_retention_purge_scheduled(None) == []
+
+    @override_settings(CELERY_BEAT_SCHEDULE={
+        "other-task": {"task": "snapadmin.purge_expired_tokens", "schedule": 3600},
+    })
+    def test_beat_schedule_without_the_purge_task_warns(self):
+        result = checks.check_retention_purge_scheduled(None)
+        assert [w.id for w in result] == ["snapadmin.W012"]
+
+    @override_settings(CELERY_BEAT_SCHEDULE={
+        "purge-expired-data": {"task": "snapadmin.purge_expired_data", "schedule": 3600},
+        "not-a-dict": "oops",
+    })
+    def test_malformed_beat_entry_is_ignored_not_fatal(self):
+        # A non-dict entry (a typo'd schedule config) must not crash the
+        # check — it is simply not a match, same as any other unrelated entry.
+        assert checks.check_retention_purge_scheduled(None) == []
+
+
+# ── @snap_action / api_read_only conflict (E008) ─────────────────────────────
+
+class TestSnapActionReadOnlyConflict:
+    def test_no_actions_is_clean(self):
+        from demo.apps.shop.models import Product
+        with patch.object(Product, "api_read_only", True):
+            assert checks.check_snap_action_read_only_conflict(None) == []
+
+    def test_missing_dependency_is_a_silent_no_op(self):
+        # The REST API is enabled but snapadmin.api.views can't be imported
+        # (DRF/drf-spectacular absent) — urls.py already raises a pointed
+        # ImproperlyConfigured for that; this check has nothing to add.
+        import sys
+        from unittest import mock
+
+        from demo.apps.shop.models import Order
+        with patch.object(Order, "api_read_only", True):
+            with mock.patch.dict(sys.modules, {"snapadmin.api.views": None}):
+                assert checks.check_snap_action_read_only_conflict(None) == []
+
+    def test_full_crud_model_is_never_flagged(self):
+        # Order.recalculate_total is methods=("post",); the demo default
+        # (full CRUD, not api_read_only) must stay clean.
+        assert checks.check_snap_action_read_only_conflict(None) == []
+
+    def test_read_only_model_with_a_post_action_errors(self):
+        from demo.apps.shop.models import Order
+        with patch.object(Order, "api_read_only", True):
+            result = checks.check_snap_action_read_only_conflict(None)
+        assert [e.id for e in result] == ["snapadmin.E008"]
+        assert "recalculate_total" in result[0].msg
+
+    def test_api_http_method_names_without_post_errors(self):
+        from demo.apps.shop.models import Order
+        with patch.object(Order, "api_http_method_names", ["get"]):
+            result = checks.check_snap_action_read_only_conflict(None)
+        assert [e.id for e in result] == ["snapadmin.E008"]
+
+    def test_api_http_method_names_including_post_is_clean(self):
+        from demo.apps.shop.models import Order
+        with patch.object(Order, "api_http_method_names", ["get", "post"]):
+            assert checks.check_snap_action_read_only_conflict(None) == []
+
+    def test_read_only_model_with_only_a_get_action_is_clean(self):
+        # Product carries no @snap_action of its own, unlike Order
+        # (recalculate_total) — isolates this case from that conflict.
+        from demo.apps.shop.models import Product
+        from snapadmin.api.views import snap_action
+
+        @snap_action(methods=("get",))
+        def summary(self, request):
+            return {}
+
+        with patch.object(Product, "api_read_only", True), \
+             patch.object(Product, "summary", summary, create=True):
+            assert checks.check_snap_action_read_only_conflict(None) == []
+
+    @override_settings(SNAPADMIN_REST_API_ENABLED=False)
+    def test_rest_api_disabled_short_circuits(self):
+        from demo.apps.shop.models import Order
+        with patch.object(Order, "api_read_only", True):
+            assert checks.check_snap_action_read_only_conflict(None) == []
 
 
 # ── integration ──────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ SnapAdmin REST API views.
 """
 
 import json
+from dataclasses import dataclass
 
 from django.apps import apps
 from django.conf import settings
@@ -27,7 +28,7 @@ from snapadmin.conf import get_setting
 from snapadmin.db import route_read
 from snapadmin.api.filters import get_api_filter_backends
 from snapadmin.logging_config import get_logger
-from snapadmin.masking import get_masked_fields, user_can_view_pii
+from snapadmin.masking import get_masked_fields, user_can_access_field, user_can_view_pii
 from snapadmin.models import APIToken, EsStorageMode
 from snapadmin.pagination import SnapDynamicPagination
 from snapadmin.registry import get_model_meta, is_registered
@@ -89,9 +90,20 @@ class TokenModelPermission(permissions.BasePermission):
     def has_permission(self, request: Request, view) -> bool:
         app_label  = view.kwargs.get("app_label", "")
         model_name = view.kwargs.get("model_name", "")
-        action_str = self._action_map.get(view.action, "view")
-
         token = getattr(request, "auth", None)
+
+        if view.action == "dispatch_action":
+            # A @snap_action's own permission — view/change_<model> derived
+            # from its declared methods, or an explicit override — is checked
+            # precisely, per action, inside dispatch_action() itself
+            # (DynamicModelViewSet._snap_action_permission_granted). Resolving
+            # the same verb here too would duplicate that logic and could
+            # drift out of sync with what the action actually declares; this
+            # outer gate only confirms a token's allowed_models scope covers
+            # the model at all, same as every other action.
+            return token.can_access_model(app_label, model_name) if isinstance(token, APIToken) else True
+
+        action_str = self._action_map.get(view.action, "view")
         if isinstance(token, APIToken):
             return token_has_permission(
                 token, request.user, app_label, model_name, action_str
@@ -195,6 +207,144 @@ class _PerModelHttpMethods:
         if instance is None:
             return list(_FULL_HTTP_METHOD_NAMES)
         return instance._resolve_http_method_names()
+
+
+class SnapActionError(Exception):
+    """Raised by a ``@snap_action`` function to answer with an error response.
+
+    ``dispatch_action`` turns this into ``Response({"detail": message},
+    status=status)`` — the same ``{"detail": ...}`` envelope every other error
+    path in this module already uses. ``status`` defaults to ``400``.
+    """
+
+    def __init__(self, message: str, status: int = 400) -> None:
+        super().__init__(message)
+        self.message = message
+        self.status = status
+
+
+#: Methods that imply a read-only default permission (``view_<model>``); any
+#: other method set implies a mutating default (``change_<model>``). See
+#: :func:`snap_action`.
+_READ_ONLY_METHODS = frozenset({"get", "head", "options"})
+
+
+@dataclass(frozen=True)
+class SnapActionSpec:
+    """What ``@snap_action`` recorded about one decorated model method."""
+
+    name: str
+    detail: bool
+    methods: frozenset[str]
+    permission: str | None
+    func: object  # the undecorated function: func(instance_or_model_class, request)
+
+
+def snap_action(
+    *,
+    detail: bool = True,
+    methods: "list[str] | tuple[str, ...]" = ("post",),
+    permission: str | None = None,
+):
+    """Turn a model method into a user-defined REST action (#RFC1h).
+
+    ``@snap_property`` exposes a computed, read-only column; this exposes a
+    **callable** endpoint — ``POST /api/models/<app_label>/<Model>/<pk>/
+    <name>/`` for a ``detail=True`` action (the default), or ``POST
+    /api/models/<app_label>/<Model>/<name>/`` for ``detail=False``::
+
+        class Order(SnapModel):
+            ...
+            @snap_action()
+            def recalculate_total(self, request):
+                self.total = sum(item.line_total for item in self.items.all())
+                self.save(update_fields=["total"])
+                return {"total": str(self.total)}
+
+    The function receives the model **instance** (``detail=True``) or the
+    model **class** (``detail=False``) as its first argument, then
+    ``request`` — exactly like an ordinary method receives ``self``, so it
+    remains an ordinary callable outside the API too. Return a plain
+    JSON-serialisable ``dict`` (wrapped as ``Response(result, status=200)``)
+    or a :class:`~rest_framework.response.Response` built directly (a full
+    escape hatch for a custom status/headers). Raise
+    :class:`SnapActionError` to answer with an error.
+
+    **Discovered the same way ``@snap_property`` is** — a marker stored on the
+    function object itself, read back off the model's *own* ``__dict__``
+    (mirrors the ``get_admin_fields()`` enumeration precedent: no inherited-
+    action lookup, the same documented scoping limit). Works unmodified on
+    both doors (a :class:`~snapadmin.models.SnapModel` subclass or a
+    ``@snap_model``-decorated plain model) since it touches no model-class
+    machinery at all — just a method carrying one extra attribute.
+
+    **Permission, not a DRF permission class.** Two independent gates stand
+    between a request and the function body:
+
+    1. **The model's own CRUD policy — enforced before ``dispatch_action`` is
+       even called, for free.** Every action URL is wired to every HTTP verb
+       (``.as_view({"get": "dispatch_action", "post": "dispatch_action",
+       ...})``), but DRF's own ``dispatch()`` rejects a verb outside
+       ``self.http_method_names`` with ``405`` before selecting a handler —
+       and ``http_method_names`` on this viewset already resolves the target
+       model's ``api_read_only``/``api_http_method_names`` policy (the exact
+       set a regular ``PATCH``/``DELETE`` is measured against). A ``POST``
+       action therefore never reaches ``dispatch_action`` at all on a model
+       configured ``api_read_only=True`` — inherited structurally, not
+       re-checked a second time.
+    2. **A Django permission**, checked inside ``dispatch_action``:
+       ``permission`` if given (``"app_label.codename"``), otherwise derived
+       from ``methods`` — ``view_<model>`` when every method is safe
+       (GET/HEAD/OPTIONS), ``change_<model>`` otherwise. Checked with the
+       caller's ``has_perm()`` (superusers pass for free) plus the
+       authenticating ``APIToken``'s ``allowed_models`` scope, when the
+       caller used a token.
+
+    :param detail: ``True`` (default) for a per-object action (needs a
+        ``pk``); ``False`` for a collection-level action. One decorator call
+        expresses one scope — declare a second method for the other, exactly
+        like DRF's own ``@action(detail=...)``.
+    :param methods: Lowercase HTTP verbs this action accepts. Defaults to
+        ``("post",)``, the shape almost every action needs (a mutation
+        triggered by the client).
+    :param permission: An explicit ``"app_label.codename"`` override for the
+        default permission derived from ``methods``.
+    """
+    resolved_methods = frozenset(m.lower() for m in methods)
+    if not resolved_methods:
+        raise ValueError("snap_action() needs at least one HTTP method.")
+
+    def decorator(func):
+        func.__snapadmin_action__ = SnapActionSpec(
+            name=func.__name__,
+            detail=detail,
+            methods=resolved_methods,
+            permission=permission,
+            func=func,
+        )
+        return func
+
+    return decorator
+
+
+def get_snap_action(model_class: type, name: str) -> SnapActionSpec | None:
+    """The :class:`SnapActionSpec` ``model_class`` declared under ``name``, or ``None``.
+
+    Looks only at ``model_class``'s own ``__dict__`` — an action inherited
+    from a parent class is not discovered, mirroring ``@snap_property``'s
+    same, already-documented scoping limit.
+    """
+    func = model_class.__dict__.get(name)
+    return getattr(func, "__snapadmin_action__", None)
+
+
+def iter_snap_actions(model_class: type) -> list[SnapActionSpec]:
+    """Every ``@snap_action`` declared directly on ``model_class``, in definition order."""
+    return [
+        spec
+        for attr in model_class.__dict__.values()
+        if (spec := getattr(attr, "__snapadmin_action__", None)) is not None
+    ]
 
 
 class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
@@ -322,6 +472,85 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             model_name = self.kwargs.get("model_name", "")
             raise NotFound(f"Model '{model_name}' not found in app '{app_label}'.")
 
+    def _snap_action_permission_granted(self, model_class, spec: SnapActionSpec) -> bool:
+        """Whether the current request may call this ``@snap_action`` (#RFC1h answer a).
+
+        ``spec.permission`` if given, else derived from ``spec.methods``:
+        ``view_<model>`` when every declared method is safe
+        (GET/HEAD/OPTIONS), ``change_<model>`` otherwise. ``has_perm()``
+        already grants a superuser everything, so no separate bypass is
+        needed. **No token-scope re-check here**: for ``dispatch_action``,
+        :meth:`TokenModelPermission.has_permission` already confirms an
+        ``APIToken`` caller's ``allowed_models`` scope covers the model
+        before this method is ever reached — duplicating it here would be
+        unreachable, same reasoning as ``dispatch_action`` not re-checking
+        ``api_read_only``.
+        """
+        app_label = model_class._meta.app_label
+        model_name = model_class._meta.model_name
+        if spec.permission:
+            codename = spec.permission
+        else:
+            verb = "view" if spec.methods <= _READ_ONLY_METHODS else "change"
+            codename = f"{app_label}.{verb}_{model_name}"
+        return bool(self.request.user.has_perm(codename))
+
+    @extend_schema(
+        summary="Dispatch a user-defined @snap_action",
+        description=(
+            "Generic dynamic dispatcher for every @snap_action declared on any "
+            "registered model — the concrete action names, scopes and methods "
+            "are model-specific and discovered at call time, not statically "
+            "enumerable here. See GET /api/models/schema/ for the per-model "
+            "action list."
+        ),
+    )
+    def dispatch_action(self, request, *args, **kwargs):
+        """Route to a ``@snap_action``-decorated model method.
+
+        Backs both action URL patterns — ``.../<pk>/<action_name>/`` (detail)
+        and ``.../<action_name>/`` (list) — for every HTTP verb; the actual
+        verb/scope match against the action's own declaration happens here,
+        not in the URLconf, since the set of valid action names is dynamic.
+        """
+        model_class = self._get_model_class()  # never None — initial() already 404s
+        action_name = self.kwargs.get("action_name", "")
+        spec = get_snap_action(model_class, action_name)
+        if spec is None:
+            raise NotFound(f"Action '{action_name}' not found on model '{model_class.__name__}'.")
+
+        if spec.detail != ("pk" in self.kwargs):
+            raise NotFound(
+                f"Action '{action_name}' is {'detail' if spec.detail else 'list'}-only."
+            )
+
+        method = request.method.lower()
+        if method not in spec.methods:
+            return Response(
+                {"detail": f"Action '{action_name}' does not accept {request.method}."},
+                status=status.HTTP_405_METHOD_NOT_ALLOWED,
+            )
+        # No separate api_read_only/api_http_method_names re-check here: the
+        # model's CRUD policy is already enforced before dispatch_action is
+        # ever called, for free — DRF's own dispatch() rejects a verb outside
+        # self.http_method_names (the _PerModelHttpMethods descriptor, the
+        # exact same _resolve_http_method_names() this method would otherwise
+        # duplicate) with 405 before selecting a handler. A model configured
+        # api_read_only=True never reaches this line for a write verb; adding
+        # a second copy of that check here would be unreachable dead code,
+        # not defence in depth.
+        if not self._snap_action_permission_granted(model_class, spec):
+            return Response({"detail": "Permission denied."}, status=status.HTTP_403_FORBIDDEN)
+
+        subject = self.get_object() if spec.detail else model_class
+        try:
+            result = spec.func(subject, request)
+        except SnapActionError as exc:
+            return Response({"detail": exc.message}, status=exc.status)
+        if isinstance(result, Response):
+            return result
+        return Response(result, status=status.HTTP_200_OK)
+
     def _get_search_query(self) -> str:
         return self.request.query_params.get(api_settings.SEARCH_PARAM, "").strip()
 
@@ -345,16 +574,30 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         return tuple(search_fields) or None
 
     def _masked_fields_for_request(self, model_class) -> set[str]:
-        """Masked field names the current caller must not filter/order/search by.
+        """Field names the current caller must not filter/order/search by.
 
-        Empty for a PII-privileged caller — masking is a display concern only
-        for them. Otherwise this is the same field set the serializer stars
-        out, so ``?field=``/``?ordering=field``/``?search=`` can't be used as
-        an oracle to recover a value the response body never reveals raw.
+        The union of two independent reasons a field must not be usable as a
+        query oracle: masking (empty for a PII-privileged caller — display is
+        the only thing masking gates for them) and #FUT3b's
+        ``api_field_permissions`` read guard (unaffected by PII privilege — a
+        separate permission axis, checked per field regardless of
+        ``view_raw_pii``). Either way this is the same field set the
+        serializer excludes/stars out, so ``?field=``/``?ordering=field``/
+        ``?search=`` can't be used to recover a value the response body never
+        reveals.
         """
-        if user_can_view_pii(self.request.user):
-            return set()
-        return set(get_masked_fields(model_class._meta.app_label, model_class._meta.model_name))
+        user = self.request.user
+        fields = set() if user_can_view_pii(user) else set(
+            get_masked_fields(model_class._meta.app_label, model_class._meta.model_name)
+        )
+        permissions = get_model_meta(model_class, "api_field_permissions", {}) or {}
+        fields |= {
+            field
+            for field, rule in permissions.items()
+            if isinstance(rule, dict) and rule.get("read")
+            and not user_can_access_field(user, model_class, field, write=False)
+        }
+        return fields
 
     def get_queryset(self):
         model_class = self._get_model_class()
@@ -642,6 +885,14 @@ class ModelSchemaView(SnapAPIAuthMixin, APIView):
     fields with types and flags — enough for a client to build a form or a table
     without hardcoding the model. Fields named in ``api_exclude_fields`` are
     omitted here too.
+
+    Also the discovery surface for ``@snap_action`` (#RFC1h answer e): each
+    model's entry carries an ``"actions"`` list (name, scope, methods, URL) —
+    the concrete action set is dynamic per model, which drf-spectacular's
+    static schema cannot enumerate for the generic ``dispatch_action``
+    operation it documents instead. This is the same place a client already
+    discovers a model's fields, so there is exactly one discovery mechanism,
+    not two.
     """
 
     permission_classes = [permissions.IsAuthenticated]
@@ -677,6 +928,19 @@ class ModelSchemaView(SnapAPIAuthMixin, APIView):
                     }
                     for f in model._meta.get_fields()
                     if hasattr(f, "name") and f.name not in excluded
+                ],
+                "actions": [
+                    {
+                        "name": spec.name,
+                        "detail": spec.detail,
+                        "methods": sorted(spec.methods),
+                        "url": request.build_absolute_uri(
+                            f"/api/models/{app_label}/{model_name}/{{pk}}/{spec.name}/"
+                            if spec.detail
+                            else f"/api/models/{app_label}/{model_name}/{spec.name}/"
+                        ),
+                    }
+                    for spec in iter_snap_actions(model)
                 ],
             })
 

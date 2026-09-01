@@ -125,6 +125,19 @@ Key protections:
   `manage.py check` warns (`snapadmin.W009`) when an explicit setting silently disagrees with the
   active profile, so re-enabling a surface a profile turned off is never silent. See
   [`SNAPADMIN_PROFILE` presets](https://drofji.github.io/django-snapadmin/#profiles).
+- **`@snap_action` (user-defined REST actions) can never widen a model's own write policy.** Every
+  action URL is wired to every HTTP verb, but Django REST Framework rejects a verb outside the
+  view's `http_method_names` — the exact same descriptor that already resolves `api_read_only` /
+  `api_http_method_names` for the built-in CRUD verbs — before a handler is even selected. A
+  `POST`-only action therefore cannot reach a model configured `api_read_only = True`; there is
+  nothing to bypass, structurally, not via a second check that could drift out of sync. Beyond
+  that, each action requires a Django permission (`view_<model>`/`change_<model>`, derived from its
+  declared methods, or an explicit override) — checked with the caller's own `has_perm()` plus, for
+  a token-authenticated caller, the token's `allowed_models` scope. `manage.py check` catches a
+  declared conflict between an action's methods and its model's own policy at boot
+  (`snapadmin.E008`) rather than at first request. See [User-Defined REST
+  Actions](https://drofji.github.io/django-snapadmin/#snap-action).
+
 
 ### API tokens
 - Tokens are **hashed with SHA-256 at rest** — the raw key is shown **once** at creation (and once
@@ -219,6 +232,20 @@ Key protections:
   Both default to full CRUD; the `snapadmin.W007` check nudges a field-read-only model
   (`api_write_fields = []`) toward `api_read_only` so it returns a clean `405` instead of a
   blank-row insert.
+- **`api_field_permissions`** gates an individual field's presence and writability behind a Django
+  permission — `{"salary": {"read": "hr.view_salary", "write": "hr.change_salary"}}` — a third guard
+  alongside `api_exclude_fields` (absolute) and `api_write_fields` (its own, unchanged, silent-drop
+  contract). A denied **read** is *absent* from a REST response (never `null`, never an error — the
+  key itself is gone, so nothing about the field's existence leaks) or *nulled* in GraphQL (the
+  schema is built once at import time, so a per-request field cannot be removed from the response
+  shape the way REST can — a documented, deliberate asymmetry). A denied **write** answers an
+  explicit `400` naming the field, since a silently dropped write is a data-loss bug the caller
+  cannot detect. The gate is checked upstream of PII masking (does the field appear at all, before
+  whether what appears is raw or starred) and also removes a permission-denied field from
+  `?field=`/`?ordering=`/`?search=` — the same oracle-prevention rule masking already follows. Wired
+  into REST and GraphQL; the admin form and background export are a tracked follow-up, not silently
+  unguarded — until they ship, treat a field's `api_field_permissions` rule as REST/GraphQL-only.
+
 
 ### Data protection & auditability
 - **PII masking** — `SNAPADMIN_MASKED_FIELDS` masks configured fields in the admin, the REST API and

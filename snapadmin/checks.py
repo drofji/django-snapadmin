@@ -610,6 +610,54 @@ def check_snapadmin_profile_contradiction(app_configs, **kwargs):
     return warnings
 
 
+def check_snap_action_read_only_conflict(app_configs, **kwargs):
+    """Error: a ``@snap_action`` declares methods the model's own CRUD policy already blocks.
+
+    ``dispatch_action()`` measures every action's HTTP methods against the
+    exact same ``api_read_only``/``api_http_method_names`` policy a regular
+    verb is measured against (#RFC1h) — an action whose methods are not a
+    subset of that resolved set always answers ``403`` and can never actually
+    run. That is dead, misleading configuration: the action exists in code
+    and is discoverable via ``GET /api/models/schema/``, yet nothing can ever
+    reach it. Caught at boot instead of at first request.
+    """
+    if not get_setting("SNAPADMIN_REST_API_ENABLED", True):
+        return []
+    try:
+        from snapadmin.api.views import _SAFE_HTTP_METHOD_NAMES, iter_snap_actions
+    except ImportError:
+        # The REST API is enabled but its dependencies are missing — urls.py
+        # already raises a pointed ImproperlyConfigured for that; this check
+        # has nothing further to add.
+        return []
+
+    errors = []
+    for model in apps.get_models():
+        if not is_registered(model):
+            continue
+        explicit = get_model_meta(model, "api_http_method_names", None)
+        if explicit is not None:
+            allowed = {str(name).lower() for name in explicit} | {"head", "options"}
+        elif get_model_meta(model, "api_read_only", False):
+            allowed = set(_SAFE_HTTP_METHOD_NAMES)
+        else:
+            continue  # full CRUD — no action's methods can conflict
+        for spec in iter_snap_actions(model):
+            blocked = sorted(spec.methods - allowed)
+            if not blocked:
+                continue
+            errors.append(Error(
+                f"{model._meta.label}'s @snap_action {spec.name!r} declares method(s) "
+                f"{blocked} that the model's own api_read_only/api_http_method_names "
+                f"policy already blocks (only {sorted(allowed)} allowed) — this action "
+                "can never be reached and always answers 403.",
+                hint="Widen the model's api_http_method_names, drop the conflicting "
+                     "method(s) from the action, or turn off api_read_only if the "
+                     "model is meant to accept this action.",
+                id="snapadmin.E008",
+            ))
+    return errors
+
 ALL_CHECKS = [
     check_analytics_db_alias,
     check_masked_fields,
@@ -623,6 +671,7 @@ ALL_CHECKS = [
     check_backup_env_requires_encryption,
     check_backup_s3_configuration,
     check_backup_schedule_cadence,
+    check_snap_action_read_only_conflict,
     check_unfold_theme,
     check_snapadmin_profile,
     check_snapadmin_profile_contradiction,

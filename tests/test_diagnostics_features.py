@@ -217,6 +217,39 @@ class TestModelBasedCapabilities:
         assert data["retention_purge"] is True
         assert "model" in data["details"]["retention_purge"]
 
+    def _neutralise_model_retention(self, monkeypatch):
+        """demo.AuditLog and demo.Showcase both carry a permanent
+        data_retention_days (#RET2a dogfood / #RET2c dogfood) — clear both so
+        a test can exercise the "nothing model-level configured" branch."""
+        from demo.apps.shop.models import AuditLog, Showcase
+        monkeypatch.setattr(AuditLog, "data_retention_days", None, raising=False)
+        monkeypatch.setattr(Showcase, "data_retention_days", None, raising=False)
+
+    def test_retention_on_via_audit_log_default_alone(self, monkeypatch):
+        # SNAPADMIN_AUDIT_RETENTION_DAYS defaults to 365 (on) — #RET2a made
+        # this capability true on an install with zero SnapModels configured.
+        self._neutralise_model_retention(monkeypatch)
+        data = _collect(verbose=True)
+        assert data["retention_purge"] is True
+        assert "audit log" in data["details"]["retention_purge"]
+
+    @override_settings(SNAPADMIN_AUDIT_RETENTION_DAYS=0)
+    def test_retention_off_when_nothing_configured(self, monkeypatch):
+        self._neutralise_model_retention(monkeypatch)
+        assert _collect()["retention_purge"] is False
+
+    @override_settings(SNAPADMIN_AUDIT_RETENTION_DAYS=0, SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_retention_on_via_export_job_setting_alone(self, monkeypatch):
+        self._neutralise_model_retention(monkeypatch)
+        data = _collect(verbose=True)
+        assert data["retention_purge"] is True
+        assert "export jobs" in data["details"]["retention_purge"]
+
+    def test_retention_files_counted_in_detail(self):
+        # demo.Showcase declares data_retention_files (#RET2c).
+        data = _collect(verbose=True)
+        assert "data_retention_files" in data["details"]["retention_purge"]
+
     def test_write_allowlist_detected(self, monkeypatch):
         from demo.apps.shop.models import Product
         monkeypatch.setattr(Product, "api_write_fields", ["name"], raising=False)
@@ -264,6 +297,61 @@ class TestModelBasedCapabilities:
         )
         enabled, detail = features_collector._api_tokens()
         assert enabled is False and detail == ""
+
+
+class TestSnapActions:
+    def test_detected_by_default(self):
+        # demo.Order.recalculate_total (#RFC1h dogfood) ships in the demo app.
+        data = _collect(verbose=True)
+        assert data["snap_actions"] is True
+        assert "action" in data["details"]["snap_actions"]
+        assert "model" in data["details"]["snap_actions"]
+
+    def test_off_when_no_model_declares_one(self):
+        assert features_collector._snap_actions([]) == (False, "")
+
+    def test_fail_soft_when_api_views_unimportable(self, monkeypatch):
+        import sys
+        monkeypatch.setitem(sys.modules, "snapadmin.api.views", None)
+        try:
+            enabled, detail = features_collector._snap_actions(["not-used"])
+        finally:
+            monkeypatch.delitem(sys.modules, "snapadmin.api.views", raising=False)
+        assert enabled is False and detail == ""
+
+
+class TestFieldPermissions:
+    def test_off_by_default(self):
+        # No demo model declares api_field_permissions by default.
+        assert _collect()["field_permissions"] is False
+
+    def test_detected_when_configured(self, monkeypatch):
+        # Scoped to an explicit model list (mirrors
+        # test_decorated_models_counts_registered_plain_models below) rather
+        # than the live registry, which other concurrently-running test
+        # modules may also be registering throwaway models into.
+        from demo.apps.shop.models import Customer
+        monkeypatch.setattr(
+            Customer, "api_field_permissions",
+            {"email": {"read": "demo.view_customer"}}, raising=False,
+        )
+        enabled, detail = features_collector._field_permissions([Customer])
+        assert enabled is True
+        assert detail == "1 field on 1 model"
+
+    def test_counts_across_several_models(self, monkeypatch):
+        from demo.apps.shop.models import Customer, Order
+        monkeypatch.setattr(
+            Customer, "api_field_permissions",
+            {"email": {"read": "demo.view_customer"}, "origin": {"write": "demo.change_customer"}},
+            raising=False,
+        )
+        monkeypatch.setattr(
+            Order, "api_field_permissions", {"total": {"write": "demo.change_order"}}, raising=False,
+        )
+        enabled, detail = features_collector._field_permissions([Customer, Order])
+        assert enabled is True
+        assert detail == "3 fields on 2 models"
 
 
 class TestSso:

@@ -21,7 +21,7 @@ from graphql import GraphQLError, GraphQLResolveInfo
 
 from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
-from snapadmin.masking import get_masked_fields, mask_field, user_can_view_pii
+from snapadmin.masking import get_masked_fields, mask_field, user_can_access_field, user_can_view_pii
 from snapadmin.models import EsStorageMode
 from snapadmin.registry import get_model_meta, is_registered
 
@@ -82,23 +82,53 @@ def _make_relation_guard(model: type[Model]) -> classmethod:
 
 
 def _make_masked_resolver(field_name: str):
-    """Build a field resolver that masks configured PII in GraphQL output.
+    """Build a field resolver applying both the field-permission gate and PII masking.
 
-    Mirrors the REST serializer (:class:`snapadmin.api.serializers.
-    PIIMaskingSerializerMixin`): the raw attribute is returned only when the
-    requesting user may view raw PII (see
-    :func:`snapadmin.masking.user_can_view_pii`), otherwise the value is passed
-    through :func:`snapadmin.masking.mask_field`, so a field's own
-    ``SNAPADMIN_MASKING_RULES`` entry applies here exactly as it does in REST.
-    Fails closed — an absent or anonymous user gets the masked value.
+    Two orthogonal guards, composed in the fixed order #FUT3a's design
+    requires (permission gate first, masking second — a field that should not
+    be visible at all is never a candidate for "visible but starred"):
+
+    1. **Field-permission gate** (#FUT3b, :func:`snapadmin.masking.
+       user_can_access_field`) — a field named in the model's
+       ``api_field_permissions`` whose caller lacks the declared ``"read"``
+       permission resolves to ``None``. This is a **documented asymmetry**
+       with REST: the GraphQL schema is built once, at import time
+       (``schema = get_dynamic_graphql_schema()`` below, module level), while
+       field permissions vary per request (per role) — a resolver can null a
+       field's value but cannot remove it from the response *shape* the way
+       REST's ``to_representation`` pops a dict key. Absence is REST's
+       contract; null is GraphQL's, because that is what its architecture can
+       actually deliver.
+    2. **PII masking**, unchanged from before this gate existed: the raw
+       attribute is returned only when the requesting user may view raw PII
+       (:func:`snapadmin.masking.user_can_view_pii`), otherwise the value is
+       passed through :func:`snapadmin.masking.mask_field`, so a field's own
+       ``SNAPADMIN_MASKING_RULES`` entry applies here exactly as it does in
+       REST.
+
+    Attached to every field named in either ``get_masked_fields()`` or an
+    ``api_field_permissions`` ``"read"`` entry (see the call site below) — a
+    field with neither never gets a resolver here at all. **Masking itself
+    only applies when the field is actually in ``get_masked_fields()``** —
+    a field reached only through the permission gate (no masking rule at
+    all) returns its raw value once the gate passes, rather than falling
+    through to the default masker just because a resolver happens to be
+    attached; the two guards are independent; one being configured must
+    never imply the other. Fails closed on both — an absent or anonymous
+    user gets the permission-denied/masked outcome, never the raw value.
     """
 
     def resolve_masked(root: Model, info: GraphQLResolveInfo) -> object:
-        value = getattr(root, field_name)
         user = getattr(info.context, "user", None)
+        model = type(root)
+        if not user_can_access_field(user, model, field_name, write=False):
+            return None
+        value = getattr(root, field_name)
+        opts = root._meta
+        if field_name not in get_masked_fields(opts.app_label, opts.model_name):
+            return value
         if user_can_view_pii(user):
             return value
-        opts = root._meta
         return mask_field(opts.app_label, opts.model_name, field_name, value, user)
 
     return resolve_masked
@@ -150,12 +180,18 @@ def get_dynamic_graphql_schema():
 
                 # Namespace for the DjangoObjectType. get_queryset extends the
                 # per-model view-permission check to every relation traversed
-                # from this type; per-field resolvers mask configured PII so it
-                # never leaves GraphQL unmasked (mirroring the REST serializer).
+                # from this type; per-field resolvers mask configured PII and
+                # enforce api_field_permissions reads (#FUT3b) so neither ever
+                # leaves GraphQL unguarded (mirroring the REST serializer).
                 type_attrs: dict = {'Meta': meta_attr, 'get_queryset': _make_relation_guard(model)}
-                for masked_field in get_masked_fields(model._meta.app_label, model._meta.model_name):
-                    if masked_field not in excluded:
-                        type_attrs[f"resolve_{masked_field}"] = _make_masked_resolver(masked_field)
+                guarded_fields = set(get_masked_fields(model._meta.app_label, model._meta.model_name))
+                guarded_fields |= {
+                    field for field, rule in (get_model_meta(model, "api_field_permissions", {}) or {}).items()
+                    if isinstance(rule, dict) and rule.get("read")
+                }
+                for guarded_field in guarded_fields:
+                    if guarded_field not in excluded:
+                        type_attrs[f"resolve_{guarded_field}"] = _make_masked_resolver(guarded_field)
                 object_type = type(type_name, (DjangoObjectType,), type_attrs)
 
                 # Add fields to Query

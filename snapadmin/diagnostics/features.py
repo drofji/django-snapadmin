@@ -4,9 +4,10 @@ Feature-adoption collector for ``snapadmin_info`` (the ``features`` section).
 A commerce-readiness checklist: for each business-important SnapAdmin capability —
 backups, retention-based deletion, audit trail, PII masking (fields and rules), the REST/GraphQL APIs,
 API tokens, Elasticsearch, background tasks, health/error alerting, rate limiting,
-the read-only / write / delete guards and SSO — report whether it is actually turned
-on or in use in *this* project (``✓``) or sitting unused (``✗``). Where a capability is
-adopted per-model or per-field, ``--verbose`` adds a one-line count.
+the read-only / write / delete guards, user-defined REST actions, field-level permission
+guards and SSO — report whether it is actually turned on or in use in *this* project
+(``✓``) or sitting unused (``✗``). Where a capability is adopted per-model or per-field,
+``--verbose`` adds a one-line count.
 
 This complements the ``version`` collector (which lists the ``SNAPADMIN_*_ENABLED``
 toggles): here the signal is *adoption* — a model actually declaring retention, a
@@ -117,11 +118,64 @@ def _backup_detail() -> str:
     return detail
 
 
+def _snap_actions(models: list[type[Model]]) -> tuple[bool, str]:
+    """``@snap_action`` adoption (#RFC1h) — fail-soft if the API views module can't import
+    (REST disabled / DRF absent), same reasoning as :func:`_api_tokens`/:func:`_sso`."""
+    try:
+        from snapadmin.api.views import iter_snap_actions
+
+        per_model = {m: iter_snap_actions(m) for m in models}
+    except Exception:
+        return False, ""
+    total = sum(len(specs) for specs in per_model.values())
+    if not total:
+        return False, ""
+    action_models = sum(1 for specs in per_model.values() if specs)
+    return True, f"{_count(total, 'action')} on {_count(action_models, 'model')}"
+
+
+def _field_permissions(models: list[type[Model]]) -> tuple[bool, str]:
+    """``api_field_permissions`` adoption (#FUT3b) — fields gated, and how many models."""
+    fields = 0
+    field_models = 0
+    for model in models:
+        rules = get_model_meta(model, "api_field_permissions", {}) or {}
+        if rules:
+            field_models += 1
+            fields += len(rules)
+    if not fields:
+        return False, ""
+    return True, f"{_count(fields, 'field')} on {_count(field_models, 'model')}"
+
+
+def _retention_detail(model_count: int, file_model_count: int, audit_on: bool, export_days) -> str:
+    """Detail string for the ``retention_purge`` capability's several facets."""
+    parts = []
+    if model_count:
+        parts.append(_count(model_count, "model"))
+    if file_model_count:
+        parts.append(f"{file_model_count} with data_retention_files")
+    if audit_on:
+        parts.append("audit log")
+    if export_days:
+        parts.append(f"export jobs ({export_days}d)")
+    return ", ".join(parts)
+
+
 def _capabilities() -> list[tuple[str, bool, str]]:
     """Every audited capability as ``(key, enabled, detail)`` in report order."""
+    from snapadmin.models import SnapadminAuditLog
+
     models = _concrete_snap_models()
 
     retention = sum(1 for m in models if (get_model_meta(m, "data_retention_days", None) or 0) > 0)
+    # data_retention_files (#RET2c) and the always-on audit-log purge (#RET2a)
+    # and opt-in export-job purge (#RET2b) all feed the same retention_purge
+    # capability below — one entry for "is anything being auto-deleted here",
+    # with the detail spelling out which of the four sweeps contribute.
+    retention_files = sum(1 for m in models if get_model_meta(m, "data_retention_files", None))
+    audit_retention_on = SnapadminAuditLog.data_retention_days() > 0
+    export_retention_days = get_setting("SNAPADMIN_EXPORT_RETENTION_DAYS", None)
     # A field can be declared sensitive by either setting; count the union, and
     # report how many of them carry an explicit rule (iterating a rules dict
     # yields its field names, so both shapes fold in the same way).
@@ -159,7 +213,8 @@ def _capabilities() -> list[tuple[str, bool, str]]:
         ("audit_trail", bool(get_setting("SNAPADMIN_AUDIT_LOG_ENABLED", True)), ""),
         ("error_monitoring", bool(get_setting("SNAPADMIN_ERROR_MONITOR_ENABLED", True)), ""),
         ("backups", bool(get_setting("SNAPADMIN_BACKUP_ENABLED", False)), _backup_detail()),
-        ("retention_purge", retention > 0, _count(retention, "model")),
+        ("retention_purge", retention > 0 or audit_retention_on or bool(export_retention_days),
+         _retention_detail(retention, retention_files, audit_retention_on, export_retention_days)),
         ("pii_masking", masked_fields > 0, _masking_detail(masked_fields, ruled_fields)),
         ("api_tokens", *_api_tokens()),
         ("elasticsearch", es_enabled, _count(es_models, "indexed model") if es_enabled else ""),
@@ -171,6 +226,8 @@ def _capabilities() -> list[tuple[str, bool, str]]:
         ("delete_guard", bool(get_setting("SNAPADMIN_API_DELETE_GUARD", None)), ""),
         ("decorated_models", decorated > 0, _count(decorated, "plain model")),
         ("connectivity_awareness", connectivity_on, _count(offline_models, "offline-capable model") if offline_models else ""),
+        ("snap_actions", *_snap_actions(models)),
+        ("field_permissions", *_field_permissions(models)),
         ("sso", *_sso()),
         ("profile", *_profile()),
     ]

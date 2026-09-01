@@ -28,6 +28,7 @@ from snapadmin.masking import (
     get_masking_rules,
     mask_field,
     mask_value,
+    user_can_access_field,
     user_can_view_pii,
 )
 from snapadmin.api.serializers import get_serializer_for_model
@@ -490,6 +491,182 @@ class TestPerFieldPii:
         assert mask_field("demo", "Customer", "first_name", "Alice", user) == "[redacted]"
 
 
+# ── Field-level permission guards (#FUT3b) ──────────────────────────────────
+
+FIELD_PERMISSIONS = {
+    "email": {"read": "demo.view_customer"},
+    "origin": {"write": "demo.change_customer"},
+    "first_name": {"read": "demo.view_customer", "write": "demo.change_customer"},
+}
+
+
+@pytest.mark.django_db
+class TestUserCanAccessField:
+    def test_field_with_no_rule_is_unrestricted(self, monkeypatch):
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        assert user_can_access_field(AnonymousUser(), Customer, "last_name", write=False) is True
+        assert user_can_access_field(AnonymousUser(), Customer, "last_name", write=True) is True
+
+    def test_no_mapping_at_all_is_unrestricted(self):
+        from demo.apps.shop.models import Customer
+
+        assert user_can_access_field(AnonymousUser(), Customer, "email", write=False) is True
+
+    def test_rule_without_the_relevant_side_is_unrestricted(self, monkeypatch):
+        # "email" only declares "read" — writing it is untouched by this mechanism.
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        assert user_can_access_field(AnonymousUser(), Customer, "email", write=True) is True
+
+    def test_anonymous_denied_when_a_rule_exists(self, monkeypatch):
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        assert user_can_access_field(AnonymousUser(), Customer, "email", write=False) is False
+
+    def test_inactive_user_denied(self, monkeypatch, regular_user):
+        from demo.apps.shop.models import Customer
+
+        regular_user.is_active = False
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        assert user_can_access_field(regular_user, Customer, "email", write=False) is False
+
+    def test_authenticated_without_permission_denied(self, monkeypatch, regular_user):
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        assert user_can_access_field(regular_user, Customer, "email", write=False) is False
+
+    def test_holder_of_the_permission_allowed(self, monkeypatch, regular_user):
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        user = _with_perm(regular_user, "view_customer")
+        assert user_can_access_field(user, Customer, "email", write=False) is True
+
+    def test_write_side_checked_independently_of_read(self, monkeypatch, regular_user):
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        user = _with_perm(regular_user, "view_customer")
+        # Holds the read grant ("view_customer") but not the (different) write
+        # grant "change_customer" that "origin" requires.
+        assert user_can_access_field(user, Customer, "origin", write=True) is False
+
+    def test_superuser_bypasses_every_rule(self, monkeypatch, admin_user):
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        assert user_can_access_field(admin_user, Customer, "email", write=False) is True
+        assert user_can_access_field(admin_user, Customer, "origin", write=True) is True
+
+    def test_decorated_plain_model_reads_the_registry_entry(self):
+        # api_field_permissions works identically via registry.register() — the
+        # interim mechanism for a @snap_model-decorated model, mirroring how
+        # #RFC1e's own precedence tests reached two other unexposed kwargs.
+        from django.db import models as django_models
+        from django.test.utils import isolate_apps
+
+        from snapadmin import registry
+
+        with isolate_apps("snapadmin"):
+            plain_model = type(
+                "FieldPermPlainTarget",
+                (django_models.Model,),
+                {"__module__": __name__, "Meta": type("Meta", (), {"app_label": "snapadmin"})},
+            )
+        registry.register(plain_model, api_field_permissions={"secret": {"read": "tests.view_secret"}})
+        assert user_can_access_field(AnonymousUser(), plain_model, "secret", write=False) is False
+        assert user_can_access_field(AnonymousUser(), plain_model, "other", write=False) is True
+
+
+# ── The REST serializer's field-permission guard (#FUT3b) ──────────────────
+
+@pytest.mark.django_db
+class TestRestFieldPermissions:
+    def test_denied_read_is_absent_not_null(self, monkeypatch, customer, regular_user):
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        ser = get_serializer_for_model("demo", "Customer")
+        data = ser(customer, context={"request": SimpleNamespace(user=regular_user)}).data
+        assert "email" not in data  # not data["email"] is None — the key itself is gone
+        assert data["last_name"] == "Smith"  # unrelated field unaffected
+
+    def test_granted_read_is_present(self, monkeypatch, customer, regular_user):
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        user = _with_perm(regular_user, "view_customer")
+        ser = get_serializer_for_model("demo", "Customer")
+        data = ser(customer, context={"request": SimpleNamespace(user=user)}).data
+        assert data["email"] == "alice@example.com"
+
+    def test_superuser_sees_every_field(self, monkeypatch, customer, admin_user):
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        ser = get_serializer_for_model("demo", "Customer")
+        data = ser(customer, context={"request": SimpleNamespace(user=admin_user)}).data
+        assert "email" in data
+
+    def test_denied_write_is_a_400_naming_the_field(self, monkeypatch, regular_user):
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        ser_class = get_serializer_for_model("demo", "Customer")
+        ser = ser_class(
+            data={"first_name": "A", "last_name": "B", "email": "a@b.com", "origin": "status_b"},
+            context={"request": SimpleNamespace(user=regular_user)},
+        )
+        assert ser.is_valid() is False
+        assert "origin" in ser.errors  # "origin" requires demo.change_customer to write
+
+    def test_granted_write_passes_validation(self, monkeypatch, regular_user):
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        user = _with_perm(regular_user, "change_customer")
+        ser_class = get_serializer_for_model("demo", "Customer")
+        ser = ser_class(
+            data={"first_name": "A", "last_name": "B", "email": "a@b.com", "origin": "status_b"},
+            context={"request": SimpleNamespace(user=user)},
+        )
+        assert ser.is_valid() is True, ser.errors
+
+    def test_field_with_no_rule_is_never_denied(self, customer, regular_user):
+        # No api_field_permissions configured at all on Customer: identical
+        # to the pre-#FUT3b serializer behaviour.
+        ser = get_serializer_for_model("demo", "Customer")
+        data = ser(customer, context={"request": SimpleNamespace(user=regular_user)}).data
+        assert "email" in data
+
+    def test_exclude_wins_absolutely_over_a_read_grant(self, monkeypatch, customer, admin_user):
+        # api_exclude_fields removes the field from the serializer entirely —
+        # even a superuser (who bypasses the permission gate outright) never
+        # sees it, because there is no field object left to gate. Baked in at
+        # build_model_serializer() time, so the module cache must be busted
+        # for this one test to observe it (established pattern, see
+        # test_model_api.py's restricted_product_serializer fixture).
+        from demo.apps.shop.models import Customer
+        from snapadmin.api import serializers as serializers_module
+
+        monkeypatch.setattr(Customer, "api_exclude_fields", ["email"], raising=False)
+        monkeypatch.setattr(
+            Customer, "api_field_permissions", {"email": {"read": "demo.view_customer"}}, raising=False
+        )
+        serializers_module._serializer_cache.pop("demo.Customer", None)
+        try:
+            ser = get_serializer_for_model("demo", "Customer")
+            data = ser(customer, context={"request": SimpleNamespace(user=admin_user)}).data
+            assert "email" not in data
+        finally:
+            serializers_module._serializer_cache.pop("demo.Customer", None)
+
+
 # ── The same rules on every masking surface (#PROP4c) ───────────────────────
 
 @pytest.mark.django_db
@@ -537,6 +714,51 @@ class TestRulesAcrossSurfaces:
         batch, _cursor = next(_DefaultOrmSource(job).iter_batches(cursor=None, chunk_size=10))
         assert batch[0]["email"] == "#####@###########"
         assert batch[0]["first_name"] == "[redacted]"
+
+
+# ── Field-permission guard on the GraphQL resolver (#FUT3b) ────────────────
+
+@pytest.mark.django_db
+class TestFieldPermissionGraphQLResolver:
+    def test_denied_read_is_nulled_not_omitted(self, monkeypatch, customer, regular_user):
+        # GraphQL's static schema cannot omit a field per caller (#FUT3a point
+        # 4) — denial nulls the value, the documented asymmetry with REST.
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        resolve = _make_masked_resolver("email")
+        info = SimpleNamespace(context=SimpleNamespace(user=regular_user))
+        assert resolve(customer, info) is None
+
+    def test_granted_read_returns_the_raw_value(self, monkeypatch, customer, regular_user):
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        user = _with_perm(regular_user, "view_customer")
+        resolve = _make_masked_resolver("email")
+        info = SimpleNamespace(context=SimpleNamespace(user=user))
+        assert resolve(customer, info) == "alice@example.com"
+
+    def test_permission_gate_then_masking_in_order(self, monkeypatch, customer, regular_user):
+        # "first_name" is both permission-gated (FIELD_PERMISSIONS) and masked
+        # (RULES) — holding the permission still leaves it masked, proving the
+        # gate and the masking are independent, ordered checks, not aliases.
+        from demo.apps.shop.models import Customer
+
+        monkeypatch.setattr(Customer, "api_field_permissions", FIELD_PERMISSIONS, raising=False)
+        with override_settings(SNAPADMIN_MASKING_RULES=RULES):
+            user = _with_perm(regular_user, "view_customer")
+            resolve = _make_masked_resolver("first_name")
+            info = SimpleNamespace(context=SimpleNamespace(user=user))
+            assert resolve(customer, info) == "[redacted]"
+
+    def test_field_with_no_permission_rule_is_unaffected(self, customer, regular_user):
+        # No api_field_permissions configured at all: identical to the
+        # pre-#FUT3b resolver behaviour (masking only).
+        with override_settings(SNAPADMIN_MASKING_RULES=RULES):
+            resolve = _make_masked_resolver("email")
+            info = SimpleNamespace(context=SimpleNamespace(user=regular_user))
+            assert resolve(customer, info) == "#####@###########"
 
     @override_settings(SNAPADMIN_MASKING_RULES=RULES)
     def test_audit_diff(self):
