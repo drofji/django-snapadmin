@@ -610,6 +610,54 @@ def check_snapadmin_profile_contradiction(app_configs, **kwargs):
     return warnings
 
 
+def check_retention_purge_scheduled(app_configs, **kwargs):
+    """Warn: retention is configured somewhere, but nothing schedules the purge.
+
+    ``SnapModel.purge_expired`` / ``SnapadminAuditLog.purge_expired`` /
+    ``purge_expired_export_jobs`` only ever run when something calls them —
+    the ``snapadmin.purge_expired_data`` Celery Beat entry, or an operator
+    invoking ``manage.py snapadmin_purge_expired_data`` from an external cron.
+    Retention is on the books the moment any of the three settings below is
+    configured (the audit log always is, by its own 365-day default), so a
+    project that never wires up either trigger has a table it believes is
+    bounded quietly growing forever — the exact state every #RET2 report was
+    actually in. This can only see ``CELERY_BEAT_SCHEDULE`` as Django settings
+    define it; a cron entry calling the management command directly is
+    invisible here and does not need to trip this warning.
+    """
+    from snapadmin.models import SnapadminAuditLog
+
+    configured = (
+        SnapadminAuditLog.data_retention_days() > 0
+        or bool(get_setting("SNAPADMIN_EXPORT_RETENTION_DAYS", None))
+        or any(
+            (get_model_meta(model, "data_retention_days", None) or 0) > 0
+            for model in apps.get_models()
+            if is_registered(model)
+        )
+    )
+    if not configured:
+        return []
+
+    beat_schedule = getattr(settings, "CELERY_BEAT_SCHEDULE", None) or {}
+    scheduled_tasks = {
+        entry.get("task") for entry in beat_schedule.values() if isinstance(entry, dict)
+    }
+    if "snapadmin.purge_expired_data" in scheduled_tasks:
+        return []
+
+    return [Warning(
+        "Retention is configured (a model's data_retention_days, "
+        "SNAPADMIN_AUDIT_RETENTION_DAYS or SNAPADMIN_EXPORT_RETENTION_DAYS), "
+        "but no CELERY_BEAT_SCHEDULE entry runs snapadmin.purge_expired_data — "
+        "the tables it names will keep growing until something calls it.",
+        hint="Add a CELERY_BEAT_SCHEDULE entry for the 'snapadmin.purge_expired_data' "
+             "task (see docs/index.html#gdpr), or run "
+             "'manage.py snapadmin_purge_expired_data' from an external cron instead.",
+        id="snapadmin.W012",
+    )]
+
+
 def check_snap_action_read_only_conflict(app_configs, **kwargs):
     """Error: a ``@snap_action`` declares methods the model's own CRUD policy already blocks.
 
@@ -659,6 +707,169 @@ def check_snap_action_read_only_conflict(app_configs, **kwargs):
     return errors
 
 
+#: Sentinel for "never declared subject_path at all" — distinct from an
+#: explicit ``None`` ("this model carries nothing subject-scoped"), the same
+#: trick ``get_model_meta``'s own ``default`` argument is built on.
+_SUBJECT_PATH_UNDECLARED = object()
+
+
+def check_subject_paths(app_configs, **kwargs):
+    """GDPR subject-access declaration (#FUT4a/#FUT4b) — loud, not silent, omission.
+
+    Every registered SnapAdmin model must declare ``subject_path`` — a forward
+    ORM lookup path to the field carrying the value that identifies a GDPR data
+    subject, or ``None`` if the model carries nothing subject-scoped. A model
+    that never sets it at all is indistinguishable, from the outside, from one
+    whose author considered the question and answered "nothing here" — exactly
+    the silence the ``manage.py snapadmin_subject_request`` export/deletion
+    command cannot safely assume its way around, since it is a legally-binding
+    export. ``snapadmin.E011`` is that omission.
+
+    ``snapadmin.E012`` groups every way a *declared* path can still be wrong —
+    mirroring the house style ``check_masking_rules`` already sets (E003 for an
+    unresolvable key, E004/E005 for distinct problems within one setting):
+
+    * ``is_data_subject=True`` with no ``subject_identifier``, or with
+      ``subject_path != subject_identifier`` — a subject model must reach
+      *itself* by exactly its own identifying field, zero hops, never a
+      different path (almost always a copy-paste mistake, and silently
+      accepting one would defeat the whole point of requiring both).
+    * a path over the 3-relation-hop cap — a deliberate ceiling, not a
+      measured ceiling: past it is a schema shape worth a person looking at,
+      not a silent multi-hop join running inside a legally-binding export.
+    * a path that does not resolve via this model's own **forward**
+      relations (``ForeignKey``/``OneToOneField`` only — never a reverse
+      accessor or a many-to-many, since the path lives on the model that
+      *has* the data, not the model being reached) to a real terminal field.
+    * an ``ES_ONLY`` model declaring a multi-hop path — confirmed against
+      ``EsQuerySet.filter()`` itself, which only ever matches flat
+      ``field=value`` (nothing splits on ``__`` there), so a multi-hop path on
+      an ``ES_ONLY`` model would silently match nothing rather than erroring,
+      the one shape that must be caught here instead of discovered against a
+      live index during an actual export run.
+
+    The honest limit this whole mechanism sits on: it only ever walks
+    ``apps.get_models()`` filtered by :func:`snapadmin.registry.is_registered`
+    — a Django model nobody ever wrapped in ``SnapModel``/``@snap_model`` is
+    invisible here before the question is even asked. State that next to the
+    subject-request command's own honesty limits, not just here.
+    """
+    from django.core.exceptions import FieldDoesNotExist
+    from django.db import models as django_models
+
+    from snapadmin.models import EsStorageMode
+
+    errors = []
+    for model in apps.get_models():
+        if not is_registered(model):
+            continue
+
+        label = model._meta.label
+        path = get_model_meta(model, "subject_path", _SUBJECT_PATH_UNDECLARED)
+
+        if path is _SUBJECT_PATH_UNDECLARED:
+            errors.append(Error(
+                f"{label} is a registered SnapAdmin model but never declares "
+                "subject_path (or None) — a GDPR subject-access export/deletion "
+                "cannot know whether this model carries personal data reachable "
+                "from a subject.",
+                hint="Set subject_path to a forward ORM lookup path reaching the "
+                     "subject's identifying field (e.g. 'customer__email'), or "
+                     f"subject_path = None if {label} carries nothing subject-scoped.",
+                id="snapadmin.E011",
+            ))
+            continue
+        if path is None:
+            continue
+
+        is_subject = bool(get_model_meta(model, "is_data_subject", False))
+        identifier = get_model_meta(model, "subject_identifier", None)
+
+        if is_subject:
+            if not identifier:
+                errors.append(Error(
+                    f"{label} sets is_data_subject=True but declares no "
+                    "subject_identifier.",
+                    hint="Set subject_identifier to the field name on this model "
+                         "holding the raw identifier value, e.g. 'email'.",
+                    id="snapadmin.E012",
+                ))
+                continue
+            if path != identifier:
+                errors.append(Error(
+                    f"{label} is a subject model (is_data_subject=True) whose "
+                    f"subject_path ({path!r}) does not equal its own "
+                    f"subject_identifier ({identifier!r}).",
+                    hint="A subject model must reach itself by exactly its own "
+                         f"identifying field: set subject_path = {identifier!r}.",
+                    id="snapadmin.E012",
+                ))
+                continue
+
+        if not isinstance(path, str) or not path:
+            errors.append(Error(
+                f"{label}.subject_path = {path!r} is not a non-empty string.",
+                hint="subject_path must be a '__'-joined ORM lookup path string, "
+                     "or None.",
+                id="snapadmin.E012",
+            ))
+            continue
+
+        segments = path.split("__")
+        hops = segments[:-1]
+        if len(hops) > 3:
+            errors.append(Error(
+                f"{label}.subject_path = {path!r} is {len(hops)} relation hops "
+                "deep — over the 3-hop cap.",
+                hint="Shorten the path, or reconsider the design — a path this "
+                     "deep is worth a person looking at, not a silent multi-hop "
+                     "join inside a legally-binding export.",
+                id="snapadmin.E012",
+            ))
+            continue
+
+        current = model
+        resolvable = True
+        for segment in hops:
+            try:
+                field = current._meta.get_field(segment)
+            except FieldDoesNotExist:
+                resolvable = False
+                break
+            if not isinstance(field, (django_models.ForeignKey, django_models.OneToOneField)):
+                resolvable = False
+                break
+            current = field.related_model
+        if resolvable:
+            try:
+                current._meta.get_field(segments[-1])
+            except FieldDoesNotExist:
+                resolvable = False
+        if not resolvable:
+            errors.append(Error(
+                f"{label}.subject_path = {path!r} does not resolve to a real "
+                "field via this model's own forward relations.",
+                hint="subject_path must be a '__'-joined chain of this model's "
+                     "own forward ForeignKey/OneToOneField names, ending in a "
+                     "real field name — never a reverse accessor or a "
+                     "many-to-many.",
+                id="snapadmin.E012",
+            ))
+            continue
+
+        if hops and get_model_meta(model, "es_storage_mode", None) == EsStorageMode.ES_ONLY:
+            errors.append(Error(
+                f"{label} is ES_ONLY and subject_path = {path!r} has relation "
+                "hops — EsQuerySet.filter() only matches flat field=value, so a "
+                "multi-hop path silently matches nothing at export/deletion time.",
+                hint="An ES_ONLY model may only declare a zero-hop subject_path "
+                     "— a field literally present on the ES document.",
+                id="snapadmin.E012",
+            ))
+
+    return errors
+
+
 #: Above this, SNAPADMIN_FETCH_BY_MAX_VALUES no longer meaningfully bounds the
 #: request-size DoS the cap exists to close (see fetch_by in
 #: snapadmin.api.views) — a value this high is functionally "no cap" while
@@ -704,7 +915,9 @@ ALL_CHECKS = [
     check_backup_env_requires_encryption,
     check_backup_s3_configuration,
     check_backup_schedule_cadence,
+    check_retention_purge_scheduled,
     check_snap_action_read_only_conflict,
+    check_subject_paths,
     check_fetch_by_max_values,
     check_unfold_theme,
     check_snapadmin_profile,

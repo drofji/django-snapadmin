@@ -206,6 +206,11 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     # own gate, #JS2e) — the setting alone is not enough to mean anything is
     # actually running.
     connectivity_on = bool(get_setting("SNAPADMIN_CONNECTIVITY_ENABLED", False)) and offline_models > 0
+    # GDPR subject-access declaration (#FUT4a/#FUT4b) — "on" means at least one
+    # valid manage.py snapadmin_subject_request entry point exists; the detail
+    # also names how many registered models a request from it can reach.
+    subject_models = sum(1 for m in models if get_model_meta(m, "is_data_subject", False))
+    subject_path_models = sum(1 for m in models if get_model_meta(m, "subject_path", None))
 
     return [
         ("rest_api", bool(get_setting("SNAPADMIN_REST_API_ENABLED", True)), ""),
@@ -228,6 +233,9 @@ def _capabilities() -> list[tuple[str, bool, str]]:
         ("connectivity_awareness", connectivity_on, _count(offline_models, "offline-capable model") if offline_models else ""),
         ("snap_actions", *_snap_actions(models)),
         ("field_permissions", *_field_permissions(models)),
+        ("gdpr_subject_access", subject_models > 0,
+         f"{_count(subject_models, 'subject model')}, {_count(subject_path_models, 'model')} reachable"
+         if subject_models else ""),
         ("sso", *_sso()),
         ("profile", *_profile()),
     ]

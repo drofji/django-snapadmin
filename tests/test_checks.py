@@ -692,6 +692,274 @@ class TestSnapadminProfileContradiction:
         assert checks.check_snapadmin_profile_contradiction(None) == []
 
 
+# ── GDPR subject-access declaration (E011/E012) ──────────────────────────────
+
+from django.db import models as django_models
+from django.test.utils import isolate_apps
+
+from snapadmin.models import EsStorageMode, SnapModel, snap_model
+
+
+def _plain_model(name, fields=None, **snap_model_kwargs):
+    """A plain, isolated django.db.models.Model registered via @snap_model,
+    with real (isolated) fields for exercising subject_path resolution."""
+    with isolate_apps("snapadmin"):
+        attrs = {"__module__": __name__, "Meta": type("Meta", (), {"app_label": "snapadmin"})}
+        attrs.update(fields or {})
+        model = type(name, (django_models.Model,), attrs)
+        snap_model(**snap_model_kwargs)(model)
+    return model
+
+
+class TestSubjectPathsCheck:
+    def test_clean_when_nothing_registered(self, monkeypatch):
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [])
+        assert checks.check_subject_paths(None) == []
+
+    def test_unregistered_model_is_ignored(self, monkeypatch):
+        with isolate_apps("snapadmin"):
+            class Plain0(django_models.Model):
+                class Meta:
+                    app_label = "snapadmin"
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [Plain0])
+        assert checks.check_subject_paths(None) == []
+
+    def test_undeclared_subject_path_is_e011(self, monkeypatch):
+        model = _plain_model("Undeclared0")
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E011"]
+        assert "never declares" in result[0].msg
+
+    def test_explicit_none_is_clean(self, monkeypatch):
+        model = _plain_model("None0", subject_path=None)
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+        assert checks.check_subject_paths(None) == []
+
+    def test_zero_hop_value_match_is_clean(self, monkeypatch):
+        model = _plain_model(
+            "ValueMatch0",
+            fields={"user_email": django_models.EmailField()},
+            subject_path="user_email",
+        )
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+        assert checks.check_subject_paths(None) == []
+
+    def test_subject_model_self_reference_matching_is_clean(self, monkeypatch):
+        model = _plain_model(
+            "Subject0",
+            fields={"email": django_models.EmailField()},
+            subject_path="email", is_data_subject=True, subject_identifier="email",
+        )
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+        assert checks.check_subject_paths(None) == []
+
+    def test_is_data_subject_without_identifier_is_e012(self, monkeypatch):
+        model = _plain_model(
+            "NoIdentifier0",
+            fields={"email": django_models.EmailField()},
+            subject_path="email", is_data_subject=True,
+        )
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E012"]
+        assert "subject_identifier" in result[0].msg
+
+    def test_subject_path_not_matching_identifier_is_e012(self, monkeypatch):
+        model = _plain_model(
+            "Mismatch0",
+            fields={"email": django_models.EmailField(), "username": django_models.CharField(max_length=20)},
+            subject_path="username", is_data_subject=True, subject_identifier="email",
+        )
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E012"]
+        assert "does not equal" in result[0].msg
+
+    def test_non_string_path_is_e012(self, monkeypatch):
+        model = _plain_model("NonString0", subject_path=123)
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E012"]
+        assert "not a non-empty string" in result[0].msg
+
+    def test_empty_string_path_is_e012(self, monkeypatch):
+        model = _plain_model("Empty0", subject_path="")
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E012"]
+
+    def test_over_three_hops_is_e012(self, monkeypatch):
+        model = _plain_model("TooDeep0", subject_path="a__b__c__d__e")
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E012"]
+        assert "hop" in result[0].msg
+
+    def test_three_hops_exactly_is_allowed_to_proceed_to_resolution(self, monkeypatch):
+        # At the cap, not over it — falls through to the resolution check,
+        # which then fails for an unrelated reason (no such field), proving
+        # the hop-count gate itself did not reject it.
+        model = _plain_model("AtCap0", subject_path="a__b__c__d")
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E012"]
+        assert "does not resolve" in result[0].msg
+
+    def test_hop_segment_missing_field_is_e012(self, monkeypatch):
+        model = _plain_model(
+            "BadHop0", fields={"name": django_models.CharField(max_length=10)},
+            subject_path="ghost__email",
+        )
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E012"]
+        assert "does not resolve" in result[0].msg
+
+    def test_hop_through_a_non_relation_field_is_e012(self, monkeypatch):
+        model = _plain_model(
+            "NonRelationHop0", fields={"name": django_models.CharField(max_length=10)},
+            subject_path="name__email",
+        )
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E012"]
+
+    def test_unresolvable_terminal_field_is_e012(self, monkeypatch):
+        model = _plain_model("Unresolvable0", subject_path="does_not_exist")
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E012"]
+
+    def test_resolvable_forward_fk_hop_is_clean(self, monkeypatch):
+        with isolate_apps("snapadmin"):
+            class FkTarget0(django_models.Model):
+                email = django_models.EmailField()
+
+                class Meta:
+                    app_label = "snapadmin"
+
+            class FkSource0(django_models.Model):
+                target = django_models.ForeignKey(FkTarget0, on_delete=django_models.CASCADE)
+
+                class Meta:
+                    app_label = "snapadmin"
+
+            snap_model(subject_path="target__email")(FkSource0)
+            snap_model(subject_path=None)(FkTarget0)
+
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [FkSource0, FkTarget0])
+        assert checks.check_subject_paths(None) == []
+
+    def test_resolvable_one_to_one_hop_is_clean(self, monkeypatch):
+        with isolate_apps("snapadmin"):
+            class O2OTarget0(django_models.Model):
+                email = django_models.EmailField()
+
+                class Meta:
+                    app_label = "snapadmin"
+
+            class O2OSource0(django_models.Model):
+                target = django_models.OneToOneField(O2OTarget0, on_delete=django_models.CASCADE)
+
+                class Meta:
+                    app_label = "snapadmin"
+
+            snap_model(subject_path="target__email")(O2OSource0)
+            snap_model(subject_path=None)(O2OTarget0)
+
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [O2OSource0, O2OTarget0])
+        assert checks.check_subject_paths(None) == []
+
+    def test_terminal_field_missing_after_valid_hop_is_e012(self, monkeypatch):
+        with isolate_apps("snapadmin"):
+            class Target1(django_models.Model):
+                class Meta:
+                    app_label = "snapadmin"
+
+            class Source1(django_models.Model):
+                target = django_models.ForeignKey(Target1, on_delete=django_models.CASCADE)
+
+                class Meta:
+                    app_label = "snapadmin"
+
+            snap_model(subject_path="target__ghost")(Source1)
+            snap_model(subject_path=None)(Target1)
+
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [Source1, Target1])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E012"]
+
+    def test_many_to_many_hop_is_rejected(self, monkeypatch):
+        with isolate_apps("snapadmin"):
+            class M2MTarget0(django_models.Model):
+                email = django_models.EmailField()
+
+                class Meta:
+                    app_label = "snapadmin"
+
+            class M2MSource0(django_models.Model):
+                targets = django_models.ManyToManyField(M2MTarget0)
+
+                class Meta:
+                    app_label = "snapadmin"
+
+            snap_model(subject_path="targets__email")(M2MSource0)
+            snap_model(subject_path=None)(M2MTarget0)
+
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [M2MSource0, M2MTarget0])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E012"]
+
+    def test_es_only_zero_hop_is_clean(self, monkeypatch):
+        with isolate_apps("snapadmin"):
+            class EsZeroHop0(SnapModel):
+                query = django_models.CharField(max_length=100)
+                es_storage_mode = EsStorageMode.ES_ONLY
+                subject_path = "query"
+
+                class Meta:
+                    app_label = "snapadmin"
+
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [EsZeroHop0])
+        assert checks.check_subject_paths(None) == []
+
+    def test_es_only_multi_hop_is_e012(self, monkeypatch):
+        with isolate_apps("snapadmin"):
+            class EsTarget0(django_models.Model):
+                email = django_models.EmailField()
+
+                class Meta:
+                    app_label = "snapadmin"
+
+            class EsSource0(SnapModel):
+                target = django_models.ForeignKey(EsTarget0, on_delete=django_models.CASCADE)
+                es_storage_mode = EsStorageMode.ES_ONLY
+                subject_path = "target__email"
+
+                class Meta:
+                    app_label = "snapadmin"
+
+            snap_model(subject_path=None)(EsTarget0)
+
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [EsSource0, EsTarget0])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E012"]
+        assert "ES_ONLY" in result[0].msg
+
+    def test_multiple_models_report_every_error(self, monkeypatch):
+        undeclared = _plain_model("Undeclared1")
+        clean = _plain_model("Clean1", subject_path=None)
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [undeclared, clean])
+        result = checks.check_subject_paths(None)
+        assert [e.id for e in result] == ["snapadmin.E011"]
+
+    def test_real_demo_registry_is_clean(self):
+        """Integration confirmation: every shipped demo model already
+        declares a valid subject_path (#FUT4a/#FUT4b dogfood)."""
+        assert checks.check_subject_paths(None) == []
+
+
 # ── retention purge scheduled (W012) ─────────────────────────────────────────
 
 class TestRetentionPurgeScheduled:

@@ -366,6 +366,204 @@ class TestPurgeExpiredEsOnly:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# SnapadminAuditLog.purge_expired() — the audit trail is not a SnapModel, so it
+# carries its own retention machinery (#RET2a)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestAuditLogPurgeExpired:
+    def _old_entry(self, days_old: int):
+        from snapadmin.models import SnapadminAuditLog
+        entry = SnapadminAuditLog.objects.create(action="create", actor_repr="tester")
+        SnapadminAuditLog.objects.filter(pk=entry.pk).update(
+            timestamp=timezone.now() - timedelta(days=days_old)
+        )
+        return entry
+
+    def test_default_retention_is_365_days(self):
+        from snapadmin.models import SnapadminAuditLog
+        assert SnapadminAuditLog.data_retention_days() == 365
+
+    def test_retention_days_reads_the_setting_live(self, settings):
+        from snapadmin.models import SnapadminAuditLog
+        settings.SNAPADMIN_AUDIT_RETENTION_DAYS = 10
+        assert SnapadminAuditLog.data_retention_days() == 10
+
+    def test_retention_field_is_timestamp(self):
+        from snapadmin.models import SnapadminAuditLog
+        assert SnapadminAuditLog.data_retention_field == "timestamp"
+
+    def test_deletes_expired_rows(self):
+        from snapadmin.models import SnapadminAuditLog
+        old = self._old_entry(366)
+        assert SnapadminAuditLog.purge_expired() == 1
+        assert not SnapadminAuditLog.objects.filter(pk=old.pk).exists()
+
+    def test_keeps_recent_rows(self):
+        from snapadmin.models import SnapadminAuditLog
+        recent = SnapadminAuditLog.objects.create(action="create", actor_repr="tester")
+        SnapadminAuditLog.purge_expired()
+        assert SnapadminAuditLog.objects.filter(pk=recent.pk).exists()
+
+    def test_dry_run_counts_without_deleting(self):
+        from snapadmin.models import SnapadminAuditLog
+        old = self._old_entry(366)
+        assert SnapadminAuditLog.purge_expired(dry_run=True) == 1
+        assert SnapadminAuditLog.objects.filter(pk=old.pk).exists()
+
+    def test_disabled_returns_zero(self, settings):
+        from snapadmin.models import SnapadminAuditLog
+        settings.SNAPADMIN_AUDIT_RETENTION_DAYS = 0
+        self._old_entry(9999)
+        assert SnapadminAuditLog.purge_expired() == 0
+
+    def test_purge_uses_queryset_delete_not_instance_delete(self):
+        """QuerySet.delete() is the one sanctioned bypass of the append-only
+        guard — purge_expired() must not go through the instance .delete()
+        (which raises ValidationError) or the purge itself would explode.
+        """
+        from snapadmin.models import SnapadminAuditLog
+        self._old_entry(366)
+        # No exception means the guard was correctly bypassed via QuerySet.delete().
+        SnapadminAuditLog.purge_expired()
+
+
+@pytest.mark.django_db
+class TestPurgeExpiredDataTaskIncludesAuditLog:
+    def _old_entry(self, days_old: int):
+        from snapadmin.models import SnapadminAuditLog
+        entry = SnapadminAuditLog.objects.create(action="create", actor_repr="tester")
+        SnapadminAuditLog.objects.filter(pk=entry.pk).update(
+            timestamp=timezone.now() - timedelta(days=days_old)
+        )
+        return entry
+
+    def test_task_purges_the_audit_log_too(self):
+        from snapadmin.tasks import purge_expired_data
+        old = self._old_entry(366)
+        result = purge_expired_data()
+        from snapadmin.models import SnapadminAuditLog
+        assert not SnapadminAuditLog.objects.filter(pk=old.pk).exists()
+        assert result["purged"]["snapadmin.SnapadminAuditLog"] >= 1
+
+    def test_task_skips_audit_log_when_disabled(self, settings):
+        from snapadmin.tasks import purge_expired_data
+        settings.SNAPADMIN_AUDIT_RETENTION_DAYS = 0
+        self._old_entry(9999)
+        result = purge_expired_data()
+        assert "snapadmin.SnapadminAuditLog" not in result["purged"]
+
+    def test_task_reports_audit_log_purge_error(self, monkeypatch):
+        from snapadmin.models import SnapadminAuditLog
+        from snapadmin.tasks import purge_expired_data
+
+        def boom(*, now=None):
+            raise RuntimeError("db unavailable")
+
+        monkeypatch.setattr(SnapadminAuditLog, "purge_expired", staticmethod(boom))
+        result = purge_expired_data()
+        assert "snapadmin.SnapadminAuditLog" in result["errors"]
+
+
+@pytest.mark.django_db
+class TestPurgeExpiredDataCommandIncludesAuditLog:
+    def _call_command(self, *args):
+        from io import StringIO
+        from django.core.management import call_command
+        out = StringIO()
+        call_command("snapadmin_purge_expired_data", *args, stdout=out)
+        return out.getvalue()
+
+    def _old_entry(self, days_old: int):
+        from snapadmin.models import SnapadminAuditLog
+        entry = SnapadminAuditLog.objects.create(action="create", actor_repr="tester")
+        SnapadminAuditLog.objects.filter(pk=entry.pk).update(
+            timestamp=timezone.now() - timedelta(days=days_old)
+        )
+        return entry
+
+    def test_command_purges_the_audit_log(self):
+        from snapadmin.models import SnapadminAuditLog
+        old = self._old_entry(366)
+        output = self._call_command()
+        assert not SnapadminAuditLog.objects.filter(pk=old.pk).exists()
+        assert "snapadmin.SnapadminAuditLog" in output
+
+    def test_command_dry_run_does_not_delete_audit_log(self):
+        from snapadmin.models import SnapadminAuditLog
+        old = self._old_entry(366)
+        self._call_command("--dry-run")
+        assert SnapadminAuditLog.objects.filter(pk=old.pk).exists()
+
+    def test_command_reports_audit_log_purge_error(self):
+        from snapadmin.models import SnapadminAuditLog
+
+        def boom(*, now=None, dry_run=False):
+            raise RuntimeError("db unavailable")
+
+        with patch.object(SnapadminAuditLog, "purge_expired", staticmethod(boom)):
+            output = self._call_command()
+        assert "ERROR snapadmin.SnapadminAuditLog" in output
+
+
+@pytest.mark.django_db
+class TestPurgeExpiredDataCommandIncludesExportJobs:
+    def _call_command(self, *args):
+        from io import StringIO
+        from django.core.management import call_command
+        out = StringIO()
+        call_command("snapadmin_purge_expired_data", *args, stdout=out)
+        return out.getvalue()
+
+    def _old_export_job(self, days_old: int):
+        from snapadmin.models import SnapExportJob
+        job = SnapExportJob.objects.create(
+            app_label="demo", model="Product", export_format="csv",
+            status=SnapExportJob.Status.COMPLETED, file_name="cmd_export.csv",
+        )
+        SnapExportJob.objects.filter(pk=job.pk).update(
+            finished_at=timezone.now() - timedelta(days=days_old)
+        )
+        return job
+
+    def test_disabled_by_default_prints_nothing_about_jobs(self):
+        output = self._call_command()
+        assert "export_jobs" not in output
+        assert "export_files" not in output
+
+    def test_command_purges_export_jobs_and_files(self, settings):
+        from snapadmin.models import SnapExportJob
+        settings.SNAPADMIN_EXPORT_RETENTION_DAYS = 30
+        old = self._old_export_job(31)
+        output = self._call_command()
+        assert not SnapExportJob.objects.filter(pk=old.pk).exists()
+        assert "snapadmin.SnapExportJob" in output
+        assert "snapadmin.export_files" in output
+
+    def test_command_dry_run_does_not_delete_export_jobs(self, settings):
+        from snapadmin.models import SnapExportJob
+        settings.SNAPADMIN_EXPORT_RETENTION_DAYS = 30
+        old = self._old_export_job(31)
+        output = self._call_command("--dry-run")
+        assert SnapExportJob.objects.filter(pk=old.pk).exists()
+        assert "DRY RUN snapadmin.SnapExportJob" in output
+        assert "DRY RUN snapadmin.export_files" in output
+
+    def test_command_reports_export_purge_failure(self, settings, monkeypatch):
+        from snapadmin import exporting
+        settings.SNAPADMIN_EXPORT_RETENTION_DAYS = 30
+        monkeypatch.setattr(
+            exporting, "purge_expired_export_jobs",
+            lambda now=None, dry_run=False: {
+                "enabled": True, "jobs_deleted": {"SnapExportJob": 0},
+                "files_deleted": 0, "orphan_files_deleted": 0, "failed": ["boom"],
+            },
+        )
+        output = self._call_command()
+        assert "ERROR snapadmin.export_jobs: boom" in output
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # purge_expired() counts must reflect the target model's own rows, not
 # Django's cascade-inflated QuerySet.delete() total (on_delete=CASCADE children)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -413,3 +611,165 @@ class TestPurgeExpiredCountNotCascadeInflated:
         # not Django's cascade-inflated delete() total (1 order + 3 items = 4).
         assert live_count == 1
         assert live_count == dry_run_count
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# data_retention_files (#RET2c) — purge_expired() takes storage-backed files
+# with it, files before rows, a shared path is never orphaned, and dry_run
+# touches nothing. Exercised against Showcase (the demo model with real
+# SnapFileField/SnapImageField columns) with its retention window patched to
+# a short value for the test, rather than its permanent 10-year demo config.
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestPurgeExpiredFiles:
+    def _showcase(self, **kw):
+        from demo.apps.shop.models import Showcase
+        defaults = {"char_field": "x"}
+        defaults.update(kw)
+        return Showcase.objects.create(**defaults)
+
+    def _age(self, obj, days_old: int):
+        from demo.apps.shop.models import Showcase
+        Showcase.objects.filter(pk=obj.pk).update(
+            datetime_field=timezone.now() - timedelta(days=days_old)
+        )
+        obj.refresh_from_db()
+        return obj
+
+    def _retention(self, files):
+        from demo.apps.shop.models import Showcase
+        return (
+            patch.object(Showcase, "data_retention_days", 30, create=True),
+            patch.object(Showcase, "data_retention_field", "datetime_field", create=True),
+            patch.object(Showcase, "data_retention_files", files, create=True),
+        )
+
+    def test_deletes_file_before_row(self):
+        from django.core.files.base import ContentFile
+        from demo.apps.shop.models import Showcase
+
+        obj = self._showcase()
+        obj.file_field.save("doc.txt", ContentFile(b"hello"), save=True)
+        storage, path = obj.file_field.storage, obj.file_field.name
+        self._age(obj, 31)
+
+        p1, p2, p3 = self._retention(["file_field"])
+        with p1, p2, p3:
+            count = Showcase.purge_expired()
+
+        assert count == 1
+        assert not storage.exists(path)
+        assert not Showcase.objects.filter(pk=obj.pk).exists()
+
+    def test_no_files_declared_purges_rows_only(self):
+        from django.core.files.base import ContentFile
+        from demo.apps.shop.models import Showcase
+
+        obj = self._showcase()
+        obj.file_field.save("kept.txt", ContentFile(b"hello"), save=True)
+        storage, path = obj.file_field.storage, obj.file_field.name
+        self._age(obj, 31)
+
+        p1, p2, p3 = self._retention(None)
+        with p1, p2, p3:
+            Showcase.purge_expired()
+
+        # data_retention_files unset (None) — today's behaviour, unchanged:
+        # the row goes, the file is left exactly where it was.
+        assert storage.exists(path)
+
+    def test_missing_file_is_not_a_failure(self):
+        from demo.apps.shop.models import Showcase
+
+        obj = self._showcase()  # file_field/image_field both blank
+        self._age(obj, 31)
+
+        p1, p2, p3 = self._retention(["file_field"])
+        with p1, p2, p3:
+            count = Showcase.purge_expired()  # must not raise
+
+        assert count == 1
+        assert not Showcase.objects.filter(pk=obj.pk).exists()
+
+    def test_storage_error_raises_and_keeps_the_row(self):
+        from django.core.files.base import ContentFile
+        from demo.apps.shop.models import Showcase
+        from snapadmin.models import SnapPurgeError
+
+        obj = self._showcase()
+        obj.file_field.save("boom.txt", ContentFile(b"hello"), save=True)
+        self._age(obj, 31)
+
+        p1, p2, p3 = self._retention(["file_field"])
+        with p1, p2, p3, \
+             patch("django.core.files.storage.FileSystemStorage.delete",
+                   side_effect=OSError("disk full")):
+            with pytest.raises(SnapPurgeError):
+                Showcase.purge_expired()
+
+        # Files-before-rows: a file failure must leave the row (and its file
+        # name) intact so the purge is retryable, not orphan one from the other.
+        assert Showcase.objects.filter(pk=obj.pk).exists()
+
+    def test_dry_run_touches_nothing(self):
+        from django.core.files.base import ContentFile
+        from demo.apps.shop.models import Showcase
+
+        obj = self._showcase()
+        obj.file_field.save("preview.txt", ContentFile(b"hello"), save=True)
+        storage, path = obj.file_field.storage, obj.file_field.name
+        self._age(obj, 31)
+
+        p1, p2, p3 = self._retention(["file_field"])
+        with p1, p2, p3:
+            count = Showcase.purge_expired(dry_run=True)
+
+        assert count == 1
+        assert storage.exists(path)
+        assert Showcase.objects.filter(pk=obj.pk).exists()
+
+    def test_shared_path_within_the_same_purge_batch_is_still_deleted(self):
+        """Two rows expiring in the *same* purge that happen to reference the
+        same storage path must not skip each other forever — the shared-file
+        skip only protects a path a row *outside* this batch still needs.
+        """
+        from django.core.files.base import ContentFile
+        from demo.apps.shop.models import Showcase
+
+        first = self._showcase()
+        first.file_field.save("shared.txt", ContentFile(b"hello"), save=True)
+        storage, path = first.file_field.storage, first.file_field.name
+        second = self._showcase(file_field=path)
+        self._age(first, 31)
+        self._age(second, 31)
+
+        p1, p2, p3 = self._retention(["file_field"])
+        with p1, p2, p3:
+            count = Showcase.purge_expired()
+
+        assert count == 2
+        assert not storage.exists(path)
+
+    def test_path_still_referenced_by_a_live_row_is_skipped(self):
+        """A row outside this purge's window still points at the same path —
+        the file must survive even though the expiring row's own copy of the
+        row is deleted.
+        """
+        from django.core.files.base import ContentFile
+        from demo.apps.shop.models import Showcase
+
+        old = self._showcase()
+        old.file_field.save("shared_live.txt", ContentFile(b"hello"), save=True)
+        storage, path = old.file_field.storage, old.file_field.name
+        live = self._showcase(file_field=path)  # recent — not in this purge's window
+        self._age(old, 31)
+
+        p1, p2, p3 = self._retention(["file_field"])
+        with p1, p2, p3:
+            count = Showcase.purge_expired()
+
+        assert count == 1
+        assert not Showcase.objects.filter(pk=old.pk).exists()
+        assert Showcase.objects.filter(pk=live.pk).exists()
+        assert storage.exists(path)  # kept — "live" still references it

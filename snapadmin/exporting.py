@@ -93,6 +93,22 @@ def export_chunk_size() -> int:
     return max(1, int(get_setting("SNAPADMIN_EXPORT_CHUNK_SIZE", 1000)))
 
 
+def export_retention_days() -> int | None:
+    """``SNAPADMIN_EXPORT_RETENTION_DAYS``, or ``None`` when retention is off.
+
+    Unset (``None``) by default — unlike :attr:`SnapModel.data_retention_days`
+    or the audit log's ``SNAPADMIN_AUDIT_RETENTION_DAYS`` (both on by
+    default), this purge deletes files a project may want to keep around (a
+    downloaded report, an archival export), so it is opt-in rather than
+    on-by-default. See :func:`purge_expired_export_jobs`.
+    """
+    value = get_setting("SNAPADMIN_EXPORT_RETENTION_DAYS", None)
+    if value in (None, ""):
+        return None
+    days = int(value)
+    return days if days > 0 else None
+
+
 def export_dir() -> str:
     """Directory the (local) working export files are written to, created if missing.
 
@@ -597,6 +613,140 @@ def _run(job) -> None:
     job.finished_at = timezone.now()
     job.save(update_fields=["status", "finished_at"])
     logger.info("snapadmin.export.completed", job=str(job.pk), rows=job.processed_rows)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Retention (#RET2b) — SNAPADMIN_EXPORT_RETENTION_DAYS
+#
+# Export/reindex job rows and the files they wrote are never cleaned up on
+# their own: an export streams into place, gets downloaded, and the job row
+# and its published file both just sit there — quietly filling a disk on a
+# project that runs scheduled exports. This purge removes finished job rows
+# past the window, their published files, and any export file left behind
+# with no matching job row at all (a worker that died mid-export leaves
+# exactly that — the row is created before the file starts writing, so an
+# orphan here means a row was removed some other way while its file survived,
+# e.g. by hand, or by a pre-#RET2b version of this purge).
+# ─────────────────────────────────────────────────────────────────────────────
+
+def purge_expired_export_jobs(*, now=None, dry_run: bool = False) -> dict:
+    """Purge finished ``SnapExportJob``/``SnapReindexJob`` rows and their files.
+
+    A no-op (``{"enabled": False, ...}``) when :func:`export_retention_days`
+    is unset — this purge is opt-in, unlike the always-on model/audit-log
+    retention. Otherwise, for jobs whose ``finished_at`` is older than the
+    window:
+
+    * **Files before rows.** Each ``SnapExportJob``'s published file is
+      deleted from :func:`get_export_storage` first; only once every file in
+      the batch is confirmed gone (or was already missing) are the job rows
+      themselves deleted. A storage failure is appended to the returned
+      ``"failed"`` list — never only logged — and leaves **every** row in this
+      run's batch intact, so the whole batch is safely retryable on the next
+      run rather than orphaning a row from the file it names.
+    * ``SnapReindexJob`` rows carry no file, so they are deleted directly.
+    * **Orphan sweep.** Any file in the export storage with no matching
+      ``SnapExportJob.file_name`` at all, and whose modification time is
+      older than the retention window, is treated as abandoned and removed.
+      This assumes the export storage location is used exclusively for
+      SnapAdmin exports — its documented purpose (see :func:`export_dir`) —
+      not a shared bucket with unrelated files; state this assumption where
+      the setting is documented, not just here.
+
+    **Known limitation:** a ``SnapReindexJob`` cancelled through the API never
+    gets a ``finished_at`` stamp (see ``snapadmin/reindexing.py``'s
+    cancellation path), so a cancelled reindex job is invisible to the cutoff
+    below and is not purged by this function until that gap is closed
+    elsewhere. A cancelled ``SnapExportJob`` does not share this gap — its
+    ``cancel`` action stamps ``finished_at`` precisely so this purge can reach
+    it, since a cancelled export can leave a real partial file on disk (see
+    the module docstring).
+    """
+    from snapadmin.models import SnapExportJob, SnapReindexJob
+
+    retention_days = export_retention_days()
+    result: dict = {
+        "enabled": retention_days is not None,
+        "jobs_deleted": {}, "files_deleted": 0, "orphan_files_deleted": 0,
+        "failed": [],
+    }
+    if retention_days is None:
+        return result
+
+    now = now or timezone.now()
+    cutoff = now - datetime.timedelta(days=retention_days)
+    storage = get_export_storage()
+
+    export_qs = SnapExportJob.objects.filter(
+        status__in=[
+            SnapExportJob.Status.COMPLETED,
+            SnapExportJob.Status.FAILED,
+            SnapExportJob.Status.CANCELLED,
+        ],
+        finished_at__lt=cutoff,
+    )
+    if dry_run:
+        result["jobs_deleted"]["SnapExportJob"] = export_qs.count()
+    else:
+        export_pks = []
+        for job in export_qs.iterator():
+            export_pks.append(job.pk)
+            name = export_file_name(job)
+            try:
+                if storage.exists(name):
+                    storage.delete(name)
+                    result["files_deleted"] += 1
+            except Exception as exc:
+                logger.error(
+                    "snapadmin.export_retention.file_delete_failed",
+                    job=str(job.pk), name=name, error=str(exc),
+                )
+                result["failed"].append(f"SnapExportJob {job.pk} file {name!r}: {exc}")
+        if export_pks and not result["failed"]:
+            deleted, _ = SnapExportJob.objects.filter(pk__in=export_pks).delete()
+            result["jobs_deleted"]["SnapExportJob"] = deleted
+        else:
+            result["jobs_deleted"]["SnapExportJob"] = 0
+
+    reindex_qs = SnapReindexJob.objects.filter(
+        status__in=[SnapReindexJob.Status.COMPLETED, SnapReindexJob.Status.FAILED],
+        finished_at__lt=cutoff,
+    )
+    if dry_run:
+        result["jobs_deleted"]["SnapReindexJob"] = reindex_qs.count()
+    else:
+        deleted, _ = reindex_qs.delete()
+        result["jobs_deleted"]["SnapReindexJob"] = deleted
+
+    known_names = set(SnapExportJob.objects.exclude(file_name="").values_list("file_name", flat=True))
+    try:
+        _, storage_files = storage.listdir("")
+    except NotImplementedError:
+        storage_files = []
+    for name in storage_files:
+        if name in known_names:
+            continue
+        try:
+            modified = storage.get_modified_time(name)
+        except (NotImplementedError, OSError):
+            continue
+        if timezone.is_naive(modified):
+            modified = timezone.make_aware(modified)
+        if modified >= cutoff:
+            continue
+        if dry_run:
+            result["orphan_files_deleted"] += 1
+            continue
+        try:
+            storage.delete(name)
+            result["orphan_files_deleted"] += 1
+        except Exception as exc:
+            logger.error(
+                "snapadmin.export_retention.orphan_delete_failed", name=name, error=str(exc),
+            )
+            result["failed"].append(f"orphan file {name!r}: {exc}")
+
+    return result
 
 
 def _write_bytes(handle, data: bytes) -> int:

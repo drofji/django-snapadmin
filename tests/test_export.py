@@ -15,6 +15,7 @@ import uuid
 from decimal import Decimal
 
 import pytest
+from django.core.files.base import ContentFile
 from django.core.files.storage import FileSystemStorage, Storage
 from django.test import override_settings
 from django.utils import timezone
@@ -1258,3 +1259,350 @@ class TestPluggableExportSources:
         lines = open(exporting.output_path(job)).read().strip().splitlines()
         assert lines[0] == "id,catalog_line"         # header written exactly once
         assert len(lines) == 6                        # no duplicated rows on resume
+
+
+# ── retention purge (#RET2b) ─────────────────────────────────────────────────
+
+class _FailingDeleteStorage:
+    """Wraps a real storage but fails on ``delete()`` of a named file — used to
+    exercise the "storage failure is reported, row kept" branch of the export
+    retention purge without touching a real filesystem's permissions."""
+
+    def __init__(self, inner, *, fails_on: str):
+        self._inner = inner
+        self._fails_on = fails_on
+
+    def exists(self, name):
+        return self._inner.exists(name)
+
+    def delete(self, name):
+        if name == self._fails_on:
+            raise OSError("disk full")
+        self._inner.delete(name)
+
+    def listdir(self, path):
+        return self._inner.listdir(path)
+
+    def get_modified_time(self, name):
+        return self._inner.get_modified_time(name)
+
+    def path(self, name):
+        return self._inner.path(name)
+
+
+class _OrphanSweepStorage:
+    """Wraps a real storage, overriding just the calls the orphan sweep makes
+    — used to exercise its defensive branches (an unsupported listdir/
+    get_modified_time, a naive modified time, a delete failure) without a
+    real filesystem/backend that actually misbehaves that way.
+
+    Every override is scoped to a single ``target`` filename and falls
+    through to the real storage for everything else — the export dir is a
+    session-wide shared directory (see settings_test.py), so an unscoped
+    override would also misreport every leftover file another test in the
+    session happened to leave behind.
+    """
+
+    def __init__(self, inner, *, target=None, listdir_error=None, modified_time=None,
+                 modified_time_error=None, fails_on=None):
+        self._inner = inner
+        self._target = target
+        self._listdir_error = listdir_error
+        self._modified_time = modified_time
+        self._modified_time_error = modified_time_error
+        self._fails_on = fails_on
+
+    def exists(self, name):
+        return self._inner.exists(name)
+
+    def delete(self, name):
+        if name == self._fails_on:
+            raise OSError("disk full")
+        self._inner.delete(name)
+
+    def listdir(self, path):
+        if self._listdir_error:
+            raise self._listdir_error
+        return self._inner.listdir(path)
+
+    def get_modified_time(self, name):
+        if name == self._target:
+            if self._modified_time_error:
+                raise self._modified_time_error
+            if self._modified_time is not None:
+                return self._modified_time
+        return self._inner.get_modified_time(name)
+
+    def path(self, name):
+        return self._inner.path(name)
+
+
+@pytest.mark.django_db
+class TestExportRetentionConfig:
+    def test_disabled_by_default(self):
+        assert exporting.export_retention_days() is None
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_enabled_when_set(self):
+        assert exporting.export_retention_days() == 30
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=0)
+    def test_zero_is_disabled(self):
+        assert exporting.export_retention_days() is None
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS="")
+    def test_blank_is_disabled(self):
+        assert exporting.export_retention_days() is None
+
+
+@pytest.mark.django_db
+class TestPurgeExpiredExportJobs:
+    @pytest.fixture(autouse=True)
+    def _clean_export_dir(self):
+        """SNAPADMIN_EXPORT_DIR is one session-wide directory (settings_test.py)
+        shared by every export test — a plain-file leftover from an unrelated
+        test elsewhere in the file (its owning SnapExportJob row rolled back
+        with the test transaction, but the file itself is not transactional)
+        would otherwise read as a false orphan here. Start every test in this
+        class from an empty directory rather than relying on cleanup elsewhere.
+        """
+        storage = exporting.get_export_storage()
+        _, files = storage.listdir("")
+        for name in files:
+            storage.delete(name)
+        yield
+
+    def _old_job(self, days_old, **kw):
+        defaults = dict(status=SnapExportJob.Status.COMPLETED)
+        defaults.update(kw)
+        job = _job(**defaults)
+        SnapExportJob.objects.filter(pk=job.pk).update(
+            finished_at=timezone.now() - datetime.timedelta(days=days_old)
+        )
+        job.refresh_from_db()
+        return job
+
+    def test_disabled_returns_not_enabled(self):
+        result = exporting.purge_expired_export_jobs()
+        assert result == {
+            "enabled": False, "jobs_deleted": {}, "files_deleted": 0,
+            "orphan_files_deleted": 0, "failed": [],
+        }
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_deletes_finished_job_and_its_file(self):
+        job = self._old_job(31, file_name="old_export.csv")
+        storage = exporting.get_export_storage()
+        storage.save("old_export.csv", ContentFile(b"a,b\n1,2\n"))
+
+        result = exporting.purge_expired_export_jobs()
+
+        assert result["enabled"] is True
+        assert result["jobs_deleted"]["SnapExportJob"] == 1
+        assert result["files_deleted"] == 1
+        assert result["failed"] == []
+        assert not SnapExportJob.objects.filter(pk=job.pk).exists()
+        assert not storage.exists("old_export.csv")
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_keeps_recent_job(self):
+        job = _job(status=SnapExportJob.Status.COMPLETED, file_name="recent.csv")
+        exporting.purge_expired_export_jobs()
+        assert SnapExportJob.objects.filter(pk=job.pk).exists()
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_pending_job_is_never_swept(self):
+        job = _job(status=SnapExportJob.Status.PENDING)
+        exporting.purge_expired_export_jobs()
+        assert SnapExportJob.objects.filter(pk=job.pk).exists()
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_missing_file_is_not_a_failure(self):
+        # A completed job whose file was already removed some other way
+        # must not block the row purge — "already gone" is success, not error.
+        job = self._old_job(31, file_name="already_gone.csv")
+        result = exporting.purge_expired_export_jobs()
+        assert result["failed"] == []
+        assert not SnapExportJob.objects.filter(pk=job.pk).exists()
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_cancelled_job_with_partial_file_is_purged(self):
+        job = self._old_job(31, status=SnapExportJob.Status.CANCELLED, file_name="partial.csv")
+        storage = exporting.get_export_storage()
+        storage.save("partial.csv", ContentFile(b"partial rows\n"))
+
+        result = exporting.purge_expired_export_jobs()
+
+        assert result["jobs_deleted"]["SnapExportJob"] == 1
+        assert not storage.exists("partial.csv")
+        assert not SnapExportJob.objects.filter(pk=job.pk).exists()
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_storage_failure_is_reported_and_row_kept(self, monkeypatch):
+        job = self._old_job(31, file_name="boom.csv")
+        real_storage = exporting.get_export_storage()
+        real_storage.save("boom.csv", ContentFile(b"x"))
+        failing = _FailingDeleteStorage(real_storage, fails_on="boom.csv")
+        monkeypatch.setattr(exporting, "get_export_storage", lambda: failing)
+
+        result = exporting.purge_expired_export_jobs()
+
+        assert result["failed"]
+        assert "boom.csv" in result["failed"][0]
+        # Kept intact — files-before-rows means a file failure must not
+        # orphan the row from the file name it still needs on the retry.
+        assert SnapExportJob.objects.filter(pk=job.pk).exists()
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_dry_run_touches_nothing(self):
+        job = self._old_job(31, file_name="preview.csv")
+        storage = exporting.get_export_storage()
+        storage.save("preview.csv", ContentFile(b"x"))
+
+        result = exporting.purge_expired_export_jobs(dry_run=True)
+
+        assert result["jobs_deleted"]["SnapExportJob"] == 1
+        assert SnapExportJob.objects.filter(pk=job.pk).exists()
+        assert storage.exists("preview.csv")
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_deletes_finished_reindex_jobs(self):
+        from snapadmin.models import SnapReindexJob
+        job = SnapReindexJob.objects.create(
+            app_label="demo", model="Product", status=SnapReindexJob.Status.COMPLETED,
+        )
+        SnapReindexJob.objects.filter(pk=job.pk).update(
+            finished_at=timezone.now() - datetime.timedelta(days=31)
+        )
+
+        result = exporting.purge_expired_export_jobs()
+
+        assert result["jobs_deleted"]["SnapReindexJob"] == 1
+        assert not SnapReindexJob.objects.filter(pk=job.pk).exists()
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_keeps_recent_reindex_job(self):
+        from snapadmin.models import SnapReindexJob
+        job = SnapReindexJob.objects.create(
+            app_label="demo", model="Product", status=SnapReindexJob.Status.COMPLETED,
+        )
+        exporting.purge_expired_export_jobs()
+        assert SnapReindexJob.objects.filter(pk=job.pk).exists()
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_orphan_file_with_no_job_row_is_swept(self):
+        storage = exporting.get_export_storage()
+        storage.save("orphan.csv", ContentFile(b"x"))
+        old_time = (timezone.now() - datetime.timedelta(days=31)).timestamp()
+        os.utime(storage.path("orphan.csv"), (old_time, old_time))
+
+        result = exporting.purge_expired_export_jobs()
+
+        assert result["orphan_files_deleted"] == 1
+        assert not storage.exists("orphan.csv")
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_recent_orphan_file_is_kept(self):
+        storage = exporting.get_export_storage()
+        storage.save("recent_orphan.csv", ContentFile(b"x"))
+
+        result = exporting.purge_expired_export_jobs()
+
+        assert result["orphan_files_deleted"] == 0
+        assert storage.exists("recent_orphan.csv")
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_file_named_by_a_kept_job_is_not_an_orphan(self):
+        # A recent job's file must never be swept by the orphan pass just
+        # because that job isn't old enough for the row-retention pass.
+        job = _job(status=SnapExportJob.Status.COMPLETED, file_name="kept.csv")
+        storage = exporting.get_export_storage()
+        storage.save("kept.csv", ContentFile(b"x"))
+        old_time = (timezone.now() - datetime.timedelta(days=31)).timestamp()
+        os.utime(storage.path("kept.csv"), (old_time, old_time))
+
+        result = exporting.purge_expired_export_jobs()
+
+        assert result["orphan_files_deleted"] == 0
+        assert storage.exists("kept.csv")
+        assert SnapExportJob.objects.filter(pk=job.pk).exists()
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_orphan_dry_run_counts_without_deleting(self, monkeypatch):
+        storage = exporting.get_export_storage()
+        storage.save("orphan_preview.csv", ContentFile(b"x"))
+        old_time = (timezone.now() - datetime.timedelta(days=31)).timestamp()
+        os.utime(storage.path("orphan_preview.csv"), (old_time, old_time))
+
+        result = exporting.purge_expired_export_jobs(dry_run=True)
+
+        assert result["orphan_files_deleted"] == 1
+        assert storage.exists("orphan_preview.csv")
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_listdir_not_implemented_is_not_fatal(self, monkeypatch):
+        real_storage = exporting.get_export_storage()
+        wrapped = _OrphanSweepStorage(real_storage, listdir_error=NotImplementedError())
+        # (listdir_error is not per-file, so no target is needed here.)
+        monkeypatch.setattr(exporting, "get_export_storage", lambda: wrapped)
+
+        result = exporting.purge_expired_export_jobs()  # must not raise
+
+        assert result["orphan_files_deleted"] == 0
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_unreadable_modified_time_skips_the_file(self, monkeypatch):
+        real_storage = exporting.get_export_storage()
+        real_storage.save("weird.csv", ContentFile(b"x"))
+        wrapped = _OrphanSweepStorage(real_storage, target="weird.csv",
+                                       modified_time_error=OSError("no stat"))
+        monkeypatch.setattr(exporting, "get_export_storage", lambda: wrapped)
+
+        result = exporting.purge_expired_export_jobs()  # must not raise
+
+        assert result["orphan_files_deleted"] == 0
+        assert real_storage.exists("weird.csv")
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_naive_modified_time_is_made_aware(self, monkeypatch):
+        real_storage = exporting.get_export_storage()
+        real_storage.save("naive.csv", ContentFile(b"x"))
+        naive_old = datetime.datetime.now() - datetime.timedelta(days=31)
+        assert timezone.is_naive(naive_old)
+        wrapped = _OrphanSweepStorage(real_storage, target="naive.csv", modified_time=naive_old)
+        monkeypatch.setattr(exporting, "get_export_storage", lambda: wrapped)
+
+        result = exporting.purge_expired_export_jobs()
+
+        assert result["orphan_files_deleted"] == 1
+        assert not real_storage.exists("naive.csv")
+
+    @override_settings(SNAPADMIN_EXPORT_RETENTION_DAYS=30)
+    def test_orphan_delete_failure_is_reported(self, monkeypatch):
+        real_storage = exporting.get_export_storage()
+        real_storage.save("orphan_boom.csv", ContentFile(b"x"))
+        old_time = (timezone.now() - datetime.timedelta(days=31)).timestamp()
+        os.utime(real_storage.path("orphan_boom.csv"), (old_time, old_time))
+        wrapped = _OrphanSweepStorage(real_storage, fails_on="orphan_boom.csv")
+        monkeypatch.setattr(exporting, "get_export_storage", lambda: wrapped)
+
+        result = exporting.purge_expired_export_jobs()
+
+        assert result["orphan_files_deleted"] == 0
+        assert result["failed"]
+        assert "orphan_boom.csv" in result["failed"][0]
+        assert real_storage.exists("orphan_boom.csv")
+
+
+@pytest.mark.django_db
+class TestExportCancelStampsFinishedAt:
+    """The cancel action must stamp finished_at so a cancelled job (which can
+    leave a real partial file on disk) is reachable by the retention purge."""
+
+    def test_cancel_sets_finished_at(self, auth_client):
+        job = _job(status=SnapExportJob.Status.PENDING)
+        r = auth_client.post(f"/api/exports/{job.pk}/cancel/")
+        assert r.status_code == 200
+        job.refresh_from_db()
+        assert job.status == SnapExportJob.Status.CANCELLED
+        assert job.finished_at is not None

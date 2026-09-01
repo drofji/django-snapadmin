@@ -243,7 +243,10 @@ def test_snap_model_decorator_signature():
 
     Keyword-only and deliberately limited to the settings a plain model actually
     honours: no ``es_*``/``data_retention_*`` keywords, because ``@snap_model``
-    attaches none of the machinery that would act on them.
+    attaches none of the machinery that would act on them. ``subject_path``/
+    ``is_data_subject``/``subject_identifier`` (#FUT4a/#FUT4b) are pure registry
+    metadata — no runtime machinery needed — so they *are* accepted here, unlike
+    the ``es_*``/``data_retention_*`` families.
     """
     from snapadmin.models import snap_model
 
@@ -251,6 +254,7 @@ def test_snap_model_decorator_signature():
         "api_exclude_fields", "api_write_fields", "api_read_only",
         "api_http_method_names", "api_filter_lookups", "api_default_text_lookups",
         "api_json_filters", "offline_mode", "offline_cache_limit", "search_fields",
+        "subject_path", "is_data_subject", "subject_identifier",
     ]
     assert all(
         param.kind is inspect.Parameter.KEYWORD_ONLY

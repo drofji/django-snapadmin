@@ -42,6 +42,12 @@ class Product(snap_models.SnapModel):
     # fields accept client-supplied values on create/update.
     api_write_fields = ["name", "price", "in_stock"]
 
+    # GDPR subject-access declaration — required on every registered model, no
+    # implicit default. None states explicitly that this model carries nothing
+    # reachable from a data subject; see the GDPR docs for a model that does
+    # (e.g. an order pointing at a customer's email).
+    subject_path = None
+
     class Meta:
         verbose_name = _("Product")
         verbose_name_plural = _("Products")

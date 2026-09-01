@@ -427,13 +427,26 @@ class TestSnapModelDriftGuard:
         )
 
     def test_every_decorator_keyword_matches_a_snapmodel_attribute(self):
-        """search_fields is the one deliberate exception: SnapModel derives its
-        own search_fields from searchable=True Snap fields rather than a class
-        attribute, so it has no attribute of the same name to compare against."""
+        """search_fields is the original exception: SnapModel derives its own
+        search_fields from searchable=True Snap fields rather than a class
+        attribute, so it has no attribute of the same name to compare against.
+
+        subject_path/is_data_subject/subject_identifier (#FUT4a/#FUT4b) are
+        the second, deliberate one — and for the opposite reason. SnapModel
+        declares no class-attribute default for subject_path on purpose: the
+        sentinel trick check_subject_paths relies on (distinguishing "never
+        declared" from an explicit "declared None") only works if there is no
+        inherited base-class value to fall back to. Giving SnapModel a
+        subject_path = None default would make every subclass that skips it
+        silently answer "nothing subject-scoped" instead of failing loudly
+        with snapadmin.E011 — exactly the failure mode this whole mechanism
+        exists to close.
+        """
         import inspect
 
         params = set(inspect.signature(snap_model).parameters)
-        for name in params - {"search_fields"}:
+        exceptions = {"search_fields", "subject_path", "is_data_subject", "subject_identifier"}
+        for name in params - exceptions:
             assert hasattr(SnapModel, name), (
                 f"snap_model() accepts {name!r} but SnapModel has no matching attribute"
             )

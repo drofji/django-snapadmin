@@ -369,6 +369,49 @@ class SnapadminAuditLog(models.Model):
     def delete(self, *args, **kwargs):
         raise ValidationError(_("Audit log entries are immutable and cannot be deleted."))
 
+    # GDPR retention (#RET2a). SnapadminAuditLog is deliberately not a SnapModel
+    # and never registered (see the class docstring and snap_model()'s "no
+    # retention purge" note) — registering it would also expose it through the
+    # dynamic REST/GraphQL API and the offline cache, which is not what this
+    # model is for. So it does not carry data_retention_days as a plain class
+    # attribute the way SnapModel.purge_expired() reads one; instead it is read
+    # live here, and snapadmin.tasks.purge_expired_data() calls this classmethod
+    # directly (an explicit, additive call, not the apps.get_models() sweep).
+    data_retention_field = "timestamp"
+
+    @classmethod
+    def data_retention_days(cls) -> int:
+        """``SNAPADMIN_AUDIT_RETENTION_DAYS``, read live (not frozen at import time).
+
+        Defaults to 365 — the value this setting has always documented, now
+        actually enforced by an unattended purge instead of only by
+        ``snapadmin_audit_export --purge``. Set to ``0`` or a negative number to
+        disable automatic purging (the export command's own ``--purge`` still
+        works, since it reads the same setting independently).
+        """
+        return int(get_setting("SNAPADMIN_AUDIT_RETENTION_DAYS", 365))
+
+    @classmethod
+    def purge_expired(cls, *, now=None, dry_run: bool = False) -> int:
+        """Delete audit rows past :meth:`data_retention_days` (GDPR).
+
+        Mirrors :meth:`SnapModel.purge_expired` for the one built-in model that
+        is not a ``SnapModel``. ``QuerySet.delete()`` bypasses the append-only
+        guard on :meth:`delete` by design — retention pruning is the one
+        sanctioned way to remove a row, never a single-object delete.
+        """
+        retention_days = cls.data_retention_days()
+        if retention_days <= 0:
+            return 0
+        now = now or timezone.now()
+        cutoff = now - timedelta(days=retention_days)
+        qs = cls.objects.filter(timestamp__lt=cutoff)
+        if dry_run:
+            return qs.count()
+        count = qs.count()
+        qs.delete()  # sanctioned bypass of the append-only guard — see above
+        return count
+
 
 class SnapJobBase(models.Model):
     """Abstract base for a resumable, progress-tracking background job.
@@ -1017,7 +1060,8 @@ class SnapModel(models.Model):
       ``api_default_text_lookups`` / ``api_json_filters`` (generated query filters).
     * **Elasticsearch** — ``es_index_enabled``, ``es_storage_mode``,
       ``es_index_name``, ``es_mapping``.
-    * **Compliance** — ``data_retention_days`` for the GDPR purge.
+    * **Compliance** — ``data_retention_days``/``data_retention_files`` for the
+      GDPR purge.
 
     Each attribute is documented inline where it is declared below, and in full at
     https://drofji.github.io/django-snapadmin/#snap-model.
@@ -1158,6 +1202,12 @@ class SnapModel(models.Model):
     # Records older than this many days (measured on data_retention_field) will be removed.
     data_retention_days: int | None = None
     data_retention_field: str = "created_at"
+    # Storage-backed field names (SnapFileField / SnapImageField) whose files are
+    # deleted alongside an expiring row, so a purged row never leaves an orphaned
+    # file behind on disk — see purge_expired()'s "files before rows" ordering
+    # and the shared-file skip rule documented there. None (the default) purges
+    # rows only, exactly today's behaviour.
+    data_retention_files: list[str] | None = None
 
     # Offline mode
     # Set offline_mode = True to enable client-side caching (IndexedDB) of this model's
@@ -2352,6 +2402,70 @@ class SnapModel(models.Model):
             return 0
 
     @classmethod
+    def _purge_expired_files(cls, qs, purging_pks: set) -> None:
+        """Delete :attr:`data_retention_files` storage objects for the rows in ``qs``.
+
+        Called **before** ``qs.delete()`` (see :meth:`purge_expired`'s docstring)
+        so a file-deletion failure leaves the row — and therefore the file's
+        name — intact and the purge retryable on the next run. A missing file
+        (already gone from storage) is treated as already-done, not a failure.
+
+        A path still referenced by another **live** row is skipped — deleting it
+        would orphan that other row's file — and only logged, never counted as a
+        failure. ``purging_pks`` (every pk in this same purge batch) is excluded
+        from that "still referenced" check: two expiring rows that happen to
+        share one path must not skip each other forever just because each still
+        sees the other one, not-yet-deleted, in the database.
+
+        A genuine storage error raises :class:`SnapPurgeError`, mirroring the
+        Elasticsearch-mirror failure below, so it reaches the caller's error
+        report (``purge_expired_data``'s ``errors`` dict) instead of only a log
+        line — the same rule #OPS2 applies to a task summary.
+        """
+        file_fields = getattr(cls, "data_retention_files", None) or []
+        if not file_fields:
+            return
+        # One "still referenced elsewhere" check per distinct (field, path) —
+        # the shared-file rule (#RET2c) costs one extra query per distinct path,
+        # not one per row.
+        checked: dict[tuple[str, str], bool] = {}
+        failures: list[str] = []
+        for row in qs.iterator():
+            for field_name in file_fields:
+                field_file = getattr(row, field_name, None)
+                path = getattr(field_file, "name", "") if field_file else ""
+                if not path:
+                    continue
+                key = (field_name, path)
+                if key not in checked:
+                    checked[key] = (
+                        cls.objects.filter(**{field_name: path})
+                        .exclude(pk__in=purging_pks)
+                        .exists()
+                    )
+                if checked[key]:
+                    logger.info(
+                        "snapadmin.purge.file_shared_skip",
+                        model=cls.__name__, field=field_name, path=path,
+                    )
+                    continue
+                try:
+                    if field_file.storage.exists(path):
+                        field_file.storage.delete(path)
+                except Exception as exc:
+                    logger.error(
+                        "snapadmin.purge.file_delete_failed",
+                        model=cls.__name__, field=field_name, path=path, error=str(exc),
+                    )
+                    failures.append(f"{field_name}={path}: {exc}")
+        if failures:
+            raise SnapPurgeError(
+                f"{cls.__name__}: {len(failures)} file(s) could not be deleted "
+                "during retention purge (rows kept intact so the purge is "
+                "retryable): " + "; ".join(failures)
+            )
+
+    @classmethod
     def purge_expired(cls, *, now=None, dry_run: bool = False) -> int:
         """Delete records past this model's ``data_retention_days`` (GDPR).
 
@@ -2362,11 +2476,18 @@ class SnapModel(models.Model):
         * ``DUAL``    — bulk delete from the database **and** the ES mirror.
         * ``ES_ONLY`` — delete the matching documents from Elasticsearch.
 
+        When :attr:`data_retention_files` names storage-backed fields, their
+        files are deleted **before** the rows — see :meth:`_purge_expired_files`
+        for the shared-file and failure rules. ``ES_ONLY`` models never carry
+        files (see the attribute's docstring: no DB table means no field to
+        read a path from), so the file pass only runs for ``DB_ONLY``/``DUAL``.
+
         Returns the number of records purged (or that *would* be purged when
         ``dry_run=True``); returns ``0`` when retention is not configured. The
         count always reflects this model's own rows, never the cascade-inflated
         total that ``QuerySet.delete()`` reports when related rows are removed
-        via ``on_delete=CASCADE``.
+        via ``on_delete=CASCADE``. ``dry_run=True`` touches nothing — no file is
+        deleted and no row is counted as skipped — it only counts rows.
 
         For ``DUAL`` mode, raises :class:`SnapPurgeError` if the database delete
         succeeds but the Elasticsearch mirror cannot be cleared — the caller
@@ -2390,11 +2511,13 @@ class SnapModel(models.Model):
         if dry_run:
             return qs.count()
 
+        purging_pks = set(qs.values_list("pk", flat=True))
+        count = len(purging_pks)
+
         if cls.es_storage_mode == EsStorageMode.DUAL:
-            pks = list(qs.values_list("pk", flat=True))
-            count = len(pks)
+            cls._purge_expired_files(qs, purging_pks)
             qs.delete()
-            if not cls._delete_pks_from_es(pks):
+            if not cls._delete_pks_from_es(list(purging_pks)):
                 raise SnapPurgeError(
                     f"{cls.__name__}: {count} row(s) deleted from the database, "
                     "but the Elasticsearch mirror could not be cleared; personal "
@@ -2402,7 +2525,7 @@ class SnapModel(models.Model):
                 )
             return count
 
-        count = qs.count()
+        cls._purge_expired_files(qs, purging_pks)
         qs.delete()
         return count
 
@@ -2802,7 +2925,7 @@ _SNAP_MODEL_UNEXPOSED_ATTRIBUTES: frozenset[str] = frozenset({
     "es_index_enabled", "es_storage_mode", "es_index_name", "es_mapping",
     "es_index_settings", "es_auto_mapping", "es_query_routing",
     # GDPR retention — needs a shared purge_expired attachment (#RFC1g row 2).
-    "data_retention_days", "data_retention_field",
+    "data_retention_days", "data_retention_field", "data_retention_files",
     # Generated admin — needs register_admin()/get_admin_fields() refactored
     # onto get_model_meta() before these mean anything for a plain model
     # (#RFC1g row 3).
@@ -2825,6 +2948,9 @@ def snap_model(
     offline_mode: bool = _UNSET,
     offline_cache_limit: int = _UNSET,
     search_fields: Sequence[str] | None = _UNSET,
+    subject_path: str | None = _UNSET,
+    is_data_subject: bool = _UNSET,
+    subject_identifier: str | None = _UNSET,
 ) -> Callable[[type[models.Model]], type[models.Model]]:
     """Opt a plain ``django.db.models.Model`` into SnapAdmin, without subclassing.
 
@@ -2865,7 +2991,8 @@ def snap_model(
       indexing that never happens.
     * **No retention purge.** No ``purge_expired()``, so neither the
       ``snapadmin_purge_expired_data`` command nor the ``purge_expired_data`` task
-      touches it — hence no ``data_retention_days`` keyword either.
+      touches it — hence no ``data_retention_days``/``data_retention_files``
+      keyword either.
     * **No generated admin.** ``SnapModel.register_all_admins()`` skips it: without
       ``Snap*Field`` flags there is nothing to derive fieldsets, list columns or
       filters from. Register a ``ModelAdmin`` for it yourself, as usual.
@@ -2881,6 +3008,16 @@ def snap_model(
     keywords actually passed are recorded, so applying the decorator to a
     ``SnapModel`` subclass overrides exactly those and leaves the rest of the
     class-level configuration in place.
+
+    ``subject_path``/``is_data_subject``/``subject_identifier`` are the one
+    exception to "mirrors a ``SnapModel`` class attribute": :class:`SnapModel`
+    declares **no** default for ``subject_path`` on purpose, so a subclass that
+    never sets it is indistinguishable from one that never even considered it —
+    ``check_subject_paths`` (``snapadmin.E011``) catches exactly that silence on
+    *either* registration door. Declaring is mandatory once a model is
+    registered at all; there is no safe implicit default for "does this model
+    carry personal data reachable from a subject" the way there is for, say,
+    ``api_read_only=False``.
 
     :param api_exclude_fields: Field names kept out of the REST serializer, the
         GraphQL type and the schema endpoint.
@@ -2900,6 +3037,20 @@ def snap_model(
     :param search_fields: Field names DRF's ``?search=`` matches against. A plain
         model has no ``searchable=True`` Snap fields to derive this from, so
         without it ``?search=`` is a no-op for the model.
+    :param subject_path: A forward-only, ``__``-joined ORM lookup path (at most
+        three relation hops) from this model to the field carrying the GDPR
+        subject's identifying value, e.g. ``"customer__email"``. ``None`` is a
+        valid, explicit declaration ("this model carries nothing subject-scoped");
+        never leave it undeclared. A path with zero ``__`` segments names a field
+        on this model directly (the value-match case, e.g. an audit row storing
+        a copied email).
+    :param is_data_subject: Marks this model as a valid subject-access-request
+        entry point — an operator may run "everything for the person identified
+        by X" against it. Requires ``subject_identifier`` and
+        ``subject_path == subject_identifier`` (enforced by
+        ``check_subject_paths``, not merely documented).
+    :param subject_identifier: The field name on *this* model holding the raw
+        identifier value, required when ``is_data_subject=True``.
     :raises TypeError: if applied to anything that is not a ``models.Model``
         subclass.
     """
@@ -2914,6 +3065,9 @@ def snap_model(
         "offline_mode": offline_mode,
         "offline_cache_limit": offline_cache_limit,
         "search_fields": _as_list(search_fields),
+        "subject_path": subject_path,
+        "is_data_subject": is_data_subject,
+        "subject_identifier": subject_identifier,
     }
     given = {name: value for name, value in meta.items() if value is not _UNSET}
 

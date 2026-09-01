@@ -138,7 +138,6 @@ Key protections:
   (`snapadmin.E008`) rather than at first request. See [User-Defined REST
   Actions](https://drofji.github.io/django-snapadmin/#snap-action).
 
-
 ### API tokens
 - Tokens are **hashed with SHA-256 at rest** — the raw key is shown **once** at creation (and once
   again on rotation) and never stored. Stored tokens expose only a non-secret 8-char `token_prefix`
@@ -246,7 +245,6 @@ Key protections:
   into REST and GraphQL; the admin form and background export are a tracked follow-up, not silently
   unguarded — until they ship, treat a field's `api_field_permissions` rule as REST/GraphQL-only.
 
-
 ### Data protection & auditability
 - **PII masking** — `SNAPADMIN_MASKED_FIELDS` masks configured fields in the admin, the REST API and
   GraphQL for users without PII-view permission; masked fields are also dropped from the change form
@@ -277,8 +275,58 @@ Key protections:
   rules. The raw `changes` JSON is excluded from the change form outright: it was previously only
   *replaced* in `readonly_fields`, which pushed the real field back into the form where Django
   rendered it read-only and unmasked next to the masked copy (fixed in the current release).
-- **Immutable audit trail** (`SNAPADMIN_AUDIT_LOG_ENABLED`) records every admin create/update/delete;
-  retention via `SNAPADMIN_AUDIT_RETENTION_DAYS` and `snapadmin_audit_export` for SIEM ingestion.
+- **Immutable audit trail** (`SNAPADMIN_AUDIT_LOG_ENABLED`) records every admin create/update/delete.
+  Retention is enforced two ways against the same `SNAPADMIN_AUDIT_RETENTION_DAYS` (default **365**,
+  on by default): automatically, by `snapadmin.purge_expired_data` (the audit log is not a
+  `SnapModel`, so this is an explicit step in that task/command, not the generic per-model sweep),
+  and manually via `snapadmin_audit_export --purge` for a SIEM-export-then-prune pass. Rows are
+  append-only (`save`/`delete` raise once persisted) — the purge uses `QuerySet.delete()`, the one
+  sanctioned bypass of that guard, never a code path reachable from outside retention pruning.
+- **GDPR retention takes uploaded files with it** — `data_retention_files` (a list of
+  `SnapFileField`/`SnapImageField` names) makes `purge_expired()` delete those files from storage
+  before deleting the row, not just the row: previously a purged row could leave its file
+  unreachable-but-undeletable on disk, which is the wrong outcome for a retention feature built for
+  compliance. Files are deleted **before** the row (a storage failure leaves the row — and the file's
+  name — intact and the purge retryable, raising `SnapPurgeError` instead of silently continuing), and
+  a path still referenced by another live row outside the purge is never deleted. `dry_run=True`
+  deletes nothing, including files.
+- **Export/reindex job housekeeping is opt-in** (`SNAPADMIN_EXPORT_RETENTION_DAYS`, unset by default)
+  — unlike the two retention sweeps above, this one deletes files (a downloaded report, an archival
+  export) a project may want to keep, so it needs an explicit setting rather than an on-by-default
+  window. Once set, `snapadmin.purge_expired_data` deletes finished `SnapExportJob`/`SnapReindexJob`
+  rows past the window and their published files (files before rows, same ordering/failure rule as
+  `data_retention_files`), plus a sweep for any export file left with no job row at all. Assumes the
+  export storage location is dedicated to SnapAdmin exports — do not point it at a bucket holding
+  unrelated files.
+- **`snapadmin.W012`** warns at startup when retention is configured anywhere (a model's
+  `data_retention_days`, the audit log's on-by-default window, or `SNAPADMIN_EXPORT_RETENTION_DAYS`)
+  but no `CELERY_BEAT_SCHEDULE` entry runs `snapadmin.purge_expired_data` — the exact state every
+  retention-scattered report this batch of checks addresses turned out to be in: retention configured,
+  nothing scheduled to enforce it.
+- **GDPR subject-access requests** (`manage.py snapadmin_subject_request export|delete`) — export or
+  delete everything reachable from one data subject, via every registered model's own `subject_path`
+  declaration (`snapadmin.E011` fails `manage.py check` for a registered model that never declares it
+  at all — not even `None`; `E012` catches a declared-but-malformed one: a subject model whose own path
+  doesn't match its identifier, a path over 3 relation hops, one that doesn't resolve via this model's
+  own *forward* relations, or a multi-hop path on an `ES_ONLY` model).
+  - **Gated on `snapadmin.view_raw_pii`** — a SAR export is unmasked by design (it goes to the
+    subject), which makes it a high-value artefact; `--user` must already be trusted with raw PII, and
+    every run (export or deletion) is written to the audit trail against that operator.
+  - **Export reuses the existing async-export machinery** (one `SnapExportJob` per matched model, the
+    same masking bypass a PII-privileged requester already gets elsewhere), so there is no second
+    "skip masking" code path to get wrong. `--recipient` AGE-encrypts the finished bundle in place
+    (the same machinery backups use) and removes the plaintext.
+  - **Deletion is dry-run by default.** Both modes run the identical pre-flight — a Django deletion
+    `Collector` walk over every matched row, which also discovers cascade spillover the `subject_path`
+    declarations alone would not show — so the preview matches what `--confirm` actually does. Any
+    protected relation (`on_delete=PROTECT`) refuses the **whole** run up front and deletes nothing,
+    rather than deleting in dependency order to route around it.
+  - **The deletion audit entry cannot be swept away by a later request for the same subject** —
+    `SnapadminAuditLog` is deliberately outside the general SnapAdmin registry (see the audit-trail
+    entry above) and therefore carries no `subject_path` at all.
+  - **Honest limits, printed on every run:** this command reaches only the SnapAdmin registry — it
+    cannot see or touch a backup bundle, an Elasticsearch copy a model does not itself mirror, or any
+    third-party store a project integrates outside SnapAdmin.
 - **Backups** — 3-2-1 database backups with local/network/FTP(S)/SFTP/S3-compatible targets; transport
   credentials come from `SNAPADMIN_BACKUP_*` settings/env, never hard-coded. The S3 destination
   supports the ambient AWS credential chain (environment variables, a shared config file, an IAM

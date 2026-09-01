@@ -194,7 +194,7 @@ Operations
         for an install that already sets things explicitly.
     ``snapadmin.checks``
         Django system checks — warnings ``snapadmin.W001``…``W012`` and errors
-        ``snapadmin.E001``…``E008`` catch misconfiguration at startup, so read
+        ``snapadmin.E001``…``E012`` catch misconfiguration at startup, so read
         them before debugging behaviour. The masking checks are *errors* because
         a mistyped rule fails open: it masks nothing and says nothing.
         ``E007`` is the backup ``.env``-without-encryption refusal: ``env`` in
@@ -202,7 +202,10 @@ Operations
         configured fails closed rather than shipping plaintext secrets. ``E008``
         catches a ``@snap_action`` whose declared HTTP methods conflict with its
         own model's ``api_read_only``/``api_http_method_names`` policy — dead
-        configuration that would otherwise always answer ``403``.
+        configuration that would otherwise always answer ``403``. ``E011``/``E012``
+        are the GDPR subject-access declaration: a registered model that never
+        declares ``subject_path`` (or ``None``) at all, or one that declares a
+        malformed path — see ``manage.py snapadmin_subject_request`` below.
     ``snapadmin.crypto``
         Streaming AGE encryption for backup artefacts — two backends
         (``pyrage``, the optional ``[age]`` extra; or the ``age`` command-line
@@ -237,11 +240,17 @@ Management commands
     ``snapadmin_info``, ``snapadmin_license_check``, ``snapadmin_reindex``,
     ``snapadmin_import``, ``snapadmin_audit_export``, ``snapadmin_health_alert``,
     ``snapadmin_db_backup``, ``snapadmin_purge_expired_data``, ``snapadmin_send_error_digest``,
-    ``snapadmin_restore``, ``snapadmin_rollback``. The three GDPR/error-digest ones
-    were once unprefixed (``db_backup``, ``purge_expired_data``,
+    ``snapadmin_restore``, ``snapadmin_rollback``, ``snapadmin_subject_request``. The three
+    GDPR/error-digest ones were once unprefixed (``db_backup``, ``purge_expired_data``,
     ``send_error_digest``); those names still work as deprecated aliases that print
     a rename notice. ``snapadmin_restore``/``snapadmin_rollback`` are dry-run by
     default — pass ``--confirm`` to actually restore or roll back.
+    ``snapadmin_subject_request export|delete --model app.Model --identifier VALUE
+    --user USERNAME`` is the GDPR subject-access command — export (unmasked,
+    reusing the existing ``SnapExportJob`` machinery) or delete (dry-run by
+    default, ``--confirm`` to actually delete) everything reachable from one
+    data subject via every registered model's ``subject_path``. ``--user`` must
+    hold ``snapadmin.view_raw_pii``.
 
 Settings
 --------

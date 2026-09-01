@@ -250,6 +250,18 @@ class TestModelBasedCapabilities:
         data = _collect(verbose=True)
         assert "data_retention_files" in data["details"]["retention_purge"]
 
+    def test_gdpr_subject_access_on_via_demo_customer(self):
+        # demo.Customer declares is_data_subject=True (#FUT4a/#FUT4b).
+        data = _collect(verbose=True)
+        assert data["gdpr_subject_access"] is True
+        assert "subject model" in data["details"]["gdpr_subject_access"]
+        assert "reachable" in data["details"]["gdpr_subject_access"]
+
+    def test_gdpr_subject_access_off_without_a_subject_model(self, monkeypatch):
+        monkeypatch.setattr(features_collector, "_concrete_snap_models", lambda: [])
+        data = _collect()
+        assert data["gdpr_subject_access"] is False
+
     def test_write_allowlist_detected(self, monkeypatch):
         from demo.apps.shop.models import Product
         monkeypatch.setattr(Product, "api_write_fields", ["name"], raising=False)

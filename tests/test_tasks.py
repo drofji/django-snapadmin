@@ -159,6 +159,41 @@ class TestPurgeExpiredDataOutcome:
             with pytest.raises(SnapPurgeError, match="demo.AuditLog"):
                 purge_expired_data()
 
+    def test_export_jobs_considered_and_reported_when_enabled(self, monkeypatch):
+        from django.apps import apps
+        from snapadmin.tasks import purge_expired_data
+
+        monkeypatch.setattr(apps, "get_models", lambda: [])
+        with override_settings(SNAPADMIN_AUDIT_RETENTION_DAYS=0,
+                                SNAPADMIN_EXPORT_RETENTION_DAYS=30):
+            result = purge_expired_data()
+        assert result["status"] == "ok"
+        assert "snapadmin.export_jobs" in result["purged"]
+        assert result["export_jobs"]["enabled"] is True
+
+    def test_export_jobs_failure_reported_as_partial(self, monkeypatch):
+        """SNAPADMIN_AUDIT_RETENTION_DAYS is left at its default (on) here so
+        the audit-log purge is also considered and succeeds trivially (no
+        rows) alongside the failing export-jobs sweep — partial needs at
+        least one success next to the failure; all-considered-failed raises
+        instead (see test_total_failure_raises above)."""
+        from django.apps import apps
+        from snapadmin import exporting
+        from snapadmin.tasks import purge_expired_data
+
+        monkeypatch.setattr(apps, "get_models", lambda: [])
+        monkeypatch.setattr(
+            exporting, "purge_expired_export_jobs",
+            lambda now=None: {
+                "enabled": True, "jobs_deleted": {}, "files_deleted": 0,
+                "orphan_files_deleted": 0, "failed": ["boom"],
+            },
+        )
+        result = purge_expired_data()
+        assert result["status"] == "partial"
+        assert "snapadmin.export_jobs" in result["errors"]
+        assert "boom" in result["errors"]["snapadmin.export_jobs"]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # snapadmin.tasks.send_error_digest — the outcome convention (#OPS2c)

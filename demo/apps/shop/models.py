@@ -28,6 +28,11 @@ class Category(snap_models.SnapModel):
 
     api_write_fields = ["name", "slug", "is_active"]
 
+    # GDPR subject-access declaration (#FUT4a) — required on every registered
+    # model, no implicit default: None states explicitly that this model
+    # carries nothing reachable from a data subject.
+    subject_path = None
+
     class Meta:
         verbose_name = _("Category")
         verbose_name_plural = _("Categories")
@@ -36,6 +41,7 @@ class Tag(snap_models.SnapModel):
     name = snap_fields.SnapCharField(max_length=50, verbose_name=_("Tag Name"), searchable=True, show_in_form=True)
 
     api_write_fields = ["name"]
+    subject_path = None  # nothing subject-scoped — see Category above
 
     class Meta:
         verbose_name = _("Tag")
@@ -150,6 +156,7 @@ class Product(snap_models.SnapModel):
     es_index_settings = {"number_of_shards": 1}
 
     api_write_fields = ["category", "tags", "name", "price", "available", "description"]
+    subject_path = None  # catalogue data — nothing subject-scoped
 
     class Meta:
         verbose_name = _("Product")
@@ -189,6 +196,13 @@ class Customer(snap_models.SnapModel):
 
     api_write_fields = ["first_name", "last_name", "origin", "email", "active"]
 
+    # GDPR subject-access declaration (#FUT4a): Customer is the subject model
+    # itself — subject_path must equal subject_identifier exactly (zero hops,
+    # enforced by snapadmin.E012, not just documented).
+    is_data_subject = True
+    subject_identifier = "email"
+    subject_path = "email"
+
     class Meta:
         verbose_name = _("Customer")
         verbose_name_plural = _("Customers")
@@ -207,6 +221,7 @@ class CustomerProfile(snap_models.SnapModel):
     bio = snap_fields.SnapTextField(blank=True, verbose_name=_("Bio"), show_in_form=True)
 
     api_write_fields = ["customer", "newsletter", "bio"]
+    subject_path = "customer__email"  # one hop to the Customer subject's email
 
     class Meta:
         verbose_name = _("Customer Profile")
@@ -223,6 +238,7 @@ class Order(snap_models.SnapModel):
     # created_at is auto_now_add (never client-supplied), so the allowlist is
     # just the two fields an order actually carries.
     api_write_fields = ["customer", "total"]
+    subject_path = "customer__email"  # one hop to the Customer subject's email
 
     # @snap_action (#RFC1h) — a user-defined REST action, POST-only,
     # detail-level: POST /api/models/shop/Order/<pk>/recalculate_total/.
@@ -275,6 +291,7 @@ class SearchLog(snap_models.SnapModel):
     es_auto_mapping = True
 
     api_write_fields = ["query", "results_count"]
+    subject_path = None  # search query text, no subject-identifying data
 
     class Meta:
         managed = False  # No DB table — required for ES_ONLY models
@@ -305,6 +322,13 @@ class AuditLog(snap_models.SnapModel):
     # (auto_now_add) and user_email is excluded above, so this is the
     # mass-assignment allowlist for whatever's left as the model grows.
     api_write_fields = ["action"]
+
+    # GDPR subject-access declaration (#FUT4a): a value-match, not a relation —
+    # user_email is a copy of the subject's identifier stored directly on this
+    # row, so the path is the field itself, zero '__' hops (the "one hop of
+    # zero" case: filter(**{subject_path: value}) already reads this correctly
+    # with no special-casing).
+    subject_path = "user_email"
 
     class Meta:
         verbose_name = _("Audit Log")
@@ -338,6 +362,7 @@ class ExchangeRate(snap_models.SnapModel):
     # written by API clients — so the dynamic REST API serves this table read-only:
     # list/retrieve/count/export work, POST/PUT/PATCH/DELETE answer 405.
     api_read_only = True
+    subject_path = None  # currency-rate feed data, nothing subject-scoped
 
     class Meta:
         verbose_name = _("Exchange Rate")
@@ -361,6 +386,9 @@ class OrderItem(snap_models.SnapModel):
         return f"{self.quantity * self.price:.2f}"
 
     api_write_fields = ["order", "product", "quantity", "price"]
+    # Two relation hops to the Customer subject's email — the worked example
+    # the #FUT1a depth-cap discussion names directly.
+    subject_path = "order__customer__email"
 
     class Meta:
         verbose_name = _("Order Item")
@@ -464,6 +492,16 @@ class Showcase(snap_models.SnapModel):
         "rich_text_field", "phone_field", "color_field",
         "small_int_field", "pos_small_int_field", "pos_big_int_field",
     ]
+
+    # Demonstrates data_retention_files (#RET2c): a purged row takes its
+    # uploaded files with it instead of leaving them orphaned on disk. The
+    # window is deliberately long (10 years) — this is dogfood for the
+    # feature, not a real cleanup policy, and demo rows should not vanish
+    # from under an evaluator a week after they create one.
+    data_retention_days = 3650
+    data_retention_field = "datetime_field"
+    data_retention_files = ["image_field", "file_field"]
+    subject_path = None  # field-type showcase, nothing subject-scoped
 
     class Meta:
         verbose_name = _("Showcase")

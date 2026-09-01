@@ -191,6 +191,9 @@ class TestAdminRegistration:
 
         class NoAdminModel(SnapModel):
             admin_enabled = False
+            subject_path = None  # concrete (abstract=False) and lingers in the
+            # real "demo" app registry for the rest of the session — every
+            # registered SnapModel must declare this (snapadmin.E011).
 
             class Meta:
                 app_label = "demo"

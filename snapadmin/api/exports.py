@@ -21,6 +21,7 @@ rather than accepted as a job that can only fail in the worker.
 from django.apps import apps
 from django.db import models as django_models
 from django.http import FileResponse
+from django.utils import timezone
 from rest_framework import mixins, permissions, serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -251,7 +252,13 @@ class ExportJobViewSet(
             return Response({"detail": f"Job already {job.status}."},
                             status=status.HTTP_409_CONFLICT)
         job.status = SnapExportJob.Status.CANCELLED
-        job.save(update_fields=["status"])
+        # finished_at stamps every terminal status, cancellation included — the
+        # export-retention purge (SNAPADMIN_EXPORT_RETENTION_DAYS) measures its
+        # window on this field, and a cancelled job can leave a real partial
+        # file on disk (see snapadmin.exporting's module docstring) that needs
+        # to be reachable by that sweep just like a completed job's file.
+        job.finished_at = timezone.now()
+        job.save(update_fields=["status", "finished_at"])
         return Response(ExportJobSerializer(job, context={"request": request}).data)
 
     @action(detail=True, methods=["get"])
