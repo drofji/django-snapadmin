@@ -416,10 +416,21 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             return []
         explicit = get_model_meta(model, "api_http_method_names", None)
         if explicit is not None:
-            return sorted({name.lower() for name in explicit} | {"head", "options"})
-        if get_model_meta(model, "api_read_only", False):
-            return list(_SAFE_HTTP_METHOD_NAMES)
-        return list(_FULL_HTTP_METHOD_NAMES)
+            allowed = sorted({name.lower() for name in explicit} | {"head", "options"})
+        elif get_model_meta(model, "api_read_only", False):
+            allowed = list(_SAFE_HTTP_METHOD_NAMES)
+        else:
+            allowed = list(_FULL_HTTP_METHOD_NAMES)
+
+        # fetch_by (#FETCH2a) is a POST only because a large explicit key set
+        # doesn't fit in a URL — it never writes anything, so it inherits
+        # GET's availability rather than being gated by POST's. Without this,
+        # a read-only or GET-only model (the read-heavy reference/lookup data
+        # fetch-by exists for) could never use it at all. self.action is set
+        # by DRF's ViewSetMixin.initialize_request() before this is consulted.
+        if getattr(self, "action", None) == "fetch_by" and "get" in allowed and "post" not in allowed:
+            allowed = sorted(set(allowed) | {"post"})
+        return allowed
 
     def _get_model_class(self):
         app_label  = self.kwargs["app_label"]
@@ -872,6 +883,91 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
 
         response = StreamingHttpResponse(stream(), content_type="application/x-ndjson")
         filename = f"{model_class._meta.app_label}_{model_class._meta.model_name}.ndjson"
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        if get_setting("SNAPADMIN_QUERY_BACKEND_HEADER", True):
+            response["X-Snap-Query-Backend"] = self._query_backend
+        return response
+
+    @extend_schema(summary="Fetch an explicit set of rows by a unique/indexed field (POST body)")
+    def fetch_by(self, request, *args, **kwargs):
+        """``POST .../fetch-by/`` — stream every row whose ``field`` is in ``values``.
+
+        Body: ``{"field": "sku", "values": [...]}``. A **POST that reads** is
+        justified in this one sentence: the key set does not fit in a URL,
+        and there is no other way to express "fetch exactly these records"
+        for a large explicit set the way ``export``'s ``?filters=`` expresses
+        a *condition* — encoding a big value list as a query string risks the
+        server's own URL-length limit before it risks anything else.
+
+        ``field`` must be ``unique=True`` or ``db_index=True`` on the target
+        model — anything else is a ``400`` naming the constraint, closing the
+        unindexed-scan foot-gun a free-form field name would otherwise open.
+        ``values`` is capped at ``SNAPADMIN_FETCH_BY_MAX_VALUES`` (default
+        ``10000``); over the cap is a ``400``, **never a silent truncation**
+        — the cap exists before this route does, because an unbounded
+        ``values`` list is a denial-of-service vector. Same NDJSON streaming,
+        permissions, masking and ``api_read_only``/field rules as ``list``/
+        ``export`` — a masked field can't be used as the lookup key either,
+        the same oracle-prevention rule ``list``'s ``?ordering=``/``?search=``
+        already apply. Not supported for ``ES_ONLY`` models, which have no DB
+        column to index in the first place.
+        """
+        model_class = self._get_model_class()
+
+        if get_model_meta(model_class, "es_storage_mode", EsStorageMode.DB_ONLY) == EsStorageMode.ES_ONLY:
+            return Response(
+                {"detail": f"{model_class._meta.label} is ES_ONLY — fetch-by needs a DB column to index."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        field_name = request.data.get("field")
+        field = next((f for f in model_class._meta.fields if f.name == field_name), None)
+        if field is None:
+            return Response(
+                {"detail": f"{model_class._meta.label} has no field {field_name!r}."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not (field.unique or field.db_index):
+            return Response(
+                {"detail": f"{field_name!r} is not unique=True or db_index=True on "
+                           f"{model_class._meta.label} — fetch-by refuses an unindexed scan."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if field_name in self._masked_fields_for_request(model_class):
+            return Response(
+                {"detail": f"{field_name!r} is a masked field and cannot be used as a fetch-by key."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        values = request.data.get("values")
+        if not isinstance(values, list) or not values:
+            return Response(
+                {"detail": "\"values\" must be a non-empty list."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        max_values = int(get_setting("SNAPADMIN_FETCH_BY_MAX_VALUES", 10000) or 0)
+        if max_values > 0 and len(values) > max_values:
+            return Response(
+                {"detail": f"{len(values)} values exceeds SNAPADMIN_FETCH_BY_MAX_VALUES "
+                           f"({max_values})."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        queryset = self.filter_queryset(self.get_queryset()).filter(**{f"{field_name}__in": values})
+        serializer_class = self.get_serializer_class()
+        chunk_size = max(1, int(get_setting("SNAPADMIN_EXPORT_CHUNK_SIZE", 1000)))
+
+        def stream():
+            source = (
+                queryset.iterator(chunk_size=chunk_size)
+                if hasattr(queryset, "iterator") else iter(queryset)
+            )
+            for obj in source:
+                data = serializer_class(obj, context={"request": request}).data
+                yield json.dumps(data, default=str) + "\n"
+
+        response = StreamingHttpResponse(stream(), content_type="application/x-ndjson")
+        filename = f"{model_class._meta.app_label}_{model_class._meta.model_name}_fetch.ndjson"
         response["Content-Disposition"] = f'attachment; filename="{filename}"'
         if get_setting("SNAPADMIN_QUERY_BACKEND_HEADER", True):
             response["X-Snap-Query-Backend"] = self._query_backend

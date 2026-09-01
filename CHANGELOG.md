@@ -40,6 +40,14 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   Beat and has audit rows older than 365 days will see them deleted on the first run after
   upgrading. Set `SNAPADMIN_AUDIT_RETENTION_DAYS = 0` to keep every audit row indefinitely, as
   before.
+- **Every registered model must now declare `subject_path`.** New check `snapadmin.E011` fails
+  `manage.py check` for **any** registered `SnapModel`/`@snap_model` model that never declares
+  `subject_path` at all — `subject_path = None` is a valid, explicit answer ("this model carries
+  nothing reachable from a GDPR data subject"), but silence is not. This is unconditional and not
+  behind a feature flag: it is the declaration the new `snapadmin_subject_request` export/deletion
+  command depends on to know what it can safely reach. Every existing registered model in every
+  project needs one line added (`subject_path = None`, or a real path for a model that does carry
+  personal data) before `manage.py check` passes again after upgrading. See the migration guide.
 
 ### Added
 - `snap_field()` now accepts every `Snap*Field` constructor kwarg — `required` and the file-upload
@@ -152,6 +160,26 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   `--resume` can never re-create a row an earlier attempt already committed. Write-surface rules
   (`api_write_fields`/`api_exclude_fields`/`api_read_only`/masking) are enforced up front, not as a
   follow-up.
+- **GDPR subject-access requests** — `manage.py snapadmin_subject_request export|delete --model
+  app.Model --identifier VALUE --user USERNAME` exports or deletes everything reachable from one data
+  subject, across every registered model's own `subject_path` declaration (a forward `__`-joined ORM
+  path, ≤3 relation hops, to the subject-identifying field, or `None`). `subject_path` is required on
+  every registered model, no implicit default — new checks `snapadmin.E011` (never declared) and
+  `snapadmin.E012` (declared but malformed: `is_data_subject=True` with no/mismatched
+  `subject_identifier`, over the hop cap, unresolvable via forward relations, or a multi-hop path on
+  an `ES_ONLY` model). `--user` must hold `snapadmin.view_raw_pii` — export is unmasked by design and
+  reuses the existing async-export machinery; `--recipient` AGE-encrypts the finished bundle.
+  Deletion is dry-run by default; both modes pre-flight through a Django deletion `Collector`, so a
+  protected relation (`on_delete=PROTECT`) refuses the whole run up front instead of deleting in
+  dependency order. `@snap_model()` also accepts `subject_path`/`is_data_subject`/
+  `subject_identifier` as new keyword arguments.
+- `POST /api/models/<app>/<Model>/fetch-by/` fetches a large explicit key set in one call —
+  `{"field": "sku", "values": [...]}` streamed as NDJSON, the counterpart to `export`'s filtered
+  streaming. `field` must be `unique=True` or `db_index=True` (`400` otherwise, naming the
+  constraint); `values` is capped at `SNAPADMIN_FETCH_BY_MAX_VALUES` (default `10000`, `400` never a
+  truncation over it — new check `snapadmin.W013` flags a ceiling raised so high it defeats the
+  cap). Same permissions and masking as `export`; reachable via `POST` even on an `api_read_only`
+  model, since it never writes. Not supported for `ES_ONLY` models (no DB column to index).
 
 ### Changed
 - The shipped `admin.js`'s select2 initialisation is opt-in now — see Breaking, above, for the

@@ -50,6 +50,24 @@ per release):
   upgrading. Set ``SNAPADMIN_AUDIT_RETENTION_DAYS = 0`` to keep every audit row indefinitely, as
   before.
 
+* **Every registered model must now declare ``subject_path``.** New check ``snapadmin.E011`` fails
+  ``manage.py check`` for *any* registered ``SnapModel``/``@snap_model`` model that never declares
+  ``subject_path`` at all — ``subject_path = None`` is a valid, explicit answer ("this model carries
+  nothing reachable from a GDPR data subject"), but silence is not. This is unconditional, not behind
+  a feature flag: it is the declaration the new ``snapadmin_subject_request`` export/deletion command
+  depends on to know what it can safely reach, and the whole point of the check is that a model
+  nobody looked at cannot silently opt itself out of a legally-binding export. **Every existing
+  registered model in every project needs one line added** before ``manage.py check`` passes again
+  after upgrading::
+
+      class Product(SnapModel):
+          ...
+          subject_path = None   # add this — or a real path for a model that does carry PII
+
+  A model whose rows are genuinely reachable from a subject (an order, a support ticket, anything with
+  a foreign key back to a customer) should get a real path instead — see `GDPR Subject-Access Requests
+  <https://drofji.github.io/django-snapadmin/#gdpr-subject-request>`_ for the declaration shape.
+
 Added
 -----
 
@@ -384,6 +402,51 @@ Added
   column targeting an excluded, non-allowlisted or (with no ``--requested-by`` user holding PII
   access) masked field fails the whole run, naming the field, rather than writing it silently. See
   `Bulk Import <https://drofji.github.io/django-snapadmin/#bulk-import>`_.
+
+* **``POST .../fetch-by/`` fetches a large explicit key set in one call.** ``export`` streams a
+  *filtered* result set; there was no way to ask for a large, explicitly enumerated set of records
+  by key in one request — exactly what a project synchronising against another system needs.
+  ``POST /api/models/<app>/<Model>/fetch-by/`` with body ``{"field": "sku", "values": [...]}``
+  answers that, as a small delta on the existing export streaming path. ``field`` must be
+  ``unique=True`` or ``db_index=True`` on the target model — a ``400`` names the constraint
+  otherwise, closing the unindexed-full-table-scan foot-gun a free-form field name would open.
+  **``values`` is capped at ``SNAPADMIN_FETCH_BY_MAX_VALUES`` (default ``10000``); over the cap is a
+  ``400``, never a truncation** — the cap exists before the route does, since an unbounded list is a
+  denial-of-service vector. New check ``snapadmin.W013`` warns if the cap is raised so high it stops
+  meaningfully bounding anything. Same NDJSON streaming, permissions and masking as ``export`` — a
+  masked field can't be used as the lookup key either. **Reachable via ``POST`` even on an
+  ``api_read_only`` model**, since fetch-by never writes anything; the read/write policy that gates
+  ``create`` on the same URL segment does not apply to it. Not supported for ``ES_ONLY`` models,
+  which have no DB column to index in the first place. See `fetch-by
+  <https://drofji.github.io/django-snapadmin/#api-rest>`_.
+
+* **GDPR subject-access requests: ``manage.py snapadmin_subject_request export|delete``.** Answers a
+  different question than time-based retention — not "how old is too old" but "show (or delete)
+  everything about this one person, right now" — by walking every registered model's own
+  ``subject_path`` declaration (see the ``Breaking`` note above)::
+
+      python manage.py snapadmin_subject_request export \\
+          --model demo.Customer --identifier alice@example.com --user dpo_operator
+
+      python manage.py snapadmin_subject_request delete \\
+          --model demo.Customer --identifier alice@example.com --user dpo_operator --confirm
+
+  **Gated on ``snapadmin.view_raw_pii``** — a SAR export is unmasked by design (it goes to the
+  subject), which makes it a high-value artefact, so ``--user`` must already be trusted with raw PII;
+  every run is written to the audit trail against that operator either way. **Export reuses the
+  existing async-export machinery** (one ``SnapExportJob`` per matched model, the same masking bypass
+  a PII-privileged requester already gets elsewhere), so there is no second "skip masking" code path
+  to get wrong; ``--recipient`` AGE-encrypts the finished bundle and removes the plaintext.
+  **Deletion is dry-run by default**, and both modes run the identical pre-flight — a Django deletion
+  ``Collector`` walk over every matched row, which also discovers cascade spillover the
+  ``subject_path`` declarations alone would not show, so the preview matches what ``--confirm``
+  actually does. **Any protected relation (``on_delete=PROTECT``) refuses the whole run up front and
+  deletes nothing**, rather than deleting in dependency order to route around it. The deletion audit
+  entry cannot itself be swept away by a later request for the same subject: ``SnapadminAuditLog`` is
+  deliberately outside the general SnapAdmin registry, so it carries no ``subject_path`` at all.
+  **Honest limits, printed on every run:** this command cannot see or touch a backup bundle, an
+  Elasticsearch copy a model does not itself mirror, or any third-party store outside SnapAdmin. See
+  `GDPR Subject-Access Requests <https://drofji.github.io/django-snapadmin/#gdpr-subject-request>`_.
 
 Changed
 -------

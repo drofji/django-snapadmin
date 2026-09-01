@@ -156,6 +156,11 @@ if REST_API_ENABLED:
             DynamicModelViewSet.as_view({"get": "export"}),
             name="model-export",
         ),
+        path(
+            "models/<str:app_label>/<str:model_name>/fetch-by/",
+            DynamicModelViewSet.as_view({"post": "fetch_by"}),
+            name="model-fetch-by",
+        ),
 
         # Dynamic model CRUD  ─  detail + update + delete
         path(

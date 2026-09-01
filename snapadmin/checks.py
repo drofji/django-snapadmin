@@ -658,6 +658,39 @@ def check_snap_action_read_only_conflict(app_configs, **kwargs):
             ))
     return errors
 
+
+#: Above this, SNAPADMIN_FETCH_BY_MAX_VALUES no longer meaningfully bounds the
+#: request-size DoS the cap exists to close (see fetch_by in
+#: snapadmin.api.views) — a value this high is functionally "no cap" while
+#: still looking configured and safe.
+FETCH_BY_MAX_VALUES_SANE_CEILING = 100_000
+
+
+def check_fetch_by_max_values(app_configs, **kwargs):
+    """Warn: SNAPADMIN_FETCH_BY_MAX_VALUES set so high it defeats its own purpose.
+
+    The cap exists so an explicit ``values`` list on the ``fetch-by`` route
+    can never become an unbounded-query denial-of-service vector. Raising it
+    far past any plausible legitimate batch size quietly reopens that door
+    while the setting still reads as "configured".
+    """
+    raw = get_setting("SNAPADMIN_FETCH_BY_MAX_VALUES", 10000)
+    try:
+        max_values = int(raw)
+    except (TypeError, ValueError):
+        return []
+    if max_values <= FETCH_BY_MAX_VALUES_SANE_CEILING:
+        return []
+    return [Warning(
+        f"SNAPADMIN_FETCH_BY_MAX_VALUES = {max_values} is unusually high — it no longer "
+        "meaningfully bounds the fetch-by route's request size.",
+        hint=f"Values above {FETCH_BY_MAX_VALUES_SANE_CEILING} defeat the purpose of the cap "
+             "(an unbounded 'values' list is a denial-of-service vector). Lower it, or confirm "
+             "this is genuinely intentional for a trusted, bulk-synchronisation caller.",
+        id="snapadmin.W013",
+    )]
+
+
 ALL_CHECKS = [
     check_analytics_db_alias,
     check_masked_fields,
@@ -672,6 +705,7 @@ ALL_CHECKS = [
     check_backup_s3_configuration,
     check_backup_schedule_cadence,
     check_snap_action_read_only_conflict,
+    check_fetch_by_max_values,
     check_unfold_theme,
     check_snapadmin_profile,
     check_snapadmin_profile_contradiction,

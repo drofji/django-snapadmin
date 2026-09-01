@@ -295,6 +295,7 @@
       <li><a href="#error-monitoring">Error Monitoring</a></li>
       <li><a href="#logging">Structured Logging</a></li>
       <li><a href="#gdpr">GDPR / Data Retention</a></li>
+      <li><a href="#gdpr-subject-request">GDPR Subject-Access Requests</a></li>
       <li><a href="#enterprise-config">Enterprise Config</a></li>
       <li><a href="#integrating">Integrating (Auth / JWT / ETL)</a></li>
       <li><a href="#profiles">SNAPADMIN_PROFILE Presets</a></li>
@@ -1404,6 +1405,22 @@ for row in Product.objects.all().iterator(chunk_size=2000):
   (<code>SNAPADMIN_EXPORT_CHUNK_SIZE</code>, default 1000) so huge tables never materialise in memory.
   Both require the model's <code>view</code> permission. This is the synchronous counterpart to the
   Celery-backed <code>/api/exports/</code> jobs above.</p>
+
+  <h3><code>fetch-by</code> — an explicit key set, in one call</h3>
+  <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/models/&lt;app&gt;/&lt;Model&gt;/fetch-by/</span><span class="endpoint-desc">Body <code>{"field": "sku", "values": [...]}</code> → stream every matching row as NDJSON</span></div>
+  <p><code>export</code> streams a <em>filtered</em> result set; <code>fetch-by</code> answers a different
+  question — "give me exactly these records", for a key set large enough that a query string can't hold
+  it. It is a <strong>POST that reads</strong>, justified by that one constraint alone: there is no other
+  way to express a large explicit value list. <code>field</code> must be <code>unique=True</code> or
+  <code>db_index=True</code> on the target model — anything else answers <code>400</code> naming the
+  constraint, closing the unindexed-full-table-scan foot-gun a free-form field name would open. A hard
+  cap, <code>SNAPADMIN_FETCH_BY_MAX_VALUES</code> (default <code>10000</code>), rejects an oversized
+  <code>values</code> list with <code>400</code> rather than silently truncating it — an unbounded list is
+  a denial-of-service vector, and the cap exists before this route does. Same NDJSON streaming,
+  permissions and masking as <code>export</code> (a masked field also can't be used as the lookup key);
+  not supported for <code>ES_ONLY</code> models, which have no DB column to index. Because it never
+  writes, it remains reachable via POST even on an <code>api_read_only</code> model — the read/write
+  policy that gates <code>create</code> on the same URL segment does not apply to it.</p>
 
   <h3>Hiding fields from the API — <code>api_exclude_fields</code></h3>
   <p>Columns listed in <code>api_exclude_fields</code> are removed from the REST serializer
@@ -3015,6 +3032,116 @@ AuditLog.purge_expired(dry_run=True)  # count what *would* be deleted, delete no
   <a href="#celery">Celery &amp; Periodic Tasks</a> — the demo project's own
   <code>CELERY_BEAT_SCHEDULE</code> schedules every one of them.</p>
 
+  <!-- ── GDPR Subject-Access Requests ────────────────────────────────────────── -->
+  <h2 id="gdpr-subject-request">🧾 GDPR Subject-Access Requests</h2>
+  <p><code>data_retention_days</code> answers "how old is too old"; a subject-access request answers a
+  different question — <strong>"show (or delete) everything about this one person, right now"</strong>.
+  <code>manage.py snapadmin_subject_request</code> answers it by walking every registered model's own
+  <code>subject_path</code> declaration, the same one <code>snapadmin.E011</code>/<code>E012</code>
+  require every registered model to state explicitly (declared, not guessed).</p>
+
+  <h3>Declaring who a subject is</h3>
+  <pre><code>class Customer(SnapModel):
+    email = SnapEmailField(...)
+    is_data_subject   = True     # a valid --model entry point
+    subject_identifier = "email"  # the field holding the raw identifier
+    subject_path        = "email"  # a subject's own path always equals its identifier
+
+class Order(SnapModel):
+    customer = SnapForeignKey(Customer, on_delete=PROTECT)
+    subject_path = "customer__email"   # one relation hop to the subject
+
+class SomeOtherModel(SnapModel):
+    subject_path = None   # explicit — this model carries nothing subject-scoped</code></pre>
+  <p><code>subject_path</code> is required on <strong>every</strong> registered model — <code>None</code>
+  is a valid, explicit answer, but silence is not: <code>snapadmin.E011</code> fails
+  <code>manage.py check</code> for any registered model that never declares it at all, and
+  <code>snapadmin.E012</code> catches a declared-but-malformed one (a subject model whose own path
+  doesn't match its identifier, a path over 3 relation hops, one that doesn't resolve via this model's
+  own <em>forward</em> relations, or a multi-hop path on an <code>ES_ONLY</code> model — see
+  <a href="#subject-path-reference">the reference table</a> below). The decorator route accepts the
+  same three keywords: <code>@snap_model(subject_path=..., is_data_subject=..., subject_identifier=...)</code>.</p>
+
+  <h3>Running a request</h3>
+  <pre><code># Export everything reachable from this subject, unmasked, as one bundle:
+python manage.py snapadmin_subject_request export \
+    --model demo.Customer --identifier alice@example.com --user dpo_operator
+
+# ...optionally AGE-encrypted to a recipient (repeatable) — the plaintext is removed once encrypted:
+python manage.py snapadmin_subject_request export \
+    --model demo.Customer --identifier alice@example.com --user dpo_operator \
+    --recipient age1qy...
+
+# Preview a deletion — dry-run by default, deletes nothing:
+python manage.py snapadmin_subject_request delete \
+    --model demo.Customer --identifier alice@example.com --user dpo_operator
+
+# Actually delete, once the preview looks right:
+python manage.py snapadmin_subject_request delete \
+    --model demo.Customer --identifier alice@example.com --user dpo_operator --confirm</code></pre>
+  <div class="callout callout-warn">
+    <strong><code>--user</code> must hold <code>snapadmin.view_raw_pii</code>.</strong>
+    A subject-access export is <strong>unmasked by design</strong> — it goes to the subject, so masking
+    it would defeat the point — which makes it a high-value artefact. The command is gated on the same
+    permission that already unlocks raw PII everywhere else in SnapAdmin, and every run is written to
+    the immutable audit trail against that operator.
+  </div>
+
+  <h3>Export: reuses the existing export machinery, unmasked</h3>
+  <p>One <code>SnapExportJob</code> per matched model, run synchronously with
+  <code>filters={subject_path: identifier}</code> and <code>requested_by</code> set to the resolved
+  operator — the same masking bypass that already applies to a PII-privileged requester elsewhere
+  produces the unmasked export, so there is no second "skip masking" code path to get wrong. A
+  <code>manifest.json</code> lists every file, the row count per model, and who requested it. Pass one
+  or more <code>--recipient</code> age/SSH public keys to encrypt the whole bundle in place afterward
+  (<a href="#backups">the same AGE machinery backups use</a>) — recommended, since an unmasked SAR
+  bundle is exactly the kind of thing that should not sit in plaintext once written.</p>
+
+  <h3>Deletion: dry-run by default, refuses rather than routes around a block</h3>
+  <p>Both dry-run and <code>--confirm</code> run the <strong>identical pre-flight</strong> — a Django
+  deletion <code>Collector</code> walk over every matched row, which discovers cascade spillover on its
+  own (a more complete picture than the <code>subject_path</code> declarations alone: deleting a
+  <code>Customer</code> also takes its <code>CustomerProfile</code>, since that relation is
+  <code>on_delete=CASCADE</code>) — so the dry run is a genuine preview of what <code>--confirm</code>
+  would do, not a separate, weaker check. If <strong>any</strong> matched row is protected
+  (<code>on_delete=PROTECT</code> — the demo's <code>Order.customer</code> uses it), the whole run
+  refuses up front and deletes <strong>nothing</strong>, rather than deleting in dependency order to
+  route around it:</p>
+  <pre><code>$ python manage.py snapadmin_subject_request delete --model demo.Customer \
+      --identifier alice@example.com --user dpo_operator --confirm
+REFUSED — deleting these rows is blocked by a protected relation: demo.Order
+Nothing was deleted. Resolve the blocking rows manually (delete or reassign them) before retrying.</code></pre>
+  <p>A deletion audit entry is written after a successful run — action <code>delete</code>, model
+  <code>subject_access_deletion</code>, the per-model row counts, and the operator. This entry
+  <strong>cannot itself be swept away by a later deletion for the same subject</strong>:
+  <code>SnapadminAuditLog</code> is deliberately outside the general SnapAdmin registry (see
+  <a href="#audit-trail">Unalterable Audit Trail</a>), so it carries no <code>subject_path</code> at
+  all and is structurally invisible to this command's own matching sweep.</p>
+
+  <div class="callout callout-warn">
+    <strong>Honest limits — stated here, not left implied.</strong>
+    This command reaches only the SnapAdmin registry, and prints that limit on every run. It
+    <strong>cannot</strong> see or touch a backup bundle (a SAR deletion does not retroactively purge
+    an already-taken backup — see <a href="#backups">3-2-1 Backups</a>'s own retention), an
+    Elasticsearch copy the matched model does not itself mirror, or any third-party store a project
+    integrates outside SnapAdmin. It is only as complete as the registry and every model's own
+    <code>subject_path</code> declaration — a model nobody registered is invisible before the question
+    is even asked.
+  </div>
+
+  <h4 id="subject-path-reference">Reference</h4>
+  <table>
+    <tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>subject_path</code></td><td><code>str | None</code></td><td><em>required, no default</em></td><td>Forward <code>__</code>-joined ORM path (≤3 relation hops) to the subject-identifying field, or <code>None</code>.</td></tr>
+    <tr><td><code>is_data_subject</code></td><td><code>bool</code></td><td><code>False</code></td><td>Marks this model as a valid <code>--model</code> entry point. Requires <code>subject_path == subject_identifier</code>.</td></tr>
+    <tr><td><code>subject_identifier</code></td><td><code>str | None</code></td><td><code>None</code></td><td>Field name on this model holding the raw identifier, required when <code>is_data_subject=True</code>.</td></tr>
+  </table>
+  <table>
+    <tr><th>Check</th><th>Severity</th><th>Fires when</th></tr>
+    <tr><td><code>snapadmin.E011</code></td><td>Error</td><td>A registered model never declares <code>subject_path</code> at all (not even <code>None</code>).</td></tr>
+    <tr><td><code>snapadmin.E012</code></td><td>Error</td><td>A declared <code>subject_path</code> is malformed: <code>is_data_subject=True</code> with no/mismatched <code>subject_identifier</code>, over 3 relation hops, unresolvable via this model's own forward relations, or a multi-hop path on an <code>ES_ONLY</code> model.</td></tr>
+  </table>
+
   <!-- ── Enterprise config ─────────────────────────────────────────────────── -->
   <h2 id="enterprise-config">🏢 Enterprise Config <span class="badge">v0.1.0a8</span></h2>
   <p>Four settings-driven features that fit SnapAdmin's zero-boilerplate philosophy. Every one is
@@ -3687,6 +3814,7 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset, same as
     <tr><td><code>SNAPADMIN_EXPORT_MAX_ROWS</code></td><td><code>0</code></td><td>Row ceiling for the synchronous <code>.../export/</code> when no valid <code>?limit=</code> is passed; <code>0</code> = unlimited. Exceeding it responds <code>413</code> and points the caller at <code>POST /api/exports/</code></td></tr>
     <tr><td><code>SNAPADMIN_EXPORT_LIMIT_MAX</code></td><td><code>0</code></td><td>Hard cap an explicit <code>?limit=</code> on <code>.../export/</code> is clamped down to; <code>0</code> = no clamp</td></tr>
     <tr><td><code>SNAPADMIN_IMPORT_CHUNK_SIZE</code></td><td><code>1000</code></td><td>Rows per import chunk — the checkpoint/resume granularity for <code>manage.py snapadmin_import</code> (see <a href="#bulk-import">Bulk Import</a>)</td></tr>
+    <tr><td><code>SNAPADMIN_FETCH_BY_MAX_VALUES</code></td><td><code>10000</code></td><td>Hard cap on the <code>values</code> list <code>.../fetch-by/</code> accepts; over the cap is <code>400</code>, never a truncation. <code>snapadmin.W013</code> warns if raised past a sane ceiling</td></tr>
   </table>
 
   <h3>Audit trail, GDPR &amp; large tables</h3>
