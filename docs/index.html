@@ -4300,7 +4300,8 @@ Optional extras
 
 Commercial compatibility: ✓ OK — installed licences are proprietary-safe
 
-Vulnerability scan: no vulnerability scanner installed — `pip install pip-audit` then run `pip-audit`.</code></pre>
+Vulnerability scan: no vulnerability scanner installed — `pip install pip-audit` then run `pip-audit`.
+Curated data last reviewed: 2026-09-02 (0 days ago)</code></pre>
 
   <div class="callout callout-info">
     <strong>Base install is fully permissive.</strong>
@@ -4308,6 +4309,15 @@ Vulnerability scan: no vulnerability scanner installed — `pip install pip-audi
     dependency to watch for commercial use is the <code>[wysiwyg]</code> extra (CKEditor 5,
     GPL-or-commercial); the LGPL helpers (<code>[backup]</code>, <code>[autocomplete-filter]</code>)
     are weak copyleft and opt-in. See <a href="#installation">Optional extras</a>.
+  </div>
+
+  <div class="callout callout-warn">
+    <strong>The curated map is hand-maintained — it goes stale by design.</strong>
+    Every report ends with the date the table was last checked against <code>pyproject.toml</code>
+    and each package's own licence metadata. Past 180 days unreviewed, the command adds a loud
+    <code>⚠ Curated licence data is over N days old</code> line so a fork or a long-idle install
+    doesn't trust a table nobody has looked at in months — verify the affected packages yourself
+    (or send a PR) rather than relying on a stale 🟢/🟡/🔴.
   </div>
 
   <!-- ── Internationalization ───────────────────────────────────────────────── -->

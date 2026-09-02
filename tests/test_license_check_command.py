@@ -7,7 +7,7 @@ from io import StringIO
 
 from django.core.management import call_command
 
-from snapadmin.licensing import CURATED, PackageStatus, Tier
+from snapadmin.licensing import CURATED, CURATED_REVIEWED_ON, PackageStatus, Tier
 
 CMD = "snapadmin.management.commands.snapadmin_license_check"
 
@@ -29,6 +29,18 @@ class TestTextReport:
         assert "Core dependencies" in out
         assert "Django" in out
         assert "Vulnerability scan:" in out
+        assert f"Curated data last reviewed: {CURATED_REVIEWED_ON.isoformat()}" in out
+        assert "Curated licence data is over" not in out  # fresh — no staleness warning
+
+    def test_stale_curated_data_warns(self, monkeypatch):
+        monkeypatch.setattr(CMD + ".curated_staleness", lambda: (200, True))
+        out = _run()
+        assert "⚠ Curated licence data is over 200 days old" in out
+
+    def test_fresh_curated_data_does_not_warn(self, monkeypatch):
+        monkeypatch.setattr(CMD + ".curated_staleness", lambda: (5, False))
+        out = _run()
+        assert "Curated licence data is over" not in out
 
     def test_critical_only_hides_permissive(self):
         out = _run(critical_only=True)
@@ -71,6 +83,9 @@ class TestJsonReport:
         assert "verdict" in payload
         assert "vulnerability_scan" in payload
         assert payload["vulnerability_scan"]["ran"] is False
+        assert payload["curated_reviewed_on"] == CURATED_REVIEWED_ON.isoformat()
+        assert payload["curated_age_days"] == 0
+        assert payload["curated_stale"] is False
 
     def test_json_verbose_includes_uncurated(self, monkeypatch):
         monkeypatch.setattr(CMD + ".audit_uncurated", lambda: [("mystery", "GPL-3.0", Tier.RESTRICTED)])

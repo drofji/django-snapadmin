@@ -489,6 +489,13 @@ Added
   restoring one is an all-tenants operation. See `Multi-Tenancy
   <https://drofji.github.io/django-snapadmin/#multi-tenancy>`_.
 
+* **``snapadmin_license_check`` now reports how stale its own data is.** The command's curated
+  licence map is hand-maintained, so every report ends with the date it was last checked against
+  ``pyproject.toml`` and each package's own licence metadata, and warns loudly once that is over
+  180 days old rather than letting a fork or a long-idle install trust a table nobody has reviewed
+  in months. Also in the ``--json`` payload as ``curated_reviewed_on`` / ``curated_age_days`` /
+  ``curated_stale``. See `Licence Audit <https://drofji.github.io/django-snapadmin/#license-check>`_.
+
 Changed
 -------
 

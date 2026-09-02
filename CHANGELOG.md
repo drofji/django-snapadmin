@@ -195,6 +195,8 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   `snapadmin.E009` flags a `tenant_scoped = True` declaration that cannot actually be enforced.
   Isolation is logical, not physical — `snapadmin.backup`'s database dumps run below the ORM and are
   not tenant-scoped at all, documented as plainly as the feature.
+- `snapadmin_license_check` now reports how stale its curated licence map is (last-reviewed date,
+  age in days) and warns loudly past 180 days unreviewed — also in the `--json` payload.
 
 ### Changed
 - The shipped `admin.js`'s select2 initialisation is opt-in now — see Breaking, above, for the

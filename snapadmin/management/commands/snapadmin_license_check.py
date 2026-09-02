@@ -20,10 +20,12 @@ import json
 from django.core.management.base import BaseCommand
 
 from snapadmin.licensing import (
+    CURATED_REVIEWED_ON,
     PackageStatus,
     Tier,
     audit_uncurated,
     commercial_verdict,
+    curated_staleness,
     is_compatible_with,
     scan_curated,
 )
@@ -87,10 +89,14 @@ class Command(BaseCommand):
     # ── payload / renderers ──────────────────────────────────────────────────
 
     def _payload(self, shown, statuses, verbose) -> dict:
+        age_days, stale = curated_staleness()
         payload = {
             "packages": [self._pkg_dict(s) for s in shown],
             "verdict": commercial_verdict(statuses),
             "vulnerability_scan": _cve_note(),
+            "curated_reviewed_on": CURATED_REVIEWED_ON.isoformat(),
+            "curated_age_days": age_days,
+            "curated_stale": stale,
         }
         if verbose:
             payload["uncurated"] = [
@@ -147,6 +153,14 @@ class Command(BaseCommand):
                 self.stdout.write("  none")
 
         self.stdout.write("\nVulnerability scan: " + _cve_note()["note"])
+
+        age_days, stale = curated_staleness()
+        self.stdout.write(f"Curated data last reviewed: {CURATED_REVIEWED_ON.isoformat()} ({age_days} days ago)")
+        if stale:
+            self.stdout.write(self.style.WARNING(
+                f"⚠ Curated licence data is over {age_days} days old — re-verify it against "
+                "pyproject.toml and each package's own licence metadata."
+            ))
 
     def _write_row(self, status: PackageStatus, width: int):
         info = status.info

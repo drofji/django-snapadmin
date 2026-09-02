@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import date, timedelta
 from email.message import Message
 from importlib import metadata
 
@@ -11,6 +12,8 @@ import pytest
 from snapadmin import licensing
 from snapadmin.licensing import (
     CURATED,
+    CURATED_REVIEWED_ON,
+    CURATED_STALE_AFTER_DAYS,
     LicenseInfo,
     PackageStatus,
     Tier,
@@ -20,6 +23,7 @@ from snapadmin.licensing import (
     audit_uncurated,
     classify,
     commercial_verdict,
+    curated_staleness,
     is_compatible_with,
     scan_curated,
 )
@@ -104,6 +108,38 @@ class TestCuratedMap:
                 continue
             for package in packages:
                 assert CURATED[_normalize(package)].extra == extra_name
+
+
+class TestCuratedStaleness:
+    def test_fresh_on_review_day(self):
+        age_days, stale = curated_staleness(today=CURATED_REVIEWED_ON)
+        assert age_days == 0
+        assert stale is False
+
+    def test_not_yet_stale_at_the_boundary(self):
+        boundary = CURATED_REVIEWED_ON + timedelta(days=CURATED_STALE_AFTER_DAYS)
+        age_days, stale = curated_staleness(today=boundary)
+        assert age_days == CURATED_STALE_AFTER_DAYS
+        assert stale is False
+
+    def test_stale_one_day_past_the_boundary(self):
+        past = CURATED_REVIEWED_ON + timedelta(days=CURATED_STALE_AFTER_DAYS + 1)
+        age_days, stale = curated_staleness(today=past)
+        assert age_days == CURATED_STALE_AFTER_DAYS + 1
+        assert stale is True
+
+    def test_defaults_to_today(self, monkeypatch):
+        fixed = date(2030, 1, 1)
+
+        class _FixedDate(date):
+            @classmethod
+            def today(cls):
+                return fixed
+
+        monkeypatch.setattr(licensing, "date", _FixedDate)
+        age_days, stale = curated_staleness()
+        assert age_days == (fixed - CURATED_REVIEWED_ON).days
+        assert stale is True
 
 
 class TestScan:

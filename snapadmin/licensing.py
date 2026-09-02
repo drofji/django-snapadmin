@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import date
 from enum import Enum
 from importlib import metadata
 
@@ -136,6 +137,24 @@ _CURATED: tuple[LicenseInfo, ...] = (
 
 #: Curated records keyed by normalised package name.
 CURATED: dict[str, LicenseInfo] = {info.normalized: info for info in _CURATED}
+
+#: The date `_CURATED` was last checked against `pyproject.toml` and each package's own licence
+#: metadata. A hand-curated table's whole risk is drifting silently — bump this whenever `_CURATED`
+#: changes, so `curated_staleness()` (surfaced by `snapadmin_license_check`) has something honest to
+#: measure against.
+CURATED_REVIEWED_ON: date = date(2026, 9, 2)
+
+#: How many days `_CURATED` may go unreviewed before `snapadmin_license_check` warns about it.
+CURATED_STALE_AFTER_DAYS: int = 180
+
+
+def curated_staleness(*, today: date | None = None) -> tuple[int, bool]:
+    """Days since :data:`CURATED_REVIEWED_ON`, and whether that exceeds the staleness window.
+
+    ``today`` is injectable for tests; defaults to :meth:`date.today`.
+    """
+    age_days = ((today or date.today()) - CURATED_REVIEWED_ON).days
+    return age_days, age_days > CURATED_STALE_AFTER_DAYS
 
 
 @dataclass(frozen=True)
