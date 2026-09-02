@@ -514,6 +514,24 @@ Fixed
   file on disk, and until now that job was invisible to anything measuring a retention window on
   ``finished_at``, including the new ``SNAPADMIN_EXPORT_RETENTION_DAYS`` purge.
 
+Deprecated
+----------
+
+* **``SNAPADMIN_REST_API_ENABLED`` and ``SNAPADMIN_GRAPHQL_ENABLED`` will default to ``False`` at
+  ``1.0``.** Both default to ``True`` today, so including ``snapadmin.urls`` exposes generated
+  read/write endpoints for every registered model — without a per-model ``api_write_fields``
+  allowlist, every field on it is writable. A project migrating from a plain Django admin never
+  asked for an API at all, and gets one anyway. Rather than flip the default mid-beta — this
+  project's deprecation window is already pinned to ``1.0`` (see ``SECURITY.md``'s API-stability
+  table), and a *second* breaking boundary mid-beta is exactly the failure this batch of fixes is
+  about — this release ships only the warning half: a new system check, ``snapadmin.W014``, fires
+  when either setting is left unset **and** its route is actually mounted, naming the future
+  default and the one line that pins today's behaviour
+  (``SNAPADMIN_REST_API_ENABLED = True`` / ``SNAPADMIN_GRAPHQL_ENABLED = True``). Pin either
+  setting explicitly, at any time, to silence the warning and keep today's behaviour past ``1.0``,
+  or set it to ``False`` now to adopt the future default early. The literal flip lands with the
+  ``1.0`` release itself.
+
 Security
 --------
 

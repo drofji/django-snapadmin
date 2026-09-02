@@ -230,6 +230,7 @@ def _capabilities() -> list[tuple[str, bool, str]]:
         ("write_allowlist", write_allowlist > 0, _count(write_allowlist, "model")),
         ("delete_guard", bool(get_setting("SNAPADMIN_API_DELETE_GUARD", None)), ""),
         ("decorated_models", decorated > 0, _count(decorated, "plain model")),
+        ("show_in_form_default", bool(get_setting("SNAPADMIN_SHOW_IN_FORM_DEFAULT", False)), ""),
         ("connectivity_awareness", connectivity_on, _count(offline_models, "offline-capable model") if offline_models else ""),
         ("snap_actions", *_snap_actions(models)),
         ("field_permissions", *_field_permissions(models)),

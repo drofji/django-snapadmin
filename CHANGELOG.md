@@ -224,6 +224,12 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   was invisible to anything measuring a retention window on `finished_at` (including the new
   `SNAPADMIN_EXPORT_RETENTION_DAYS` purge).
 
+### Deprecated
+- `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` defaulting to `True` is deprecated —
+  both flip to `False` at `1.0`. A new check, `snapadmin.W014`, warns when either is left unset
+  while its route is actually mounted, naming the one line that pins today's behaviour. See
+  Breaking, above.
+
 ### Security
 - `snap_field(field, wysiwyg=True)` now sanitizes on write, matching `SnapRichTextField` — closing
   a gap where the wrapper route stored raw HTML unsanitized.

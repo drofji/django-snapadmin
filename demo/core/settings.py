@@ -286,6 +286,12 @@ SNAPADMIN_DASHBOARD_PUBLIC = env_bool('SNAPADMIN_DASHBOARD_PUBLIC', False)
 # is *exactly* Django's is replaced, so a custom UserAdmin is never touched.
 # False = leave the auth admin alone.
 SNAPADMIN_THEME_AUTH_ADMIN = env_bool('SNAPADMIN_THEME_AUTH_ADMIN', True)
+# Project-wide default for every SnapField's show_in_form, for a codebase adopting
+# SnapAdmin onto models that never set it per field (unset fields would otherwise
+# all resolve to False, generating an empty change form — see snapadmin.W015). An
+# explicit per-field show_in_form= always wins. The demo declares every field
+# explicitly, so this stays at the shipped default.
+SNAPADMIN_SHOW_IN_FORM_DEFAULT = env_bool('SNAPADMIN_SHOW_IN_FORM_DEFAULT', False)
 # The connectivity/offline layer (health poll, save-blocking guard, sidebar
 # sync badge) is opt-in and defaults to False upstream (#JS2e) — it only loads
 # when at least one registered model has offline_mode=True. The demo turns it

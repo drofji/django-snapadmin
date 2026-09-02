@@ -481,18 +481,22 @@ matrix, extras gotchas, and the MySQL driver licence note.
 Every surface is a plain Django setting. Switching one off removes its routes entirely:
 
 ```python
-SNAPADMIN_REST_API_ENABLED       = True    # REST CRUD endpoints
-SNAPADMIN_GRAPHQL_ENABLED        = True    # GraphQL endpoint
+SNAPADMIN_REST_API_ENABLED       = True    # REST CRUD endpoints — deprecated default, flips to False at 1.0
+SNAPADMIN_GRAPHQL_ENABLED        = True    # GraphQL endpoint — same deprecation, see SECURITY.md
 SNAPADMIN_SWAGGER_ENABLED        = True    # Swagger UI + ReDoc
 SNAPADMIN_URL_PREFIX             = ""      # relocate the whole API surface
 SNAPADMIN_CONNECTIVITY_ENABLED   = False   # admin-wide health poll + offline save-guard (opt-in)
 ```
 
+Pin the first two explicitly — `snapadmin.W014` warns while either is left at its built-in `True`
+and its route is actually mounted, since a plain-admin migration that never asked for an API
+otherwise gets one anyway.
+
 Don't want to decide all ~90 of them? `SNAPADMIN_PROFILE = "admin"` (or `"api"` / `"full"`) picks
 sane defaults for the handful that actually matter — an explicit setting always overrides it.
 
-Misconfiguration shows up **at startup** as a Django system check (`snapadmin.W001`–`W011`,
-`E001`–`E007`), not as a mystery at request time.
+Misconfiguration shows up **at startup** as a Django system check (`snapadmin.W001`–`W015`,
+`E001`–`E012`), not as a mystery at request time.
 
 → [Every setting, with defaults](https://drofji.github.io/django-snapadmin/#env-vars) ·
 [SNAPADMIN_PROFILE presets](https://drofji.github.io/django-snapadmin/#profiles)

@@ -265,7 +265,7 @@ class SearchLog(snap_models.SnapModel):
     Demonstrates es_storage_mode = ES_ONLY.
     No database table — records live only in Elasticsearch.
     """
-    query = snap_fields.SnapCharField(max_length=255, verbose_name=_("Query"), searchable=True)
+    query = snap_fields.SnapCharField(max_length=255, verbose_name=_("Query"), searchable=True, show_in_form=True)
     results_count = snap_fields.SnapIntegerField(verbose_name=_("Results Count"))
     # snap_field() attaches SnapAdmin metadata to a plain Django field instead
     # of a Snap*Field subclass — the interop path for a third-party field

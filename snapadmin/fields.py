@@ -16,6 +16,7 @@ from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
 from snapadmin import validators as snap_validators
+from snapadmin.conf import get_setting
 
 
 # ===========================================================================
@@ -98,7 +99,8 @@ class SnapField:
     ``show_in_list``
         Include the field as a column on the admin changelist. Default ``True``.
     ``show_in_form``
-        Include the field on the add/change form. Default ``False``.
+        Include the field on the add/change form. Default ``False``, or the project-wide
+        ``SNAPADMIN_SHOW_IN_FORM_DEFAULT`` setting when set — an explicit value here always wins.
     ``searchable``
         Add to the admin search box, the REST ``?search=`` filter and — on a model
         mirrored to Elasticsearch — the search mapping. Default ``False``.
@@ -155,7 +157,13 @@ class SnapField:
     def __applySnapDefaults(self, **kwargs) -> dict:
         snap_defaults = {
             SnapFieldAttributeEnum.SHOW_IN_LIST: True,
-            SnapFieldAttributeEnum.SHOW_IN_FORM: False,
+            # Project-wide escape hatch for a codebase adopting SnapAdmin onto
+            # models that never set show_in_form anywhere: without it, every
+            # field falls back to False and register_admin() generates an
+            # empty change form with no error (see snapadmin.checks.W015).
+            # An explicit per-field show_in_form= still wins — this only
+            # changes what an *unset* field resolves to.
+            SnapFieldAttributeEnum.SHOW_IN_FORM: get_setting("SNAPADMIN_SHOW_IN_FORM_DEFAULT", False),
             SnapFieldAttributeEnum.SEARCHABLE: False,
             SnapFieldAttributeEnum.FILTERABLE: False,
             SnapFieldAttributeEnum.EDITABLE: True,
@@ -402,6 +410,11 @@ def snap_field(field: models.Field, **kwargs: bool | str | None) -> models.Field
     :func:`_attach_file_validator`, and note those three only make sense on a
     ``FileField``/``ImageField``). An unrecognised name — a typo — raises
     ``ValueError`` naming it, rather than silently doing nothing.
+
+    Sets **only** the attributes actually passed — unlike a ``Snap*Field``
+    subclass, this wrapper never applies a default for one that is left out
+    (so ``SNAPADMIN_SHOW_IN_FORM_DEFAULT`` does not reach a field attached
+    this way; pass ``show_in_form=`` explicitly if you need it raised here).
 
     Adds no database migration for every kwarg **except** ``required``: the
     metadata kwargs are mutated *after* ``Field.__init__`` already recorded its

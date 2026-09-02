@@ -72,6 +72,18 @@ Currently deprecated, still working — all scheduled for **removal in `1.0`**:
 | `snapadmin_info` (underscored console script) | `snapadmin-info` | `1.0` |
 | `snapadmin_license_check` (underscored console script) | `snapadmin-license-check` | `1.0` |
 
+**Default changing at `1.0`, not yet flipped:**
+
+| Setting | Today's default | `1.0` default | Warns today via |
+|---|---|---|---|
+| `SNAPADMIN_REST_API_ENABLED` | `True` | `False` | `snapadmin.W014`, when left unset and the route is actually mounted |
+| `SNAPADMIN_GRAPHQL_ENABLED` | `True` | `False` | `snapadmin.W014`, same condition |
+
+Both flip because a project migrating from a plain Django admin never asked for an API at all, yet
+gets one — writable, unless `api_write_fields` is set per model — the moment `snapadmin.urls` is
+included. Pin either setting explicitly, at any time, to opt out of the flip and keep today's
+behaviour past `1.0`. See the migration guide.
+
 The three management-command aliases print their removal date on stderr every time they run (see
 `snapadmin/management/aliases.py`). The two underscored console scripts are a duplicate spelling of
 the dashed ones declared in `pyproject.toml`, kept only because `snapadmin_info`/`snapadmin_license_check`
@@ -413,8 +425,9 @@ Key protections:
 
 ### Attack-surface reduction & extension guards
 - Each surface can be **switched off**: `SNAPADMIN_REST_API_ENABLED`, `SNAPADMIN_GRAPHQL_ENABLED`,
-  `SNAPADMIN_SWAGGER_ENABLED` (disabling removes the routes entirely). The user-management API
-  (`SNAPADMIN_USER_API_ENABLED`) is **off by default**.
+  `SNAPADMIN_SWAGGER_ENABLED` (disabling removes the routes entirely). Both default to `True` today
+  — see the API-stability table above, this default is deprecated and flips to `False` at `1.0`.
+  The user-management API (`SNAPADMIN_USER_API_ENABLED`) is **off by default**.
 - The **bulk ES reindex endpoint** is off by default (`SNAPADMIN_REINDEX_API_ENABLED`) and
   `IsAdminUser`-gated when enabled.
 - **Deletion guards** — `SnapModel.api_can_delete(request)` and the `SNAPADMIN_API_DELETE_GUARD` dotted
@@ -426,6 +439,9 @@ Key protections:
 - Serve everything over **HTTPS** — API tokens and session cookies are bearer credentials.
 - Keep the dashboard gated (leave `SNAPADMIN_DASHBOARD_PUBLIC` unset/`False`).
 - Keep `SNAPADMIN_GRAPHIQL_ENABLED` off in production and `SNAPADMIN_GRAPHQL_REQUIRE_AUTH = True`.
+- Pin `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` explicitly rather than relying on
+  the built-in default — both flip to `False` at `1.0` (`snapadmin.W014` warns while either is
+  left unset with the surface actually mounted).
 - Scope API tokens with `allowed_models` (and `allowed_scopes` for your own endpoints) and set an
   `expiration_date`; rotate a leaked token with `POST /api/tokens/<id>/rotate/` rather than deleting
   and reissuing it — the row, its scopes and its history survive, and the old key stops authenticating

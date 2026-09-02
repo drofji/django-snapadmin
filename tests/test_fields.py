@@ -19,6 +19,7 @@ from decimal import Decimal
 
 import pytest
 from django.db import models
+from django.test import override_settings
 from django.utils.safestring import SafeString
 
 from snapadmin.fields import (
@@ -125,6 +126,44 @@ class TestSnapFieldDefaults:
     def test_required_override_true(self):
         f = self._make_field(required=True)
         assert f.required is True
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SNAPADMIN_SHOW_IN_FORM_DEFAULT — project-wide show_in_form default (#DEF2b)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestShowInFormDefaultSetting:
+    def test_unset_keeps_the_shipped_default(self):
+        f = SnapCharField(max_length=50)
+        assert f.show_in_form is False
+
+    @override_settings(SNAPADMIN_SHOW_IN_FORM_DEFAULT=True)
+    def test_raised_default_applies_to_an_unset_field(self):
+        f = SnapCharField(max_length=50)
+        assert f.show_in_form is True
+
+    @override_settings(SNAPADMIN_SHOW_IN_FORM_DEFAULT=True)
+    def test_explicit_per_field_false_still_wins(self):
+        f = SnapCharField(max_length=50, show_in_form=False)
+        assert f.show_in_form is False
+
+    @override_settings(SNAPADMIN_SHOW_IN_FORM_DEFAULT=True)
+    def test_snap_field_wrapper_route_is_out_of_scope(self):
+        """snap_field() never applies *any* default (see its docstring) — the
+        setting only reaches __applySnapDefaults, used by the Snap*Field
+        classes. An explicit show_in_form= on the wrapper still works."""
+        wrapped = snap_field(models.CharField(max_length=50))
+        assert not hasattr(wrapped, "show_in_form")
+        wrapped_explicit = snap_field(models.CharField(max_length=50), show_in_form=True)
+        assert wrapped_explicit.show_in_form is True
+
+    @override_settings(SNAPADMIN_SHOW_IN_FORM_DEFAULT=True)
+    def test_deconstruct_is_unaffected(self):
+        """The setting changes a default, never the serialised field — snap-only
+        kwargs never reach deconstruct() regardless of what they resolved to."""
+        f = SnapCharField(max_length=50)
+        _, _, _, kwargs = f.deconstruct()
+        assert "show_in_form" not in kwargs
 
 
 # ─────────────────────────────────────────────────────────────────────────────

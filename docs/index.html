@@ -848,7 +848,7 @@ class Product(models.Model):
   <table>
     <tr><th>Flag</th><th>Type</th><th>Default</th><th>Effect</th></tr>
     <tr><td><code>show_in_list</code></td><td>bool</td><td>True</td><td>Adds to <code>list_display</code></td></tr>
-    <tr><td><code>show_in_form</code></td><td>bool</td><td>False</td><td>Shows field in change form</td></tr>
+    <tr><td><code>show_in_form</code></td><td>bool</td><td>False<sup>*</sup></td><td>Shows field in change form</td></tr>
     <tr><td><code>searchable</code></td><td>bool</td><td>False</td><td>Adds to <code>search_fields</code></td></tr>
     <tr><td><code>filterable</code></td><td>bool</td><td>False</td><td>Smart sidebar filter (type-aware)</td></tr>
     <tr><td><code>editable</code></td><td>bool</td><td>True</td><td>Always read-only when False</td></tr>
@@ -861,6 +861,13 @@ class Product(models.Model):
     <tr><td><code>autocomplete</code></td><td>bool</td><td>False</td><td>Searchable autocomplete widget (relation fields)</td></tr>
   </table>
   </details>
+
+  <p><sup>*</sup> <code>show_in_form</code>'s <code>False</code> default is project-wide, not
+  per-field: <code>SNAPADMIN_SHOW_IN_FORM_DEFAULT</code> raises it for every field that never sets
+  it explicitly — useful when adopting SnapAdmin onto models that predate it, where nothing setting
+  it anywhere used to mean every generated change form rendered empty
+  (<code>snapadmin.W015</code> now catches that whatever the cause). An explicit per-field
+  <code>show_in_form=</code> always wins over the project-wide setting.</p>
 
   <p><strong>Wysiwyg HTML is sanitized on write and on render.</strong> Rich-text fields
   (<code>wysiwyg=True</code> / <code>SnapRichTextField</code>) hold HTML written by whoever can
@@ -3766,18 +3773,23 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset, same as
   <h3>Feature toggles</h3>
   <table>
     <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-    <tr><td><code>SNAPADMIN_REST_API_ENABLED</code></td><td><code>True</code></td><td>Serve the REST CRUD endpoints (<code>False</code> removes the routes)</td></tr>
+    <tr><td><code>SNAPADMIN_REST_API_ENABLED</code></td><td><code>True</code><sup>†</sup></td><td>Serve the REST CRUD endpoints (<code>False</code> removes the routes)</td></tr>
     <tr><td><code>SNAPADMIN_SWAGGER_ENABLED</code></td><td><code>True</code></td><td>Serve Swagger UI + ReDoc</td></tr>
-    <tr><td><code>SNAPADMIN_GRAPHQL_ENABLED</code></td><td><code>True</code></td><td>Serve the GraphQL endpoint</td></tr>
+    <tr><td><code>SNAPADMIN_GRAPHQL_ENABLED</code></td><td><code>True</code><sup>†</sup></td><td>Serve the GraphQL endpoint</td></tr>
     <tr><td><code>SNAPADMIN_GRAPHIQL_ENABLED</code></td><td><code>DEBUG</code></td><td>GraphiQL playground — keep it out of production</td></tr>
     <tr><td><code>SNAPADMIN_GRAPHQL_REQUIRE_AUTH</code></td><td><code>True</code></td><td>Require auth + per-model permissions on every GraphQL resolver</td></tr>
     <tr><td><code>SNAPADMIN_URL_PREFIX</code></td><td><code>""</code></td><td>Extra path segment prepended to every SnapAdmin route (relocates the whole API/GraphQL/Swagger surface)</td></tr>
     <tr><td><code>SNAPADMIN_DASHBOARD_PUBLIC</code></td><td><code>False</code></td><td>Serve the system dashboard without the default staff gate</td></tr>
     <tr><td><code>SNAPADMIN_USER_API_ENABLED</code></td><td><code>False</code></td><td>Serve the admin-only user-management API (<code>/api/users/</code>, <code>/api/permissions/</code>)</td></tr>
     <tr><td><code>SNAPADMIN_THEME_AUTH_ADMIN</code></td><td><code>True</code></td><td>With the optional Unfold theme installed, re-register Django's stock <code>User</code>/<code>Group</code> admins with Unfold's theme and forms (see <a href="#themed-auth-admin">Themed auth admin</a>)</td></tr>
+    <tr><td><code>SNAPADMIN_SHOW_IN_FORM_DEFAULT</code></td><td><code>False</code></td><td>Project-wide default for every <code>Snap*Field</code>'s <code>show_in_form</code> — raise it when adopting SnapAdmin onto models that never set the flag per field; an explicit per-field value still wins (<code>snapadmin.W015</code> flags a model whose form would render empty regardless of the cause)</td></tr>
     <tr><td><code>SNAPADMIN_CONNECTIVITY_ENABLED</code></td><td><code>False</code></td><td>Load the admin-wide health-poll/save-guard/sidebar-badge layer (<code>snapadmin/js/connectivity.js</code>) — only takes effect when at least one registered model also has <code>offline_mode = True</code> (see <a href="#offline">Offline Mode</a>)</td></tr>
     <tr><td><code>SNAPADMIN_LIMITS_CACHE_ALIAS</code></td><td><code>"default"</code></td><td>Which <code>CACHES</code> entry <code>snapadmin.limits.reserve()</code> stores its window/concurrency/cooldown counters in — point it at a shared backend before relying on quotas across more than one worker process (see <a href="#quotas">Quotas &amp; Rate Limits</a>)</td></tr>
   </table>
+  <p><sup>†</sup> Deprecated default — both flip to <code>False</code> at SnapAdmin <code>1.0</code>
+  (<code>snapadmin.W014</code> warns while either is left unset with its route actually mounted).
+  Pin the setting explicitly, either value, to silence the warning. See the
+  <a href="#migration-guides">migration guide</a>.</p>
 
   <h3>API behaviour, auth &amp; limits</h3>
   <table>
@@ -4461,7 +4473,7 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
     no JavaScript. It states what SnapAdmin is, carries the three-step quickstart, lists the facts an
     assistant should not have to infer — snap-only field kwargs add no migration, import paths are the
     public contract, the Unfold theme is optional, misconfiguration surfaces as
-    <code>snapadmin.W001</code>–<code>W011</code> and <code>snapadmin.E001</code>–<code>E007</code> —
+    <code>snapadmin.W001</code>–<code>W015</code> and <code>snapadmin.E001</code>–<code>E012</code> —
     and then links every section of this page with a
     line describing what it covers.
   </p>

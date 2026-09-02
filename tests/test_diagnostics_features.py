@@ -172,6 +172,13 @@ class TestSettingsGatedCapabilities:
         assert data["elasticsearch"] is False
         assert "elasticsearch" not in data.get("details", {})
 
+    def test_show_in_form_default_off_by_default(self):
+        assert _collect()["show_in_form_default"] is False
+
+    @override_settings(SNAPADMIN_SHOW_IN_FORM_DEFAULT=True)
+    def test_show_in_form_default_on_when_raised(self):
+        assert _collect()["show_in_form_default"] is True
+
 
 class TestConnectivityAwareness:
     """#JS2e: "on" requires both the setting and an offline-capable model."""
