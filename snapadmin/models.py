@@ -12,6 +12,8 @@ from datetime import timedelta
 from enum import Enum
 from typing import Any, NamedTuple, NoReturn
 
+from asgiref.sync import sync_to_async
+
 from django.apps import apps
 from django.core.exceptions import FieldDoesNotExist, FieldError, ImproperlyConfigured, ValidationError
 from django.contrib import admin
@@ -450,6 +452,14 @@ class SnapJobBase(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("Created At"))
     started_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Started At"))
     finished_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Finished At"))
+    # The submitter's tenant (#FUT1b), captured once when the job targets a
+    # tenant_scoped model and stamped here so a worker that runs later, in a
+    # different process with no request in hand, can replay it via
+    # snapadmin.tenancy.use_tenant() — see SnapExportJob/SnapImportJob's
+    # creation paths. Blank for a job targeting a model that is not
+    # tenant-scoped, and for SnapReindexJob, whose sweep is deliberately
+    # cross-tenant (see snapadmin.reindexing) and never stamps this field.
+    tenant_id = models.CharField(max_length=64, blank=True, default="", db_index=True, verbose_name=_("Tenant"), help_text=_("The submitter's tenant, replayed when the job runs. Blank for a job whose target model is not tenant-scoped."))
 
     class Meta:
         abstract = True
@@ -684,10 +694,16 @@ _ES_DEFAULT_AGG_SIZE = 10
 class EsQuerySet:
     """A lightweight mock QuerySet for Elasticsearch-only models."""
 
-    def __init__(self, model, hits=None):
+    def __init__(self, model, hits=None, filters=None):
         from django.db.models.sql.query import Query
         self.model = model
         self._hits = hits if hits is not None else []
+        # Every field=value filter chained onto this queryset so far — kept
+        # even though filter() already narrowed _hits, because get() below
+        # bypasses _hits entirely (it fetches straight from ES by pk) and
+        # must re-check this dict to avoid returning a hit outside the
+        # already-applied filter (see get()'s docstring).
+        self._filters = dict(filters) if filters else {}
         self.query = Query(model)  # Mock query for DRF
         self._result_cache = self._hits
         self._prefetch_related_lookups = []
@@ -704,7 +720,7 @@ class EsQuerySet:
 
     def __getitem__(self, k):
         if isinstance(k, slice):
-            return EsQuerySet(self.model, self._hits[k])
+            return self._clone(self._hits[k])
         return self._hits[k]
 
     def count(self):
@@ -739,7 +755,7 @@ class EsQuerySet:
                     break
             if match:
                 new_hits.append(hit)
-        return self._clone(new_hits)
+        return self._clone(new_hits, filters={**self._filters, **kwargs})
 
     def exclude(self, *args, **kwargs):
         return self
@@ -753,8 +769,12 @@ class EsQuerySet:
     def prefetch_related(self, *lookups):
         return self
 
-    def _clone(self, hits=None):
-        return EsQuerySet(self.model, hits if hits is not None else self._hits)
+    def _clone(self, hits=None, filters=None):
+        return EsQuerySet(
+            self.model,
+            hits if hits is not None else self._hits,
+            filters if filters is not None else self._filters,
+        )
 
     def using(self, alias):
         return self
@@ -766,6 +786,17 @@ class EsQuerySet:
         return self
 
     def get(self, *args, **kwargs):
+        """Fetch one document by pk directly from Elasticsearch.
+
+        Bypasses ``_hits`` entirely (a direct ES lookup, not a scan of an
+        already-fetched page), so any ``filter()`` chained onto this
+        queryset before ``get()`` — most importantly a tenant-scoping filter
+        (see ``snapadmin.tenancy.scope_queryset``) — is re-checked against
+        the fetched document here via ``_filters``. Without this, a caller
+        holding a *filtered* queryset could still ``.get(pk=...)`` a
+        document the filter excluded, since ES itself was never asked about
+        the filter at all.
+        """
         pk = kwargs.get("pk") or kwargs.get("id")
         if pk:
             try:
@@ -774,7 +805,6 @@ class EsQuerySet:
                 data = hit["_source"]
                 obj = self.model(**{k: v for k, v in data.items() if k != "id"})
                 obj.pk = data.get("id")
-                return obj
             except Exception as exc:
                 # A connection failure surfaces as DoesNotExist to the caller —
                 # log the real cause so outages aren't mistaken for missing rows.
@@ -785,7 +815,36 @@ class EsQuerySet:
                     error=str(exc),
                 )
                 raise self.model.DoesNotExist
+            for key, val in self._filters.items():
+                if getattr(obj, key, None) != val:
+                    raise self.model.DoesNotExist
+            return obj
         raise self.model.DoesNotExist
+
+    def first(self):
+        """The first hit, or ``None`` — matches ``QuerySet.first()``'s contract."""
+        return self._hits[0] if self._hits else None
+
+    def last(self):
+        """The last hit, or ``None`` — matches ``QuerySet.last()``'s contract."""
+        return self._hits[-1] if self._hits else None
+
+    # ------------------------------------------------------------------
+    # Async counterparts (#PROP1b). A real Django QuerySet gets aget/afirst/
+    # alast for free from Django itself; EsQuerySet is a standalone mock (it
+    # does not subclass QuerySet), so it needs its own thin async wrappers
+    # over the sync methods above — the same pattern Django's own QuerySet
+    # uses internally.
+    # ------------------------------------------------------------------
+
+    async def aget(self, *args, **kwargs):
+        return await sync_to_async(self.get, thread_sensitive=True)(*args, **kwargs)
+
+    async def afirst(self):
+        return await sync_to_async(self.first, thread_sensitive=True)()
+
+    async def alast(self):
+        return await sync_to_async(self.last, thread_sensitive=True)()
 
     def exists(self) -> bool:
         return bool(self._hits)
@@ -799,19 +858,26 @@ class EsManager(models.Manager):
     """Manager that uses Elasticsearch for ES_ONLY models."""
 
     def get_queryset(self):
+        # The single point every SnapModel query — the admin, the REST/GraphQL
+        # APIs, the offline cache, purge, import's duplicate-key lookup —
+        # funnels through, so it is where tenant scoping (#FUT1) is enforced
+        # once for all of them. A no-op for a model that never opted in
+        # (tenant_scoped = False, the default); see snapadmin.tenancy.
+        from snapadmin.tenancy import scope_queryset
+
         if getattr(self.model, "es_storage_mode", None) == EsStorageMode.ES_ONLY:
             limit = get_setting("SNAPADMIN_ES_SEARCH_LIMIT", 1000)
             qs = self.model.es_search(limit=limit)
             if not isinstance(qs, EsQuerySet):
-                return EsQuerySet(self.model, [])
-            return qs
+                qs = EsQuerySet(self.model, [])
+            return scope_queryset(self.model, qs)
         # No default ordering is injected here. A default ``order_by("-pk")`` on
         # the base manager leaks into ``GROUP BY`` for ``.values().annotate()``
         # aggregations (Django appends ordering columns to the GROUP BY), which
         # silently returns one row per pk instead of per group. The "-pk" newest-
         # first default is applied in the presentation layers that need a stable
         # order instead (admin changelist ``ordering`` and the API list view).
-        return super().get_queryset()
+        return scope_queryset(self.model, super().get_queryset())
 
 
 class DjangoAdminClassAttributeEnum(str, Enum):
@@ -938,8 +1004,37 @@ class SnapSaveMixin:
     A create records the initial field values; an edit records only what changed.
     """
 
+    def _stamp_tenant(self, obj) -> None:
+        """Force a tenant-scoped model's tenant column to this request's bound
+        tenant on create (#FUT1b).
+
+        The generated admin form never exposes the tenant column (it carries
+        no Snap field ``show_in_form`` flag — see ``get_admin_fields()`` —
+        by design, the same reasoning as the REST/GraphQL write paths:
+        assignment is server-side only), so nothing else would ever set it.
+        Refuses the save outright when no tenant is bound rather than
+        silently creating a row nobody can ever see again — the row would
+        otherwise carry an empty tenant value that matches no tenant's
+        filter, an orphan indistinguishable from a bug.
+        """
+        from django.core.exceptions import PermissionDenied
+
+        from snapadmin.tenancy import ALL_TENANTS, get_current_tenant, is_tenant_scoped, tenant_field_name
+
+        model = type(obj)
+        if not is_tenant_scoped(model):
+            return
+        current = get_current_tenant()
+        if current is None or current is ALL_TENANTS:
+            raise PermissionDenied(
+                f"No tenant is bound to this request — {model._meta.label} is "
+                "tenant-scoped and refuses to create a row with no tenant assigned."
+            )
+        setattr(obj, tenant_field_name(model), current)
+
     def save_model(self, request, obj, form, change):
         if not change:
+            self._stamp_tenant(obj)
             super().save_model(request, obj, form, change)
             # Audit trail: snapshot the created field values.
             from snapadmin import audit
@@ -1208,6 +1303,23 @@ class SnapModel(models.Model):
     # and the shared-file skip rule documented there. None (the default) purges
     # rows only, exactly today's behaviour.
     data_retention_files: list[str] | None = None
+
+    # Multi-tenancy (#FUT1). Set tenant_scoped = True and add a tenant column
+    # (snapadmin.tenancy.tenant_field()) to opt this model into row-level
+    # tenant isolation. Once set, every generated surface — the admin, the
+    # REST/GraphQL APIs, Elasticsearch routing, exports, imports, the offline
+    # cache — requires a bound tenant context (snapadmin.tenancy.use_tenant())
+    # to see or write any row; with none bound, every read returns empty and
+    # every write is refused, never "every row" (default-deny). Isolation is
+    # *logical*, not physical — one query path that bypasses the manager still
+    # leaks; see SECURITY.md. False (the default) leaves a model exactly as
+    # before: tenant scoping is opt-in, never retrofitted onto an existing
+    # project's models. See snapadmin.tenancy for the full mechanism.
+    tenant_scoped: bool = False
+    # Name of the tenant column, resolved through get_model_meta() the same
+    # way every other name here is — so a decorated plain model, or a project
+    # setting, can override it too. None (the default) resolves to "tenant_id".
+    tenant_field: str | None = None
 
     # Offline mode
     # Set offline_mode = True to enable client-side caching (IndexedDB) of this model's
@@ -1582,6 +1694,7 @@ class SnapModel(models.Model):
                         "lenient": True,
                     }
                 } if query_string else {"match_all": {}}
+                query = cls._with_tenant_es_scope(query)
                 response = es.search(
                     index=cls.get_es_index_name(),
                     body={
@@ -1691,6 +1804,71 @@ class SnapModel(models.Model):
             )
 
     @classmethod
+    def _tenant_es_term(cls) -> tuple[str, Any] | None:
+        """``(es_field, value)`` enforcing this model's tenant scope on a direct
+        Elasticsearch query, or ``None`` when nothing needs enforcing.
+
+        The ES-native query methods (:meth:`es_search`, :meth:`es_filter`,
+        :meth:`es_aggregate`, :meth:`es_count`, :meth:`es_scan`) build their
+        own query body and, for ``ES_ONLY`` models, reconstruct objects
+        straight from the ES response — they never reach
+        :meth:`EsManager.get_queryset`'s scoping hook the way ``cls.objects``
+        does. So the tenant constraint has to be forced into the query body
+        itself here.
+
+        ``None`` when :meth:`~snapadmin.tenancy.is_tenant_scoped` is false,
+        or inside :func:`~snapadmin.tenancy.use_all_tenants`. With **no**
+        tenant bound — including a tenant field this model's ES mapping does
+        not carry at all — resolves to a term that can never match a real
+        document (Elasticsearch's own ``_id`` field against a value no
+        document will ever have), so Elasticsearch itself enforces the empty
+        result: one fail-closed shape, not a second "return nothing" branch
+        duplicated in every caller.
+        """
+        from snapadmin.tenancy import ALL_TENANTS, get_current_tenant, is_tenant_scoped, tenant_field_name
+
+        if not is_tenant_scoped(cls):
+            return None
+        current = get_current_tenant()
+        if current is ALL_TENANTS:
+            return None
+        if current is None:
+            return ("_id", "__snapadmin_no_tenant_context__")
+        field_name = tenant_field_name(cls)
+        try:
+            es_field = cls._resolve_es_term_field(field_name)
+        except ValueError:
+            logger.warning("tenant_field_not_es_mapped", model=cls.__name__, field=field_name)
+            return ("_id", "__snapadmin_no_tenant_context__")
+        return (es_field, current)
+
+    @classmethod
+    def _with_tenant_es_scope(cls, query: dict) -> dict:
+        """Wrap a full-text ``query`` body (:meth:`es_search`'s shape) in the
+        tenant filter clause from :meth:`_tenant_es_term`, unchanged when
+        there is nothing to enforce."""
+        term = cls._tenant_es_term()
+        if term is None:
+            return query
+        field, value = term
+        return {"bool": {"must": [query], "filter": [{"term": {field: value}}]}}
+
+    @classmethod
+    def _resolve_es_terms(cls, terms: dict) -> dict:
+        """``**terms`` resolved through :meth:`_resolve_es_term_field`, with
+        this model's tenant term (see :meth:`_tenant_es_term`) forced in —
+        shared by :meth:`es_filter`, :meth:`es_aggregate`, :meth:`es_count`
+        and :meth:`es_scan`. A caller-supplied term for the same ES field is
+        overridden, never merged: tenant scoping is not something a query's
+        own terms can widen.
+        """
+        resolved = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
+        tenant_term = cls._tenant_es_term()
+        if tenant_term is not None:
+            resolved[tenant_term[0]] = tenant_term[1]
+        return resolved
+
+    @classmethod
     def _es_db_fallback(cls, db_fallback: bool | None) -> bool:
         """Resolve the effective ES→DB fallback posture for a query method.
 
@@ -1750,7 +1928,7 @@ class SnapModel(models.Model):
         """
         # Resolve/validate every term up-front so a bad field raises regardless
         # of which backend ends up answering the query.
-        resolved = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
+        resolved = cls._resolve_es_terms(terms)
 
         limit = limit or get_setting("SNAPADMIN_ES_SEARCH_LIMIT", 1000)
         fallback = cls._es_db_fallback(db_fallback)
@@ -1896,7 +2074,7 @@ class SnapModel(models.Model):
         # Resolve/validate every field and term up-front so a bad field raises
         # regardless of which backend ends up answering the query.
         resolved_fields = {name: cls._resolve_es_term_field(name) for name in fields}
-        resolved_terms = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
+        resolved_terms = cls._resolve_es_terms(terms)
 
         fallback = cls._es_db_fallback(db_fallback)
         es_intended = cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY
@@ -2010,7 +2188,7 @@ class SnapModel(models.Model):
         """
         # Resolve/validate every term up-front so a bad field raises regardless
         # of which backend ends up answering the query.
-        resolved = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
+        resolved = cls._resolve_es_terms(terms)
 
         fallback = cls._es_db_fallback(db_fallback)
         es_intended = cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY
@@ -2140,7 +2318,7 @@ class SnapModel(models.Model):
             )
         # Resolve/validate every term up-front so a bad field raises on the call,
         # not lazily on the first `next()` of the returned generator.
-        resolved = {cls._resolve_es_term_field(key): value for key, value in terms.items()}
+        resolved = cls._resolve_es_terms(terms)
         page_size = page_size or get_setting("SNAPADMIN_ES_SEARCH_LIMIT", 1000)
         fallback = cls._es_db_fallback(db_fallback)
         pk_only = source is False
@@ -2507,27 +2685,35 @@ class SnapModel(models.Model):
         if cls.es_storage_mode == EsStorageMode.ES_ONLY:
             return cls._purge_expired_es_only(cutoff, retention_field, dry_run)
 
-        qs = cls.objects.filter(**{f"{retention_field}__lt": cutoff})
-        if dry_run:
-            return qs.count()
+        # Retention is time-based, not tenant-based: an expired row is purged
+        # regardless of which tenant it belongs to, so this sweep is one of
+        # the few legitimately cross-tenant operations (#FUT1b) — it must see
+        # every tenant's rows, never only the caller's (there usually is no
+        # caller; this runs from a scheduled task with no request in hand).
+        from snapadmin.tenancy import use_all_tenants
 
-        purging_pks = set(qs.values_list("pk", flat=True))
-        count = len(purging_pks)
+        with use_all_tenants():
+            qs = cls.objects.filter(**{f"{retention_field}__lt": cutoff})
+            if dry_run:
+                return qs.count()
 
-        if cls.es_storage_mode == EsStorageMode.DUAL:
+            purging_pks = set(qs.values_list("pk", flat=True))
+            count = len(purging_pks)
+
+            if cls.es_storage_mode == EsStorageMode.DUAL:
+                cls._purge_expired_files(qs, purging_pks)
+                qs.delete()
+                if not cls._delete_pks_from_es(list(purging_pks)):
+                    raise SnapPurgeError(
+                        f"{cls.__name__}: {count} row(s) deleted from the database, "
+                        "but the Elasticsearch mirror could not be cleared; personal "
+                        "data may still be live and searchable via ES."
+                    )
+                return count
+
             cls._purge_expired_files(qs, purging_pks)
             qs.delete()
-            if not cls._delete_pks_from_es(list(purging_pks)):
-                raise SnapPurgeError(
-                    f"{cls.__name__}: {count} row(s) deleted from the database, "
-                    "but the Elasticsearch mirror could not be cleared; personal "
-                    "data may still be live and searchable via ES."
-                )
             return count
-
-        cls._purge_expired_files(qs, purging_pks)
-        qs.delete()
-        return count
 
     # ------------------------------------------------------------------
     # Human-readable representation

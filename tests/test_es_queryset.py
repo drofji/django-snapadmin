@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from asgiref.sync import async_to_sync
 from snapadmin.models import EsQuerySet, EsManager, EsStorageMode
 
 
@@ -146,6 +147,69 @@ class TestEsQuerySetGet:
                 qs.get(pk=99)
 
 
+class TestEsQuerySetFirstLast:
+    def test_first_returns_the_first_hit(self):
+        hits = _make_hits("A", "B")
+        assert EsQuerySet(None, hits).first() is hits[0]
+
+    def test_first_none_when_empty(self):
+        assert EsQuerySet(None, []).first() is None
+
+    def test_last_returns_the_last_hit(self):
+        hits = _make_hits("A", "B")
+        assert EsQuerySet(None, hits).last() is hits[-1]
+
+    def test_last_none_when_empty(self):
+        assert EsQuerySet(None, []).last() is None
+
+
+# ── async counterparts (#PROP1b) ──────────────────────────────────────────────
+#
+# EsQuerySet does not subclass Django's QuerySet, so aget/afirst/alast get no
+# free ride from Django's own async machinery — they are thin wrappers this
+# class must provide itself. Run via asgiref's async_to_sync rather than an
+# async test runner: the project pins no pytest-asyncio dependency, and this
+# is the same primitive Django's own aget/afirst/alast use internally.
+
+class TestEsQuerySetAsync:
+    @pytest.mark.django_db
+    def test_aget_matches_get(self):
+        from demo.apps.shop.models import Product
+
+        mock_es = MagicMock()
+        mock_es.get.return_value = {"_source": {"id": 99, "name": "Mock Product"}}
+        qs = EsQuerySet(Product, [])
+        with patch.object(Product, "get_es_client", return_value=mock_es):
+            result = async_to_sync(qs.aget)(pk=99)
+        assert result.pk == 99
+
+    @pytest.mark.django_db
+    def test_aget_not_found_raises_does_not_exist(self):
+        from demo.apps.shop.models import Product
+
+        qs = EsQuerySet(Product, [])
+        with pytest.raises(Product.DoesNotExist):
+            async_to_sync(qs.aget)()
+
+    def test_afirst_matches_first(self):
+        hits = _make_hits("A", "B")
+        qs = EsQuerySet(None, hits)
+        assert async_to_sync(qs.afirst)() is hits[0]
+
+    def test_afirst_none_when_empty(self):
+        qs = EsQuerySet(None, [])
+        assert async_to_sync(qs.afirst)() is None
+
+    def test_alast_matches_last(self):
+        hits = _make_hits("A", "B")
+        qs = EsQuerySet(None, hits)
+        assert async_to_sync(qs.alast)() is hits[-1]
+
+    def test_alast_none_when_empty(self):
+        qs = EsQuerySet(None, [])
+        assert async_to_sync(qs.alast)() is None
+
+
 class TestEsQuerySetDelete:
     @pytest.mark.django_db
     def test_delete_es_only_calls_es_client(self):
@@ -219,3 +283,29 @@ class TestEsManagerGetQueryset:
             qs = SearchLog.objects.get_queryset()
         assert isinstance(qs, EsQuerySet)
         assert len(qs) == 0
+
+
+class TestEsManagerAsyncPassthrough:
+    """EsManager overrides only get_queryset() — aget/afirst/alast reach the
+    manager for free via Django's own Manager.from_queryset() passthrough,
+    which simply forwards to self.get_queryset().<name>(). This is what makes
+    it matter that EsQuerySet itself defines those three (#PROP1b): a DB-
+    backed model's get_queryset() already returns a real QuerySet with native
+    async support, but an ES_ONLY model's get_queryset() returns EsQuerySet,
+    which had no async methods at all before this."""
+
+    @pytest.mark.django_db
+    def test_db_backed_model_aget(self):
+        from demo.apps.shop.models import Customer
+
+        Customer.objects.create(first_name="Dana", email="dana@example.com")
+        result = async_to_sync(Customer.objects.aget)(email="dana@example.com")
+        assert result.first_name == "Dana"
+
+    @pytest.mark.django_db
+    def test_es_only_model_afirst_reaches_esqueryset(self):
+        from demo.apps.shop.models import SearchLog
+
+        with patch.object(SearchLog, "es_search", return_value=EsQuerySet(SearchLog, [])):
+            result = async_to_sync(SearchLog.objects.afirst)()
+        assert result is None
