@@ -534,3 +534,10 @@ def test_es_module_reexports_are_identical_objects():
 
     for name in ("EsManager", "EsQuerySet", "EsStorageMode", "SnapEsUnavailable"):
         assert getattr(models, name) is getattr(es, name), f"snapadmin.models.{name} is not snapadmin.es.{name}"
+
+
+def test_jobs_module_reexports_are_identical_objects():
+    from snapadmin import jobs, models
+
+    for name in ("SnapJobBase", "SnapExportJob", "SnapReindexJob", "SnapImportJob"):
+        assert getattr(models, name) is getattr(jobs, name), f"snapadmin.models.{name} is not snapadmin.jobs.{name}"

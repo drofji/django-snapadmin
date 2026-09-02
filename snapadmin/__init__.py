@@ -69,6 +69,10 @@ Declaring models
         ``snapadmin.models`` (#SIMPL1f) for size, and re-exported from there
         unchanged: ``from snapadmin.models import EsManager`` keeps working, and
         this is the module to read when working on the ES integration itself.
+    ``snapadmin.jobs``
+        The resumable background-job models — ``SnapJobBase``, ``SnapExportJob``,
+        ``SnapReindexJob``, ``SnapImportJob`` — split out of ``snapadmin.models``
+        (#SIMPL1f) the same way, and re-exported from there unchanged.
     ``snapadmin.fields``
         Every ``Snap*Field``. Snap-only kwargs (``searchable``, ``filterable``,
         ``show_in_list``, ``wysiwyg``, …) drive the admin and API and are
