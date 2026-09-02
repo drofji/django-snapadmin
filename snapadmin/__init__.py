@@ -63,6 +63,12 @@ Declaring models
         display-only column — the decorator form of ``SnapFunctionField``, works
         on either door), ``EsStorageMode``, ``APIToken``, ``ErrorEvent``, the ES
         manager/queryset.
+    ``snapadmin.es``
+        The Elasticsearch integration's model-layer pieces — ``EsStorageMode``,
+        ``EsManager``, ``EsQuerySet``, ``SnapEsUnavailable`` — split out of
+        ``snapadmin.models`` (#SIMPL1f) for size, and re-exported from there
+        unchanged: ``from snapadmin.models import EsManager`` keeps working, and
+        this is the module to read when working on the ES integration itself.
     ``snapadmin.fields``
         Every ``Snap*Field``. Snap-only kwargs (``searchable``, ``filterable``,
         ``show_in_list``, ``wysiwyg``, …) drive the admin and API and are

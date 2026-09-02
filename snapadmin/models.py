@@ -83,6 +83,7 @@ def _wysiwyg_widget():
 
 from snapadmin import fields as snapfields
 from snapadmin.conf import get_setting
+from snapadmin.es import EsManager, EsQuerySet, EsStorageMode, SnapEsUnavailable
 from snapadmin.fields import DjangoFieldAttributeEnum, SnapFieldAttributeEnum, SnapField
 from snapadmin.logging_config import get_logger
 from snapadmin.pagination import EstimatedCountPaginator
@@ -654,27 +655,10 @@ class SnapPurgeError(Exception):
     """
 
 
-class SnapEsUnavailable(Exception):
-    """Raised by an ES query method when Elasticsearch cannot answer and the
-    caller has opted out of the database fallback (``db_fallback=False`` or
-    ``SNAPADMIN_ES_DB_FALLBACK=False``).
-
-    Signals that a DUAL model's Elasticsearch backend is disabled or erroring,
-    so the query would otherwise have run its (potentially unscalable) database
-    equivalent — a full-table ``GROUP BY`` or an unbounded ``.iterator()``. The
-    original Elasticsearch error, when there was one, is chained as ``__cause__``.
-    ES_ONLY models never raise this (they have no database to fall back to), and
-    DB_ONLY models never raise it (the database is their primary store).
-    """
-
-
-class EsStorageMode(str, Enum):
-    """Modes for Elasticsearch integration."""
-
-    DB_ONLY = "db_only"  # Standard Django behavior
-    DUAL = "dual"        # Save to both DB and ES, search via ES
-    ES_ONLY = "es_only"  # Save/retrieve only via ES, no DB table needed
-
+# EsStorageMode, EsQuerySet, EsManager and SnapEsUnavailable moved to
+# snapadmin.es (#SIMPL1f) and are imported below, near the top of this file,
+# alongside this module's other snapadmin.* imports — re-exported here so
+# every existing ``from snapadmin.models import EsManager`` etc. is unaffected.
 
 # ES field types that support exact (term/terms) matching directly. Analysed
 # ``text`` is deliberately excluded — a term query against it matches individual
@@ -693,195 +677,6 @@ _ES_KEYWORD_SUBFIELD_TYPES = frozenset({"keyword", "constant_keyword", "wildcard
 # Default number of buckets returned per ``es_aggregate`` facet (ES's own
 # ``terms`` aggregation default), overridable per call via ``size=``.
 _ES_DEFAULT_AGG_SIZE = 10
-
-
-class EsQuerySet:
-    """A lightweight mock QuerySet for Elasticsearch-only models."""
-
-    def __init__(self, model, hits=None, filters=None):
-        from django.db.models.sql.query import Query
-        self.model = model
-        self._hits = hits if hits is not None else []
-        # Every field=value filter chained onto this queryset so far — kept
-        # even though filter() already narrowed _hits, because get() below
-        # bypasses _hits entirely (it fetches straight from ES by pk) and
-        # must re-check this dict to avoid returning a hit outside the
-        # already-applied filter (see get()'s docstring).
-        self._filters = dict(filters) if filters else {}
-        self.query = Query(model)  # Mock query for DRF
-        self._result_cache = self._hits
-        self._prefetch_related_lookups = []
-        self._sticky_filter = False
-        self._for_write = False
-        self._prefetch_done = False
-        self._known_related_objects = {}
-
-    def __iter__(self):
-        return iter(self._hits)
-
-    def __len__(self):
-        return len(self._hits)
-
-    def __getitem__(self, k):
-        if isinstance(k, slice):
-            return self._clone(self._hits[k])
-        return self._hits[k]
-
-    def count(self):
-        return len(self._hits)
-
-    def delete(self):
-        if self.model.es_storage_mode == EsStorageMode.ES_ONLY:
-            try:
-                es = self.model.get_es_client()
-                for hit in self._hits:
-                    es.delete(index=self.model.get_es_index_name(), id=hit.pk, ignore=[404])
-            except Exception as exc:
-                logger.warning(
-                    "es_queryset_delete_failed",
-                    model=self.model.__name__,
-                    hit_count=len(self._hits),
-                    error=str(exc),
-                )
-        return len(self._hits), {self.model._meta.label: len(self._hits)}
-
-    def filter(self, *args, **kwargs):
-        if not kwargs:
-            return self
-
-        new_hits = []
-        for hit in self._hits:
-            match = True
-            for key, val in kwargs.items():
-                # Handle simple filter: field=value
-                if getattr(hit, key, None) != val:
-                    match = False
-                    break
-            if match:
-                new_hits.append(hit)
-        return self._clone(new_hits, filters={**self._filters, **kwargs})
-
-    def exclude(self, *args, **kwargs):
-        return self
-
-    def order_by(self, *field_names):
-        return self
-
-    def select_related(self, *fields):
-        return self
-
-    def prefetch_related(self, *lookups):
-        return self
-
-    def _clone(self, hits=None, filters=None):
-        return EsQuerySet(
-            self.model,
-            hits if hits is not None else self._hits,
-            filters if filters is not None else self._filters,
-        )
-
-    def using(self, alias):
-        return self
-
-    def none(self):
-        return self._clone([])
-
-    def all(self):
-        return self
-
-    def get(self, *args, **kwargs):
-        """Fetch one document by pk directly from Elasticsearch.
-
-        Bypasses ``_hits`` entirely (a direct ES lookup, not a scan of an
-        already-fetched page), so any ``filter()`` chained onto this
-        queryset before ``get()`` — most importantly a tenant-scoping filter
-        (see ``snapadmin.tenancy.scope_queryset``) — is re-checked against
-        the fetched document here via ``_filters``. Without this, a caller
-        holding a *filtered* queryset could still ``.get(pk=...)`` a
-        document the filter excluded, since ES itself was never asked about
-        the filter at all.
-        """
-        pk = kwargs.get("pk") or kwargs.get("id")
-        if pk:
-            try:
-                es = self.model.get_es_client()
-                hit = es.get(index=self.model.get_es_index_name(), id=str(pk))
-                data = hit["_source"]
-                obj = self.model(**{k: v for k, v in data.items() if k != "id"})
-                obj.pk = data.get("id")
-            except Exception as exc:
-                # A connection failure surfaces as DoesNotExist to the caller —
-                # log the real cause so outages aren't mistaken for missing rows.
-                logger.warning(
-                    "es_get_failed",
-                    model=self.model.__name__,
-                    pk=pk,
-                    error=str(exc),
-                )
-                raise self.model.DoesNotExist
-            for key, val in self._filters.items():
-                if getattr(obj, key, None) != val:
-                    raise self.model.DoesNotExist
-            return obj
-        raise self.model.DoesNotExist
-
-    def first(self):
-        """The first hit, or ``None`` — matches ``QuerySet.first()``'s contract."""
-        return self._hits[0] if self._hits else None
-
-    def last(self):
-        """The last hit, or ``None`` — matches ``QuerySet.last()``'s contract."""
-        return self._hits[-1] if self._hits else None
-
-    # ------------------------------------------------------------------
-    # Async counterparts (#PROP1b). A real Django QuerySet gets aget/afirst/
-    # alast for free from Django itself; EsQuerySet is a standalone mock (it
-    # does not subclass QuerySet), so it needs its own thin async wrappers
-    # over the sync methods above — the same pattern Django's own QuerySet
-    # uses internally.
-    # ------------------------------------------------------------------
-
-    async def aget(self, *args, **kwargs):
-        return await sync_to_async(self.get, thread_sensitive=True)(*args, **kwargs)
-
-    async def afirst(self):
-        return await sync_to_async(self.first, thread_sensitive=True)()
-
-    async def alast(self):
-        return await sync_to_async(self.last, thread_sensitive=True)()
-
-    def exists(self) -> bool:
-        return bool(self._hits)
-
-    @property
-    def ordered(self) -> bool:
-        return True
-
-
-class EsManager(models.Manager):
-    """Manager that uses Elasticsearch for ES_ONLY models."""
-
-    def get_queryset(self):
-        # The single point every SnapModel query — the admin, the REST/GraphQL
-        # APIs, the offline cache, purge, import's duplicate-key lookup —
-        # funnels through, so it is where tenant scoping (#FUT1) is enforced
-        # once for all of them. A no-op for a model that never opted in
-        # (tenant_scoped = False, the default); see snapadmin.tenancy.
-        from snapadmin.tenancy import scope_queryset
-
-        if getattr(self.model, "es_storage_mode", None) == EsStorageMode.ES_ONLY:
-            limit = get_setting("SNAPADMIN_ES_SEARCH_LIMIT", 1000)
-            qs = self.model.es_search(limit=limit)
-            if not isinstance(qs, EsQuerySet):
-                qs = EsQuerySet(self.model, [])
-            return scope_queryset(self.model, qs)
-        # No default ordering is injected here. A default ``order_by("-pk")`` on
-        # the base manager leaks into ``GROUP BY`` for ``.values().annotate()``
-        # aggregations (Django appends ordering columns to the GROUP BY), which
-        # silently returns one row per pk instead of per group. The "-pk" newest-
-        # first default is applied in the presentation layers that need a stable
-        # order instead (admin changelist ``ordering`` and the API list view).
-        return scope_queryset(self.model, super().get_queryset())
 
 
 class DjangoAdminClassAttributeEnum(str, Enum):

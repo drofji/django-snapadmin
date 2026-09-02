@@ -521,3 +521,16 @@ def test_unknown_top_level_attr_raises():
 
     with pytest.raises(AttributeError):
         snapadmin.ThisNameIsNotExported
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #SIMPL1f: models.py's additive split. Each step re-exports the moved names
+# from models.py unchanged — assert *identity*, not just presence, so a re-export
+# that accidentally rebinds to a copy or a different object is caught.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def test_es_module_reexports_are_identical_objects():
+    from snapadmin import es, models
+
+    for name in ("EsManager", "EsQuerySet", "EsStorageMode", "SnapEsUnavailable"):
+        assert getattr(models, name) is getattr(es, name), f"snapadmin.models.{name} is not snapadmin.es.{name}"
