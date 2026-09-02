@@ -193,7 +193,7 @@ Operations
         configure" to one line for a new project without changing behaviour
         for an install that already sets things explicitly.
     ``snapadmin.checks``
-        Django system checks — warnings ``snapadmin.W001``…``W012`` and errors
+        Django system checks — warnings ``snapadmin.W001``…``W015`` and errors
         ``snapadmin.E001``…``E012`` catch misconfiguration at startup, so read
         them before debugging behaviour. The masking checks are *errors* because
         a mistyped rule fails open: it masks nothing and says nothing.
@@ -206,6 +206,12 @@ Operations
         are the GDPR subject-access declaration: a registered model that never
         declares ``subject_path`` (or ``None``) at all, or one that declares a
         malformed path — see ``manage.py snapadmin_subject_request`` below.
+        ``W014`` fires when ``SNAPADMIN_REST_API_ENABLED``/``_GRAPHQL_ENABLED``
+        is left unset while its route is actually mounted — both default to
+        ``True`` today but are deprecated to default to ``False`` at ``1.0``.
+        ``W015`` catches a registered model whose generated admin form would
+        render with no fields at all (no ``show_in_form=True`` anywhere),
+        whatever the cause — see ``SNAPADMIN_SHOW_IN_FORM_DEFAULT`` below.
     ``snapadmin.crypto``
         Streaming AGE encryption for backup artefacts — two backends
         (``pyrage``, the optional ``[age]`` extra; or the ``age`` command-line
@@ -266,7 +272,9 @@ delivery), ``SNAPADMIN_AUDIT_*`` and
 ``SNAPADMIN_EXPORT_*``,
 ``SNAPADMIN_SSO_*``, plus layout keys (``SNAPADMIN_URL_PREFIX``,
 ``SNAPADMIN_APP_LABELS``, ``SNAPADMIN_HIDDEN_APPS``, ``SNAPADMIN_NESTED_APPS``,
-``SNAPADMIN_THEME_AUTH_ADMIN``).
+``SNAPADMIN_THEME_AUTH_ADMIN``, ``SNAPADMIN_SHOW_IN_FORM_DEFAULT`` — raises
+every ``Snap*Field``'s ``show_in_form`` default project-wide; an explicit
+per-field value still wins).
 The full reference with defaults is the "Environment Variables Reference"
 section of the documentation.
 
