@@ -137,7 +137,51 @@ SNAPADMIN_GRAPHIQL_ENABLED = DEBUG     # GraphiQL playground — dev only
 > resolving. After wiring, run `python manage.py check` to catch obvious problems and inspect your URL
 > map (e.g. `manage.py show_urls` from django-extensions) for duplicate paths.
 
-## 8. Migrate & collect static
+## 8. Expect an `AlterField`-only migration on the first `makemigrations`
+
+Every `Snap*Field` records its own dotted class path in `deconstruct()`
+(`snapadmin.fields.SnapCharField`, not Django's `CharField`), so the moment a model's fields
+change to `Snap*Field` classes, Django's autodetector sees every converted field as changed — even
+though the column itself is identical (the Snap-only kwargs like `searchable`/`show_in_list` never
+reach `deconstruct()`; see step 9, below). The first `makemigrations` after the swap produces a
+migration that is nothing but `AlterField` operations, one per converted field — a wide model can
+produce a migration file with well over a hundred of them. **This is expected, not a bug:** on
+PostgreSQL and MySQL, an `AlterField` that only changes a field's *Python* class (not its SQL
+type/`NULL`/default) is a no-op at the database level; **on SQLite it rebuilds the table** (SQLite
+has no native `ALTER COLUMN`, so Django recreates the table and copies every row) — slower on a
+large table, but still data-preserving. Review it with `sqlmigrate` before applying in production,
+as with any migration:
+
+```bash
+python manage.py makemigrations yourapp   # produces N × AlterField, nothing else
+python manage.py sqlmigrate yourapp 000X  # confirm: no column type/constraint actually changes
+```
+
+## 9. Static asset paths changed — update any hardcoded `Media` class
+
+SnapAdmin namespaces every shipped asset under `snapadmin/`, unlike the retired package, which
+shipped its assets flat. A `Media` class (yours, or a third-party admin mixin's) that hardcodes
+the old flat paths gets a **silent 404** — Django's static file finder does not error on a
+template referencing a file that doesn't exist. The full, current asset list:
+
+```
+snapadmin/css/admin.css
+snapadmin/css/admin-stock.css       (stock-admin theme layer)
+snapadmin/css/admin-unfold.css      (Unfold theme layer)
+snapadmin/css/select2.min.css
+snapadmin/js/admin.js
+snapadmin/js/connectivity.js
+snapadmin/js/jquery_bridge.js
+snapadmin/js/model_selector.js
+snapadmin/js/offline.js
+snapadmin/js/select2.min.js
+```
+
+Reference them as `{% static "snapadmin/css/admin.css" %}`, or in a `Media` class:
+`class Media: css = {"all": ["snapadmin/css/admin.css"]}` — never a bare `admin.css` or
+`css/admin.css` without the `snapadmin/` namespace.
+
+## 10. Migrate & collect static
 
 ```bash
 python manage.py migrate          # creates only snapadmin_apitoken
@@ -148,7 +192,7 @@ python manage.py collectstatic    # if you serve static yourself
 > alongside SnapAdmin makes both try to register the admin → `AlreadyRegistered`. Fully uninstall the
 > old package and remove it from `INSTALLED_APPS` before enabling SnapAdmin.
 
-## 9. Historical migration files that import the old field classes
+## 11. Historical migration files that import the old field classes
 
 Your app's **existing** migration files froze the old field classes into their `deconstruct()`
 output — e.g. `('name', drofji_autoadmin.fields.AutoAdminCharField(max_length=200))`. Once
