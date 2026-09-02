@@ -177,30 +177,32 @@ class TestCheckWriteSurface:
             check_write_surface(ExchangeRate, {"code", "rate"})
 
     def test_http_method_names_without_a_write_verb_is_refused(self, monkeypatch):
-        from snapadmin.registry import register
-        register(Category, api_http_method_names=["get", "head"])
-        try:
-            with pytest.raises(SnapImportError, match="excludes every write verb"):
-                check_write_surface(Category, {"name"})
-        finally:
-            register(Category, api_http_method_names=None)
+        # get_model_meta() checks the registry entry before the class attribute, and
+        # treats an explicit None there as a real value rather than "unset" — so
+        # register(Category, api_http_method_names=None) would not undo this override,
+        # it would permanently shadow Category's class attribute for the rest of the
+        # test session. monkeypatch.setitem restores the registry entry exactly as it
+        # was (present or absent) once this test ends.
+        from snapadmin.registry import _REGISTRY
+        monkeypatch.setitem(_REGISTRY.setdefault(Category, {}), "api_http_method_names", ["get", "head"])
+        with pytest.raises(SnapImportError, match="excludes every write verb"):
+            check_write_surface(Category, {"name"})
 
     def test_excluded_field_is_refused_by_name(self):
         from demo.apps.shop.models import AuditLog
         with pytest.raises(SnapImportError, match="user_email"):
             check_write_surface(AuditLog, {"action", "user_email"})
 
-    def test_field_outside_write_allowlist_is_refused_by_name(self):
+    def test_field_outside_write_allowlist_is_refused_by_name(self, monkeypatch):
         # Category.api_write_fields = ["name", "slug", "is_active"] — id is not in it,
         # but id is never itself excluded/allowlisted since it's the pk; use a made-up
-        # scenario instead by tightening the allowlist via the registry.
-        from snapadmin.registry import register
-        register(Category, api_write_fields=["name"])
-        try:
-            with pytest.raises(SnapImportError, match="slug"):
-                check_write_surface(Category, {"name", "slug"})
-        finally:
-            register(Category, api_write_fields=None)
+        # scenario instead by tightening the allowlist via the registry. See the note
+        # above test_http_method_names_without_a_write_verb_is_refused about why this
+        # uses monkeypatch.setitem rather than register(Category, api_write_fields=None).
+        from snapadmin.registry import _REGISTRY
+        monkeypatch.setitem(_REGISTRY.setdefault(Category, {}), "api_write_fields", ["name"])
+        with pytest.raises(SnapImportError, match="slug"):
+            check_write_surface(Category, {"name", "slug"})
 
     def test_masked_field_is_refused_with_no_requester(self, settings):
         settings.SNAPADMIN_MASKED_FIELDS = {"demo.Customer": ["email"]}
@@ -280,7 +282,20 @@ class TestTenantScopedImport:
 
 @pytest.mark.django_db
 class TestRoundTrip:
-    def test_export_then_import_reproduces_the_data(self):
+    def _allow_id_writes(self, monkeypatch):
+        # The exported CSV/NDJSON carries "id" as a column, and Category's own
+        # api_write_fields (["name", "slug", "is_active"]) does not include it — the
+        # write-surface guard (#IMP2, rule 8) correctly refuses to let an import set an
+        # arbitrary primary key otherwise. A round trip that means to preserve row
+        # identity has to opt "id" into the allowlist explicitly, exactly as a real
+        # project would.
+        from snapadmin.registry import _REGISTRY
+        monkeypatch.setitem(
+            _REGISTRY.setdefault(Category, {}), "api_write_fields", ["id", "name", "slug", "is_active"]
+        )
+
+    def test_export_then_import_reproduces_the_data(self, monkeypatch):
+        self._allow_id_writes(monkeypatch)
         from snapadmin.exporting import export_dir as _export_dir
         from snapadmin.exporting import run_export_job
         from snapadmin.models import SnapExportJob
@@ -314,7 +329,8 @@ class TestRoundTrip:
             row = Category.objects.get(pk=pk)
             assert (row.name, row.slug, row.is_active) == (name, slug, is_active)
 
-    def test_round_trip_via_json_format(self, tmp_path):
+    def test_round_trip_via_json_format(self, monkeypatch, tmp_path):
+        self._allow_id_writes(monkeypatch)
         Category.objects.create(name="Toys", slug="toys", is_active=True)
         path = tmp_path / "categories.json"
         rows = list(Category.objects.values("id", "name", "slug", "is_active"))
