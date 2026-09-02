@@ -395,6 +395,23 @@
     so the compatibility claims here are enforced, not aspirational.
   </div>
 
+  <h3 id="async-support">Async support</h3>
+  <p><code>SnapModel.asave()</code> / <code>.adelete()</code> / <code>.arefresh_from_db()</code> are
+  Django's own native async model methods (available since Django 5.2) — SnapAdmin adds no code for
+  them and needs none: each is a thin wrapper around the matching sync method
+  (<code>self.save()</code> / <code>self.delete()</code> / <code>self.refresh_from_db()</code>), and
+  Python resolves that through the instance's actual class, so they already reach
+  <code>SnapModel</code>'s own overrides — the Elasticsearch mirror and a wysiwyg field's
+  sanitize-on-write run identically whether you call <code>save()</code> or
+  <code>await obj.asave()</code>. <code>EsManager</code> / <code>EsQuerySet</code> (the Elasticsearch
+  query layer for <code>ES_ONLY</code> models) gain <code>aget()</code> / <code>afirst()</code> /
+  <code>alast()</code> to match — a DB-backed model already got these for free from Django's own
+  <code>QuerySet</code>.</p>
+  <p><strong>Out of scope, deliberately:</strong> async DRF ViewSets (DRF's own async support is
+  still partial), an async Elasticsearch client (the bundled client is sync-only and would need its
+  own wrapper), and bulk async operations (<code>abulk_create</code> / <code>abulk_update</code>).
+  GraphQL resolvers need nothing extra — Graphene already handles async resolvers transparently.</p>
+
   <h3>Configuring <code>INSTALLED_APPS</code></h3>
   <p>The <strong>Unfold theme is optional</strong> (<code>pip install django-snapadmin[theme]</code>) — with it you get the themed UI, without it SnapAdmin renders on Django's built-in admin. If you use Unfold, its contrib apps must come <em>before</em> <code>django.contrib.admin</code>.</p>
   <pre><code>INSTALLED_APPS = [

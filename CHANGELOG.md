@@ -180,6 +180,11 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   truncation over it — new check `snapadmin.W013` flags a ceiling raised so high it defeats the
   cap). Same permissions and masking as `export`; reachable via `POST` even on an `api_read_only`
   model, since it never writes. Not supported for `ES_ONLY` models (no DB column to index).
+- The async surface: `asave`/`adelete`/`arefresh_from_db` on `SnapModel` (Django's own native async
+  model methods since 5.2 — a test now pins that they reach `SnapModel`'s own `save()`/`delete()`
+  overrides, including the Elasticsearch mirror and wysiwyg sanitize-on-write) and
+  `aget`/`afirst`/`alast` on `EsManager`/`EsQuerySet`. Out of scope: async DRF ViewSets, an async
+  Elasticsearch client, bulk async operations.
 
 ### Changed
 - The shipped `admin.js`'s select2 initialisation is opt-in now — see Breaking, above, for the

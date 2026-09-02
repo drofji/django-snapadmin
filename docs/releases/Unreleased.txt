@@ -448,6 +448,19 @@ Added
   Elasticsearch copy a model does not itself mirror, or any third-party store outside SnapAdmin. See
   `GDPR Subject-Access Requests <https://drofji.github.io/django-snapadmin/#gdpr-subject-request>`_.
 
+* **The async surface: ``asave``/``adelete``/``arefresh_from_db`` on ``SnapModel``, and
+  ``aget``/``afirst``/``alast`` on ``EsManager``/``EsQuerySet``.** The three ``SnapModel`` methods
+  are Django's own native async model methods (available since Django 5.2) — each is a thin wrapper
+  around the matching sync method, and Python resolves that through the instance's actual class, so
+  they already reach ``SnapModel``'s own overrides (the Elasticsearch mirror, a wysiwyg field's
+  sanitize-on-write) with zero SnapAdmin-specific code. A test now pins that this stays true.
+  ``EsQuerySet`` (the lightweight ``ES_ONLY`` query layer, which does not subclass Django's
+  ``QuerySet`` and so got none of this for free) gains ``aget``/``afirst``/``alast`` to match — a
+  DB-backed model's own ``QuerySet`` already had them. **Out of scope, deliberately:** async DRF
+  ViewSets, an async Elasticsearch client, and bulk async operations
+  (``abulk_create``/``abulk_update``) — see `Async support
+  <https://drofji.github.io/django-snapadmin/#async-support>`_.
+
 Changed
 -------
 
