@@ -44,6 +44,14 @@ migrations.
 Most of this surface is pinned by `tests/test_public_contract.py`, so a breaking change fails the
 suite rather than reaching PyPI quietly.
 
+**The test suite (`tests/`) is not shipped in the wheel or sdist** — only `snapadmin/` and the docs
+are; see the [Contributing](README.md#contributing) section. That is a packaging-size choice, not a
+coverage gap: every security fix in `CHANGELOG.md`/the release notes has a regression test living
+next to the subsystem it fixed (masking, sanitization, permission checks, the audit trail, …), and
+CI runs the full suite on every push against the compatibility matrix — what actually ships is what
+that suite already verified against a clone of this repository, not a second, unverified copy
+trailing behind inside every install.
+
 **While in the `0.x` beta series (now):** breaking changes are possible but never silent. Each one
 is called out in [`CHANGELOG.md`](CHANGELOG.md) and the release notes, with a migration guide when
 manual steps are involved. Pin an exact version in production.

@@ -561,11 +561,21 @@ supported-versions row and the production-hardening checklist.
 ## Contributing
 
 See [CONTRIBUTING.md](https://github.com/drofji/django-snapadmin/blob/main/CONTRIBUTING.md). The
-suite must stay green with 100% coverage on `snapadmin/`:
+suite lives at [`tests/`](https://github.com/drofji/django-snapadmin/tree/main/tests) in the source
+repository and must stay green with 100% coverage on `snapadmin/`:
 
 ```bash
 pytest
 ```
+
+**`tests/` is not shipped in the wheel or sdist** — only `snapadmin/` (the published package),
+`README.md`, `LICENSE` and the docs are. That is a packaging-size choice, not a coverage gap: the
+suite runs in CI on every push against the Python × Django compatibility matrix above, so what a
+release actually ships is exactly what that suite already verified, on a clone of this repository —
+not a second, weaker copy trailing behind inside every install. Regression tests for a specific
+reported issue live next to the subsystem they cover (e.g. `tests/test_fields.py` for a field
+validator, `tests/test_pii_masking.py` for masking) — if you hit a bug, check there before filing
+one that might already be covered.
 
 ## License
 

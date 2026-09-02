@@ -947,6 +947,39 @@ class TestFileFieldValidatorConfig:
             assert self._config(rebuilt._validators[0]) == (["pdf", "txt"], ["utf-8"], 1024)
             name, path, args, kwargs = rebuilt.deconstruct()
 
+    def test_rebuilt_field_still_enforces_its_limits(self):
+        """#REL2c: config-attribute equality alone doesn't prove the validator
+        still *runs* after a migration-style round trip — construct files that
+        violate each limit and confirm the rebuilt field's own validator
+        (never the original instance) actually rejects them."""
+        import io
+
+        from django.core.exceptions import ValidationError
+
+        from snapadmin.fields import SnapFileField
+
+        field = SnapFileField(allowed_extensions=["pdf"], max_size_bytes=10)
+        _, _, args, kwargs = field.deconstruct()
+        rebuilt = SnapFileField(*args, **kwargs)
+        validator = rebuilt._validators[0]
+
+        bad_extension = io.BytesIO(b"x")
+        bad_extension.name = "notes.exe"
+        bad_extension.size = 1
+        with pytest.raises(ValidationError, match="extension"):
+            validator(bad_extension)
+
+        too_big = io.BytesIO(b"0123456789ABCDE")
+        too_big.name = "notes.pdf"
+        too_big.size = len(too_big.getvalue())
+        with pytest.raises(ValidationError, match="size"):
+            validator(too_big)
+
+        within_limits = io.BytesIO(b"ok")
+        within_limits.name = "notes.pdf"
+        within_limits.size = 2
+        validator(within_limits)  # no raise
+
     def test_file_field_no_config_stays_clean(self):
         from snapadmin.fields import SnapFileField
 
