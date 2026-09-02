@@ -185,6 +185,16 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   overrides, including the Elasticsearch mirror and wysiwyg sanitize-on-write) and
   `aget`/`afirst`/`alast` on `EsManager`/`EsQuerySet`. Out of scope: async DRF ViewSets, an async
   Elasticsearch client, bulk async operations.
+- Row-level multi-tenancy (`snapadmin.tenancy`): a model opts in with `tenant_scoped = True` plus a
+  tenant column (`tenant_field()`), and every generated surface — admin, REST, GraphQL,
+  Elasticsearch routing, async export/import jobs, the offline cache — then requires a bound tenant
+  (`use_tenant()`, or the new `SnapTenantMiddleware` per request via the new
+  `SNAPADMIN_TENANT_RESOLVER`/`SNAPADMIN_TENANT_USER_RESOLVER` settings) to see or write any row:
+  default-deny, never "every row" with none bound. `use_all_tenants()` is the one explicit, audited
+  bypass, reserved for the retention purge and the Elasticsearch reindex. New check
+  `snapadmin.E009` flags a `tenant_scoped = True` declaration that cannot actually be enforced.
+  Isolation is logical, not physical — `snapadmin.backup`'s database dumps run below the ORM and are
+  not tenant-scoped at all, documented as plainly as the feature.
 
 ### Changed
 - The shipped `admin.js`'s select2 initialisation is opt-in now — see Breaking, above, for the

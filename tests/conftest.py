@@ -27,10 +27,27 @@ def customer_inactive(db):
     from demo.apps.shop.models import Customer
     return Customer.objects.create(first_name="Bob", last_name="Jones", email="bob@example.com", origin="status_b", active=False)
 
+#: The tenant most of the pre-existing (non-tenancy-focused) test suite's
+#: fixture users resolve to under demo/core/tenancy.py's email-domain
+#: fallback (admin_user's email is "admin@example.com" — see pytest-django's
+#: own admin_user fixture). Order (#FUT1) is the demo's tenant-scoped model;
+#: a row created outside any bound tenant context is invisible to every
+#: tenant by design (snapadmin.tenancy's default-deny), so every fixture
+#: that creates one for a test that is not itself testing tenant isolation
+#: must bind this tenant first. Tests that exercise cross-tenant isolation
+#: itself use a different, explicit tenant instead — see test_tenancy_*.py.
+DEFAULT_TEST_TENANT = "example.com"
+
+
 @pytest.fixture
 def order(db, customer):
     from demo.apps.shop.models import Order
-    return Order.objects.create(customer=customer, total=Decimal("99.99"))
+    # A direct ORM .create() bypasses every SnapAdmin write-time guard,
+    # tenant stamping included (only perform_create/save_model/_process_row
+    # stamp it) — the tenant must be passed explicitly here, the same way a
+    # fixture would pass any other required field a request-time guard would
+    # otherwise fill in.
+    return Order.objects.create(customer=customer, total=Decimal("99.99"), tenant_id=DEFAULT_TEST_TENANT)
 
 @pytest.fixture
 def api_token(db, admin_user):
@@ -75,4 +92,9 @@ def anon_client():
 @pytest.fixture
 def regular_user(db):
     from django.contrib.auth.models import User
-    return User.objects.create_user(username="regular", password="password")
+    # email domain matches DEFAULT_TEST_TENANT — demo/core/tenancy.py's
+    # resolver falls back to it, so a request authenticated as this user
+    # resolves the same tenant the `order` fixture's row carries (#FUT1).
+    return User.objects.create_user(
+        username="regular", password="password", email=f"regular@{DEFAULT_TEST_TENANT}"
+    )

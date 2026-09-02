@@ -411,6 +411,66 @@ class TestOfflineModelDataEndpoint:
         assert url == self.URL
         assert resolve(url).view_name == "offline-data"
 
+    def test_cross_tenant_rows_never_reach_the_offline_cache(self, auth_client, customer):
+        """#FUT1b — the offline cache payload is one of the surfaces the
+        negative sweep requires a cross-tenant test for. Order is the demo's
+        tenant-scoped model; toggling offline_mode on it (like the
+        FK/M2M test above) is cheaper than adding a second demo model.
+        """
+        from demo.apps.shop.models import Order
+        from tests.conftest import DEFAULT_TEST_TENANT
+
+        original = Order.offline_mode
+        try:
+            Order.offline_mode = True
+            mine = Order.objects.create(
+                customer=customer, total="1.00", tenant_id=DEFAULT_TEST_TENANT,
+            )
+            theirs = Order.objects.create(
+                customer=customer, total="2.00", tenant_id="a-different-tenant",
+            )
+            # auth_client authenticates as admin_user, which demo/core/
+            # tenancy.py's resolver maps to DEFAULT_TEST_TENANT.
+            r = auth_client.get("/api/offline-data/demo/order/")
+            assert r.status_code == 200
+            ids = [obj["id"] for obj in r.json()["objects"]]
+            assert mine.pk in ids
+            assert theirs.pk not in ids
+        finally:
+            Order.offline_mode = original
+
+    def test_no_tenant_bound_returns_an_empty_cache_payload(self, customer):
+        """A token-authenticated caller with no resolvable tenant (#FUT1b's
+        default-deny) sees an empty offline cache, never every tenant's rows."""
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+        from rest_framework.test import APIClient
+        from demo.apps.shop.models import Order
+        from snapadmin.models import APIToken
+
+        original = Order.offline_mode
+        try:
+            Order.offline_mode = True
+            Order.objects.create(customer=customer, total="1.00", tenant_id="acme")
+
+            # No email -> demo/core/tenancy.py's resolver resolves no tenant.
+            # Staff + view_order so the request reaches the scoped read
+            # itself rather than being blocked by the unrelated permission
+            # gate _can_view already enforces.
+            user = get_user_model().objects.create_user(
+                username="notenant3", password="x", is_staff=True,
+            )
+            user.user_permissions.add(Permission.objects.get(codename="view_order"))
+            token = APIToken.create_for_user(user, "NoTenant")
+            client = APIClient()
+            client.credentials(HTTP_AUTHORIZATION=f"Token {token.token_key}")
+
+            r = client.get("/api/offline-data/demo/order/")
+            assert r.status_code == 200
+            assert r.json()["objects"] == []
+        finally:
+            Order.offline_mode = original
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Offline endpoints honour admin access — staff + per-model view permission

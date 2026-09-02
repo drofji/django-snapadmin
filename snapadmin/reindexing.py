@@ -223,7 +223,16 @@ def _run(job, *, chunk_size, parallel, tune, limit, on_progress) -> dict:
     index_name = model.get_es_index_name()
     pk_attname = model._meta.pk.attname
 
-    qs = model.objects.all()
+    # #FUT1b: a reindex must cover every tenant's rows to keep the ES index
+    # complete — verify_index()'s count comparison against the whole index
+    # would otherwise mismatch by construction for a tenant-scoped model.
+    # Bypassing scoping here, once, at construction, is safe: the queryset
+    # this call returns carries (or doesn't carry) its tenant filter clause
+    # from this moment on, regardless of what tenant context is bound later.
+    from snapadmin.tenancy import use_all_tenants
+
+    with use_all_tenants():
+        qs = model.objects.all()
     es_only = isinstance(qs, EsQuerySet)
 
     if job.started_at is None:

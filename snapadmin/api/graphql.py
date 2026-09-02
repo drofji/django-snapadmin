@@ -59,7 +59,7 @@ def _check_access(info, model) -> None:
 
 
 def _make_relation_guard(model: type[Model]) -> classmethod:
-    """Build a ``get_queryset`` classmethod that permission-checks relations.
+    """Build a ``get_queryset`` classmethod that permission- and tenant-checks relations.
 
     graphene_django calls ``DjangoObjectType.get_queryset(queryset, info)``
     whenever it resolves a type through a relation — directly for to-many
@@ -71,12 +71,23 @@ def _make_relation_guard(model: type[Model]) -> classmethod:
     permission on (or that falls outside its API-token scope). On denial it
     raises the same ``GraphQLError`` the top-level resolvers raise, rather than
     returning the related object.
+
+    Also applies :func:`snapadmin.tenancy.scope_queryset` (#FUT1b) — a
+    no-op for a model that never opted into tenant scoping, and belt-and-
+    suspenders for one that did: Django's default relation-traversal
+    manager (``_base_manager``) already resolves through the same
+    tenant-scoped :class:`~snapadmin.models.EsManager` a top-level query
+    does, but this guard is the one place every traversed relation — direct
+    or nested — is guaranteed to pass through, so it enforces the guarantee
+    itself rather than relying on that manager detail staying true.
     """
 
     @classmethod
     def get_queryset(cls: type[DjangoObjectType], queryset: QuerySet, info: GraphQLResolveInfo) -> QuerySet:
+        from snapadmin.tenancy import scope_queryset
+
         _check_access(info, model)
-        return queryset
+        return scope_queryset(model, queryset)
 
     return get_queryset
 
@@ -156,7 +167,18 @@ class SnapGraphQLView(GraphQLView):
                 result = None
             if result is not None:
                 request.user, request.auth = result
-        return super().dispatch(request, *args, **kwargs)
+
+        # #FUT1b: rebind the current tenant from request.user as resolved
+        # just above — SnapTenantMiddleware already bound one from the
+        # Django-middleware-layer request.user, stale for a token-
+        # authenticated GraphQL caller (correct already for session auth,
+        # e.g. GraphiQL inside the admin). A single `with` suffices here,
+        # unlike the REST viewsets (see SnapAPIAuthMixin.initial /
+        # finalize_response) — this dispatch() is one Python scope.
+        from snapadmin.tenancy import resolve_tenant_for_request, use_tenant
+
+        with use_tenant(resolve_tenant_for_request(request)):
+            return super().dispatch(request, *args, **kwargs)
 
 
 def get_dynamic_graphql_schema():

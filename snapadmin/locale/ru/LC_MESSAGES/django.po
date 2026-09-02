@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-31 05:19+0000\n"
+"POT-Creation-Date: 2026-09-02 18:12+0000\n"
 "Language: ru\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -273,6 +273,16 @@ msgstr "Начато"
 msgid "Finished At"
 msgstr "Завершено"
 
+msgid "Tenant"
+msgstr "Арендатор"
+
+msgid ""
+"The submitter's tenant, replayed when the job runs. Blank for a job whose "
+"target model is not tenant-scoped."
+msgstr ""
+"Арендатор отправителя, воспроизводится при выполнении задачи. Пусто для "
+"задачи, целевая модель которой не изолирована по арендатору."
+
 msgid "Format"
 msgstr "Формат"
 
@@ -327,6 +337,79 @@ msgstr "Задание переиндексации"
 
 msgid "Reindex Jobs"
 msgstr "Задания переиндексации"
+
+#, fuzzy
+#| msgid "Failed"
+msgid "Fail"
+msgstr "Ошибка"
+
+msgid "Skip"
+msgstr "Пропустить"
+
+msgid "Update"
+msgstr "Обновить"
+
+msgid "Source File"
+msgstr "Исходный файл"
+
+msgid "Display-only name of the input file this job reads."
+msgstr "Отображаемое имя входного файла, который читает эта задача."
+
+msgid "Column Map"
+msgstr "Сопоставление столбцов"
+
+msgid ""
+"Explicit CSV/JSON header -> field name overrides; header-name matching fills "
+"the rest."
+msgstr ""
+"Явные переопределения заголовков CSV/JSON в имена полей; сопоставление по "
+"имени заголовка заполняет остальное."
+
+msgid "Natural Key"
+msgstr "Естественный ключ"
+
+msgid ""
+"Field name(s) that identify a duplicate row; blank resolves the default at "
+"run time."
+msgstr ""
+"Имя(ена) поля, идентифицирующие повторяющуюся строку; пусто — значение по "
+"умолчанию определяется во время выполнения."
+
+msgid "On Conflict"
+msgstr "При конфликте"
+
+msgid "Report File"
+msgstr "Файл отчёта"
+
+#, fuzzy
+#| msgid "Resume Byte Offset"
+msgid "Report Resume Byte Offset"
+msgstr "Смещение байтов возобновления"
+
+#, fuzzy
+#| msgid "Byte length of the working file confirmed at cursor_pk."
+msgid "Byte length of the report file confirmed as written."
+msgstr "Длина рабочего файла в байтах, подтверждённая на cursor_pk."
+
+msgid "Skipped"
+msgstr "Пропущено"
+
+msgid ""
+"Used for PII-access checks on masked target fields; blank is treated as no "
+"PII access."
+msgstr ""
+"Используется для проверки доступа к PII в маскированных целевых полях; "
+"пусто считается отсутствием доступа к PII."
+
+#, fuzzy
+#| msgid "Export Job"
+msgid "Import Job"
+msgstr "Задание экспорта"
+
+#, fuzzy
+#| msgid "Export Jobs"
+msgid "Import Jobs"
+msgstr "Задания экспорта"
 
 msgid "Field"
 msgstr "Поле"
@@ -441,6 +524,9 @@ msgstr "Провайдеры единого входа (SSO)"
 
 msgid "Or sign in with"
 msgstr "Или войдите через"
+
+msgid "Row-level tenant isolation key — see SnapModel.tenant_scoped."
+msgstr "Ключ изоляции арендаторов на уровне строк — см. SnapModel.tenant_scoped."
 
 msgid "Add new item"
 msgstr "Добавить запись"
@@ -623,9 +709,6 @@ msgstr "Да"
 
 msgid "Type to search"
 msgstr "Введите запрос"
-
-msgid "Update"
-msgstr "Обновить"
 
 msgid "Value"
 msgstr "Значение"

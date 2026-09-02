@@ -14,7 +14,7 @@ from django.urls import reverse
 from django.utils.module_loading import import_string
 from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.filters import BaseFilterBackend, OrderingFilter
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -32,6 +32,7 @@ from snapadmin.masking import get_masked_fields, user_can_access_field, user_can
 from snapadmin.models import APIToken, EsStorageMode
 from snapadmin.pagination import SnapDynamicPagination
 from snapadmin.registry import get_model_meta, is_registered
+from snapadmin.tenancy import ALL_TENANTS, get_current_tenant, is_tenant_scoped, tenant_field_name
 from snapadmin.api.serializers import (
     APITokenCreateSerializer,
     APITokenSerializer,
@@ -42,6 +43,13 @@ logger = get_logger(__name__)
 
 # Cache for model field introspection results to avoid repeated _meta.get_fields() calls
 _model_field_cache = {}
+
+#: Sentinel distinguishing "the client's request body did not include this
+#: field at all" from "included it, with a None/empty value" — perform_create/
+#: perform_update need the distinction (a client that never mentions the
+#: tenant field is auto-stamped silently; one that mentions a *different*
+#: tenant is refused loudly).
+_NOT_SUPPLIED = object()
 
 
 class IsTokenOwnerOrAdmin(permissions.BasePermission):
@@ -482,6 +490,59 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             app_label = self.kwargs.get("app_label", "")
             model_name = self.kwargs.get("model_name", "")
             raise NotFound(f"Model '{model_name}' not found in app '{app_label}'.")
+
+    def perform_create(self, serializer):
+        """Stamp a tenant-scoped model's tenant column server-side (#FUT1b).
+
+        The row is never created with a client-supplied tenant value: an
+        absent field is silently stamped to the request's bound tenant, and
+        a body that names a *different* tenant is refused outright (a 400
+        naming the field), never overwritten in silence — the same asymmetry
+        rule #FUT3b's write-surface guard already applies to an excluded
+        field. Refuses the create entirely (403) when no tenant is bound,
+        rather than creating an orphaned row nobody can ever see again.
+        This is the create-side counterpart to :meth:`get_queryset`'s
+        read-side scoping, which by itself only protects existing rows.
+        """
+        model_class = self._get_model_class()
+        if not is_tenant_scoped(model_class):
+            serializer.save()
+            return
+        current = get_current_tenant()
+        if current is None or current is ALL_TENANTS:
+            raise PermissionDenied(
+                f"No tenant is bound to this request — {model_class._meta.label} "
+                "is tenant-scoped and refuses to create a row with no tenant assigned."
+            )
+        field = tenant_field_name(model_class)
+        supplied = serializer.validated_data.get(field, _NOT_SUPPLIED)
+        if supplied is not _NOT_SUPPLIED and supplied not in (None, "") and supplied != current:
+            raise ValidationError({
+                field: f"{field!r} is assigned automatically from the request's tenant "
+                       "and cannot be set to a different value."
+            })
+        serializer.save(**{field: current})
+
+    def perform_update(self, serializer):
+        """Refuse a write that would move an existing row to a different
+        tenant (#FUT1b).
+
+        The row is reachable here at all only because :meth:`get_queryset`
+        already scoped it to the request's tenant — this closes the one
+        remaining vector, a request body naming a *different* tenant value
+        for the field itself, which would otherwise silently move the row
+        out of the caller's own tenant.
+        """
+        model_class = self._get_model_class()
+        if not is_tenant_scoped(model_class):
+            serializer.save()
+            return
+        current = get_current_tenant()
+        field = tenant_field_name(model_class)
+        supplied = serializer.validated_data.get(field, _NOT_SUPPLIED)
+        if supplied is not _NOT_SUPPLIED and supplied not in (None, "") and supplied != current:
+            raise ValidationError({field: f"{field!r} cannot be changed."})
+        serializer.save()
 
     def _snap_action_permission_granted(self, model_class, spec: SnapActionSpec) -> bool:
         """Whether the current request may call this ``@snap_action`` (#RFC1h answer a).

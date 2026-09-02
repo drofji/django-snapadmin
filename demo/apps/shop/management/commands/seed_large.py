@@ -26,6 +26,11 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from demo.apps.shop.models import Customer, Order
+from snapadmin.tenancy import use_all_tenants
+
+# Order is the demo's tenant-scoped model (#FUT1) — see seed_demo.py's
+# DEMO_SEED_TENANT for why every seeded order shares this one tenant.
+DEMO_SEED_TENANT = "example.com"
 
 FIRST_NAMES = [
     "Alice", "Bob", "Carol", "David", "Emma", "Frank", "Grace", "Henry",
@@ -97,8 +102,10 @@ class Command(BaseCommand):
 
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS("✅  Large seed complete!"))
+        with use_all_tenants():
+            order_count = Order.objects.count()
         self.stdout.write(f"   Customers : {Customer.objects.count():,}")
-        self.stdout.write(f"   Orders    : {Order.objects.count():,}")
+        self.stdout.write(f"   Orders    : {order_count:,}")
         self.stdout.write("")
         self.stdout.write("   Benchmark : python demo/manage.py benchmark_list_view")
 
@@ -106,7 +113,11 @@ class Command(BaseCommand):
 
     def _flush(self):
         self.stdout.write("   Flushing existing Orders and Customers…")
-        Order.objects.all().delete()
+        # Trusted, operator-run maintenance code — every tenant's orders
+        # must go (#FUT1b), not only whatever a bound context (usually none,
+        # here) would otherwise scope the delete to.
+        with use_all_tenants():
+            Order.objects.all().delete()
         Customer.objects.all().delete()
         self.stdout.write("   Done.")
 
@@ -148,6 +159,7 @@ class Command(BaseCommand):
                 batch.append(Order(
                     customer_id=customer_ids[i % len(customer_ids)],
                     total=Decimal(str(round(random.uniform(19.99, 999.99), 2))),
+                    tenant_id=DEMO_SEED_TENANT,
                 ))
             with transaction.atomic():
                 Order.objects.bulk_create(batch, batch_size=batch_size)

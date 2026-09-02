@@ -76,6 +76,12 @@ class Command(BaseCommand):
             help="Username to attribute this run to — required to import into a column "
                  "targeting a masked/PII field (a run with no requester has no PII access).",
         )
+        parser.add_argument(
+            "--tenant", default=None,
+            help="The tenant every row this run creates is assigned to — required when "
+                 "--model is tenant-scoped (snapadmin.tenancy); there is no request here "
+                 "to resolve one from. Ignored for a model that is not tenant-scoped.",
+        )
 
     def handle(self, *args, **options):
         try:
@@ -115,6 +121,7 @@ class Command(BaseCommand):
                 column_map=column_map,
                 natural_key=natural_key,
                 on_conflict=options["on_conflict"],
+                tenant=options["tenant"],
                 requested_by=requested_by,
                 resume=options["resume"],
             )

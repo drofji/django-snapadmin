@@ -142,6 +142,51 @@ def diff_rows(changes: dict | None) -> list[dict]:
     return rows
 
 
+def visible_audit_queryset(qs):
+    """``qs`` (a :class:`~snapadmin.models.SnapadminAuditLog` queryset), narrowed
+    to rows the current tenant may see (#FUT1b).
+
+    ``SnapadminAuditLog`` carries no tenant column of its own — it is shared
+    infrastructure, written for every model, not itself tenant data (see the
+    model's own docstring for why registering it as a ``SnapModel`` was
+    rejected). So a row naming a *tenant-scoped* target model is checked
+    against that model's own current visibility instead: its target object
+    must still exist **and** be reachable through the model's own
+    tenant-scoped manager right now. An audit entry for a deleted object, or
+    one belonging to another tenant, is hidden — under-claiming is the
+    correct posture here: "the object no longer exists so this cannot be
+    verified" hides the row rather than guessing it is safe to show.
+
+    A no-op when no registered model is tenant-scoped. Cost is bounded by
+    the number of tenant-scoped models (typically a handful), each one
+    indexed lookup against ``app_label``/``model`` (both ``db_index=True``)
+    plus one query against that model's own table — not a per-row check.
+    """
+    from django.apps import apps as django_apps
+
+    from snapadmin.tenancy import is_tenant_scoped
+
+    for model in django_apps.get_models():
+        if not is_tenant_scoped(model):
+            continue
+        app_label = model._meta.app_label
+        model_name = model._meta.model_name
+        object_ids = list(
+            qs.filter(app_label=app_label, model=model_name)
+            .values_list("object_id", flat=True)
+            .distinct()
+        )
+        if not object_ids:
+            continue
+        visible = {
+            str(pk) for pk in model.objects.filter(pk__in=object_ids).values_list("pk", flat=True)
+        }
+        invisible = [oid for oid in object_ids if oid not in visible]
+        if invisible:
+            qs = qs.exclude(app_label=app_label, model=model_name, object_id__in=invisible)
+    return qs
+
+
 def record_audit(request, action: str, instance, changes: dict | None = None) -> None:
     """Append one audit-trail row for ``action`` on ``instance``.
 

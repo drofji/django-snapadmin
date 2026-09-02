@@ -146,6 +146,30 @@ class TestEsQuerySetGet:
             with pytest.raises(Product.DoesNotExist):
                 qs.get(pk=99)
 
+    @pytest.mark.django_db
+    def test_get_respects_a_previously_chained_filter(self):
+        # get() fetches straight from ES by pk, bypassing _hits — without
+        # re-checking _filters, a caller holding a *filtered* queryset (most
+        # importantly a tenant-scoped one, #FUT1b) could still .get(pk=...)
+        # a document the filter excluded, since ES itself was never asked.
+        from demo.apps.shop.models import Product
+        mock_es = MagicMock()
+        mock_es.get.return_value = {"_source": {"id": 99, "name": "Mock Product"}}
+        qs = EsQuerySet(Product, []).filter(name="Someone Else's Product")
+        with patch.object(Product, "get_es_client", return_value=mock_es):
+            with pytest.raises(Product.DoesNotExist):
+                qs.get(pk=99)
+
+    @pytest.mark.django_db
+    def test_get_returns_a_document_matching_the_chained_filter(self):
+        from demo.apps.shop.models import Product
+        mock_es = MagicMock()
+        mock_es.get.return_value = {"_source": {"id": 99, "name": "Mock Product"}}
+        qs = EsQuerySet(Product, []).filter(name="Mock Product")
+        with patch.object(Product, "get_es_client", return_value=mock_es):
+            result = qs.get(pk=99)
+        assert result.pk == 99
+
 
 class TestEsQuerySetFirstLast:
     def test_first_returns_the_first_hit(self):

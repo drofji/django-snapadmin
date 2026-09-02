@@ -296,6 +296,7 @@
       <li><a href="#logging">Structured Logging</a></li>
       <li><a href="#gdpr">GDPR / Data Retention</a></li>
       <li><a href="#gdpr-subject-request">GDPR Subject-Access Requests</a></li>
+      <li><a href="#multi-tenancy">Multi-Tenancy</a></li>
       <li><a href="#enterprise-config">Enterprise Config</a></li>
       <li><a href="#integrating">Integrating (Auth / JWT / ETL)</a></li>
       <li><a href="#profiles">SNAPADMIN_PROFILE Presets</a></li>
@@ -3165,6 +3166,107 @@ Nothing was deleted. Resolve the blocking rows manually (delete or reassign them
     <tr><th>Check</th><th>Severity</th><th>Fires when</th></tr>
     <tr><td><code>snapadmin.E011</code></td><td>Error</td><td>A registered model never declares <code>subject_path</code> at all (not even <code>None</code>).</td></tr>
     <tr><td><code>snapadmin.E012</code></td><td>Error</td><td>A declared <code>subject_path</code> is malformed: <code>is_data_subject=True</code> with no/mismatched <code>subject_identifier</code>, over 3 relation hops, unresolvable via this model's own forward relations, or a multi-hop path on an <code>ES_ONLY</code> model.</td></tr>
+  </table>
+
+  <!-- ── Multi-tenancy ─────────────────────────────────────────────────────── -->
+  <h2 id="multi-tenancy">🏘️ Multi-Tenancy</h2>
+  <p>Row-level tenant isolation, opt-in per model. A model declares itself tenant-scoped and adds a
+  tenant column; every generated surface then requires a bound tenant to see or write any row of
+  it — <strong>default-deny</strong>, not opt-out. Nothing about a model that never opts in changes.</p>
+
+  <pre><code>from snapadmin import models as snap_models
+from snapadmin.tenancy import tenant_field
+
+class Order(snap_models.SnapModel):
+    customer = snap_models.SnapForeignKey(Customer, on_delete=models.PROTECT)
+    tenant_id = tenant_field()      # a plain, nullable, indexed CharField
+    tenant_scoped = True            # opts this model into isolation</code></pre>
+
+  <p><code>tenant_field()</code> returns a pre-configured <code>CharField</code> — nullable so the
+  migration it adds never breaks an existing row, indexed for the filter every scoped query runs.
+  Override any keyword (<code>max_length=</code>, …) to fit a project's own tenant-identifier shape;
+  declare a real <code>ForeignKey</code> by hand instead if the tenant is itself a project model.
+  <code>tenant_field</code> (the model attribute, distinct from the factory function above) renames the
+  column when set — otherwise it is <code>"tenant_id"</code>.</p>
+
+  <h3>Resolving the current tenant</h3>
+  <p>Add the middleware, then point it at a resolver:</p>
+  <pre><code># settings.py
+MIDDLEWARE = [
+    # ... after AuthenticationMiddleware, so the resolver can read request.user
+    "snapadmin.tenancy.SnapTenantMiddleware",
+]
+SNAPADMIN_TENANT_RESOLVER = "myproject.tenancy.resolve_tenant"       # request -&gt; tenant value | None
+SNAPADMIN_TENANT_USER_RESOLVER = "myproject.tenancy.resolve_for_user" # user -&gt; tenant value | None</code></pre>
+  <p><code>SNAPADMIN_TENANT_RESOLVER</code> runs once per request, resolving the caller's tenant from
+  whatever a project's own auth carries — a claim on the session/JWT, a subdomain, an SSO group.
+  <strong>Unset, every request resolves to no tenant</strong> — the correct fail-closed default until a
+  project configures one. <code>SNAPADMIN_TENANT_USER_RESOLVER</code> is the second half: an async
+  export or import job has no request when a Celery worker actually runs it, so the tenant is resolved
+  from the submitter once, at job-creation time, and stamped onto the job row for the worker to replay.
+  See <a href="https://github.com/drofji/django-snapadmin/tree/main/demo/core/tenancy.py">
+  <code>demo/core/tenancy.py</code></a> for a complete (illustrative, email-domain-based) pair of
+  resolvers wired into the demo project.</p>
+
+  <h3>What "default-deny" means concretely</h3>
+  <table>
+    <tr><th>Surface</th><th>With no tenant bound</th><th>With a tenant bound</th></tr>
+    <tr><td>Admin changelist / change form</td><td>Empty list · <code>404</code> by pk</td><td>That tenant's rows only</td></tr>
+    <tr><td>Admin create</td><td>Refused (<code>PermissionDenied</code>) — never an orphaned row</td><td>Row stamped with the bound tenant</td></tr>
+    <tr><td>REST list / retrieve / count / export / fetch-by</td><td>Empty result · <code>404</code></td><td>Scoped automatically (<code>get_queryset()</code>)</td></tr>
+    <tr><td>REST create</td><td><code>403</code></td><td>Row stamped server-side; a body naming a <em>different</em> tenant is a <code>400</code>, never silently overwritten</td></tr>
+    <tr><td>REST update</td><td>n/a (row already unreachable)</td><td>A body naming a different tenant is a <code>400</code></td></tr>
+    <tr><td>GraphQL query / node / relation traversal</td><td>Empty · not found</td><td>Scoped automatically</td></tr>
+    <tr><td>Elasticsearch routing (<code>es_search</code>/<code>es_filter</code>/<code>es_aggregate</code>/<code>es_count</code>/<code>es_scan</code>)</td><td>A term that can never match a real document</td><td>The tenant term is forced into the query, overriding any caller-supplied value for the same field</td></tr>
+    <tr><td>Async export / import job</td><td>Job creation refused (<code>403</code> / a clear CLI error)</td><td>Tenant captured on the job, replayed when the worker runs</td></tr>
+    <tr><td>Import column mapping</td><td colspan="2">A column mapped to the tenant field is rejected by name — the tenant comes only from <code>--tenant</code>, never a file</td></tr>
+    <tr><td>Offline cache payload</td><td>Empty payload</td><td>That tenant's rows only</td></tr>
+    <tr><td>Audit log read (changelist &amp; timeline)</td><td>Rows naming a tenant-scoped model are hidden</td><td>Only rows whose target object is currently visible to that tenant</td></tr>
+    <tr><td><code>snapadmin_purge_expired_data</code> / <code>snapadmin_reindex</code></td><td colspan="2">Deliberately <strong>cross-tenant always</strong> — retention is time-based and the ES index must stay complete; see below</td></tr>
+  </table>
+
+  <div class="callout callout-warn">
+    <strong>Honest limits — stated here, not left implied.</strong>
+    This is <strong>logical</strong> isolation, not physical: every guarantee above holds because every
+    surface reads through the same scoped manager, and one query path that bypasses it still leaks — a
+    raw SQL query, a custom management command calling <code>Model.objects</code> without binding a
+    tenant, a third-party package that queries the table directly. It is not a substitute for a separate
+    schema or database where that level of isolation is required.
+    <strong>Backups and restores are not tenant-scoped at all</strong> — <code>snapadmin.backup</code>
+    dumps the whole configured database (<code>pg_dump</code>/<code>mysqldump</code>/a raw SQLite file
+    copy), below the ORM and therefore below this feature entirely. A backup bundle contains every
+    tenant's data, and restoring one is an all-tenants operation.
+  </div>
+
+  <h3>The one escape hatch: <code>use_all_tenants()</code></h3>
+  <p>Reserved for background code whose job is inherently cross-tenant — the retention purge (a row's
+  age decides whether it is purged, not its tenant) and the Elasticsearch reindex (the index must stay
+  complete across every tenant, or a verify pass would mismatch by construction against the whole
+  index). Application code must never reach for it to work around a scoping failure:</p>
+  <pre><code>from snapadmin.tenancy import use_all_tenants
+
+with use_all_tenants():
+    Order.objects.all()   # every tenant's rows, deliberately and audibly</code></pre>
+
+  <h3>A <code>NULL</code> tenant is unassigned data, not shared data</h3>
+  <p>The column is nullable so the migration it adds never breaks an existing row — but a row with no
+  tenant value matches no tenant's filter, by ordinary SQL equality semantics. It is simply invisible
+  to every tenant until something assigns it, never a fallback any caller can reach.</p>
+
+  <h4 id="tenancy-reference">Reference</h4>
+  <table>
+    <tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>tenant_scoped</code></td><td><code>bool</code></td><td><code>False</code></td><td>Opts a <code>SnapModel</code> subclass into row-level isolation. A <code>@snap_model</code>-decorated plain model cannot enforce this (see <code>snapadmin.E009</code> below) — subclass <code>SnapModel</code> instead.</td></tr>
+    <tr><td><code>tenant_field</code></td><td><code>str | None</code></td><td><code>None</code></td><td>Name of the tenant column when it is not <code>"tenant_id"</code>.</td></tr>
+  </table>
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>SNAPADMIN_TENANT_RESOLVER</code></td><td><em>unset</em></td><td>Dotted path to <code>resolver(request) -&gt; tenant value | None</code>. Unset means every request resolves to no tenant.</td></tr>
+    <tr><td><code>SNAPADMIN_TENANT_USER_RESOLVER</code></td><td><em>unset</em></td><td>Dotted path to <code>resolver(user) -&gt; tenant value | None</code>, used to create an export/import job for a tenant-scoped model.</td></tr>
+  </table>
+  <table>
+    <tr><th>Check</th><th>Severity</th><th>Fires when</th></tr>
+    <tr><td><code>snapadmin.E009</code></td><td>Error</td><td>A model sets <code>tenant_scoped = True</code> but its resolved tenant column does not exist, or the model was registered via <code>@snap_model</code> rather than subclassing <code>SnapModel</code> (unenforceable either way — this check does not demand every registered model declare tenant scoping).</td></tr>
   </table>
 
   <!-- ── Enterprise config ─────────────────────────────────────────────────── -->

@@ -22,6 +22,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
 
+from snapadmin.tenancy import SnapTenantRebindMixin
+
 
 def _offline_models() -> list:
     """Return the registered offline-capable SnapModel classes."""
@@ -87,11 +89,18 @@ class OfflineModelsView(APIView):
         })
 
 
-class OfflineModelDataView(APIView):
+class OfflineModelDataView(SnapTenantRebindMixin, APIView):
     """Return the most-recent serialized rows of one offline-capable model.
 
     Only models with ``offline_mode = True`` are exposed — this is the offline
     cache feed, not a general data API (that is ``DynamicModelViewSet``).
+
+    Mixes in :class:`~snapadmin.tenancy.SnapTenantRebindMixin` (#FUT1b): this
+    view keeps DRF's project-wide default authentication rather than
+    SnapAdmin's own (see the module docstring), but a token-authenticated
+    caller still needs the current tenant rebound after DRF's lazy
+    authentication actually runs, the same as every other view that serves
+    tenant-scoped rows.
     """
 
     permission_classes = [IsAuthenticated]

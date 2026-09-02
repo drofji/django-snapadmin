@@ -8,6 +8,7 @@ from snapadmin import fields as snap_fields, models as snap_models
 from snapadmin import validators
 from snapadmin.admin import SnapTabularInline, SnapStackedInline
 from snapadmin.api.views import snap_action
+from snapadmin.tenancy import tenant_field
 import uuid
 
 # ── api_write_fields, on every model below ───────────────────────────────────
@@ -232,11 +233,18 @@ class Order(snap_models.SnapModel):
     customer = snap_fields.SnapForeignKey(Customer, on_delete=django_models.PROTECT, verbose_name=_("Customer"), autocomplete=True, show_in_list=True, show_in_form=True)
     total = snap_fields.SnapDecimalField(max_digits=10, decimal_places=2, verbose_name=_("Total"), show_in_form=True, filterable=True)
     created_at = snap_fields.SnapDateTimeField(auto_now_add=True, verbose_name=_("Created At"))
+    # Multi-tenancy dogfood (#FUT1) — an order belongs to exactly one
+    # storefront/organisation, a natural tenant boundary distinct from the
+    # GDPR subject concern below (Customer is the subject; Order is the
+    # tenant boundary — kept separate on purpose, see .claude/roadmap.md).
+    tenant_id = tenant_field()
+    tenant_scoped = True
 
     snap_inlines = []  # populated below after OrderItemInline is defined
 
-    # created_at is auto_now_add (never client-supplied), so the allowlist is
-    # just the two fields an order actually carries.
+    # created_at is auto_now_add (never client-supplied); tenant_id is
+    # assigned server-side only (snapadmin.tenancy) — the allowlist is the
+    # two fields a client may actually set.
     api_write_fields = ["customer", "total"]
     subject_path = "customer__email"  # one hop to the Customer subject's email
 

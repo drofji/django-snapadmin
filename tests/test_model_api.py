@@ -283,6 +283,121 @@ class TestOrderCRUD:
         assert r.json()["customer"] == customer.pk
 
 
+# ── Order write-time tenant assignment (#FUT1b) ───────────────────────────────
+#
+# Order.api_write_fields = ["customer", "total"] keeps tenant_id out of the
+# client-writable set by default, so most of these register() a temporary,
+# wider allowlist (mirroring tests/test_importing.py's own precedent) to
+# reach perform_create/perform_update's own enforcement — the chokepoint
+# that holds even for a project that *does* choose to expose the field.
+
+@pytest.mark.django_db
+class TestOrderTenantWrite:
+    def test_create_stamps_the_bound_tenant(self, auth_client, customer):
+        from demo.apps.shop.models import Order
+        from snapadmin.tenancy import use_tenant
+        from tests.conftest import DEFAULT_TEST_TENANT
+
+        r = auth_client.post(
+            "/api/models/demo/Order/",
+            {"customer": customer.pk, "total": "10.00"},
+            format="json",
+        )
+        assert r.status_code == 201, r.content
+        with use_tenant(DEFAULT_TEST_TENANT):
+            assert Order.objects.get(pk=r.json()["id"]).tenant_id == DEFAULT_TEST_TENANT
+
+    def test_create_with_no_tenant_bound_is_refused(self, db, customer):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+        from rest_framework.test import APIClient
+        from snapadmin.models import APIToken
+
+        # No email -> demo/core/tenancy.py's resolver resolves no tenant.
+        # Granted add_order so the *outer* TokenModelPermission gate passes
+        # and the request actually reaches perform_create's own tenant
+        # check — otherwise the 403 below would come from that unrelated
+        # gate instead of proving anything about tenancy.
+        user = get_user_model().objects.create_user(username="notenant", password="x")
+        user.user_permissions.add(Permission.objects.get(codename="add_order"))
+        token = APIToken.create_for_user(user, "NoTenant")
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.token_key}")
+
+        r = client.post(
+            "/api/models/demo/Order/",
+            {"customer": customer.pk, "total": "10.00"},
+            format="json",
+        )
+        assert r.status_code == 403
+        assert "tenant-scoped" in str(r.json())
+
+    def test_create_rejects_a_differing_client_supplied_tenant(self, auth_client, customer):
+        from snapadmin.api import serializers as serializers_module
+        from snapadmin.registry import register
+        from demo.apps.shop.models import Order
+
+        register(Order, api_write_fields=["customer", "total", "tenant_id"])
+        serializers_module._serializer_cache.pop("demo.Order", None)
+        try:
+            r = auth_client.post(
+                "/api/models/demo/Order/",
+                {"customer": customer.pk, "total": "10.00", "tenant_id": "someone-elses-tenant"},
+                format="json",
+            )
+        finally:
+            register(Order, api_write_fields=["customer", "total"])
+            serializers_module._serializer_cache.pop("demo.Order", None)
+        assert r.status_code == 400
+        assert "tenant_id" in str(r.json())
+
+    def test_create_accepts_a_matching_client_supplied_tenant(self, auth_client, customer):
+        from snapadmin.api import serializers as serializers_module
+        from snapadmin.registry import register
+        from demo.apps.shop.models import Order
+        from tests.conftest import DEFAULT_TEST_TENANT
+
+        register(Order, api_write_fields=["customer", "total", "tenant_id"])
+        serializers_module._serializer_cache.pop("demo.Order", None)
+        try:
+            r = auth_client.post(
+                "/api/models/demo/Order/",
+                {"customer": customer.pk, "total": "10.00", "tenant_id": DEFAULT_TEST_TENANT},
+                format="json",
+            )
+        finally:
+            register(Order, api_write_fields=["customer", "total"])
+            serializers_module._serializer_cache.pop("demo.Order", None)
+        assert r.status_code == 201, r.content
+
+    def test_update_does_not_require_resending_the_tenant(self, auth_client, order):
+        r = auth_client.patch(
+            f"/api/models/demo/Order/{order.pk}/",
+            {"total": "50.00"},
+            format="json",
+        )
+        assert r.status_code == 200, r.content
+        assert r.json()["total"] == "50.00"
+
+    def test_update_rejects_changing_the_tenant(self, auth_client, order):
+        from snapadmin.api import serializers as serializers_module
+        from snapadmin.registry import register
+        from demo.apps.shop.models import Order
+
+        register(Order, api_write_fields=["customer", "total", "tenant_id"])
+        serializers_module._serializer_cache.pop("demo.Order", None)
+        try:
+            r = auth_client.patch(
+                f"/api/models/demo/Order/{order.pk}/",
+                {"tenant_id": "someone-elses-tenant"},
+                format="json",
+            )
+        finally:
+            register(Order, api_write_fields=["customer", "total"])
+            serializers_module._serializer_cache.pop("demo.Order", None)
+        assert r.status_code == 400
+
+
 # ── Token scope enforcement ───────────────────────────────────────────────────
 
 @pytest.mark.django_db

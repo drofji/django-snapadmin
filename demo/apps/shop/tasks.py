@@ -51,19 +51,26 @@ def generate_daily_stats(self):
     """
     from demo.apps.shop.models import Customer, Order, Product
     from django.db.models import Sum, Avg, Count
+    from snapadmin.tenancy import use_all_tenants
 
     today = date.today()
 
-    stats = {
-        "date":              today.isoformat(),
-        "total_products":    Product.objects.count(),
-        "active_products":   Product.objects.filter(available=True).count(),
-        "total_customers":   Customer.objects.count(),
-        "active_customers":  Customer.objects.filter(active=True).count(),
-        "total_orders":      Order.objects.count(),
-        "total_revenue":     float(Order.objects.aggregate(t=Sum("total"))["t"] or 0),
-        "avg_order_value":   float(Order.objects.aggregate(a=Avg("total"))["a"] or 0),
-    }
+    # Order is tenant-scoped (#FUT1) — a daily business-stats snapshot is a
+    # cross-tenant operator report, same reasoning as the retention purge
+    # and the ES reindex: it must total every tenant's orders, not just
+    # whatever tenant (there is usually none — this runs from Celery Beat,
+    # not a request) happens to be bound.
+    with use_all_tenants():
+        stats = {
+            "date":              today.isoformat(),
+            "total_products":    Product.objects.count(),
+            "active_products":   Product.objects.filter(available=True).count(),
+            "total_customers":   Customer.objects.count(),
+            "active_customers":  Customer.objects.filter(active=True).count(),
+            "total_orders":      Order.objects.count(),
+            "total_revenue":     float(Order.objects.aggregate(t=Sum("total"))["t"] or 0),
+            "avg_order_value":   float(Order.objects.aggregate(a=Avg("total"))["a"] or 0),
+        }
 
     logger.info("daily_stats_generated", **stats)
     return stats

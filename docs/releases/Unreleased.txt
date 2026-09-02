@@ -461,6 +461,34 @@ Added
   (``abulk_create``/``abulk_update``) — see `Async support
   <https://drofji.github.io/django-snapadmin/#async-support>`_.
 
+* **Row-level multi-tenancy (``snapadmin.tenancy``).** A model opts in with ``tenant_scoped = True``
+  plus a tenant column (``tenant_field()``, a nullable indexed ``CharField`` — override any keyword,
+  or declare a real ``ForeignKey`` by hand if the tenant is itself a project model). Once opted in,
+  **every generated surface requires a bound tenant to see or write a single row** — the admin, REST,
+  GraphQL, Elasticsearch routing (``es_search``/``es_filter``/``es_aggregate``/``es_count``/``es_scan``
+  — the tenant term is forced into the query body, overriding any caller-supplied value for the same
+  field), async export/import jobs, and the offline cache. **Default-deny:** with no tenant bound, a
+  read returns empty and a write is refused outright — never "every row". Resolve the current tenant
+  per request with the new ``snapadmin.tenancy.SnapTenantMiddleware`` plus
+  ``SNAPADMIN_TENANT_RESOLVER`` (a dotted path, ``resolver(request) -> tenant | None``); for an async
+  export/import job — which runs on a Celery worker with no request of its own — the submitter's
+  tenant is resolved once at job-creation time via ``SNAPADMIN_TENANT_USER_RESOLVER``
+  (``resolver(user) -> tenant | None``) and stamped onto the job row for the worker to replay.
+  ``use_all_tenants()`` is the one explicit, audited escape hatch, reserved for background code whose
+  job is inherently cross-tenant: the retention purge (a row's age decides whether it is purged, not
+  its tenant) and the Elasticsearch reindex (the index must stay complete across every tenant). New
+  check ``snapadmin.E009`` flags a ``tenant_scoped = True`` declared but unenforceable — no resolvable
+  tenant field, or the model is registered via ``@snap_model`` rather than subclassing ``SnapModel``
+  (the scoping hook lives in ``SnapModel``'s ``EsManager``, never a plain registered model's default
+  manager). **Adds a migration** — a nullable ``tenant_id`` column on the internal job models
+  (``SnapExportJob``/``SnapReindexJob``/``SnapImportJob``) plus, in the demo, on ``Order`` — additive
+  and backward compatible, no existing row or install is affected until a model opts in. **Honest
+  limit, stated as plainly as the feature:** isolation is *logical*, not physical — one query path
+  that bypasses the scoped manager still leaks — and ``snapadmin.backup``'s database dumps run below
+  the ORM entirely, so a backup bundle is **not** tenant-scoped: it contains every tenant's data,
+  restoring one is an all-tenants operation. See `Multi-Tenancy
+  <https://drofji.github.io/django-snapadmin/#multi-tenancy>`_.
+
 Changed
 -------
 

@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-01 05:06+0000\n"
+"POT-Creation-Date: 2026-09-02 18:11+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -489,6 +489,22 @@ msgstr "Grundinformationen"
 
 msgid "Advanced Settings"
 msgstr "Erweiterte Einstellungen"
+
+#, fuzzy
+#| msgid "System dashboard"
+msgid "System Health"
+msgstr "System-Dashboard"
+
+msgid "Language"
+msgstr "Sprache"
+
+msgid "Managed Models"
+msgstr "Verwaltete Modelle"
+
+
+#, python-format
+msgid "File extension '%(ext)s' is not allowed. Allowed: %(allowed)s"
+msgstr "Dateierweiterung '%(ext)s' ist nicht erlaubt. Erlaubt: %(allowed)s"
 
 #~ msgid "GDPR — delete records older than data_retention_days on each model"
 #~ msgstr ""

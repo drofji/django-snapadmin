@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-01 05:07+0000\n"
+"POT-Creation-Date: 2026-09-02 18:12+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -428,8 +428,8 @@ msgid ""
 "GDPR — data_retention_days on each model, the audit log and (if set) "
 "SNAPADMIN_EXPORT_RETENTION_DAYS job cleanup"
 msgstr ""
-"AVG — data_retention_days per model, het auditlogboek en (indien "
-"ingesteld) het opschonen van taken via SNAPADMIN_EXPORT_RETENTION_DAYS"
+"AVG — data_retention_days per model, het auditlogboek en (indien ingesteld) "
+"het opschonen van taken via SNAPADMIN_EXPORT_RETENTION_DAYS"
 
 msgid ""
 "Compute and log daily business stats (products, customers, orders, revenue)"
@@ -489,6 +489,22 @@ msgstr "Basisinformatie"
 
 msgid "Advanced Settings"
 msgstr "Geavanceerde instellingen"
+
+#, fuzzy
+#| msgid "System dashboard"
+msgid "System Health"
+msgstr "Systeemdashboard"
+
+msgid "Language"
+msgstr "Taal"
+
+msgid "Managed Models"
+msgstr "Beheerde modellen"
+
+
+#, python-format
+msgid "File extension '%(ext)s' is not allowed. Allowed: %(allowed)s"
+msgstr "Bestandsextensie '%(ext)s' is niet toegestaan. Toegestaan: %(allowed)s"
 
 #~ msgid "GDPR — delete records older than data_retention_days on each model"
 #~ msgstr "AVG — records ouder dan data_retention_days per model verwijderen"

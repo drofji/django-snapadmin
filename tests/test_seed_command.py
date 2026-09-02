@@ -45,8 +45,13 @@ class TestSeedDemoCommand:
 
     def test_creates_orders(self):
         from demo.apps.shop.models import Order
+        from snapadmin.tenancy import use_all_tenants
         self._call(count=5)
-        assert Order.objects.count() >= 5
+        # Order is tenant-scoped (#FUT1) — seed_demo stamps every row with
+        # its own fixed demo tenant; this test is about seeding, not
+        # isolation, so it reads across every tenant deliberately.
+        with use_all_tenants():
+            assert Order.objects.count() >= 5
 
     def test_creates_superuser_if_none_exists(self, db):
         from django.contrib.auth.models import User
@@ -127,8 +132,12 @@ class TestSeedDemoCommand:
 
     def test_orders_linked_to_customers(self):
         from demo.apps.shop.models import Order
+        from snapadmin.tenancy import use_all_tenants
         self._call(count=5)
-        for o in Order.objects.select_related("customer"):
+        with use_all_tenants():
+            orders = list(Order.objects.select_related("customer"))
+        assert orders
+        for o in orders:
             assert o.customer_id is not None
 
 

@@ -431,6 +431,43 @@ Key protections:
   path go to whatever channel you configure, so treat an alert channel as trusted as your error
   emails — and prefer a private channel for the health alert, which names failing subsystems.
 
+### Multi-tenancy
+- **Row-level tenant isolation** (`snapadmin.tenancy`) — a model opts in with `tenant_scoped = True`
+  plus a tenant column (`tenant_field()`); once opted in, **every generated surface requires a bound
+  tenant to see or write a single row**: the admin, REST, GraphQL, Elasticsearch routing
+  (`es_search`/`es_filter`/`es_aggregate`/`es_count`/`es_scan`), async export/import jobs, and the
+  offline cache. **Default-deny** is the whole guarantee: with no tenant bound, a read returns empty
+  and a write is refused outright — never "every row" as the fallback. The current tenant is resolved
+  per request by `SnapTenantMiddleware` + `SNAPADMIN_TENANT_RESOLVER` (a dotted path,
+  `resolver(request) -> tenant | None`; unset means every request resolves to no tenant, the
+  fail-closed default until a project configures one); for an async export/import job, which runs on a
+  Celery worker with no request of its own, the submitter's tenant is resolved once at job-creation
+  time via `SNAPADMIN_TENANT_USER_RESOLVER` and stamped onto the job row for the worker to replay.
+- **A write can never assign a foreign tenant.** REST create/update, the admin form and CSV/NDJSON
+  import all stamp the tenant server-side from the bound context, never from client/file input — a
+  request body or import column naming a *different* tenant is refused outright (a `400` naming the
+  field on REST, a rejected column on import), never silently overwritten or silently dropped.
+- **`use_all_tenants()` is the one explicit, audited escape hatch**, reserved for background code
+  whose job is inherently cross-tenant: the retention purge (a row's age decides whether it is
+  purged, not its tenant) and the Elasticsearch reindex (the index must stay complete across every
+  tenant). Application code must never reach for it to work around a scoping failure.
+- **`snapadmin.E009`** fails `manage.py check` when a model declares `tenant_scoped = True` but the
+  declaration cannot actually be enforced — no resolvable tenant field, or the model is registered via
+  `@snap_model` rather than subclassing `SnapModel` (the scoping hook lives in `SnapModel`'s
+  `EsManager`, never a plain registered model's default manager).
+- **A `NULL` tenant value is unassigned data, not shared data** — it matches no tenant's filter, by
+  ordinary SQL equality semantics, so it is invisible to every tenant until something assigns it,
+  never a fallback any caller can reach.
+- **Honest limit, stated as plainly as the feature:** isolation is **logical**, not physical. Every
+  guarantee above holds because every surface reads through the same tenant-scoped manager — a raw SQL
+  query, a custom management command calling `Model.objects` without binding a tenant, or a
+  third-party package querying the table directly still leaks. This is not a substitute for a separate
+  schema or database where that level of isolation is required.
+- **Backups and restores are not tenant-scoped at all.** `snapadmin.backup` dumps the whole configured
+  database (`pg_dump`/`mysqldump`/a raw SQLite file copy) below the ORM, entirely outside this
+  feature's reach — a backup bundle contains every tenant's data, and restoring one is an all-tenants
+  operation. Do not treat a backup, or a restore, as a tenant-scoped operation in any deployment plan.
+
 ### Attack-surface reduction & extension guards
 - Each surface can be **switched off**: `SNAPADMIN_REST_API_ENABLED`, `SNAPADMIN_GRAPHQL_ENABLED`,
   `SNAPADMIN_SWAGGER_ENABLED` (disabling removes the routes entirely). Both default to `True` today

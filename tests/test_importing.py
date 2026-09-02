@@ -13,7 +13,7 @@ from unittest.mock import patch
 import pytest
 from django.core.management import call_command
 
-from demo.apps.shop.models import Category, Customer, ExchangeRate, Product, Tag
+from demo.apps.shop.models import Category, Customer, ExchangeRate, Order, Product, Tag
 from snapadmin.exporting import export_dir
 from snapadmin.importing import (
     SnapImportError,
@@ -216,6 +216,64 @@ class TestCheckWriteSurface:
 
     def test_unmasked_writable_model_passes(self):
         check_write_surface(Category, {"name", "slug", "is_active"})  # no raise
+
+    def test_tenant_scoped_model_rejects_a_column_mapped_to_the_tenant_field(self):
+        # Order is tenant-scoped (#FUT1) — its tenant column is assigned only
+        # from --tenant (see TestTenantScopedImport below), never from a file
+        # column, rejected by name rather than silently dropped or applied.
+        with pytest.raises(SnapImportError, match="tenant_id"):
+            check_write_surface(Order, {"customer_id", "total", "tenant_id"})
+
+
+# ── tenant-scoped import (#FUT1b) ───────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestTenantScopedImport:
+    def test_start_import_requires_tenant_for_a_tenant_scoped_model(self, tmp_path):
+        path = tmp_path / "orders.csv"
+        _write_csv(path, ["customer", "total"], [])
+        with pytest.raises(SnapImportError, match="--tenant"):
+            start_import(Order, file_path=str(path))
+
+    def test_start_import_and_run_stamp_the_given_tenant(self, tmp_path):
+        from snapadmin.tenancy import use_tenant
+
+        customer = Customer.objects.create(
+            first_name="A", last_name="B", email="ab@example.com",
+        )
+        path = tmp_path / "orders.csv"
+        _write_csv(
+            path, ["customer", "total"],
+            [{"customer": customer.pk, "total": "12.50"}],
+        )
+
+        job = start_import(Order, file_path=str(path), tenant="acme")
+        assert job.tenant_id == "acme"
+
+        summary = run_import_job(job, file_path=str(path))
+        assert summary["created"] == 1
+        assert summary["failed"] == 0
+
+        with use_tenant("acme"):
+            order = Order.objects.get(customer=customer)
+        assert order.tenant_id == "acme"
+
+    def test_resume_keeps_the_original_tenant_regardless_of_a_later_argument(self, tmp_path):
+        customer = Customer.objects.create(
+            first_name="A", last_name="B", email="ab2@example.com",
+        )
+        path = tmp_path / "orders.csv"
+        _write_csv(
+            path, ["customer", "total"],
+            [{"customer": customer.pk, "total": "5.00"}],
+        )
+        job = start_import(Order, file_path=str(path), tenant="acme")
+        job.status = SnapImportJob.Status.FAILED
+        job.save(update_fields=["status"])
+
+        resumed = start_import(Order, file_path=str(path), tenant="a-different-tenant", resume=True)
+        assert resumed.pk == job.pk
+        assert resumed.tenant_id == "acme"
 
 
 # ── round trip: export -> import -> identical data ──────────────────────────

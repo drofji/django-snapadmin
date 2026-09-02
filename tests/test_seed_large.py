@@ -28,8 +28,13 @@ class TestSeedLargeCommand:
 
     def test_creates_requested_order_count(self):
         from demo.apps.shop.models import Order
+        from snapadmin.tenancy import use_all_tenants
         self._call(count=50, batch_size=10)
-        assert Order.objects.count() == 50
+        # Order is tenant-scoped (#FUT1) — seed_large stamps every row with
+        # its own fixed demo tenant; this test is about the seeding count,
+        # not isolation, so it reads across every tenant deliberately.
+        with use_all_tenants():
+            assert Order.objects.count() == 50
 
     def test_batch_size_smaller_than_count(self):
         # Forces multiple bulk_create batches.
@@ -44,20 +49,24 @@ class TestSeedLargeCommand:
 
     def test_orders_linked_to_real_customers(self):
         from demo.apps.shop.models import Order
+        from snapadmin.tenancy import use_all_tenants
         self._call(count=20, batch_size=5)
         customer_ids = set()
-        for o in Order.objects.all():
-            assert o.customer_id is not None
-            customer_ids.add(o.customer_id)
+        with use_all_tenants():
+            for o in Order.objects.all():
+                assert o.customer_id is not None
+                customer_ids.add(o.customer_id)
         # Round-robin assignment should spread across customers.
         assert len(customer_ids) > 1
 
     def test_flush_resets_to_exact_count(self):
         from demo.apps.shop.models import Customer, Order
+        from snapadmin.tenancy import use_all_tenants
         self._call(count=15, batch_size=5)
         self._call(count=10, batch_size=5, flush=True)
         assert Customer.objects.count() == 10
-        assert Order.objects.count() == 10
+        with use_all_tenants():
+            assert Order.objects.count() == 10
 
     def test_no_index_flag_accepted(self):
         # --no-index is a parity no-op; just verify it doesn't error.

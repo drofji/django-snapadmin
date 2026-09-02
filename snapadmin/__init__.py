@@ -185,6 +185,18 @@ Operations
         setting, then this ``default`` argument — so both ways of declaring a
         model read identically. ``register()`` / ``meta_for()`` complete the
         surface.
+    ``snapadmin.tenancy``
+        Row-level multi-tenancy: a model opts in with ``tenant_scoped = True``
+        plus a tenant column (``tenant_field()``), and every generated
+        surface — admin, REST, GraphQL, Elasticsearch routing, exports,
+        imports, the offline cache — then requires a bound tenant
+        (``use_tenant()``, or ``SnapTenantMiddleware`` per request via
+        ``SNAPADMIN_TENANT_RESOLVER``) to see or write any row; with none
+        bound, every read returns empty and every write is refused —
+        default-deny, never "every row". ``use_all_tenants()`` is the one
+        explicit, audited bypass, reserved for background code whose job is
+        inherently cross-tenant (the retention purge, the Elasticsearch
+        reindex). Isolation is *logical*, not physical — see ``SECURITY.md``.
     ``snapadmin.conf``
         The single accessor for every ``SNAPADMIN_*`` setting:
         ``get_setting(name, default)`` resolves an explicit Django setting,
@@ -212,6 +224,13 @@ Operations
         ``W015`` catches a registered model whose generated admin form would
         render with no fields at all (no ``show_in_form=True`` anywhere),
         whatever the cause — see ``SNAPADMIN_SHOW_IN_FORM_DEFAULT`` below.
+        ``E009`` catches a **declared but unenforceable** ``tenant_scoped``
+        (``snapadmin.tenancy``): the resolved tenant field does not exist on
+        the model, or the model was registered via ``@snap_model`` rather
+        than subclassing ``SnapModel`` — tenant scoping is enforced through
+        ``SnapModel``'s ``EsManager``, which a plain registered model never
+        uses as its default manager. It does not demand every registered
+        model declare tenant scoping — most legitimately should not.
     ``snapadmin.crypto``
         Streaming AGE encryption for backup artefacts — two backends
         (``pyrage``, the optional ``[age]`` extra; or the ``age`` command-line

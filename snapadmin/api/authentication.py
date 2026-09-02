@@ -12,6 +12,7 @@ from rest_framework import authentication, exceptions
 
 from snapadmin.conf import get_setting
 from snapadmin.models import APIToken, hash_token_key
+from snapadmin.tenancy import SnapTenantRebindMixin
 
 logger = logging.getLogger("snapadmin.api.auth")
 
@@ -41,12 +42,15 @@ def get_api_authentication_classes() -> list[type]:
     ]
 
 
-class SnapAPIAuthMixin:
+class SnapAPIAuthMixin(SnapTenantRebindMixin):
     """Resolve authenticators per request from the SnapAdmin setting.
 
     DRF reads ``authentication_classes`` at class-definition time; resolving in
     ``get_authenticators()`` instead keeps the setting overridable at runtime
     (and in tests) without subclassing the views.
+
+    Also rebinds the current tenant (#FUT1b) once DRF's own authentication
+    has actually run — see :class:`~snapadmin.tenancy.SnapTenantRebindMixin`.
     """
 
     def get_authenticators(self):

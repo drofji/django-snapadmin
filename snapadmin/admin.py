@@ -240,6 +240,32 @@ class SnapadminAuditLogAdmin(ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return False
 
+    def get_queryset(self, request):
+        # #FUT1b: hide a row naming an object outside the current tenant —
+        # see snapadmin.audit.visible_audit_queryset for the fail-closed rule.
+        return audit.visible_audit_queryset(super().get_queryset(request))
+
+    @staticmethod
+    def _object_visible_to_tenant(app_label: str, model_name: str, object_id: str) -> bool:
+        """Whether the timeline's target object passes #FUT1b's tenant scoping.
+
+        Same reasoning as :func:`snapadmin.audit.visible_audit_queryset`, for
+        one specific object reached directly by URL — the changelist's own
+        filtering does not protect a viewer who guesses or bookmarks a
+        timeline URL for a row the changelist itself would have hidden.
+        """
+        from django.apps import apps as django_apps
+
+        from snapadmin.tenancy import is_tenant_scoped
+
+        try:
+            model = django_apps.get_model(app_label, model_name)
+        except LookupError:
+            return True
+        if not is_tenant_scoped(model):
+            return True
+        return model.objects.filter(pk=object_id).exists()
+
     def get_urls(self):
         # The per-object timeline is mounted *before* the default admin URLs:
         # those end in a catch-all "<path:object_id>/" that would otherwise
@@ -259,9 +285,13 @@ class SnapadminAuditLogAdmin(ModelAdmin):
         Gated on the audit log's own view permission — the same thing that
         gates the changelist, which already exposes these rows — and masked per
         viewer, so the timeline can never reveal more than the list it is
-        reached from.
+        reached from. Also gated on #FUT1b's tenant scoping (see
+        :meth:`_object_visible_to_tenant`) — a direct/bookmarked URL must not
+        reach a timeline the changelist itself would have hidden.
         """
         if not self.has_view_permission(request):
+            raise PermissionDenied
+        if not self._object_visible_to_tenant(app_label, model, object_id):
             raise PermissionDenied
 
         entries = SnapadminAuditLog.objects.filter(

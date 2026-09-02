@@ -522,8 +522,16 @@ def run_export_job(job_id) -> None:
         return
 
     job = SnapExportJob.objects.get(pk=job_id)
+    # #FUT1b: replay the submitter's tenant (captured on the job when it was
+    # created, while a request was in hand — a worker has none of its own).
+    # A blank tenant_id (the target model was never tenant-scoped) binds
+    # None, which is a no-op everywhere tenant scoping is gated on
+    # is_tenant_scoped().
+    from snapadmin.tenancy import use_tenant
+
     try:
-        _run(job)
+        with use_tenant(job.tenant_id or None):
+            _run(job)
     except Exception as exc:
         logger.exception("snapadmin.export.failed", job=str(job.pk))
         job.status = Status.FAILED

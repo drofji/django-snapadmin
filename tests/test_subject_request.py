@@ -240,14 +240,17 @@ class TestDeleteConfirm:
 
     def test_confirm_refuses_and_deletes_nothing_when_protected(self, operator, subject_customer):
         from demo.apps.shop.models import Customer, Order
-        Order.objects.create(customer=subject_customer, total=Decimal("1.00"))
+        from tests.conftest import DEFAULT_TEST_TENANT
+        from snapadmin.tenancy import use_tenant
+        Order.objects.create(customer=subject_customer, total=Decimal("1.00"), tenant_id=DEFAULT_TEST_TENANT)
         out, err = _call(
             "delete", model="demo.Customer", identifier=subject_customer.email,
             user=operator.username, confirm=True,
         )
         assert "REFUSED" in out
         assert Customer.objects.filter(pk=subject_customer.pk).exists()
-        assert Order.objects.filter(customer_id=subject_customer.pk).exists()
+        with use_tenant(DEFAULT_TEST_TENANT):
+            assert Order.objects.filter(customer_id=subject_customer.pk).exists()
 
     def test_writes_an_audit_entry_that_survives(self, operator, subject_customer):
         from snapadmin.models import SnapadminAuditLog

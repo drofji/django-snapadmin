@@ -53,7 +53,16 @@ class TestAdminIndexRendersOneShell:
 @pytest.mark.django_db
 class TestDemoDashboardTag:
     def test_counts_are_live(self, order, customer_inactive, product, product_unavailable):
-        ctx = tag_module.demo_dashboard()
+        from tests.conftest import DEFAULT_TEST_TENANT
+        from snapadmin.tenancy import use_tenant
+
+        # demo_dashboard() reads the ambient tenant context — in a real admin
+        # render that is bound by SnapTenantMiddleware for the viewer's own
+        # session (see test_rendered_panel_shows_the_numbers below, which
+        # exercises exactly that path); called directly here, this test
+        # binds the same tenant the `order` fixture stamped its row with.
+        with use_tenant(DEFAULT_TEST_TENANT):
+            ctx = tag_module.demo_dashboard()
         assert ctx["total_orders"] == 1
         assert ctx["active_customers"] == 1          # `customer`, not `customer_inactive`
         assert ctx["revenue"] == Decimal("99.99")
@@ -68,7 +77,11 @@ class TestDemoDashboardTag:
         assert ctx["availability_percent"] == 0
 
     def test_recent_activity_lists_real_rows(self, order):
-        rows = tag_module.demo_dashboard()["recent_activity"]
+        from tests.conftest import DEFAULT_TEST_TENANT
+        from snapadmin.tenancy import use_tenant
+
+        with use_tenant(DEFAULT_TEST_TENANT):
+            rows = tag_module.demo_dashboard()["recent_activity"]
         texts = " ".join(str(r["text"]) for r in rows)
         assert f"#{order.pk}" in texts
         assert "Alice" in texts                      # the `customer` fixture

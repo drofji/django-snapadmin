@@ -1145,11 +1145,16 @@ class TestExportFilterValidationApi:
 
     def test_valid_fk_id_filter_applied(self, auth_client):
         from demo.apps.shop.models import Customer, Order
+        from tests.conftest import DEFAULT_TEST_TENANT
+        # Order is tenant-scoped (#FUT1) — auth_client authenticates as
+        # admin_user, which demo/core/tenancy.py's resolver maps to
+        # DEFAULT_TEST_TENANT via its email domain; the export job only
+        # sees rows stamped with that same tenant.
         c1 = Customer.objects.create(first_name="A", last_name="A", email="a@example.com")
         c2 = Customer.objects.create(first_name="B", last_name="B", email="b@example.com")
-        Order.objects.create(customer=c1, total="10.00")
-        Order.objects.create(customer=c1, total="20.00")
-        Order.objects.create(customer=c2, total="30.00")
+        Order.objects.create(customer=c1, total="10.00", tenant_id=DEFAULT_TEST_TENANT)
+        Order.objects.create(customer=c1, total="20.00", tenant_id=DEFAULT_TEST_TENANT)
+        Order.objects.create(customer=c2, total="30.00", tenant_id=DEFAULT_TEST_TENANT)
         r = auth_client.post(
             "/api/exports/",
             {"app_label": "demo", "model": "Order", "filters": {"customer_id": c1.pk}},
@@ -1160,8 +1165,9 @@ class TestExportFilterValidationApi:
 
     def test_valid_date_filter_applied(self, auth_client):
         from demo.apps.shop.models import Customer, Order
+        from tests.conftest import DEFAULT_TEST_TENANT
         customer = Customer.objects.create(first_name="A", last_name="A", email="a@example.com")
-        Order.objects.create(customer=customer, total="10.00")
+        Order.objects.create(customer=customer, total="10.00", tenant_id=DEFAULT_TEST_TENANT)
         cutoff = (timezone.now() - timezone.timedelta(days=1)).isoformat()
         r = auth_client.post(
             "/api/exports/",
@@ -1170,6 +1176,34 @@ class TestExportFilterValidationApi:
         )
         assert r.status_code == 201, r.content
         assert r.json()["processed_rows"] == 1
+
+
+# ── tenant assignment on export job creation (#FUT1b) ────────────────────────
+
+@pytest.mark.django_db
+class TestExportJobTenantAssignment:
+    def test_create_with_no_tenant_bound_is_refused(self, customer):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Permission
+        from rest_framework.test import APIClient
+        from snapadmin.models import APIToken
+
+        # No email -> demo/core/tenancy.py's resolver resolves no tenant.
+        # Granted view_order so the request reaches ExportJobViewSet.create()
+        # far enough to hit its own tenant check, not an unrelated 403.
+        from demo.apps.shop.models import Order
+        Order.objects.create(customer=customer, total="1.00", tenant_id="acme")
+        user = get_user_model().objects.create_user(username="notenant2", password="x")
+        user.user_permissions.add(Permission.objects.get(codename="view_order"))
+        token = APIToken.create_for_user(user, "NoTenant")
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {token.token_key}")
+
+        r = client.post(
+            "/api/exports/", {"app_label": "demo", "model": "Order"}, format="json",
+        )
+        assert r.status_code == 403
+        assert "tenant-scoped" in str(r.json())
 
 
 # ── #FEAT10: pluggable export row sources ────────────────────────────────────

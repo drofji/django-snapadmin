@@ -36,6 +36,7 @@ from snapadmin.exporting import (
 from snapadmin.masking import get_masked_fields, user_can_view_pii
 from snapadmin.models import APIToken, SnapExportJob
 from snapadmin.registry import is_registered
+from snapadmin.tenancy import ALL_TENANTS, get_current_tenant, is_tenant_scoped
 
 #: JSON-compatible scalar/collection values a filter value may hold.
 FilterValue = str | int | float | bool | list[object] | None
@@ -238,7 +239,26 @@ class ExportJobViewSet(
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        job = SnapExportJob.objects.create(requested_by=request.user, **serializer.validated_data)
+        # #FUT1b: capture the submitter's tenant now, while a request (and
+        # therefore a resolvable tenant context) is in hand — run_export_job
+        # replays it via snapadmin.tenancy.use_tenant() when the worker
+        # actually runs, since a Celery task has no request of its own.
+        model = apps.get_model(serializer.validated_data["app_label"], serializer.validated_data["model"])
+        tenant_id = ""
+        if is_tenant_scoped(model):
+            current = get_current_tenant()
+            if current is None or current is ALL_TENANTS:
+                return Response(
+                    {"detail": f"No tenant is bound to this request — {model._meta.label} is "
+                               "tenant-scoped and refuses to create an export job with no "
+                               "tenant assigned."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            tenant_id = str(current)
+
+        job = SnapExportJob.objects.create(
+            requested_by=request.user, tenant_id=tenant_id, **serializer.validated_data
+        )
         run_export.delay(str(job.pk))
 
         job.refresh_from_db()

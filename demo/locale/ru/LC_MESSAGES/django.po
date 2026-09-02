@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-01 05:08+0000\n"
+"POT-Creation-Date: 2026-09-02 18:12+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -429,8 +429,8 @@ msgid ""
 "GDPR — data_retention_days on each model, the audit log and (if set) "
 "SNAPADMIN_EXPORT_RETENTION_DAYS job cleanup"
 msgstr ""
-"GDPR — data_retention_days для каждой модели, журнал аудита и (если "
-"задано) очистка заданий через SNAPADMIN_EXPORT_RETENTION_DAYS"
+"GDPR — data_retention_days для каждой модели, журнал аудита и (если задано) "
+"очистка заданий через SNAPADMIN_EXPORT_RETENTION_DAYS"
 
 msgid ""
 "Compute and log daily business stats (products, customers, orders, revenue)"
@@ -489,6 +489,22 @@ msgstr "Основные сведения"
 
 msgid "Advanced Settings"
 msgstr "Дополнительные настройки"
+
+#, fuzzy
+#| msgid "System dashboard"
+msgid "System Health"
+msgstr "Системная панель"
+
+msgid "Language"
+msgstr "Язык"
+
+msgid "Managed Models"
+msgstr "Управляемые модели"
+
+
+#, python-format
+msgid "File extension '%(ext)s' is not allowed. Allowed: %(allowed)s"
+msgstr "Расширение файла '%(ext)s' не разрешено. Разрешены: %(allowed)s"
 
 #~ msgid "GDPR — delete records older than data_retention_days on each model"
 #~ msgstr "GDPR — удалять записи старше data_retention_days для каждой модели"

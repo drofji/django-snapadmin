@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-31 05:19+0000\n"
+"POT-Creation-Date: 2026-09-02 18:12+0000\n"
 "Language: fr_CH\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -128,10 +128,9 @@ msgid ""
 "denies every scope check (fail-closed), unlike an empty Allowed Models."
 msgstr ""
 "Chaînes libres qu'une vue propre au projet peut vérifier avec "
-"token_has_scope() — SnapAdmin se contente de les stocker et de les "
-"exposer, le sens appartient au projet. Une liste vide refuse toute "
-"vérification de portée (fermeture par défaut), contrairement à des Modèles "
-"autorisés vides."
+"token_has_scope() — SnapAdmin se contente de les stocker et de les exposer, "
+"le sens appartient au projet. Une liste vide refuse toute vérification de "
+"portée (fermeture par défaut), contrairement à des Modèles autorisés vides."
 
 msgid "Is Active"
 msgstr "Est actif"
@@ -282,6 +281,16 @@ msgstr "Démarré le"
 msgid "Finished At"
 msgstr "Terminé le"
 
+msgid "Tenant"
+msgstr "Locataire"
+
+msgid ""
+"The submitter's tenant, replayed when the job runs. Blank for a job whose "
+"target model is not tenant-scoped."
+msgstr ""
+"Le locataire de l'expéditeur, rejoué lors de l'exécution de la tâche. Vide "
+"pour une tâche dont le modèle cible n'est pas isolé par locataire."
+
 msgid "Format"
 msgstr "Format"
 
@@ -338,6 +347,80 @@ msgstr "Tâche de réindexation"
 
 msgid "Reindex Jobs"
 msgstr "Tâches de réindexation"
+
+#, fuzzy
+#| msgid "Failed"
+msgid "Fail"
+msgstr "Échoué"
+
+msgid "Skip"
+msgstr "Ignorer"
+
+msgid "Update"
+msgstr "Mettre à jour"
+
+msgid "Source File"
+msgstr "Fichier source"
+
+msgid "Display-only name of the input file this job reads."
+msgstr "Nom d'affichage uniquement du fichier d'entrée que cette tâche lit."
+
+msgid "Column Map"
+msgstr "Correspondance des colonnes"
+
+msgid ""
+"Explicit CSV/JSON header -> field name overrides; header-name matching fills "
+"the rest."
+msgstr ""
+"Substitutions explicites d'en-tête CSV/JSON vers un nom de champ ; la "
+"correspondance par nom d'en-tête complète le reste."
+
+msgid "Natural Key"
+msgstr "Clé naturelle"
+
+msgid ""
+"Field name(s) that identify a duplicate row; blank resolves the default at "
+"run time."
+msgstr ""
+"Nom(s) de champ identifiant une ligne en double ; laissé vide, résout la "
+"valeur par défaut au moment de l'exécution."
+
+msgid "On Conflict"
+msgstr "En cas de conflit"
+
+msgid "Report File"
+msgstr "Fichier de rapport"
+
+#, fuzzy
+#| msgid "Resume Byte Offset"
+msgid "Report Resume Byte Offset"
+msgstr "Décalage d'octets de reprise"
+
+#, fuzzy
+#| msgid "Byte length of the working file confirmed at cursor_pk."
+msgid "Byte length of the report file confirmed as written."
+msgstr "Longueur en octets du fichier de travail confirmée à cursor_pk."
+
+msgid "Skipped"
+msgstr "Ignoré"
+
+msgid ""
+"Used for PII-access checks on masked target fields; blank is treated as no "
+"PII access."
+msgstr ""
+"Utilisé pour les vérifications d'accès aux données personnelles sur les "
+"champs cibles masqués ; vide est traité comme aucun accès aux données "
+"personnelles."
+
+#, fuzzy
+#| msgid "Export Job"
+msgid "Import Job"
+msgstr "Tâche d'exportation"
+
+#, fuzzy
+#| msgid "Export Jobs"
+msgid "Import Jobs"
+msgstr "Tâches d'exportation"
 
 msgid "Field"
 msgstr "Champ"
@@ -452,6 +535,11 @@ msgstr "Fournisseurs d'authentification unique"
 
 msgid "Or sign in with"
 msgstr "Ou connectez-vous avec"
+
+msgid "Row-level tenant isolation key — see SnapModel.tenant_scoped."
+msgstr ""
+"Clé d'isolation des locataires au niveau des lignes — voir "
+"SnapModel.tenant_scoped."
 
 msgid "Add new item"
 msgstr "Ajouter un élément"
@@ -636,9 +724,6 @@ msgstr "Vrai"
 
 msgid "Type to search"
 msgstr "Saisissez votre recherche"
-
-msgid "Update"
-msgstr "Mettre à jour"
 
 msgid "Value"
 msgstr "Valeur"

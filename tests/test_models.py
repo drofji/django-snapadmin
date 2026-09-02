@@ -202,6 +202,36 @@ class TestAdminRegistration:
         NoAdminModel.register_admin()
         assert NoAdminModel not in admin.site._registry
 
+    def test_model_with_no_show_in_form_fields_still_registers(self):
+        """A registered model where no field sets show_in_form=True builds a
+        plain `fields` admin_attrs entry (no fieldsets) rather than crashing —
+        the else-branch of register_admin()'s fieldsets/fields choice. Found
+        uncovered while verifying coverage for an unrelated change; unrelated
+        to what this test module is otherwise about, kept here next to
+        NoAdminModel as the other "unusual registration shape" case.
+
+        Uses isolate_apps (unlike NoAdminModel above, which deliberately
+        lingers) because this model's admin *is* enabled — left registered,
+        it would trip snapadmin.W015 (check_empty_admin_forms) for the rest
+        of the session.
+        """
+        from django.test.utils import isolate_apps
+
+        from snapadmin.models import SnapModel
+
+        with isolate_apps("demo"):
+            class BareFieldsModel(SnapModel):
+                subject_path = None
+
+                class Meta:
+                    app_label = "demo"
+                    abstract = False
+
+            BareFieldsModel.register_admin()
+            admin_class = admin.site._registry[BareFieldsModel].__class__
+            assert admin_class.fields == []
+            admin.site.unregister(BareFieldsModel)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Product model
@@ -276,11 +306,14 @@ class TestOrderModel:
 
     def test_order_select_related(self, order):
         """select_related should not cause extra queries."""
-        o = (
-            __import__("demo.apps.shop.models", fromlist=["Order"])
-            .Order.objects.select_related("customer")
-            .get(pk=order.pk)
-        )
+        from snapadmin.tenancy import use_all_tenants
+
+        with use_all_tenants():
+            o = (
+                __import__("demo.apps.shop.models", fromlist=["Order"])
+                .Order.objects.select_related("customer")
+                .get(pk=order.pk)
+            )
         assert o.customer.pk is not None
 
 

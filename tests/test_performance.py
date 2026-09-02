@@ -107,12 +107,18 @@ class TestSelectRelatedEliminatesNPlusOne:
             )
             Order.objects.create(customer=cust, total=Decimal("9.99"))
 
-        model_admin = _admin_for(Order)
-        qs = Order.objects.select_related(*model_admin.list_select_related)
+        from snapadmin.tenancy import use_all_tenants
 
-        with CaptureQueriesContext(connection) as ctx:
-            for order in qs:
-                str(order.customer)  # would be one query each without the join
+        model_admin = _admin_for(Order)
+        # Order is tenant-scoped (#FUT1); this test is about the select_related
+        # optimisation, not isolation, so it reads across every tenant
+        # deliberately (the rows above were created with no tenant bound).
+        with use_all_tenants():
+            qs = Order.objects.select_related(*model_admin.list_select_related)
+
+            with CaptureQueriesContext(connection) as ctx:
+                for order in qs:
+                    str(order.customer)  # would be one query each without the join
 
         assert len(ctx) == 1
 
@@ -127,9 +133,12 @@ class TestSelectRelatedEliminatesNPlusOne:
             )
             Order.objects.create(customer=cust, total=Decimal("9.99"))
 
-        with CaptureQueriesContext(connection) as ctx:
-            for order in Order.objects.all():
-                str(order.customer)
+        from snapadmin.tenancy import use_all_tenants
+
+        with use_all_tenants():
+            with CaptureQueriesContext(connection) as ctx:
+                for order in Order.objects.all():
+                    str(order.customer)
 
         # 1 query for the orders + 1 per customer access.
         assert len(ctx) > 1

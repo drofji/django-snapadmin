@@ -579,15 +579,20 @@ class TestPurgeExpiredCountNotCascadeInflated:
     def _old_order_with_items(self, days_old: int, item_count: int = 3):
         from decimal import Decimal
         from demo.apps.shop.models import Customer, Order, OrderItem, Product
+        from snapadmin.tenancy import use_all_tenants
 
         customer = Customer.objects.create(
             first_name="Cascade", last_name="Test", email="cascade@example.com",
             origin="status_a", active=True,
         )
         order = Order.objects.create(customer=customer, total=Decimal("42.00"))
-        Order.objects.filter(pk=order.pk).update(
-            created_at=timezone.now() - timedelta(days=days_old)
-        )
+        # Order is tenant-scoped (#FUT1) — .filter().update() goes through
+        # the same scoped manager as a read, so it needs a bound context too
+        # (there is none here; the order above carries no tenant either).
+        with use_all_tenants():
+            Order.objects.filter(pk=order.pk).update(
+                created_at=timezone.now() - timedelta(days=days_old)
+            )
         product = Product.objects.create(name="Cascade Product", price=Decimal("5.00"))
         for _ in range(item_count):
             OrderItem.objects.create(order=order, product=product, quantity=1, price=Decimal("5.00"))
@@ -595,6 +600,7 @@ class TestPurgeExpiredCountNotCascadeInflated:
 
     def test_purge_count_matches_dry_run_despite_cascade(self):
         from demo.apps.shop.models import Order, OrderItem
+        from snapadmin.tenancy import use_all_tenants
 
         with patch.object(Order, "data_retention_days", 30, create=True):
             old_order = self._old_order_with_items(days_old=45, item_count=3)
@@ -605,7 +611,8 @@ class TestPurgeExpiredCountNotCascadeInflated:
             live_count = Order.purge_expired()
 
         # The cascade actually happened...
-        assert not Order.objects.filter(pk=old_order.pk).exists()
+        with use_all_tenants():
+            assert not Order.objects.filter(pk=old_order.pk).exists()
         assert OrderItem.objects.filter(order_id=old_order.pk).count() == 0
         # ...but the reported count is the target row count, matching dry_run,
         # not Django's cascade-inflated delete() total (1 order + 3 items = 4).

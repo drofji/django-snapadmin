@@ -88,6 +88,7 @@ from snapadmin.exporting import export_dir, get_export_storage
 from snapadmin.logging_config import get_logger
 from snapadmin.masking import get_masked_fields, user_can_view_pii
 from snapadmin.registry import get_model_meta
+from snapadmin.tenancy import get_current_tenant, is_tenant_scoped, tenant_field_name
 
 logger = get_logger(__name__)
 
@@ -282,6 +283,15 @@ def check_write_surface(model, field_names: set[str], *, requested_by=None) -> N
             "import refuses to write to it."
         )
 
+    if is_tenant_scoped(model):
+        tenant_field = tenant_field_name(model)
+        if tenant_field in field_names:
+            raise SnapImportError(
+                f"Column targets {tenant_field!r} on {model._meta.label}, a tenant-scoped "
+                "model's tenant column — import assigns it from --tenant, never from a file "
+                "column (rejected, not silently overwritten)."
+            )
+
     excluded = set(get_model_meta(model, "api_exclude_fields", []) or [])
     excluded_hit = sorted(field_names & excluded)
     if excluded_hit:
@@ -391,6 +401,11 @@ def _process_row(
                 return {"row": row_number, "action": "updated", "pk": existing.pk, "errors": {}}
 
             values = _build_field_values(model, column_map, row)
+            if is_tenant_scoped(model):
+                # check_write_surface already refused a column mapped to the
+                # tenant field itself — this is the only door a new row's
+                # tenant is ever assigned through (#FUT1b).
+                values[model._meta.get_field(tenant_field_name(model)).attname] = get_current_tenant()
             instance = model(**values)
             instance.full_clean()
             instance.save()
@@ -449,13 +464,23 @@ def start_import(
     column_map: dict[str, str] | None = None,
     natural_key: str | tuple[str, ...] | list[str] | None = None,
     on_conflict: str = "fail", requested_by=None, resume: bool = False,
+    tenant: Any = None,
 ):
     """Create (or, with ``resume``, reuse) a :class:`SnapImportJob` for ``model``.
 
     ``resume=True`` looks for the most recent unfinished-or-failed job for
     this model *and* this source file name (two different files targeting
     the same model must never resume each other's job) and resets it to
-    ``pending``; otherwise a fresh job is created.
+    ``pending`` — a resumed job keeps its original ``tenant`` regardless of
+    what this call was given; a running import's tenant is not something a
+    later ``--resume`` may change.
+
+    ``tenant`` (#FUT1b) is required when ``model`` is tenant-scoped — import
+    is a CLI/management-command surface with no request to resolve a tenant
+    from, so the operator must say so explicitly (``--tenant`` on
+    ``snapadmin_import``); refuses to create the job otherwise. Every row
+    this job creates is stamped with it (:func:`_process_row`), and a column
+    mapped to the tenant field itself is rejected by :func:`check_write_surface`.
     """
     from snapadmin.models import SnapImportJob
 
@@ -476,6 +501,15 @@ def start_import(
             existing.save(update_fields=["status", "error"])
             return existing
 
+    tenant_id = ""
+    if is_tenant_scoped(model):
+        if tenant is None:
+            raise SnapImportError(
+                f"{model._meta.label} is tenant-scoped — pass --tenant (a tenant this "
+                "import's rows are assigned to; there is no request here to resolve one from)."
+            )
+        tenant_id = str(tenant)
+
     return SnapImportJob.objects.create(
         app_label=model._meta.app_label,
         model=model.__name__,
@@ -487,6 +521,7 @@ def start_import(
         ),
         on_conflict=on_conflict,
         requested_by=requested_by,
+        tenant_id=tenant_id,
     )
 
 
@@ -513,9 +548,15 @@ def run_import_job(job, *, file_path: str, chunk_size: int | None = None, on_pro
         return {"skipped": True, "reason": "already processing or finished"}
 
     job.refresh_from_db()
+    # #FUT1b: replay the tenant captured on the job at start_import() time —
+    # a blank tenant_id (the target model was never tenant-scoped) binds
+    # None, a no-op everywhere tenant scoping is gated on is_tenant_scoped().
+    from snapadmin.tenancy import use_tenant
+
     try:
-        return _run(job, file_path=file_path, chunk_size=chunk_size or import_chunk_size(),
-                    on_progress=on_progress)
+        with use_tenant(job.tenant_id or None):
+            return _run(job, file_path=file_path, chunk_size=chunk_size or import_chunk_size(),
+                        on_progress=on_progress)
     except Exception as exc:
         logger.exception("snapadmin.import.failed", job=str(job.pk))
         job.status = Status.FAILED

@@ -2,7 +2,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: django-snapadmin\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-31 05:19+0000\n"
+"POT-Creation-Date: 2026-09-02 18:11+0000\n"
 "Language: de_CH\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
@@ -279,6 +279,16 @@ msgstr "Gestartet am"
 msgid "Finished At"
 msgstr "Beendet am"
 
+msgid "Tenant"
+msgstr "Mandant"
+
+msgid ""
+"The submitter's tenant, replayed when the job runs. Blank for a job whose "
+"target model is not tenant-scoped."
+msgstr ""
+"Der Mandant des Absenders, wiedergegeben, wenn der Auftrag ausgeführt wird. "
+"Leer bei einem Auftrag, dessen Zielmodell nicht mandantenfähig ist."
+
 msgid "Format"
 msgstr "Format"
 
@@ -333,6 +343,79 @@ msgstr "Reindex-Auftrag"
 
 msgid "Reindex Jobs"
 msgstr "Reindex-Aufträge"
+
+#, fuzzy
+#| msgid "Failed"
+msgid "Fail"
+msgstr "Fehlgeschlagen"
+
+msgid "Skip"
+msgstr "Überspringen"
+
+msgid "Update"
+msgstr "Aktualisieren"
+
+msgid "Source File"
+msgstr "Quelldatei"
+
+msgid "Display-only name of the input file this job reads."
+msgstr "Nur zur Anzeige bestimmter Name der Eingabedatei, die dieser Auftrag liest."
+
+msgid "Column Map"
+msgstr "Spaltenzuordnung"
+
+msgid ""
+"Explicit CSV/JSON header -> field name overrides; header-name matching fills "
+"the rest."
+msgstr ""
+"Explizite Zuordnungen von CSV/JSON-Kopfzeilen zu Feldnamen; die Zuordnung "
+"nach Kopfzeilennamen füllt den Rest."
+
+msgid "Natural Key"
+msgstr "Natürlicher Schlüssel"
+
+msgid ""
+"Field name(s) that identify a duplicate row; blank resolves the default at "
+"run time."
+msgstr ""
+"Feldname(n), die eine doppelte Zeile identifizieren; leer löst den "
+"Standardwert zur Laufzeit auf."
+
+msgid "On Conflict"
+msgstr "Bei Konflikt"
+
+msgid "Report File"
+msgstr "Berichtsdatei"
+
+#, fuzzy
+#| msgid "Resume Byte Offset"
+msgid "Report Resume Byte Offset"
+msgstr "Fortsetzungs-Byte-Offset"
+
+#, fuzzy
+#| msgid "Byte length of the working file confirmed at cursor_pk."
+msgid "Byte length of the report file confirmed as written."
+msgstr "Bytelänge der Arbeitsdatei, bestätigt bei cursor_pk."
+
+msgid "Skipped"
+msgstr "Übersprungen"
+
+msgid ""
+"Used for PII-access checks on masked target fields; blank is treated as no "
+"PII access."
+msgstr ""
+"Wird für PII-Zugriffsprüfungen bei maskierten Zielfeldern verwendet; leer "
+"wird als kein PII-Zugriff behandelt."
+
+#, fuzzy
+#| msgid "Export Job"
+msgid "Import Job"
+msgstr "Exportauftrag"
+
+#, fuzzy
+#| msgid "Export Jobs"
+msgid "Import Jobs"
+msgstr "Exportaufträge"
 
 msgid "Field"
 msgstr "Feld"
@@ -447,6 +530,11 @@ msgstr "Single-Sign-On-Anbieter"
 
 msgid "Or sign in with"
 msgstr "Oder anmelden mit"
+
+msgid "Row-level tenant isolation key — see SnapModel.tenant_scoped."
+msgstr ""
+"Schlüssel für die zeilenbasierte Mandantenisolation — siehe "
+"SnapModel.tenant_scoped."
 
 msgid "Add new item"
 msgstr "Neuen Eintrag hinzufügen"
@@ -632,9 +720,6 @@ msgstr "Wahr"
 
 msgid "Type to search"
 msgstr "Zum Suchen tippen"
-
-msgid "Update"
-msgstr "Aktualisieren"
 
 msgid "Value"
 msgstr "Wert"

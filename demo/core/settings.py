@@ -95,6 +95,10 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    # Binds the current tenant (#FUT1) for row-level isolation — after
+    # AuthenticationMiddleware so SNAPADMIN_TENANT_RESOLVER can read
+    # request.user. See SNAPADMIN_TENANT_RESOLVER below.
+    'snapadmin.tenancy.SnapTenantMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -426,6 +430,18 @@ SNAPADMIN_APP_LABELS = {}    # {"auth": "Administration"} → rename a group's h
 # Export for a SIEM with `manage.py snapadmin_audit_export`.
 SNAPADMIN_AUDIT_LOG_ENABLED = env_bool('SNAPADMIN_AUDIT_LOG_ENABLED', True)
 SNAPADMIN_AUDIT_RETENTION_DAYS = int(os.getenv('SNAPADMIN_AUDIT_RETENTION_DAYS', '365'))
+
+# Row-level multi-tenancy (#FUT1). Dotted path to a callable resolving the
+# current tenant — request-scoped (admin/REST/GraphQL/offline cache) and
+# job-submitter-scoped (async export/import) respectively; see
+# snapadmin.tenancy and demo/core/tenancy.py for the demo's own
+# (email-domain-based, illustrative-only) resolvers. Both unset → every
+# tenant-scoped model (Order, here) is unreachable, the correct fail-closed
+# default until a project configures one. Try it: create two staff users
+# with different email domains, log in as each, and compare the Orders
+# changelist — or set the X-Snapadmin-Demo-Tenant header on an API request.
+SNAPADMIN_TENANT_RESOLVER = 'demo.core.tenancy.resolve_demo_tenant'
+SNAPADMIN_TENANT_USER_RESOLVER = 'demo.core.tenancy.resolve_demo_tenant_for_user'
 
 # Large-dataset performance (issue #5). Replace the changelist's expensive
 # COUNT(*) with PostgreSQL's fast planner estimate on unfiltered listings of

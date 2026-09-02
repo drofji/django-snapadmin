@@ -871,6 +871,76 @@ def check_subject_paths(app_configs, **kwargs):
     return errors
 
 
+def check_tenant_scoping(app_configs, **kwargs):
+    """A ``tenant_scoped = True`` declaration must actually be enforceable (#FUT1b).
+
+    Row-level tenant isolation (:mod:`snapadmin.tenancy`) is opt-in per
+    model: a model declares ``tenant_scoped = True`` and adds a tenant
+    column. This check is deliberately narrow — it does **not** demand every
+    registered model declare tenant scoping (most legitimately should not:
+    global reference data, the audit log, API tokens); retrofitting
+    isolation onto an existing project's models is not something this
+    library may decide for it. What it *does* catch is a **declared but
+    broken** opt-in, which would otherwise fail silently: every read through
+    the scoped manager would return an empty queryset (never an error) for a
+    model whose tenant field cannot actually be resolved, which reads
+    exactly like "no data yet" rather than "misconfigured".
+
+    ``snapadmin.E009`` fires when a registered model sets
+    ``tenant_scoped = True`` but its resolved tenant column
+    (:func:`snapadmin.tenancy.tenant_field_name`) does not exist as a real
+    field on the model — the far more common way to reach this than a typo
+    is registering the flag on a **plain model (``@snap_model``)**: tenant
+    scoping is enforced through :class:`~snapadmin.models.EsManager`, which
+    only a :class:`~snapadmin.models.SnapModel` subclass uses as its default
+    manager, so the flag is unenforceable there even with a perfectly
+    correct field name.
+    """
+    from django.core.exceptions import FieldDoesNotExist
+
+    from snapadmin.tenancy import is_tenant_scoped, tenant_field_name
+
+    errors = []
+    for model in apps.get_models():
+        if not is_registered(model):
+            continue
+        if not is_tenant_scoped(model):
+            continue
+
+        label = model._meta.label
+        field_name = tenant_field_name(model)
+
+        if not hasattr(model, "register_admin"):
+            # A @snap_model-decorated plain model: EsManager's tenant-scoping
+            # hook (EsManager.get_queryset) is never its default manager, so
+            # the declaration cannot be enforced regardless of the field.
+            errors.append(Error(
+                f"{label} sets tenant_scoped = True but is registered via @snap_model, "
+                "not a SnapModel subclass — tenant scoping is enforced through "
+                "SnapModel's EsManager, which a plain registered model never uses as "
+                "its default manager, so this declaration is never actually enforced.",
+                hint=f"Subclass SnapModel instead of decorating a plain model with "
+                     f"@snap_model, or drop tenant_scoped on {label} if isolation "
+                     "genuinely does not apply to it.",
+                id="snapadmin.E009",
+            ))
+            continue
+
+        try:
+            model._meta.get_field(field_name)
+        except FieldDoesNotExist:
+            errors.append(Error(
+                f"{label} sets tenant_scoped = True but has no field named "
+                f"{field_name!r} — its tenant column cannot be resolved.",
+                hint=f"Add {field_name} = snapadmin.tenancy.tenant_field() to {label}, "
+                     "or set tenant_field to the name of the column that already "
+                     "carries the tenant value.",
+                id="snapadmin.E009",
+            ))
+
+    return errors
+
+
 #: Above this, SNAPADMIN_FETCH_BY_MAX_VALUES no longer meaningfully bounds the
 #: request-size DoS the cap exists to close (see fetch_by in
 #: snapadmin.api.views) — a value this high is functionally "no cap" while
@@ -1017,6 +1087,7 @@ ALL_CHECKS = [
     check_snapadmin_profile_contradiction,
     check_api_defaults_unset,
     check_empty_admin_forms,
+    check_tenant_scoping,
 ]
 
 

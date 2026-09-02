@@ -52,6 +52,14 @@ LAST_NAMES = [
 ORIGINS = ["status_a", "status_b", "status_c"]
 
 EMAIL_DOMAINS = ["example.com", "demo.org", "test.net", "mail.io"]
+# Order is the demo's tenant-scoped model (#FUT1). Seeded orders all get this
+# one tenant — the same domain the default seeded admin superuser's own
+# email uses ("admin@example.com", below) — so a fresh demo install "just
+# works" for that account out of the box; see demo/core/tenancy.py's
+# resolver for how a different X-Snapadmin-Demo-Tenant header (or a
+# different admin email domain) reaches a *different* tenant's orders
+# instead.
+DEMO_SEED_TENANT = EMAIL_DOMAINS[0]
 
 CATEGORIES = [
     ("Electronics", "electronics"),
@@ -176,7 +184,14 @@ class Command(BaseCommand):
     def _flush(self):
         """Delete all demo data."""
         self.stdout.write("   Flushing existing demo data…")
-        Order.objects.all().delete()
+        from snapadmin.tenancy import use_all_tenants
+
+        # This is trusted, operator-run maintenance code — every tenant's
+        # orders must go, not only whatever tenant a bound context (there
+        # usually is none here; this runs from a bare manage.py invocation)
+        # would otherwise scope the delete to (#FUT1b).
+        with use_all_tenants():
+            Order.objects.all().delete()
         AuditLog.objects.all().delete()
         Customer.objects.all().delete()
         Product.objects.all().delete()
@@ -278,7 +293,7 @@ class Command(BaseCommand):
         for i in range(count):
             customer = db_customers[i % len(db_customers)]
             total    = Decimal(str(round(random.uniform(19.99, 999.99), 2)))
-            orders.append(Order(customer=customer, total=total))
+            orders.append(Order(customer=customer, total=total, tenant_id=DEMO_SEED_TENANT))
 
         return Order.objects.bulk_create(orders)
 

@@ -35,6 +35,20 @@ def _grant(user, *codenames):
 
 @pytest.mark.django_db
 class TestGraphQLRelationPermission:
+    @pytest.fixture(autouse=True)
+    def _tenant_context(self):
+        # These tests call schema.execute() directly — bypassing
+        # SnapGraphQLView.dispatch(), which is where a real request binds
+        # the current tenant (#FUT1b) — so Order (tenant-scoped) is bound
+        # explicitly here instead, matching the `order` fixture's own
+        # tenant. Harmless for test_relation_denied_by_token_scope below,
+        # which targets Product (not tenant-scoped).
+        from tests.conftest import DEFAULT_TEST_TENANT
+        from snapadmin.tenancy import use_tenant
+
+        with use_tenant(DEFAULT_TEST_TENANT):
+            yield
+
     def test_fk_relation_denied_without_view_perm(self, order, regular_user):
         # Caller may view Order but NOT the related Customer: the customer
         # relation must be blocked, not resolved with real data.

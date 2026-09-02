@@ -211,6 +211,11 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     # also names how many registered models a request from it can reach.
     subject_models = sum(1 for m in models if get_model_meta(m, "is_data_subject", False))
     subject_path_models = sum(1 for m in models if get_model_meta(m, "subject_path", None))
+    # Multi-tenancy (#FUT1) — "on" means at least one registered model opted
+    # into row-level isolation; the detail names how many, so an operator can
+    # tell "no tenants configured" apart from "3 tenant-scoped models" at a
+    # glance without reading snapadmin.checks' E009 output.
+    tenant_scoped_models = sum(1 for m in models if get_model_meta(m, "tenant_scoped", False))
 
     return [
         ("rest_api", bool(get_setting("SNAPADMIN_REST_API_ENABLED", True)), ""),
@@ -239,6 +244,7 @@ def _capabilities() -> list[tuple[str, bool, str]]:
          if subject_models else ""),
         ("sso", *_sso()),
         ("profile", *_profile()),
+        ("tenant_scoping", tenant_scoped_models > 0, _count(tenant_scoped_models, "tenant-scoped model")),
     ]
 
 
