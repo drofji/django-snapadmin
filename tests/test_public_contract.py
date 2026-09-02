@@ -36,6 +36,22 @@ PUBLIC_IMPORTS = [
     "snapadmin.models.snap_model",
     # A computed column as a method, on either door (#RFC1d)
     "snapadmin.models.snap_property",
+    # The rest of snapadmin.models' defined surface (#SIMPL1f facade pin) — every name
+    # actually defined in the module, not merely leaked in from an import. Pinned here so
+    # the additive split behind the facade cannot silently drop one.
+    "snapadmin.models.SnapadminAuditLog",
+    "snapadmin.models.SnapJobBase",
+    "snapadmin.models.SnapExportJob",
+    "snapadmin.models.SnapReindexJob",
+    "snapadmin.models.SnapImportJob",
+    "snapadmin.models.SnapModelAttributeEnum",
+    "snapadmin.models.DjangoAdminClassAttributeEnum",
+    "snapadmin.models.PIIMaskingAdminMixin",
+    "snapadmin.models.formatted_id",
+    "snapadmin.models.reindexable_snapmodels",
+    "snapadmin.models.run_reindex",
+    "snapadmin.models.validate_allowed_models",
+    "snapadmin.models.validate_allowed_scopes",
     "snapadmin.registry.register",
     "snapadmin.registry.is_registered",
     "snapadmin.registry.meta_for",
@@ -164,6 +180,19 @@ def test_snapmodel_attribute_defaults():
     }
     for name, default in expected.items():
         assert getattr(SnapModel, name) == default, f"SnapModel.{name} default changed"
+
+
+def test_models_module_constants_pinned():
+    """The bare module-level constants ``snapadmin.models`` defines (#SIMPL1f facade pin).
+
+    These carry no ``__module__``/docstring of their own to pin via ``PUBLIC_IMPORTS``, so they
+    are asserted here by value instead — the split must re-export the exact same values.
+    """
+    from snapadmin import models as m
+
+    assert (m.TOKEN_KEY_LENGTH, m.TOKEN_PREFIX_LENGTH) == (40, 8)
+    assert (m.ERROR_MESSAGE_MAX_LENGTH, m.ERROR_TRACEBACK_MAX_LENGTH) == (2000, 10000)
+    assert (m.ADDITION, m.CHANGE, m.DELETION) == (1, 2, 3)
 
 
 def test_esstoragemode_members():

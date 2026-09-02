@@ -97,6 +97,8 @@ logger = get_logger(__name__)
 # ===========================================================================
 
 def validate_allowed_models(value):
+    """Validator for :attr:`APIToken.allowed_models`: a list of ``"app_label.ModelName"`` strings,
+    each naming a model that actually exists."""
     if not isinstance(value, list):
         raise ValidationError(_("Allowed models must be a list."))
     for item in value:
@@ -638,6 +640,8 @@ class SnapImportJob(SnapJobBase):
 # ===========================================================================
 
 class SnapModelAttributeEnum(str, Enum):
+    """Names of ``SnapModel`` class attributes referenced by name elsewhere in the package."""
+
     ADMIN_OVERRIDES = "admin_overrides"
 
 
@@ -881,6 +885,8 @@ class EsManager(models.Manager):
 
 
 class DjangoAdminClassAttributeEnum(str, Enum):
+    """Names of ``ModelAdmin`` class attributes the generated admin writes onto."""
+
     FIELDS = "fields"
     FIELDSETS = "fieldsets"
     LIST_DISPLAY = "list_display"
@@ -895,6 +901,8 @@ class DjangoAdminClassAttributeEnum(str, Enum):
 
 @admin.display(description="ID")
 def formatted_id(obj):
+    """Changelist ``list_display`` column: an integer pk zero-padded to 6 digits with the
+    leading zeros faded, any other pk type rendered verbatim."""
     pk = obj.pk
     # Only integer PKs get the zero-padded "000123" treatment. UUID/char/composite
     # PKs are rendered verbatim so the column never crashes on a non-int id.
