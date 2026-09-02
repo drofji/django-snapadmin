@@ -541,3 +541,22 @@ def test_jobs_module_reexports_are_identical_objects():
 
     for name in ("SnapJobBase", "SnapExportJob", "SnapReindexJob", "SnapImportJob"):
         assert getattr(models, name) is getattr(jobs, name), f"snapadmin.models.{name} is not snapadmin.jobs.{name}"
+
+
+def test_admin_gen_reexports_are_identical_objects():
+    from snapadmin import admin_gen, models
+
+    assert models.UNFOLD_INSTALLED is admin_gen.UNFOLD_INSTALLED
+    assert models._wysiwyg_widget is admin_gen._wysiwyg_widget
+
+
+def test_snap_model_admin_methods_come_from_admin_gen_mixin():
+    """SnapModel's admin-generation methods (#SIMPL1f) resolve through AdminGenMixin,
+    not a shadowing copy on SnapModel itself."""
+    from snapadmin import admin_gen
+    from snapadmin.models import SnapModel
+
+    assert issubclass(SnapModel, admin_gen.AdminGenMixin)
+    for name in ("get_admin_fields", "get_admin_media", "register_admin", "register_all_admins"):
+        assert name in admin_gen.AdminGenMixin.__dict__
+        assert name not in SnapModel.__dict__, f"SnapModel shadows {name} instead of inheriting it"

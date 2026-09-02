@@ -315,7 +315,7 @@ class TestFunctionFieldDisplayNoUnfold:
     def test_function_field_display_returns_raw_without_unfold(self):
         from snapadmin import fields as snap_fields
         from snapadmin.models import SnapModel
-        import snapadmin.models as models_module
+        import snapadmin.admin_gen as admin_gen_module
 
         class ModelWithFn(SnapModel):
             label = snap_fields.SnapFunctionField(
@@ -330,7 +330,9 @@ class TestFunctionFieldDisplayNoUnfold:
         ModelWithFn.get_admin_fields()
         method = ModelWithFn._admin_generated_overrides["SnapFunctionFieldLabel"]
 
-        with patch.object(models_module, "UNFOLD_INSTALLED", False):
+        # UNFOLD_INSTALLED lives in snapadmin.admin_gen (#SIMPL1f) — that is where
+        # get_admin_fields() actually reads it from.
+        with patch.object(admin_gen_module, "UNFOLD_INSTALLED", False):
             result = method(None, object())
         assert result == "computed-value"
 

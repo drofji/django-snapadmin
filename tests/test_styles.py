@@ -111,10 +111,13 @@ class TestCssInjection:
         """
         from django.contrib import admin as dj_admin
         from demo.apps.shop.models import Product
-        from snapadmin import models as snap_models
+        from snapadmin import admin_gen
 
         original = dj_admin.site._registry[Product]
-        monkeypatch.setattr(snap_models, "UNFOLD_INSTALLED", False)
+        # UNFOLD_INSTALLED lives in snapadmin.admin_gen (#SIMPL1f) — that is where
+        # register_admin()/get_admin_media() actually read it from, not
+        # snapadmin.models (which only re-exports the value for formatted_id()).
+        monkeypatch.setattr(admin_gen, "UNFOLD_INSTALLED", False)
         dj_admin.site.unregister(Product)
         try:
             Product.register_admin()

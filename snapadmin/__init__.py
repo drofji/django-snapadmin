@@ -73,6 +73,12 @@ Declaring models
         The resumable background-job models — ``SnapJobBase``, ``SnapExportJob``,
         ``SnapReindexJob``, ``SnapImportJob`` — split out of ``snapadmin.models``
         (#SIMPL1f) the same way, and re-exported from there unchanged.
+    ``snapadmin.admin_gen``
+        The generated-admin machinery — ``get_admin_fields()``, ``get_admin_media()``,
+        ``register_admin()``, ``register_all_admins()`` — split out of
+        ``snapadmin.models`` (#SIMPL1f) into ``AdminGenMixin``, which ``SnapModel``
+        inherits from. Every method stays reachable at ``SnapModel.<name>``
+        unchanged; this is the module to read or extend the generator itself.
     ``snapadmin.fields``
         Every ``Snap*Field``. Snap-only kwargs (``searchable``, ``filterable``,
         ``show_in_list``, ``wysiwyg``, …) drive the admin and API and are
