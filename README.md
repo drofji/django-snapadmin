@@ -414,10 +414,15 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
 
-    # ── The API stack (always required) ─────────────────────────────────────
+    # ── REST API — pip install django-snapadmin[api] ────────────────────────
+    # SNAPADMIN_REST_API_ENABLED / SNAPADMIN_SWAGGER_ENABLED default to True,
+    # so most installs want this even though it is technically optional.
     "rest_framework",
     "drf_spectacular",
     "django_filters",
+
+    # ── GraphQL — pip install django-snapadmin[graphql] ──────────────────────
+    # SNAPADMIN_GRAPHQL_ENABLED defaults to True. Independent of [api].
     "graphene_django",
 
     # ── SnapAdmin ───────────────────────────────────────────────────────────
@@ -455,6 +460,8 @@ is safe for commercial and proprietary use. Everything with a licence caveat is 
 
 | Extra | Pulls in | Gives you |
 |-------|----------|-----------|
+| `api` | `djangorestframework`, `drf-spectacular`, `django-filter` | The REST API + OpenAPI schema/Swagger/ReDoc — **on by default** (`SNAPADMIN_REST_API_ENABLED`/`SNAPADMIN_SWAGGER_ENABLED`), so most installs want it |
+| `graphql` | `graphene-django` | The generated GraphQL schema — **on by default** (`SNAPADMIN_GRAPHQL_ENABLED`), independent of `api` |
 | `theme` | `django-unfold` | The themed admin UI (stock Django admin without it) |
 | `elasticsearch` | `elasticsearch` | Full-text search, `DUAL` / `ES_ONLY` models |
 | `celery` | `celery`, `django-celery-beat`, `django-celery-results` | Background tasks: async export, GDPR purge, digests, backups |

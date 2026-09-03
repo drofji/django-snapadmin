@@ -317,13 +317,17 @@ Optional extras
 ---------------
 The base install carries only permissive licences (MIT/BSD/Apache) and is safe
 for commercial use. ``pip install django-snapadmin[<extra>]``:
+``api`` (DRF, drf-spectacular, django-filter — ``SNAPADMIN_REST_API_ENABLED`` /
+``SNAPADMIN_SWAGGER_ENABLED``, both on by default), ``graphql`` (graphene-django —
+``SNAPADMIN_GRAPHQL_ENABLED``, on by default, independent of ``api``),
 ``theme`` (Unfold UI), ``elasticsearch``, ``celery``, ``backup`` (SFTP),
 ``age`` (pyrage, for encrypted backups — ``SNAPADMIN_BACKUP_AGE_RECIPIENTS``),
 ``s3`` (boto3, for S3-compatible offsite backups — ``SNAPADMIN_BACKUP_S3_*``),
 ``extra-settings``, ``wysiwyg`` (CKEditor 5 — GPL/commercial, hence optional),
 ``autocomplete-filter``, ``xlsx`` (openpyxl, for ``export_format="xlsx"``), or
-``all``. Each is imported lazily and raises a pointed ``ImproperlyConfigured``
-only when its feature is actually used.
+``all`` (reproduces today's full dependency graph — a no-op upgrade for an
+existing install). Each is imported lazily and raises a pointed
+``ImproperlyConfigured`` only when its feature is actually used.
 
 Further reading
 ---------------

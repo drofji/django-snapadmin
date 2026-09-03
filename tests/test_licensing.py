@@ -69,8 +69,10 @@ class TestNormalize:
 class TestCuratedMap:
     def test_curated_has_core_and_extras(self):
         assert len(CURATED) == 19
-        assert sum(1 for i in CURATED.values() if i.is_core) == 7
-        assert sum(1 for i in CURATED.values() if not i.is_core) == 12
+        # djangorestframework/drf-spectacular/django-filter ([api]) and graphene-django
+        # ([graphql]) moved out of core at #DEP1e — Django, structlog and nh3 remain.
+        assert sum(1 for i in CURATED.values() if i.is_core) == 3
+        assert sum(1 for i in CURATED.values() if not i.is_core) == 16
 
     def test_license_info_properties(self):
         paramiko = CURATED["paramiko"]
@@ -108,6 +110,28 @@ class TestCuratedMap:
                 continue
             for package in packages:
                 assert CURATED[_normalize(package)].extra == extra_name
+
+    @pytest.mark.skipif(sys.version_info < (3, 11), reason="tomllib is stdlib only on Python 3.11+")
+    def test_all_extra_reproduces_every_optional_dependency(self):
+        """``pip install django-snapadmin[all]`` must be a no-op upgrade (#DEP1e).
+
+        Every package declared ``optional = true`` in ``[tool.poetry.dependencies]``
+        must appear in the ``all`` extra, and ``all`` must name nothing else — so
+        moving a package behind a new extra (as djangorestframework/drf-spectacular/
+        django-filter/graphene-django did) can never silently narrow what an existing
+        ``[all]`` install pulls on its next upgrade.
+        """
+        import tomllib
+
+        with open("pyproject.toml", "rb") as fh:
+            data = tomllib.load(fh)
+        deps = data["tool"]["poetry"]["dependencies"]
+        optional_deps = {
+            _normalize(name) for name, spec in deps.items()
+            if name.lower() != "python" and isinstance(spec, dict) and spec.get("optional") is True
+        }
+        all_extra = {_normalize(name) for name in data["tool"]["poetry"]["extras"]["all"]}
+        assert all_extra == optional_deps
 
 
 class TestCuratedStaleness:

@@ -40,6 +40,22 @@ def _count(n: int, noun: str) -> str:
     return f"{n} {noun}{'' if n == 1 else 's'}"
 
 
+def _extra_missing_detail(*module_names: str, extra: str) -> str:
+    """Flag a setting reported "on" whose packages (#DEP1e) are not actually installed.
+
+    ``rest_api``/``graphql`` read only ``SNAPADMIN_*_ENABLED`` — true even when the ``[api]``/
+    ``[graphql]`` extra was never installed, which would otherwise crash the moment
+    ``snapadmin.urls`` is imported (``snapadmin.checks.E010`` catches this too, but
+    ``snapadmin_info`` should not quietly report "on" for a feature that cannot actually run).
+    Uses ``find_spec`` — no import, no side effect — matching ``exporting.xlsx_available()``.
+    """
+    import importlib.util
+
+    if all(importlib.util.find_spec(name) is not None for name in module_names):
+        return ""
+    return f"[{extra}] extra not installed"
+
+
 def _concrete_snap_models() -> list[type[Model]]:
     return [model for model in apps.get_models() if is_registered(model)]
 
@@ -218,8 +234,8 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     tenant_scoped_models = sum(1 for m in models if get_model_meta(m, "tenant_scoped", False))
 
     return [
-        ("rest_api", bool(get_setting("SNAPADMIN_REST_API_ENABLED", True)), ""),
-        ("graphql", bool(get_setting("SNAPADMIN_GRAPHQL_ENABLED", True)), ""),
+        ("rest_api", bool(get_setting("SNAPADMIN_REST_API_ENABLED", True)), _extra_missing_detail("rest_framework", "drf_spectacular", "django_filters", extra="api")),
+        ("graphql", bool(get_setting("SNAPADMIN_GRAPHQL_ENABLED", True)), _extra_missing_detail("graphene_django", extra="graphql")),
         ("audit_trail", bool(get_setting("SNAPADMIN_AUDIT_LOG_ENABLED", True)), ""),
         ("error_monitoring", bool(get_setting("SNAPADMIN_ERROR_MONITOR_ENABLED", True)), ""),
         ("backups", bool(get_setting("SNAPADMIN_BACKUP_ENABLED", False)), _backup_detail()),

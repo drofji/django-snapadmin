@@ -1027,6 +1027,44 @@ def check_api_defaults_unset(app_configs, **kwargs):
     )]
 
 
+def check_api_extras_installed(app_configs, **kwargs):
+    """Error: a feature is enabled but the extra its packages moved behind (#DEP1e) is absent.
+
+    ``SNAPADMIN_REST_API_ENABLED`` / ``SNAPADMIN_SWAGGER_ENABLED`` default to ``True`` and need
+    the ``[api]`` extra (djangorestframework, drf-spectacular, django-filter);
+    ``SNAPADMIN_GRAPHQL_ENABLED`` defaults to ``True`` and needs ``[graphql]`` (graphene-django).
+    Importing ``snapadmin.urls`` with the setting on and the extra missing already raises
+    ``ImproperlyConfigured`` naming the fix — but only once something actually imports the
+    URLconf. This gives the same answer through ``manage.py check`` even when nothing has yet,
+    using ``find_spec`` so asking the question never risks the very ``ImportError`` this check
+    exists to explain ahead of time.
+    """
+    import importlib.util
+
+    errors = []
+    rest_enabled = get_setting("SNAPADMIN_REST_API_ENABLED", True)
+    swagger_enabled = get_setting("SNAPADMIN_SWAGGER_ENABLED", rest_enabled)
+    if (rest_enabled or swagger_enabled) and any(
+        importlib.util.find_spec(name) is None
+        for name in ("rest_framework", "drf_spectacular", "django_filters")
+    ):
+        errors.append(Error(
+            "The REST API and/or its OpenAPI schema is enabled but the [api] extra "
+            "(djangorestframework, drf-spectacular, django-filter) is not installed.",
+            hint="pip install django-snapadmin[api], or turn the feature(s) off: "
+                 "SNAPADMIN_REST_API_ENABLED = False and SNAPADMIN_SWAGGER_ENABLED = False.",
+            id="snapadmin.E010",
+        ))
+
+    if get_setting("SNAPADMIN_GRAPHQL_ENABLED", True) and importlib.util.find_spec("graphene_django") is None:
+        errors.append(Error(
+            "GraphQL is enabled but the [graphql] extra (graphene-django) is not installed.",
+            hint="pip install django-snapadmin[graphql], or set SNAPADMIN_GRAPHQL_ENABLED = False.",
+            id="snapadmin.E010",
+        ))
+    return errors
+
+
 def check_empty_admin_forms(app_configs, **kwargs):
     """Warn: a registered model's generated admin would render an empty change form.
 
@@ -1086,6 +1124,7 @@ ALL_CHECKS = [
     check_snapadmin_profile,
     check_snapadmin_profile_contradiction,
     check_api_defaults_unset,
+    check_api_extras_installed,
     check_empty_admin_forms,
     check_tenant_scoping,
 ]

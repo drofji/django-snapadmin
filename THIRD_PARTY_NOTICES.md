@@ -31,12 +31,8 @@ Everything a plain `pip install django-snapadmin` pulls in. **All permissive (MI
 | Package | Licence | | Used for |
 |---------|---------|---|----------|
 | Django | BSD-3-Clause | 🟢 | The web framework SnapAdmin builds on |
-| djangorestframework | BSD-3-Clause | 🟢 | REST API layer |
-| drf-spectacular | BSD-3-Clause | 🟢 | OpenAPI schema + Swagger/ReDoc |
-| django-filter | BSD-3-Clause | 🟢 | REST filtering backend |
-| graphene-django | MIT | 🟢 | Dynamic GraphQL schema |
 | structlog | MIT or Apache-2.0 | 🟢 | Structured logging |
-| nh3 | MIT | 🟢 | HTML sanitisation (wysiwyg stored-XSS defence) |
+| nh3 | MIT | 🟢 | HTML sanitisation (wysiwyg stored-XSS defence) — stays core even though it is imported lazily; see below |
 
 ## Optional extras (installed only when you ask for them)
 
@@ -44,6 +40,8 @@ Nothing here is installed by a base `pip install`. Install via, e.g., `pip insta
 
 | Extra | Package(s) | Licence | | Purpose |
 |-------|------------|---------|---|---------|
+| `api` | djangorestframework, drf-spectacular, django-filter | BSD-3 / BSD-3 / BSD-3 | 🟢 | The REST API (`SNAPADMIN_REST_API_ENABLED`) and its OpenAPI schema/Swagger/ReDoc (`SNAPADMIN_SWAGGER_ENABLED`) — **both default to `True`**, so most installs want this extra |
+| `graphql` | graphene-django | MIT | 🟢 | The generated GraphQL schema (`SNAPADMIN_GRAPHQL_ENABLED`, default `True`) — independent of `api`; graphene-django pulls Django + graphene + graphql-core, none of the REST packages |
 | `theme` | django-unfold | MIT | 🟢 | Unfold admin theme / UI (falls back to Django's built-in admin without it) |
 | `elasticsearch` | elasticsearch | Apache-2.0 | 🟢 | Full-text search (`ES_ONLY` / `DUAL` models) |
 | `celery` | celery, django-celery-beat, django-celery-results | BSD-3 / BSD / BSD | 🟢 | Background tasks (async export, GDPR purge, digests, backups) |
@@ -55,6 +53,12 @@ Nothing here is installed by a base `pip install`. Install via, e.g., `pip insta
 | `s3` | boto3 | Apache-2.0 | 🟢 | S3-compatible offsite backup transport (`SNAPADMIN_BACKUP_S3_*`) — AWS, MinIO, Backblaze B2, Hetzner Object Storage, Wasabi |
 | `wysiwyg` | django-ckeditor-5 (BSD wrapper) **bundling CKEditor 5** | **GPL-2.0+ or commercial** | 🔴 | Rich-text fields (`SnapRichTextField` / `wysiwyg=True`) |
 
+> **`api` and `graphql` are opt-out, not opt-in, in today's beta line.** Both
+> `SNAPADMIN_REST_API_ENABLED` and `SNAPADMIN_GRAPHQL_ENABLED` default to `True`, so a bare
+> `pip install django-snapadmin` with `snapadmin.urls` included and neither setting turned off
+> needs `pip install django-snapadmin[api,graphql]` (or `[all]`) today. Both flip to default
+> `False` at 1.0 — see the migration guide.
+>
 > **`wysiwyg` (CKEditor 5) is the one to watch for commercial use.** The Python wrapper
 > `django-ckeditor-5` is BSD, but it ships **CKEditor 5**, which is dual-licensed **GPL-2.0+ or a
 > commercial licence** (modern versions require a `licenseKey`). It is deliberately **not** a core
@@ -90,7 +94,9 @@ for the bundled attribution note and full licence files.
 ## Summary
 
 - A base `pip install django-snapadmin` is **fully permissive** (MIT/BSD/Apache-2.0) — no copyleft or
-  commercial code at all.
+  commercial code at all, and pulls only Django, structlog and nh3.
 - **No GPL/commercial code is installed by default.** CKEditor 5 (GPL/commercial) is opt-in via
   `django-snapadmin[wysiwyg]`; the LGPL helpers are opt-in via `[backup]` and `[autocomplete-filter]`.
+- **The REST API and GraphQL schema are `[api]`/`[graphql]` extras** (#DEP1e), both still on by
+  default in the current beta line — see the callout above and the migration guide.
 - Related policy: [`SECURITY.md`](SECURITY.md) → "Supply chain".

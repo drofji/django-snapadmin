@@ -32,33 +32,33 @@ URL_PREFIX = get_setting("SNAPADMIN_URL_PREFIX", "")
 logger = structlog.get_logger(__name__)
 
 
-#: Packages each feature needs, named explicitly rather than via an extra: they are
-#: still ordinary dependencies of every install, so there is no `[api]`/`[graphql]`
-#: extra to point at — telling someone to install one would send them to a pip
-#: warning and no packages. Revisit when they move behind extras.
-REST_PACKAGES = "djangorestframework drf-spectacular django-filter"
-GRAPHQL_PACKAGES = "graphene-django"
+#: The extra each feature's packages live behind (#DEP1e) — djangorestframework,
+#: drf-spectacular and django-filter are `[api]`; graphene-django is `[graphql]`,
+#: independent of it (graphene-django pulls Django + graphene + graphql-core, none
+#: of the REST packages).
+REST_EXTRA = "api"
+GRAPHQL_EXTRA = "graphql"
 
 
 def _missing_dependency(
-    feature: str, setting: str, packages: str, exc: ImportError
+    feature: str, setting: str, extra: str, exc: ImportError
 ) -> ImproperlyConfigured:
-    """Build the error raised when a feature is switched on but its packages are absent.
+    """Build the error raised when a feature is switched on but its extra is absent.
 
     A bare ``ImportError`` from inside a URLconf reads as a broken installation. It
-    is really a two-part configuration answer — install the packages, or turn the
+    is really a two-part configuration answer — install the extra, or turn the
     feature off — so say both.
     """
     return ImproperlyConfigured(
         f"{feature} is enabled ({setting} = True) but its dependencies are not installed: {exc}. "
-        f"Install them with `pip install {packages}`, "
+        f"Install them with `pip install django-snapadmin[{extra}]`, "
         f"or set {setting} = False to switch the feature off."
     )
 
 
 def _missing_graphql_dependency(exc: ImportError) -> ImproperlyConfigured:
     return _missing_dependency(
-        "GraphQL", "SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_PACKAGES, exc
+        "GraphQL", "SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_EXTRA, exc
     )
 
 
@@ -83,7 +83,7 @@ if REST_API_ENABLED:
         from snapadmin.api.reindex import ESReindexView
     except ImportError as exc:
         raise _missing_dependency(
-            "The REST API", "SNAPADMIN_REST_API_ENABLED", REST_PACKAGES, exc
+            "The REST API", "SNAPADMIN_REST_API_ENABLED", REST_EXTRA, exc
         ) from exc
 
     router = DefaultRouter()
@@ -210,7 +210,7 @@ if SWAGGER_ENABLED:
         )
     except ImportError as exc:
         raise _missing_dependency(
-            "The OpenAPI schema and docs", "SNAPADMIN_SWAGGER_ENABLED", REST_PACKAGES, exc
+            "The OpenAPI schema and docs", "SNAPADMIN_SWAGGER_ENABLED", REST_EXTRA, exc
         ) from exc
 
     urlpatterns += [

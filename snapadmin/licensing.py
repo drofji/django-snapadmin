@@ -105,13 +105,13 @@ _LGPL_NOTE = (
 _CURATED: tuple[LicenseInfo, ...] = (
     # ── Core (base install — all permissive) ──
     LicenseInfo("Django", "BSD-3-Clause"),
-    LicenseInfo("djangorestframework", "BSD-3-Clause"),
-    LicenseInfo("drf-spectacular", "BSD-3-Clause"),
-    LicenseInfo("django-filter", "BSD-3-Clause"),
-    LicenseInfo("graphene-django", "MIT"),
     LicenseInfo("structlog", "MIT OR Apache-2.0"),
     LicenseInfo("nh3", "MIT"),
     # ── Optional extras ──
+    LicenseInfo("djangorestframework", "BSD-3-Clause", extra="api"),
+    LicenseInfo("drf-spectacular", "BSD-3-Clause", extra="api"),
+    LicenseInfo("django-filter", "BSD-3-Clause", extra="api"),
+    LicenseInfo("graphene-django", "MIT", extra="graphql"),
     LicenseInfo("django-unfold", "MIT", extra="theme"),
     LicenseInfo("elasticsearch", "Apache-2.0", extra="elasticsearch"),
     LicenseInfo("celery", "BSD-3-Clause", extra="celery"),
@@ -142,7 +142,7 @@ CURATED: dict[str, LicenseInfo] = {info.normalized: info for info in _CURATED}
 #: metadata. A hand-curated table's whole risk is drifting silently — bump this whenever `_CURATED`
 #: changes, so `curated_staleness()` (surfaced by `snapadmin_license_check`) has something honest to
 #: measure against.
-CURATED_REVIEWED_ON: date = date(2026, 9, 2)
+CURATED_REVIEWED_ON: date = date(2026, 9, 3)
 
 #: How many days `_CURATED` may go unreviewed before `snapadmin_license_check` warns about it.
 CURATED_STALE_AFTER_DAYS: int = 180

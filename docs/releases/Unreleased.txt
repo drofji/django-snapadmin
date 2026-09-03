@@ -30,6 +30,18 @@ Breaking
 **deprecated** to default to ``False`` at ``1.0`` — see Deprecated, below, for the warning this
 release adds and the migration-guide paragraph pinning today's behaviour.
 
+* **``djangorestframework``, ``drf-spectacular``, ``django-filter`` and ``graphene-django`` are no
+  longer core dependencies.** They moved behind two new extras: ``[api]`` (the first three — REST
+  plus its OpenAPI schema/Swagger/ReDoc) and ``[graphql]`` (graphene-django, independent of
+  ``[api]``). A bare ``pip install django-snapadmin`` now pulls only Django, structlog and nh3.
+  ``SNAPADMIN_REST_API_ENABLED`` and ``SNAPADMIN_GRAPHQL_ENABLED`` still default to ``True`` in
+  this release (see the bullet above), so most installs need
+  ``pip install django-snapadmin[api,graphql]`` (or ``[all]``, which reproduces today's exact
+  dependency graph — a no-op upgrade for an existing install). Turning a feature on with its extra
+  missing already fails loudly — ``snapadmin.urls`` raises ``ImproperlyConfigured`` naming the
+  extra, and the new check ``snapadmin.E010`` catches it even earlier, at ``manage.py check``. See
+  the migration guide: ``docs/migrations/0.1.0b7_to_1.0.0.md``.
+
 Retro-note (this heading is new — two known historical cases predate it and were never called out
 per release):
 

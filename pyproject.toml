@@ -73,12 +73,25 @@ snapadmin_license_check = "snapadmin.manage_cli:license_check_main"
 [tool.poetry.dependencies]
 python = ">=3.10"
 Django = ">=5.2"
-djangorestframework = ">=3.15.0"
-drf-spectacular = ">=0.27.0"
-django-filter = ">=24.0"
 structlog = ">=24.1.0"
-graphene-django = ">=3.2.0"
+# nh3 stays a core dependency (D8/#DEP1e) even though the REST/GraphQL stack below
+# moves to extras: a missing nh3 must fail closed on a security-relevant default
+# (wysiwyg sanitize-on-write), which is not a state a normal install should reach.
+# It is permissive (MIT) and tiny — see snapadmin/sanitize.py's _load_nh3().
 nh3 = ">=0.2.0"
+
+# Optional: the REST API — DRF, its OpenAPI schema generator and its filter backend
+# (SNAPADMIN_REST_API_ENABLED / SNAPADMIN_SWAGGER_ENABLED). An admin-only install
+# pulls none of these; snapadmin.urls already turns a switched-on-but-missing
+# feature into an ImproperlyConfigured naming this extra, not a bare ImportError.
+djangorestframework = {version = ">=3.15.0", optional = true}
+drf-spectacular = {version = ">=0.27.0", optional = true}
+django-filter = {version = ">=24.0", optional = true}
+
+# Optional: the generated GraphQL schema (SNAPADMIN_GRAPHQL_ENABLED). Independent
+# of [api] — graphene-django pulls Django + graphene + graphql-core, none of the
+# REST packages above.
+graphene-django = {version = ">=3.2.0", optional = true}
 
 # Optional: django-unfold theme (permissive MIT). SnapAdmin resolves its admin base class
 # lazily — it uses Unfold's themed ModelAdmin/widgets when installed and enabled in
@@ -141,7 +154,9 @@ extra-settings = ["django-extra-settings"]
 wysiwyg = ["django-ckeditor-5"]
 autocomplete-filter = ["django-admin-autocomplete-filter"]
 xlsx = ["openpyxl"]
-all = ["django-unfold", "elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "pyrage", "boto3", "django-extra-settings", "django-ckeditor-5", "django-admin-autocomplete-filter", "openpyxl"]
+api = ["djangorestframework", "drf-spectacular", "django-filter"]
+graphql = ["graphene-django"]
+all = ["django-unfold", "elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "pyrage", "boto3", "django-extra-settings", "django-ckeditor-5", "django-admin-autocomplete-filter", "openpyxl", "djangorestframework", "drf-spectacular", "django-filter", "graphene-django"]
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.0.0"
@@ -151,6 +166,12 @@ pytest-django = "^4.8.0"
 pytest-cov = "^5.0.0"
 faker = "^25.0.0"
 # Dev extras (installed via demo/requirements.txt)
+# The suite exercises the REST API and GraphQL end to end; the package core
+# imports both lazily now that they are the [api]/[graphql] extras (#DEP1e).
+djangorestframework = ">=3.15.0"
+drf-spectacular = ">=0.27.0"
+django-filter = ">=24.0"
+graphene-django = ">=3.2.0"
 elasticsearch = ">=8.0.0"
 celery = ">=5.3.0"
 django-celery-beat = ">=2.6.0"

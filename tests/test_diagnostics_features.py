@@ -35,6 +35,14 @@ class TestRegistration:
         assert features_collector._count(1, "model") == "1 model"
         assert features_collector._count(3, "field") == "3 fields"
 
+    def test_extra_missing_detail_blank_when_everything_importable(self):
+        assert features_collector._extra_missing_detail("os", "sys", extra="api") == ""
+
+    def test_extra_missing_detail_names_the_extra_when_absent(self):
+        assert features_collector._extra_missing_detail(
+            "no_such_module_xyz", extra="api"
+        ) == "[api] extra not installed"
+
 
 class TestSettingsGatedCapabilities:
     @override_settings(SNAPADMIN_REST_API_ENABLED=False, SNAPADMIN_GRAPHQL_ENABLED=False)
@@ -42,6 +50,20 @@ class TestSettingsGatedCapabilities:
         data = _collect()
         assert data["rest_api"] is False
         assert data["graphql"] is False
+
+    def test_api_surfaces_have_no_detail_when_extras_installed(self):
+        # The test env carries the [api]/[graphql] extras — an empty detail is
+        # dropped entirely rather than kept as a blank string (see collect()).
+        data = _collect(verbose=True)
+        assert "rest_api" not in data.get("details", {})
+        assert "graphql" not in data.get("details", {})
+
+    def test_api_surface_detail_names_the_missing_extra(self, monkeypatch):
+        monkeypatch.setattr(
+            features_collector, "_extra_missing_detail", lambda *a, **k: "[api] extra not installed"
+        )
+        data = _collect(verbose=True)
+        assert data["details"]["rest_api"] == "[api] extra not installed"
 
     @override_settings(SNAPADMIN_BACKUP_ENABLED=True)
     def test_backups_on_when_enabled(self):

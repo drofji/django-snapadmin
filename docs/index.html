@@ -433,11 +433,16 @@
     "django.contrib.messages",
     "django.contrib.staticfiles",
 
-    # SnapAdmin stack (all required)
+    # REST API — [api] extra; SNAPADMIN_REST_API_ENABLED/SNAPADMIN_SWAGGER_ENABLED
+    # default to True, so most installs want this even though it is optional
     "rest_framework",
     "drf_spectacular",
     "django_filters",
+
+    # GraphQL — [graphql] extra; SNAPADMIN_GRAPHQL_ENABLED defaults to True.
+    # Independent of [api].
     "graphene_django",
+
     "snapadmin",
 
     # Optional — only with the [celery] extra
@@ -446,7 +451,7 @@
 
     # Your apps …
 ]</code></pre>
-  <p>Installing <code>django-snapadmin</code> pulls in <code>djangorestframework</code>, <code>drf-spectacular</code>, <code>django-filter</code> and <code>graphene-django</code> automatically — you only need to list them in <code>INSTALLED_APPS</code>. <code>django-unfold</code> is <strong>not</strong> installed by the base package — add the <code>[theme]</code> extra for the Unfold-themed admin; without it the admin renders on stock Django. <code>django-ckeditor-5</code> is likewise <strong>not</strong> installed by default (it bundles CKEditor 5, a GPL/commercial editor) — add it via the <code>[wysiwyg]</code> extra only if you use rich-text fields.</p>
+  <p>A bare <code>pip install django-snapadmin</code> pulls only Django, structlog and nh3. <code>djangorestframework</code>, <code>drf-spectacular</code> and <code>django-filter</code> come via the <code>[api]</code> extra, and <code>graphene-django</code> via <code>[graphql]</code> — both features default to <strong>on</strong> (<code>SNAPADMIN_REST_API_ENABLED</code> / <code>SNAPADMIN_GRAPHQL_ENABLED</code>), so most installs want <code>pip install django-snapadmin[api,graphql]</code> (or <code>[all]</code>) even though neither is required to run the admin alone. <code>django-unfold</code> is <strong>not</strong> installed by the base package — add the <code>[theme]</code> extra for the Unfold-themed admin; without it the admin renders on stock Django. <code>django-ckeditor-5</code> is likewise <strong>not</strong> installed by default (it bundles CKEditor 5, a GPL/commercial editor) — add it via the <code>[wysiwyg]</code> extra only if you use rich-text fields.</p>
 
   <details class="info">
   <summary><span class="info-glyph">?</span> Optional extras, licensing notes, and the package layout</summary>
@@ -455,12 +460,16 @@
   <p>The base install is self-contained. Opt into extra integrations with pip extras:</p>
   <table>
     <tr><th>Extra</th><th><code>pip install</code></th><th>Pulls in</th><th>For</th></tr>
+    <tr><td><code>api</code></td><td><code>django-snapadmin[api]</code></td><td><code>djangorestframework</code>, <code>drf-spectacular</code>, <code>django-filter</code></td><td>The REST API + OpenAPI schema/Swagger/ReDoc — <strong>on by default</strong> (<code>SNAPADMIN_REST_API_ENABLED</code> / <code>SNAPADMIN_SWAGGER_ENABLED</code>)</td></tr>
+    <tr><td><code>graphql</code></td><td><code>django-snapadmin[graphql]</code></td><td><code>graphene-django</code></td><td>The generated GraphQL schema — <strong>on by default</strong> (<code>SNAPADMIN_GRAPHQL_ENABLED</code>), independent of <code>api</code></td></tr>
     <tr><td><code>theme</code></td><td><code>django-snapadmin[theme]</code></td><td><code>django-unfold</code></td><td>Unfold-themed admin UI (falls back to Django's built-in admin without it)</td></tr>
     <tr><td><code>elasticsearch</code></td><td><code>django-snapadmin[elasticsearch]</code></td><td><code>elasticsearch</code></td><td>Full-text search / <code>ES_ONLY</code> / <code>DUAL</code> models</td></tr>
     <tr><td><code>celery</code></td><td><code>django-snapadmin[celery]</code></td><td><code>celery</code>, <code>django-celery-beat</code>, <code>django-celery-results</code></td><td>Background tasks (async export, GDPR purge, digests, backups)</td></tr>
-    <tr><td><code>backup</code></td><td><code>django-snapadmin[backup]</code></td><td><code>paramiko</code></td><td>SFTP offsite database backups</td></tr>
+    <tr><td><code>backup</code></td><td><code>django-snapadmin[backup]</code></td><td><code>paramiko</code></td><td>SFTP offsite database backups (LGPL)</td></tr>
+    <tr><td><code>age</code></td><td><code>django-snapadmin[age]</code></td><td><code>pyrage</code></td><td>AGE-encrypted backups (MIT — <code>SNAPADMIN_BACKUP_AGE_RECIPIENTS</code>; or skip this extra and use the <code>age</code> CLI instead)</td></tr>
+    <tr><td><code>s3</code></td><td><code>django-snapadmin[s3]</code></td><td><code>boto3</code></td><td>S3-compatible offsite backup transport (<code>SNAPADMIN_BACKUP_S3_*</code> — AWS, MinIO, Backblaze B2, Hetzner Object Storage, Wasabi)</td></tr>
     <tr><td><code>extra-settings</code></td><td><code>django-snapadmin[extra-settings]</code></td><td><code>django-extra-settings</code></td><td>An in-admin dynamic key/value <code>Setting</code> model (as the demo shows)</td></tr>
-    <tr><td><code>wysiwyg</code></td><td><code>django-snapadmin[wysiwyg]</code></td><td><code>django-ckeditor-5</code></td><td>Rich-text fields (<code>SnapRichTextField</code> / <code>wysiwyg=True</code>)</td></tr>
+    <tr><td><code>wysiwyg</code></td><td><code>django-snapadmin[wysiwyg]</code></td><td><code>django-ckeditor-5</code></td><td>Rich-text fields (<code>SnapRichTextField</code> / <code>wysiwyg=True</code>) — <strong>bundles CKEditor 5 (GPL-or-commercial)</strong></td></tr>
     <tr><td><code>autocomplete-filter</code></td><td><code>django-snapadmin[autocomplete-filter]</code></td><td><code>django-admin-autocomplete-filter</code></td><td><code>AutocompleteFilter</code> list filters in your own admin (LGPL)</td></tr>
     <tr><td><code>xlsx</code></td><td><code>django-snapadmin[xlsx]</code></td><td><code>openpyxl</code></td><td>XLSX output for the <a href="#async-export">async export API</a> (MIT — optional for size, not licence)</td></tr>
     <tr><td><code>all</code></td><td><code>django-snapadmin[all]</code></td><td>everything above</td><td>—</td></tr>
@@ -4301,7 +4310,7 @@ Optional extras
 Commercial compatibility: ✓ OK — installed licences are proprietary-safe
 
 Vulnerability scan: no vulnerability scanner installed — `pip install pip-audit` then run `pip-audit`.
-Curated data last reviewed: 2026-09-02 (0 days ago)</code></pre>
+Curated data last reviewed: 2026-09-03 (0 days ago)</code></pre>
 
   <div class="callout callout-info">
     <strong>Base install is fully permissive.</strong>
@@ -4579,6 +4588,10 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
       <tr>
         <td>0.1.0a11 → 0.1.0b1 (Celery task rename, dashboard staff gate, deps moved to optional extras)</td>
         <td><a href="https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/0.1.0a11_to_0.1.0b1.md">0.1.0a11_to_0.1.0b1.md</a></td>
+      </tr>
+      <tr>
+        <td>0.1.0b7 → 1.0.0 (REST/GraphQL moved to <code>[api]</code>/<code>[graphql]</code> extras, both default off)</td>
+        <td><a href="https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/0.1.0b7_to_1.0.0.md">0.1.0b7_to_1.0.0.md</a></td>
       </tr>
     </tbody>
   </table>

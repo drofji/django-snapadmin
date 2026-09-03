@@ -23,6 +23,12 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   Save button — set `SNAPADMIN_CONNECTIVITY_ENABLED = True` to restore the previous behaviour.
 - `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` are deprecated
   to default to `False` at `1.0` — see the deprecation warning and migration note below.
+- `djangorestframework`, `drf-spectacular`, `django-filter` and `graphene-django` are no longer
+  core dependencies — they moved behind two new extras, `[api]` and `[graphql]`. A bare
+  `pip install django-snapadmin` now pulls only Django, structlog and nh3; both features still
+  default to `True`, so most installs need `pip install django-snapadmin[api,graphql]` (or `[all]`,
+  a no-op upgrade for an existing install). New check `snapadmin.E010` catches a feature left on
+  with its extra missing. See the migration guide.
 - Retro-note (this heading is new): `SnapModel.get_admin_fields()`'s return arity silently grew
   from four values to five in an earlier pre-1.0 release with no changelog entry — now pinned so
   it cannot shift silently again. `django-admin-rangefilter` stopped being a dependency in

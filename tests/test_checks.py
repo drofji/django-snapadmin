@@ -1140,6 +1140,70 @@ class TestApiDefaultsUnset:
         assert checks.check_api_defaults_unset(None) == []
 
 
+# ── extras behind SNAPADMIN_REST_API_ENABLED / _SWAGGER_ENABLED / _GRAPHQL_ENABLED (E010) ────
+
+class TestApiExtrasInstalled:
+    def _hide(self, monkeypatch, *missing: str):
+        import importlib.util
+        real_find_spec = importlib.util.find_spec
+
+        def fake_find_spec(name, *args, **kwargs):
+            if name in missing:
+                return None
+            return real_find_spec(name, *args, **kwargs)
+
+        monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+
+    def test_clean_when_everything_installed(self):
+        # The test env carries the full [api]/[graphql] stack.
+        assert checks.check_api_extras_installed(None) == []
+
+    def test_rest_enabled_but_drf_missing_is_e010(self, monkeypatch):
+        self._hide(monkeypatch, "rest_framework")
+        result = checks.check_api_extras_installed(None)
+        assert [e.id for e in result] == ["snapadmin.E010"]
+        assert "[api]" in result[0].msg
+        assert "pip install django-snapadmin[api]" in result[0].hint
+
+    def test_partial_api_extra_still_flagged(self, monkeypatch):
+        # rest_framework present, django-filter (module: django_filters) missing —
+        # [api] is one extra, so a partial install is still flagged.
+        self._hide(monkeypatch, "django_filters")
+        result = checks.check_api_extras_installed(None)
+        assert [e.id for e in result] == ["snapadmin.E010"]
+
+    @override_settings(SNAPADMIN_REST_API_ENABLED=False, SNAPADMIN_SWAGGER_ENABLED=True)
+    def test_swagger_alone_still_needs_the_api_extra(self, monkeypatch):
+        self._hide(monkeypatch, "drf_spectacular")
+        result = checks.check_api_extras_installed(None)
+        assert [e.id for e in result] == ["snapadmin.E010"]
+        assert "[api]" in result[0].msg
+
+    @override_settings(SNAPADMIN_REST_API_ENABLED=False, SNAPADMIN_SWAGGER_ENABLED=False)
+    def test_rest_and_swagger_off_stays_clean_even_without_drf(self, monkeypatch):
+        self._hide(monkeypatch, "rest_framework", "drf_spectacular", "django_filter")
+        assert checks.check_api_extras_installed(None) == []
+
+    def test_graphql_enabled_but_graphene_django_missing_is_e010(self, monkeypatch):
+        self._hide(monkeypatch, "graphene_django")
+        result = checks.check_api_extras_installed(None)
+        assert [e.id for e in result] == ["snapadmin.E010"]
+        assert "[graphql]" in result[0].msg
+        assert "pip install django-snapadmin[graphql]" in result[0].hint
+
+    @override_settings(SNAPADMIN_GRAPHQL_ENABLED=False)
+    def test_graphql_off_stays_clean_even_without_graphene_django(self, monkeypatch):
+        self._hide(monkeypatch, "graphene_django")
+        assert checks.check_api_extras_installed(None) == []
+
+    def test_both_missing_reports_both_independently(self, monkeypatch):
+        self._hide(monkeypatch, "rest_framework", "graphene_django")
+        result = checks.check_api_extras_installed(None)
+        assert [e.id for e in result] == ["snapadmin.E010", "snapadmin.E010"]
+        assert "[api]" in result[0].msg
+        assert "[graphql]" in result[1].msg
+
+
 # ── empty generated admin form (W015) ─────────────────────────────────────────
 
 def _w015_message() -> str:
