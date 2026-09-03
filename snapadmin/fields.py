@@ -565,17 +565,23 @@ class SnapEmailField(models.EmailField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapSlugField(models.SlugField, SnapField):
+    """Django ``SlugField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         kwargs.setdefault(DjangoFieldAttributeEnum.MAX_LENGTH.value, 50)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapURLField(models.URLField, SnapField):
+    """Django ``URLField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapUUIDField(models.UUIDField, SnapField):
+    """Django ``UUIDField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
@@ -588,11 +594,15 @@ class SnapIntegerField(models.IntegerField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapPositiveIntegerField(models.PositiveIntegerField, SnapField):
+    """Django ``PositiveIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapFloatField(models.FloatField, SnapField):
+    """Django ``FloatField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
@@ -605,11 +615,15 @@ class SnapDecimalField(models.DecimalField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapBigIntegerField(models.BigIntegerField, SnapField):
+    """Django ``BigIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapDateField(models.DateField, SnapField):
+    """Django ``DateField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
@@ -622,11 +636,15 @@ class SnapDateTimeField(models.DateTimeField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapTimeField(models.TimeField, SnapField):
+    """Django ``TimeField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapDurationField(models.DurationField, SnapField):
+    """Django ``DurationField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
@@ -709,6 +727,8 @@ class SnapJSONField(models.JSONField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapGenericIPAddressField(models.GenericIPAddressField, SnapField):
+    """Django ``GenericIPAddressField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
@@ -736,16 +756,22 @@ class SnapManyToManyField(models.ManyToManyField, SnapField):
         super().__init__(to=to, **self.handleDjangoKwargs(**kwargs))
 
 class SnapSmallIntegerField(models.SmallIntegerField, SnapField):
+    """Django ``SmallIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapPositiveSmallIntegerField(models.PositiveSmallIntegerField, SnapField):
+    """Django ``PositiveSmallIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapPositiveBigIntegerField(models.PositiveBigIntegerField, SnapField):
+    """Django ``PositiveBigIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
+
     def __init__(self, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))

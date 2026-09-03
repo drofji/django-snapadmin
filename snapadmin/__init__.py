@@ -111,6 +111,11 @@ Admin surface
         and neither ever replaces an admin class a project customised itself.
     ``snapadmin.views`` · ``snapadmin.urls``
         The system dashboard and the URLconf to ``include()``.
+    ``snapadmin.pagination``
+        ``EstimatedCountPaginator`` — swaps a huge unfiltered changelist's exact
+        ``COUNT(*)`` for PostgreSQL's instant planner estimate above
+        ``SNAPADMIN_ESTIMATED_COUNT_THRESHOLD``; falls back to an exact count
+        everywhere that isn't safe. Wired into every generated admin.
 
 APIs
     ``snapadmin.api.views`` · ``snapadmin.api.serializers`` · ``snapadmin.api.filters``
@@ -183,6 +188,9 @@ Operations
         owns the delivery side: email plus Slack / Discord / Teams / Telegram /
         JSON webhooks (``SNAPADMIN_ALERT_WEBHOOKS``), posted with the standard
         library, failing soft so one dead channel never blocks the others.
+    ``snapadmin.middleware``
+        ``SnapErrorMonitorMiddleware`` — add it to ``MIDDLEWARE`` to feed
+        unhandled request exceptions into ``snapadmin.monitoring``.
     ``snapadmin.reindexing`` · ``snapadmin.etl`` · ``snapadmin.db``
         Elasticsearch reindexing, ETL helpers, database routing.
     ``snapadmin.tasks`` · ``snapadmin.celery_compat``

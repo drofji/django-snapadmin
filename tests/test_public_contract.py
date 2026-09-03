@@ -61,11 +61,24 @@ PUBLIC_IMPORTS = [
     "snapadmin.fields.SnapCharField",
     "snapadmin.fields.SnapTextField",
     "snapadmin.fields.SnapEmailField",
+    "snapadmin.fields.SnapSlugField",
+    "snapadmin.fields.SnapURLField",
+    "snapadmin.fields.SnapUUIDField",
     "snapadmin.fields.SnapIntegerField",
+    "snapadmin.fields.SnapPositiveIntegerField",
+    "snapadmin.fields.SnapSmallIntegerField",
+    "snapadmin.fields.SnapPositiveSmallIntegerField",
+    "snapadmin.fields.SnapBigIntegerField",
+    "snapadmin.fields.SnapPositiveBigIntegerField",
+    "snapadmin.fields.SnapFloatField",
     "snapadmin.fields.SnapDecimalField",
+    "snapadmin.fields.SnapDateField",
     "snapadmin.fields.SnapDateTimeField",
+    "snapadmin.fields.SnapTimeField",
+    "snapadmin.fields.SnapDurationField",
     "snapadmin.fields.SnapBooleanField",
     "snapadmin.fields.SnapJSONField",
+    "snapadmin.fields.SnapGenericIPAddressField",
     "snapadmin.fields.SnapFileField",
     "snapadmin.fields.SnapImageField",
     "snapadmin.fields.SnapForeignKey",
@@ -514,6 +527,19 @@ def test_blessed_reexports_listed_in_all_and_dir():
     expected = {n for names in _BLESSED_REEXPORTS.values() for n in names}
     assert expected <= set(snapadmin.__all__)
     assert expected <= set(dir(snapadmin))
+
+
+def test_every_lazy_export_is_pinned_for_docstring_coverage():
+    """#AUDIT1b: a name in snapadmin._LAZY_EXPORTS without a matching deep path in
+    PUBLIC_IMPORTS is invisible to test_public_name_documented — found 13 field
+    classes in exactly this state (SnapSlugField, SnapDateField, …)."""
+    import snapadmin
+
+    missing = sorted(
+        f"{module}.{name}" for name, module in snapadmin._LAZY_EXPORTS.items()
+        if f"{module}.{name}" not in PUBLIC_IMPORTS
+    )
+    assert not missing, f"lazy-exported but undocumented (add to PUBLIC_IMPORTS): {missing}"
 
 
 def test_unknown_top_level_attr_raises():

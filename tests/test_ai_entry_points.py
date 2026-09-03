@@ -36,22 +36,30 @@ DOCS_BASE = "https://drofji.github.io/django-snapadmin/"
 #: Django-backed modules are imported through the configured test settings.
 MAPPED_MODULES = [
     "snapadmin.models",
+    "snapadmin.es",
+    "snapadmin.jobs",
+    "snapadmin.admin_gen",
     "snapadmin.fields",
     "snapadmin.validators",
     "snapadmin.admin",
     "snapadmin.widgets",
     "snapadmin.nesting",
     "snapadmin.sanitize",
+    "snapadmin.auth_admin",
+    "snapadmin.extra_settings_admin",
     "snapadmin.views",
     "snapadmin.urls",
+    "snapadmin.pagination",
     "snapadmin.api.views",
     "snapadmin.api.serializers",
     "snapadmin.api.filters",
     "snapadmin.api.graphql",
     "snapadmin.api.authentication",
     "snapadmin.sso",
+    "snapadmin.limits",
     "snapadmin.api.exports",
     "snapadmin.exporting",
+    "snapadmin.importing",
     "snapadmin.api.users",
     "snapadmin.api.health",
     "snapadmin.api.reindex",
@@ -59,35 +67,56 @@ MAPPED_MODULES = [
     "snapadmin.audit",
     "snapadmin.masking",
     "snapadmin.backup",
-    "snapadmin.crypto",
+    "snapadmin.restore",
+    "snapadmin.snapshot",
     "snapadmin.monitoring",
     "snapadmin.health",
     "snapadmin.alerts",
     "snapadmin.logging_config",
+    "snapadmin.middleware",
     "snapadmin.reindexing",
     "snapadmin.etl",
     "snapadmin.db",
     "snapadmin.tasks",
+    "snapadmin.celery_compat",
     "snapadmin.registry",
+    "snapadmin.tenancy",
     "snapadmin.conf",
     "snapadmin.checks",
+    "snapadmin.crypto",
+    "snapadmin.theme_i18n",
     "snapadmin.diagnostics",
     "snapadmin.licensing",
     "snapadmin.quickstart",
     "snapadmin.integrate",
     "snapadmin.scaffold",
+    "snapadmin.manage_cli",
 ]
+
+#: Top-level snapadmin/*.py modules deliberately absent from MAPPED_MODULES:
+#: apps.py is referenced by string in INSTALLED_APPS, never imported directly,
+#: so it carries no "Module map" prose entry of its own.
+_UNMAPPED_TOP_LEVEL_MODULES = {"apps"}
 
 #: Management commands the docstring advertises, as command-module names.
 MAPPED_COMMANDS = [
     "snapadmin_info",
     "snapadmin_license_check",
     "snapadmin_reindex",
+    "snapadmin_import",
     "snapadmin_audit_export",
     "snapadmin_health_alert",
     "snapadmin_db_backup",
     "snapadmin_purge_expired_data",
     "snapadmin_send_error_digest",
+    "snapadmin_restore",
+    "snapadmin_rollback",
+    "snapadmin_subject_request",
+    # Deprecated unprefixed aliases (still work, print a rename notice) — the
+    # docstring names them as a group rather than individually.
+    "db_backup",
+    "purge_expired_data",
+    "send_error_digest",
 ]
 
 
@@ -129,6 +158,29 @@ class TestPackageDocstring:
     def test_mapped_management_command_exists(self, command):
         assert command in _docstring(), f"{command} dropped out of the docstring"
         importlib.import_module(f"snapadmin.management.commands.{command}")
+
+    def test_mapped_modules_list_is_not_missing_a_real_module(self):
+        """#AUDIT1b: MAPPED_MODULES is a hand-maintained list — this catches it drifting
+        behind the filesystem again, the way it silently did for es/jobs/admin_gen/
+        pagination/middleware/tenancy/limits/importing/restore/snapshot/celery_compat/
+        theme_i18n/auth_admin/extra_settings_admin/manage_cli before this test existed."""
+        package_root = Path(snapadmin.__file__).resolve().parent
+        actual = {
+            f"snapadmin.{path.stem}"
+            for path in package_root.glob("*.py")
+            if path.stem != "__init__" and path.stem not in _UNMAPPED_TOP_LEVEL_MODULES
+        }
+        missing = sorted(actual - set(MAPPED_MODULES))
+        assert not missing, f"real top-level module(s) missing from MAPPED_MODULES: {missing}"
+
+    def test_mapped_commands_list_is_not_missing_a_real_command(self):
+        commands_dir = Path(snapadmin.__file__).resolve().parent / "management" / "commands"
+        actual = {
+            path.stem for path in commands_dir.glob("*.py")
+            if path.stem != "__init__"
+        }
+        missing = sorted(actual - set(MAPPED_COMMANDS))
+        assert not missing, f"real management command(s) missing from MAPPED_COMMANDS: {missing}"
 
     def test_documented_extras_match_pyproject(self):
         """Every extra offered by the package must be listed, and vice versa."""

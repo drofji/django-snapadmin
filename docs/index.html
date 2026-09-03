@@ -414,7 +414,7 @@
   GraphQL resolvers need nothing extra — Graphene already handles async resolvers transparently.</p>
 
   <h3>Configuring <code>INSTALLED_APPS</code></h3>
-  <p>The <strong>Unfold theme is optional</strong> (<code>pip install django-snapadmin[theme]</code>) — with it you get the themed UI, without it SnapAdmin renders on Django's built-in admin. If you use Unfold, its contrib apps must come <em>before</em> <code>django.contrib.admin</code>.</p>
+  <p>The <strong>Unfold theme is optional</strong> (<code>pip install django-snapadmin[theme]</code>) — with it you get the themed UI, without it SnapAdmin renders on Django's built-in admin. If you use Unfold, its contrib apps must come <em>before</em> <code>django.contrib.admin</code>. <code>manage.py check</code> surfaces the stock-admin fallback as one informational message (<code>snapadmin.I001</code>, never an error) so it is never silently mistaken for a bug.</p>
   <pre><code>INSTALLED_APPS = [
     # Optional theme — only with the [theme] extra; must precede django.contrib.admin
     "unfold",
@@ -451,7 +451,7 @@
 
     # Your apps …
 ]</code></pre>
-  <p>A bare <code>pip install django-snapadmin</code> pulls only Django, structlog and nh3. <code>djangorestframework</code>, <code>drf-spectacular</code> and <code>django-filter</code> come via the <code>[api]</code> extra, and <code>graphene-django</code> via <code>[graphql]</code> — both features default to <strong>on</strong> (<code>SNAPADMIN_REST_API_ENABLED</code> / <code>SNAPADMIN_GRAPHQL_ENABLED</code>), so most installs want <code>pip install django-snapadmin[api,graphql]</code> (or <code>[all]</code>) even though neither is required to run the admin alone. <code>django-unfold</code> is <strong>not</strong> installed by the base package — add the <code>[theme]</code> extra for the Unfold-themed admin; without it the admin renders on stock Django. <code>django-ckeditor-5</code> is likewise <strong>not</strong> installed by default (it bundles CKEditor 5, a GPL/commercial editor) — add it via the <code>[wysiwyg]</code> extra only if you use rich-text fields.</p>
+  <p>A bare <code>pip install django-snapadmin</code> pulls only Django, structlog and nh3. <code>djangorestframework</code>, <code>drf-spectacular</code> and <code>django-filter</code> come via the <code>[api]</code> extra, and <code>graphene-django</code> via <code>[graphql]</code> — both features default to <strong>on</strong> (<code>SNAPADMIN_REST_API_ENABLED</code> / <code>SNAPADMIN_GRAPHQL_ENABLED</code>), so most installs want <code>pip install django-snapadmin[api,graphql]</code> (or <code>[all]</code>) even though neither is required to run the admin alone — turning a feature on with its extra missing fails loudly, both at <code>manage.py check</code> (<code>snapadmin.E010</code>) and, if that step is skipped, the moment <code>snapadmin.urls</code> is imported. <code>django-unfold</code> is <strong>not</strong> installed by the base package — add the <code>[theme]</code> extra for the Unfold-themed admin; without it the admin renders on stock Django. <code>django-ckeditor-5</code> is likewise <strong>not</strong> installed by default (it bundles CKEditor 5, a GPL/commercial editor) — add it via the <code>[wysiwyg]</code> extra only if you use rich-text fields.</p>
 
   <details class="info">
   <summary><span class="info-glyph">?</span> Optional extras, licensing notes, and the package layout</summary>
@@ -2512,6 +2512,12 @@ SNAPADMIN_BACKUP_S3_ENDPOINT_URL = "https://s3.eu-central-1.wasabisys.com"
 SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID = "AKIA..."
 SNAPADMIN_BACKUP_S3_SECRET_ACCESS_KEY = "..."
 SNAPADMIN_BACKUP_S3_EVERY_HOURS = 168               # weekly</code></pre>
+  <p style="font-size: 13px; color: var(--muted);">A configured-but-incomplete S3 destination is
+  <code>snapadmin.W011</code> at <code>manage.py check</code> — advisory, like the AGE recipient
+  check above: an unparseable <code>SNAPADMIN_BACKUP_S3_ENDPOINT_URL</code>, or a bucket set with
+  neither an explicit access key pair nor a detected ambient AWS credential source (env vars, a
+  shared credentials file, an ECS/IRSA role — an EC2 instance profile can't be detected without a
+  network call, so that case is silently accepted).</p>
 
   <div class="callout callout-info">
     <strong>Retention on S3 is a fallback, not the whole story.</strong> SnapAdmin prunes to the
@@ -2599,6 +2605,10 @@ SNAPADMIN_BACKUP_AGE_IDENTITY_FILE = "/etc/snapadmin/age-identity.txt"
 # "auto" (default) prefers the in-process pyrage library, falls back to the `age`
 # CLI if pyrage isn't installed. Pin explicitly with "pyrage" or "binary".
 SNAPADMIN_BACKUP_AGE_BACKEND = "auto"</code></pre>
+  <p style="font-size: 13px; color: var(--muted);">An entry that doesn't look like a valid age
+  (<code>age1…</code>) or SSH (<code>ssh-ed25519 …</code> / <code>ssh-rsa …</code>) public key is
+  <code>snapadmin.W008</code> at <code>manage.py check</code> — advisory, since the other recipients
+  still work; the malformed one only fails when a backup actually runs.</p>
 
   <table>
     <tr><th>Backend</th><th>Needs</th><th>Best for</th></tr>
@@ -3040,7 +3050,7 @@ AuditLog.purge_expired(dry_run=True)  # count what *would* be deleted, delete no
     rows past the window are deleted along with their published files (files before rows, same
     ordering rule as <code>data_retention_files</code>), and a second pass sweeps any export file left
     behind with <em>no</em> job row at all — the state a worker that died mid-export leaves.
-    This assumes the export storage location (<a href="#export">see Async Export</a>) is used
+    This assumes the export storage location (<a href="#async-export">see Async Export</a>) is used
     exclusively for SnapAdmin exports; do not point it at a bucket with unrelated files.</li>
   </ul>
   <div class="callout callout-warn" id="retention-w012">
@@ -3313,6 +3323,10 @@ SNAPADMIN_MASKED_FIELDS = {
 }
 # Grant trusted staff raw access:
 #   assign the "snapadmin | api token | Can view unmasked PII data" permission.</code></pre>
+  <p style="font-size: 13px; color: var(--muted);">A key that doesn't resolve to an installed model
+  (<code>snapadmin.E001</code>) or a field name that doesn't exist on it
+  (<code>snapadmin.E002</code>) is a startup error, not a silent no-op — masking a typo'd field would
+  otherwise fail open.</p>
 
   <h4 id="masking-rules">Per-field rules — <code>SNAPADMIN_MASKING_RULES</code></h4>
   <p>The setting above says <em>which</em> fields are sensitive; this one says <em>how</em> each is
@@ -3404,6 +3418,13 @@ SNAPADMIN_SSO_PROVIDERS = {
 # TEMPLATES → OPTIONS → context_processors: add "snapadmin.sso.sso_providers"
 # In your admin/login.html override: {% include "snapadmin/sso_buttons.html" %}</code></pre>
   <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/sso-providers/</span><span class="endpoint-desc">Public list of SSO buttons (labels + login URLs)</span></div>
+  <p>A provider entry with no <code>url</code>, a protocol-relative <code>url</code>, or an absolute
+  <code>url</code> outside <code>SNAPADMIN_SSO_ALLOWED_HOSTS</code> (when that list is non-empty) is
+  dropped from the rendered buttons rather than shown broken — unset (the default) applies no host
+  restriction, since most deployments legitimately point providers at an external identity provider.
+  <code>manage.py check</code> catches all three at startup: a missing <code>url</code> is
+  <code>snapadmin.W003</code>; a protocol-relative or off-allowlist <code>url</code> is
+  <code>snapadmin.W005</code>.</p>
 
   <details class="info">
   <summary><span class="info-glyph">?</span> Admin-index nesting</summary>
@@ -3413,6 +3434,9 @@ SNAPADMIN_SSO_PROVIDERS = {
 SNAPADMIN_NESTED_APPS = {"snapadmin": "auth"}   # move snapadmin models under "auth"
 SNAPADMIN_HIDDEN_APPS = ["silk"]                # hide these groups from the index
 SNAPADMIN_APP_LABELS  = {"auth": "Administration"}  # rename a group heading</code></pre>
+  <p style="font-size: 13px; color: var(--muted);">A <code>SNAPADMIN_NESTED_APPS</code> target that
+  names no installed app is <code>snapadmin.W002</code> at <code>manage.py check</code> — advisory,
+  since the affected models simply stay under their own group until the target app exists.</p>
   <div class="callout callout-warn">
     <strong><code>SNAPADMIN_HIDDEN_APPS</code> is cosmetic, not access control.</strong> It removes an
     app group from the rendered admin index page only — the underlying <code>ModelAdmin</code> URLs

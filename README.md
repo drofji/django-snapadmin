@@ -8,7 +8,7 @@ index — automatically.**
 [![Downloads](https://img.shields.io/pypi/dm/django-snapadmin)](https://pypi.org/project/django-snapadmin/)
 [![Python](https://img.shields.io/pypi/pyversions/django-snapadmin?logo=python&logoColor=white)](https://pypi.org/project/django-snapadmin/)
 [![Django](https://img.shields.io/badge/Django-5.2%20%7C%206.0-092E20?logo=django&logoColor=white)](https://djangoproject.com)
-[![License](https://img.shields.io/github/license/drofji/django-snapadmin)](LICENSE)
+[![License](https://img.shields.io/github/license/drofji/django-snapadmin)](https://github.com/drofji/django-snapadmin/blob/main/LICENSE)
 
 📚 [Documentation](https://drofji.github.io/django-snapadmin/) ·
 📦 [Django Packages](https://djangopackages.org/packages/p/django-snapadmin/) ·

@@ -337,6 +337,10 @@ SNAPADMIN_API_FILTER_BACKEND = (
 # the filter returns HTTP 400 instead of risking OOM. Ignored on PostgreSQL/MySQL (the
 # query is a lazy native JSON lookup there). Default 100000.
 SNAPADMIN_API_JSON_FILTER_SCAN_CAP = int(os.getenv('SNAPADMIN_API_JSON_FILTER_SCAN_CAP', '100000'))
+# Hard cap on the 'values' list length for the fetch-by route (POST
+# /api/models/<app>/<Model>/fetch-by/) — an unbounded list is a DoS vector, so a
+# request over this many values gets 400 rather than a truncation.
+SNAPADMIN_FETCH_BY_MAX_VALUES = int(os.getenv('SNAPADMIN_FETCH_BY_MAX_VALUES', '10000'))
 # DRF rate limits (e.g. '60/min'). Empty value disables that throttle.
 SNAPADMIN_THROTTLE_ANON = os.getenv('SNAPADMIN_THROTTLE_ANON', '60/min') or None
 SNAPADMIN_THROTTLE_USER = os.getenv('SNAPADMIN_THROTTLE_USER', '600/min') or None
@@ -395,6 +399,11 @@ SNAPADMIN_ANALYTICS_DB_ALIAS = os.getenv('SNAPADMIN_ANALYTICS_DB_ALIAS', '')
 # auth dependency. Exposed on the login page and at /api/sso-providers/.
 # Format: {"<key>": {"label": "...", "url": "/accounts/<p>/login/", "icon": "..."}}.
 SNAPADMIN_SSO_PROVIDERS = {}
+# Optional allowlist for an absolute SNAPADMIN_SSO_PROVIDERS url's host. A provider
+# entry pointing off-allowlist is dropped the same way one with no url at all is.
+# Unset (the default) allows any absolute host — set this once you have providers
+# with absolute URLs pointing at more than one trusted host.
+SNAPADMIN_SSO_ALLOWED_HOSTS = []
 
 # Wysiwyg HTML sanitizer. Rich-text field values are sanitized before being shown
 # in the admin changelist (stored-XSS defense). Leave unset to use the built-in
@@ -544,6 +553,11 @@ if SNAPADMIN_ERROR_MONITOR_ENABLED:
 SNAPADMIN_ERROR_ALERT_ENABLED = env_bool('SNAPADMIN_ERROR_ALERT_ENABLED', True)
 SNAPADMIN_ERROR_ALERT_THRESHOLD = int(os.getenv('SNAPADMIN_ERROR_ALERT_THRESHOLD', '20'))
 SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES = int(os.getenv('SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES', '15'))
+# Minimum gap between two spike-alert emails. Unset (the default) falls back to
+# SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES itself.
+SNAPADMIN_ERROR_ALERT_COOLDOWN_MINUTES = int(
+    os.getenv('SNAPADMIN_ERROR_ALERT_COOLDOWN_MINUTES', str(SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES))
+)
 SNAPADMIN_ERROR_ALERT_EMAILS = [
     e.strip() for e in os.getenv('SNAPADMIN_ERROR_ALERT_EMAILS', '').split(',') if e.strip()
 ]
