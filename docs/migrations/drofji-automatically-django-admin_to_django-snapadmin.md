@@ -177,7 +177,7 @@ snapadmin/js/offline.js
 snapadmin/js/select2.min.js
 ```
 
-Reference them as `{% static "snapadmin/css/admin.css" %}`, or in a `Media` class:
+Reference them as `{% raw %}{% static "snapadmin/css/admin.css" %}{% endraw %}`, or in a `Media` class:
 `class Media: css = {"all": ["snapadmin/css/admin.css"]}` — never a bare `admin.css` or
 `css/admin.css` without the `snapadmin/` namespace.
 
