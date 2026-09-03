@@ -250,7 +250,7 @@
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <h2>⚡ SnapAdmin</h2>
-    <span>Documentation v0.1.0b7</span>
+    <span>Documentation v1.0.0</span>
   </div>
   <div class="nav-search">
     <input type="search" id="navSearch" placeholder="Filter sections…" autocomplete="off">
@@ -333,19 +333,20 @@
     <p class="subtitle">Automatic, beautiful, production-ready Django Admin — zero boilerplate. REST &amp; GraphQL, Elasticsearch, offline mode and GDPR retention, all from your model definitions.</p>
 
     <div class="callout callout-success" style="text-align: left; margin: 18px auto 0;">
-      <strong>What's New in v0.1.0b7 — seventh beta</strong>
-      Two ways to declare a model instead of one. <a href="#snap-model-decorator"><code>@snap_model</code></a>
-      opts a plain <code>django.db.models.Model</code> into SnapAdmin without subclassing — no rewrite,
-      for a brownfield schema or a model whose base class belongs to a third-party package — and its
-      sibling <a href="#snap-field-wrapper"><code>snap_field()</code></a> does the same for one field at
-      a time. Most existing projects want these first; subclassing <code>SnapModel</code> stays the full
-      route for a new model where you want everything, including Elasticsearch mirroring and the
-      retention purge. Alongside that: <a href="#scaffold"><code>snapadmin-new</code></a> generates a
-      project you keep instead of another throwaway demo, <a href="#alert-channels">alert delivery to
-      Slack/Discord/Teams/Telegram</a>, <a href="#export-xlsx">XLSX exports</a>, a readable
-      <a href="#audit-timeline">audit-log diff and per-object timeline</a>, and
-      <a href="#pii-masking">per-field masking rules</a> with their own permissions. No breaking changes
-      and no required migration — every addition here is opt-in.
+      <strong>What's New in v1.0.0 — first stable release</strong>
+      <a href="#multi-tenancy">Row-level multi-tenancy</a> (default-deny across every generated
+      surface), <a href="#gdpr-subject-request">GDPR subject-access export/deletion</a>, CSV/NDJSON
+      <a href="#bulk-import">import</a> mirroring the async export, a <a href="#quotas">cache-backed
+      quota primitive</a> and user-defined <a href="#snap-action">REST actions</a> join the existing
+      admin/REST/GraphQL/Elasticsearch generation. <strong>Three breaking changes to know about
+      before upgrading — see the <a href="#migration-guides">migration guide</a>:</strong>
+      <code>SNAPADMIN_REST_API_ENABLED</code>/<code>SNAPADMIN_GRAPHQL_ENABLED</code> now default to
+      <code>False</code> (pin either to <code>True</code> to keep serving them); DRF/drf-spectacular/
+      django-filter/graphene-django moved behind the new <a href="#extras"><code>[api]</code>/
+      <code>[graphql]</code></a> extras; and the deprecated <code>db_backup</code>/
+      <code>purge_expired_data</code>/<code>send_error_digest</code> command aliases plus the
+      underscored <code>snapadmin_info</code>/<code>snapadmin_license_check</code> console scripts,
+      announced for removal since the beta series, are gone.
     </div>
 
     <div class="card-grid">
@@ -382,7 +383,7 @@
   <pre><code>pip install git+https://github.com/drofji/django-snapadmin.git</code></pre>
 
   <h3>Compatibility</h3>
-  <p>SnapAdmin requires <strong>Python ≥ 3.10</strong> and <strong>Django ≥ 5.2</strong> (no upper bound pinned). The package is <strong>beta</strong> (<code>Development Status :: 4 - Beta</code>) — the public API is stabilising but may still change before <code>0.1.0</code> stable, so pin an exact version in production.</p>
+  <p>SnapAdmin requires <strong>Python ≥ 3.10</strong> and <strong>Django ≥ 5.2</strong> (no upper bound pinned). As of <code>1.0</code> (<code>Development Status :: 5 - Production/Stable</code>) the public API is covered by semantic versioning — see <a href="https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md">SECURITY.md</a>. Pin an exact version in production regardless.</p>
   <table>
     <tr><th></th><th>Versions</th><th>Status</th></tr>
     <tr><td><strong>Python</strong></td><td>3.10 · 3.11 · 3.12 · 3.13</td><td>Supported and <strong>tested in CI</strong> on every version (declared floor 3.10).</td></tr>
@@ -433,14 +434,14 @@
     "django.contrib.messages",
     "django.contrib.staticfiles",
 
-    # REST API — [api] extra; SNAPADMIN_REST_API_ENABLED/SNAPADMIN_SWAGGER_ENABLED
-    # default to True, so most installs want this even though it is optional
+    # REST API — [api] extra; needed only with SNAPADMIN_REST_API_ENABLED/
+    # SNAPADMIN_SWAGGER_ENABLED set to True (both default False)
     "rest_framework",
     "drf_spectacular",
     "django_filters",
 
-    # GraphQL — [graphql] extra; SNAPADMIN_GRAPHQL_ENABLED defaults to True.
-    # Independent of [api].
+    # GraphQL — [graphql] extra; needed only with SNAPADMIN_GRAPHQL_ENABLED = True
+    # (default False). Independent of [api].
     "graphene_django",
 
     "snapadmin",
@@ -451,7 +452,7 @@
 
     # Your apps …
 ]</code></pre>
-  <p>A bare <code>pip install django-snapadmin</code> pulls only Django, structlog and nh3. <code>djangorestframework</code>, <code>drf-spectacular</code> and <code>django-filter</code> come via the <code>[api]</code> extra, and <code>graphene-django</code> via <code>[graphql]</code> — both features default to <strong>on</strong> (<code>SNAPADMIN_REST_API_ENABLED</code> / <code>SNAPADMIN_GRAPHQL_ENABLED</code>), so most installs want <code>pip install django-snapadmin[api,graphql]</code> (or <code>[all]</code>) even though neither is required to run the admin alone — turning a feature on with its extra missing fails loudly, both at <code>manage.py check</code> (<code>snapadmin.E010</code>) and, if that step is skipped, the moment <code>snapadmin.urls</code> is imported. <code>django-unfold</code> is <strong>not</strong> installed by the base package — add the <code>[theme]</code> extra for the Unfold-themed admin; without it the admin renders on stock Django. <code>django-ckeditor-5</code> is likewise <strong>not</strong> installed by default (it bundles CKEditor 5, a GPL/commercial editor) — add it via the <code>[wysiwyg]</code> extra only if you use rich-text fields.</p>
+  <p>A bare <code>pip install django-snapadmin</code> pulls only Django, structlog and nh3. <code>djangorestframework</code>, <code>drf-spectacular</code> and <code>django-filter</code> come via the <code>[api]</code> extra, and <code>graphene-django</code> via <code>[graphql]</code> — both features default to <strong>off</strong> (<code>SNAPADMIN_REST_API_ENABLED</code> / <code>SNAPADMIN_GRAPHQL_ENABLED</code>), so install <code>pip install django-snapadmin[api,graphql]</code> (or <code>[all]</code>) once you turn either on. Turning a feature on with its extra missing fails loudly, both at <code>manage.py check</code> (<code>snapadmin.E010</code>) and, if that step is skipped, the moment <code>snapadmin.urls</code> is imported. <code>django-unfold</code> is <strong>not</strong> installed by the base package — add the <code>[theme]</code> extra for the Unfold-themed admin; without it the admin renders on stock Django. <code>django-ckeditor-5</code> is likewise <strong>not</strong> installed by default (it bundles CKEditor 5, a GPL/commercial editor) — add it via the <code>[wysiwyg]</code> extra only if you use rich-text fields.</p>
 
   <details class="info">
   <summary><span class="info-glyph">?</span> Optional extras, licensing notes, and the package layout</summary>
@@ -460,8 +461,8 @@
   <p>The base install is self-contained. Opt into extra integrations with pip extras:</p>
   <table>
     <tr><th>Extra</th><th><code>pip install</code></th><th>Pulls in</th><th>For</th></tr>
-    <tr><td><code>api</code></td><td><code>django-snapadmin[api]</code></td><td><code>djangorestframework</code>, <code>drf-spectacular</code>, <code>django-filter</code></td><td>The REST API + OpenAPI schema/Swagger/ReDoc — <strong>on by default</strong> (<code>SNAPADMIN_REST_API_ENABLED</code> / <code>SNAPADMIN_SWAGGER_ENABLED</code>)</td></tr>
-    <tr><td><code>graphql</code></td><td><code>django-snapadmin[graphql]</code></td><td><code>graphene-django</code></td><td>The generated GraphQL schema — <strong>on by default</strong> (<code>SNAPADMIN_GRAPHQL_ENABLED</code>), independent of <code>api</code></td></tr>
+    <tr><td><code>api</code></td><td><code>django-snapadmin[api]</code></td><td><code>djangorestframework</code>, <code>drf-spectacular</code>, <code>django-filter</code></td><td>The REST API + OpenAPI schema/Swagger/ReDoc — <strong>off by default</strong>, needed once you set <code>SNAPADMIN_REST_API_ENABLED</code> / <code>SNAPADMIN_SWAGGER_ENABLED</code> to <code>True</code></td></tr>
+    <tr><td><code>graphql</code></td><td><code>django-snapadmin[graphql]</code></td><td><code>graphene-django</code></td><td>The generated GraphQL schema — <strong>off by default</strong>, needed once you set <code>SNAPADMIN_GRAPHQL_ENABLED</code> to <code>True</code>, independent of <code>api</code></td></tr>
     <tr><td><code>theme</code></td><td><code>django-snapadmin[theme]</code></td><td><code>django-unfold</code></td><td>Unfold-themed admin UI (falls back to Django's built-in admin without it)</td></tr>
     <tr><td><code>elasticsearch</code></td><td><code>django-snapadmin[elasticsearch]</code></td><td><code>elasticsearch</code></td><td>Full-text search / <code>ES_ONLY</code> / <code>DUAL</code> models</td></tr>
     <tr><td><code>celery</code></td><td><code>django-snapadmin[celery]</code></td><td><code>celery</code>, <code>django-celery-beat</code>, <code>django-celery-results</code></td><td>Background tasks (async export, GDPR purge, digests, backups)</td></tr>
@@ -3925,9 +3926,9 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset, same as
   <h3>Feature toggles</h3>
   <table>
     <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
-    <tr><td><code>SNAPADMIN_REST_API_ENABLED</code></td><td><code>True</code><sup>†</sup></td><td>Serve the REST CRUD endpoints (<code>False</code> removes the routes)</td></tr>
-    <tr><td><code>SNAPADMIN_SWAGGER_ENABLED</code></td><td><code>True</code></td><td>Serve Swagger UI + ReDoc</td></tr>
-    <tr><td><code>SNAPADMIN_GRAPHQL_ENABLED</code></td><td><code>True</code><sup>†</sup></td><td>Serve the GraphQL endpoint</td></tr>
+    <tr><td><code>SNAPADMIN_REST_API_ENABLED</code></td><td><code>False</code></td><td>Serve the REST CRUD endpoints</td></tr>
+    <tr><td><code>SNAPADMIN_SWAGGER_ENABLED</code></td><td><code>SNAPADMIN_REST_API_ENABLED</code></td><td>Serve Swagger UI + ReDoc — follows the REST setting unless set explicitly</td></tr>
+    <tr><td><code>SNAPADMIN_GRAPHQL_ENABLED</code></td><td><code>False</code></td><td>Serve the GraphQL endpoint</td></tr>
     <tr><td><code>SNAPADMIN_GRAPHIQL_ENABLED</code></td><td><code>DEBUG</code></td><td>GraphiQL playground — keep it out of production</td></tr>
     <tr><td><code>SNAPADMIN_GRAPHQL_REQUIRE_AUTH</code></td><td><code>True</code></td><td>Require auth + per-model permissions on every GraphQL resolver</td></tr>
     <tr><td><code>SNAPADMIN_URL_PREFIX</code></td><td><code>""</code></td><td>Extra path segment prepended to every SnapAdmin route (relocates the whole API/GraphQL/Swagger surface)</td></tr>
@@ -3938,11 +3939,6 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset, same as
     <tr><td><code>SNAPADMIN_CONNECTIVITY_ENABLED</code></td><td><code>False</code></td><td>Load the admin-wide health-poll/save-guard/sidebar-badge layer (<code>snapadmin/js/connectivity.js</code>) — only takes effect when at least one registered model also has <code>offline_mode = True</code> (see <a href="#offline">Offline Mode</a>)</td></tr>
     <tr><td><code>SNAPADMIN_LIMITS_CACHE_ALIAS</code></td><td><code>"default"</code></td><td>Which <code>CACHES</code> entry <code>snapadmin.limits.reserve()</code> stores its window/concurrency/cooldown counters in — point it at a shared backend before relying on quotas across more than one worker process (see <a href="#quotas">Quotas &amp; Rate Limits</a>)</td></tr>
   </table>
-  <p><sup>†</sup> Deprecated default — both flip to <code>False</code> at SnapAdmin <code>1.0</code>
-  (<code>snapadmin.W014</code> warns while either is left unset with its route actually mounted).
-  Pin the setting explicitly, either value, to silence the warning. See the
-  <a href="#migration-guides">migration guide</a>.</p>
-
   <h3>API behaviour, auth &amp; limits</h3>
   <table>
     <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
@@ -4164,19 +4160,17 @@ snapadmin-info --brief           # top-level values only
 snapadmin-info --health-check    # probes only; non-zero exit on failure</code></pre>
 
   <div class="callout callout-info">
-    <strong>Every spelling works — for now.</strong>
-    This is a <code>manage.py</code> command, but the package also installs shell shims so that
-    <code>snapadmin-info</code>, <code>snapadmin_info</code> and
-    <code>python manage.py snapadmin_info</code> are all the same thing — the shim walks up from the
-    current directory to find your <code>manage.py</code>, forwards the arguments and returns the
-    exit code. Run it anywhere inside your project. With no project in sight it says so and points at
-    <code>snapadmin-demo</code>, instead of failing as a missing binary. Same for
-    <code>snapadmin-license-check</code> / <code>snapadmin_license_check</code>.
+    <strong>Two spellings work.</strong>
+    This is a <code>manage.py</code> command, but the package also installs a shell shim so that
+    <code>snapadmin-info</code> and <code>python manage.py snapadmin_info</code> are the same thing —
+    the shim walks up from the current directory to find your <code>manage.py</code>, forwards the
+    arguments and returns the exit code. Run it anywhere inside your project. With no project in
+    sight it says so and points at <code>snapadmin-demo</code>, instead of failing as a missing
+    binary. Same for <code>snapadmin-license-check</code>.
     <strong>The underscored console-script spelling (<code>snapadmin_info</code>,
-    <code>snapadmin_license_check</code>) is a duplicate of the dashed one and will be removed in
-    <code>1.0</code></strong> — the dashed form (<code>snapadmin-info</code>,
-    <code>snapadmin-license-check</code>) and the <code>python manage.py snapadmin_info</code> form
-    both stay; only the extra underscored shell command goes.
+    <code>snapadmin_license_check</code>) was a duplicate of the dashed one and was removed in
+    <code>1.0</code></strong> — the dashed form and the <code>python manage.py snapadmin_info</code>
+    form both stay.
   </div>
 
   <h3>Flags</h3>
@@ -4224,7 +4218,7 @@ snapadmin-info --health-check    # probes only; non-zero exit on failure</code><
   Ok: ✓
   Detail: run `manage.py check` for the full text
 📦 Version &amp; Status
-  Version: 0.1.0b7
+  Version: 1.0.0
   Status: pre-release
   Django: 6.0.6
   Python: 3.12.4
@@ -4621,7 +4615,7 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
   </table>
 
   <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
-    SnapAdmin v0.1.0b7 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
+    SnapAdmin v1.0.0 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
   </div>
 
   <!-- ── AI Assistants ─────────────────────────────────────────────────────── -->

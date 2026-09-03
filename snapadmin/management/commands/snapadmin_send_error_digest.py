@@ -5,9 +5,6 @@ Cron-friendly alternative to the ``snapadmin.send_error_digest`` Celery task
 for deployments without a Celery worker:
 
     0 8 * * *  cd /app && python manage.py snapadmin_send_error_digest
-
-``send_error_digest`` (no prefix) still works as a deprecated alias — see
-:mod:`snapadmin.management.aliases`.
 """
 
 from django.core.management.base import BaseCommand

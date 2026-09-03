@@ -11,13 +11,17 @@ from django.urls import path, include
 
 from snapadmin.conf import get_setting
 
-REST_API_ENABLED = get_setting("SNAPADMIN_REST_API_ENABLED", True)
+#: Both default to False as of 1.0 (D4/#DEF2a) — a project migrating from a plain
+#: Django admin never asked for an API at all, yet including snapadmin.urls used to
+#: mount one anyway. Pin either explicitly to True to restore the pre-1.0 behaviour;
+#: see docs/migrations/0.1.0b7_to_1.0.0.md.
+REST_API_ENABLED = get_setting("SNAPADMIN_REST_API_ENABLED", False)
 # Swagger documents the REST API, so it follows it by default: with the REST API
 # switched off there is nothing to document, and defaulting to True would make
 # SNAPADMIN_REST_API_ENABLED = False insufficient on its own to load this URLconf
 # without drf-spectacular installed. An explicit setting still wins either way.
 SWAGGER_ENABLED = get_setting("SNAPADMIN_SWAGGER_ENABLED", REST_API_ENABLED)
-GRAPHQL_ENABLED = get_setting("SNAPADMIN_GRAPHQL_ENABLED", True)
+GRAPHQL_ENABLED = get_setting("SNAPADMIN_GRAPHQL_ENABLED", False)
 # Admin-only user management API — off by default (opt-in surface).
 USER_API_ENABLED = get_setting("SNAPADMIN_USER_API_ENABLED", False)
 # Optional extra path segment prepended to *every* snapadmin route. Projects that

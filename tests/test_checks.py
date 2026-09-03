@@ -1087,59 +1087,6 @@ class TestSnapActionReadOnlyConflict:
             assert checks.check_snap_action_read_only_conflict(None) == []
 
 
-# ── REST/GraphQL default-unset deprecation warning (W014) ────────────────────
-
-class TestApiDefaultsUnset:
-    def test_snapadmin_urls_mounted_true_for_a_registered_name(self):
-        assert checks._snapadmin_urls_mounted("api-health") is True
-        assert checks._snapadmin_urls_mounted("graphql") is True
-
-    def test_snapadmin_urls_mounted_false_for_an_unknown_name(self):
-        assert checks._snapadmin_urls_mounted("this-name-does-not-exist") is False
-
-    def test_both_set_explicitly_is_clean(self):
-        # The demo project declares both explicitly (even at their built-in
-        # default value), which already counts as "set" — see conf.get_setting.
-        assert checks.check_api_defaults_unset(None) == []
-
-    def test_rest_unset_but_mounted_warns(self, monkeypatch):
-        from django.conf import settings as django_settings
-        monkeypatch.delattr(django_settings, "SNAPADMIN_REST_API_ENABLED", raising=False)
-        result = checks.check_api_defaults_unset(None)
-        assert [w.id for w in result] == ["snapadmin.W014"]
-        assert "SNAPADMIN_REST_API_ENABLED" in result[0].msg
-        assert "SNAPADMIN_GRAPHQL_ENABLED" not in result[0].msg
-
-    def test_graphql_unset_but_mounted_warns(self, monkeypatch):
-        from django.conf import settings as django_settings
-        monkeypatch.delattr(django_settings, "SNAPADMIN_GRAPHQL_ENABLED", raising=False)
-        result = checks.check_api_defaults_unset(None)
-        assert [w.id for w in result] == ["snapadmin.W014"]
-        assert "SNAPADMIN_GRAPHQL_ENABLED" in result[0].msg
-
-    def test_both_unset_warns_once_naming_both(self, monkeypatch):
-        from django.conf import settings as django_settings
-        monkeypatch.delattr(django_settings, "SNAPADMIN_REST_API_ENABLED", raising=False)
-        monkeypatch.delattr(django_settings, "SNAPADMIN_GRAPHQL_ENABLED", raising=False)
-        result = checks.check_api_defaults_unset(None)
-        assert len(result) == 1
-        assert "SNAPADMIN_REST_API_ENABLED" in result[0].msg
-        assert "SNAPADMIN_GRAPHQL_ENABLED" in result[0].msg
-
-    def test_unmounted_urls_stay_silent_even_when_unset(self, monkeypatch):
-        # A project that never includes snapadmin.urls at all (admin-only
-        # usage) must not be nagged about an API it never mounted.
-        monkeypatch.setattr(checks, "_snapadmin_urls_mounted", lambda name: False)
-        from django.conf import settings as django_settings
-        monkeypatch.delattr(django_settings, "SNAPADMIN_REST_API_ENABLED", raising=False)
-        monkeypatch.delattr(django_settings, "SNAPADMIN_GRAPHQL_ENABLED", raising=False)
-        assert checks.check_api_defaults_unset(None) == []
-
-    @override_settings(SNAPADMIN_REST_API_ENABLED=False, SNAPADMIN_GRAPHQL_ENABLED=False)
-    def test_explicit_false_is_not_warned(self):
-        assert checks.check_api_defaults_unset(None) == []
-
-
 # ── extras behind SNAPADMIN_REST_API_ENABLED / _SWAGGER_ENABLED / _GRAPHQL_ENABLED (E010) ────
 
 class TestApiExtrasInstalled:

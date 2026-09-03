@@ -5,10 +5,16 @@ version-by-version summary; the full, prose release notes for each version live 
 [the docs repository](https://github.com/drofji/django-snapadmin/tree/main/docs/releases/) 
 (shipped in the source distribution) and online in the project documentation.
 
-The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and is in the
-**beta** series (`0.1.0bN`) — the public API is stabilising but may still change before `0.1.0` stable.
+The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning. As of `1.0.0` the
+public API is covered by semantic versioning — see `SECURITY.md`'s API-stability policy.
 
 ## Unreleased
+
+### Breaking
+
+Breaking: none
+
+## 1.0.0 — 2026-09-03
 
 ### Breaking
 - The shipped `admin.js`'s select2 auto-init is now **opt-in**: only a `<select>` carrying a
@@ -21,14 +27,22 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   *and* at least one registered model has `offline_mode = True`. A deployment with
   `SNAPADMIN_REST_API_ENABLED = False` used to poll a 404ing `/api/health/` forever and block every
   Save button — set `SNAPADMIN_CONNECTIVITY_ENABLED = True` to restore the previous behaviour.
-- `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` are deprecated
-  to default to `False` at `1.0` — see the deprecation warning and migration note below.
+- `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` now default to `False` (previously
+  `True`) — a project including `snapadmin.urls` no longer gets a writable REST/GraphQL surface
+  for every registered model without asking for one. Pin either to `True` to restore the previous
+  behaviour. See the migration guide.
 - `djangorestframework`, `drf-spectacular`, `django-filter` and `graphene-django` are no longer
   core dependencies — they moved behind two new extras, `[api]` and `[graphql]`. A bare
-  `pip install django-snapadmin` now pulls only Django, structlog and nh3; both features still
-  default to `True`, so most installs need `pip install django-snapadmin[api,graphql]` (or `[all]`,
-  a no-op upgrade for an existing install). New check `snapadmin.E010` catches a feature left on
-  with its extra missing. See the migration guide.
+  `pip install django-snapadmin` now pulls only Django, structlog and nh3; both features above
+  default to `False`, so most installs only need the matching extra once a surface is turned on:
+  `pip install django-snapadmin[api,graphql]` (or `[all]`, a no-op upgrade for an install that
+  already has everything). New check `snapadmin.E010` catches a feature left on with its extra
+  missing. See the migration guide.
+- The deprecated command aliases and underscored console scripts are removed:
+  `db_backup`/`purge_expired_data`/`send_error_digest` (use `snapadmin_db_backup`/
+  `snapadmin_purge_expired_data`/`snapadmin_send_error_digest`) and the underscored
+  `snapadmin_info`/`snapadmin_license_check` console scripts (use the dashed spellings, or
+  `manage.py snapadmin_info`/`manage.py snapadmin_license_check`, both unaffected).
 - Retro-note (this heading is new): `SnapModel.get_admin_fields()`'s return arity silently grew
   from four values to five in an earlier pre-1.0 release with no changelog entry — now pinned so
   it cannot shift silently again. `django-admin-rangefilter` stopped being a dependency in
@@ -246,12 +260,6 @@ The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning and 
   completion and failure — a cancelled job can leave a real partial file on disk, and until now it
   was invisible to anything measuring a retention window on `finished_at` (including the new
   `SNAPADMIN_EXPORT_RETENTION_DAYS` purge).
-
-### Deprecated
-- `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` defaulting to `True` is deprecated —
-  both flip to `False` at `1.0`. A new check, `snapadmin.W014`, warns when either is left unset
-  while its route is actually mounted, naming the one line that pins today's behaviour. See
-  Breaking, above.
 
 ### Security
 - `snap_field(field, wysiwyg=True)` now sanitizes on write, matching `SnapRichTextField` — closing

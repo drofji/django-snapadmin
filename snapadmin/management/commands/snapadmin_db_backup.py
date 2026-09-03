@@ -4,9 +4,6 @@ Run 3-2-1 database backups from the CLI / cron.
     python manage.py snapadmin_db_backup                      # only destinations that are due
     python manage.py snapadmin_db_backup --force              # all configured destinations now
     python manage.py snapadmin_db_backup --destination remote # one destination, right now
-
-``db_backup`` (no prefix) still works as a deprecated alias — see
-:mod:`snapadmin.management.aliases`.
 """
 
 from django.core.management.base import BaseCommand, CommandError

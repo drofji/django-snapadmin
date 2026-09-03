@@ -4,9 +4,9 @@ This document covers how to report a vulnerability in **django-snapadmin**, whic
 fixes, the security features the package ships, and how to deploy it safely. For the licences of the
 code SnapAdmin depends on or bundles, see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
-> **Beta software.** SnapAdmin is in the `0.1.0bN` beta series and has **not** had an independent
-> security audit. Review it before using it on sensitive or internet-facing deployments, and pin an
-> exact version in production.
+> **No independent security audit.** SnapAdmin has not had a third-party security audit. Review it
+> before using it on sensitive or internet-facing deployments, and pin an exact version in
+> production.
 
 ## Supported versions
 
@@ -15,8 +15,8 @@ receive backported patches — upgrade to the newest version to get security fix
 
 | Version | Supported |
 |---------|-----------|
-| Latest release on PyPI (currently `0.1.0b7`) | ✅ |
-| Any older alpha/beta | ❌ (upgrade) |
+| Latest release on PyPI (currently `1.0.0`) | ✅ |
+| Any older pre-`1.0` release | ❌ (upgrade) |
 
 ## API stability and compatibility policy
 
@@ -52,9 +52,9 @@ CI runs the full suite on every push against the compatibility matrix — what a
 that suite already verified against a clone of this repository, not a second, unverified copy
 trailing behind inside every install.
 
-**While in the `0.x` beta series (now):** breaking changes are possible but never silent. Each one
-is called out in [`CHANGELOG.md`](CHANGELOG.md) and the release notes, with a migration guide when
-manual steps are involved. Pin an exact version in production.
+**Before `1.0` (the `0.x` beta series):** breaking changes were possible but never silent. Each one
+was called out in [`CHANGELOG.md`](CHANGELOG.md) and the release notes, with a migration guide when
+manual steps were involved.
 
 **From `1.0` onward:** the project follows semantic versioning.
 
@@ -70,33 +70,28 @@ be removed: a `DeprecationWarning` for a Python name, a notice on stderr for a m
 (so a cron job piping stdout still surfaces it). Both name the replacement. A security fix that
 cannot be made backward-compatible is the one exception, and is documented as such in the advisory.
 
-Currently deprecated, still working — all scheduled for **removal in `1.0`**:
+**Removed at the `1.0.0` cut**, per the announced beta-series removal window — upgrading from any
+pre-`1.0` release needs the corresponding change:
 
-| Deprecated name | Use instead | Removed in |
+| Removed name | Use instead |
+|---|---|
+| `db_backup` (management command) | `snapadmin_db_backup` |
+| `purge_expired_data` (management command) | `snapadmin_purge_expired_data` |
+| `send_error_digest` (management command) | `snapadmin_send_error_digest` |
+| `snapadmin_info` (underscored console script) | `snapadmin-info` (or `manage.py snapadmin_info`) |
+| `snapadmin_license_check` (underscored console script) | `snapadmin-license-check` (or `manage.py snapadmin_license_check`) |
+
+**Defaults flipped at the `1.0.0` cut:**
+
+| Setting | Pre-`1.0` default | `1.0` default |
 |---|---|---|
-| `db_backup` (management command) | `snapadmin_db_backup` | `1.0` |
-| `purge_expired_data` (management command) | `snapadmin_purge_expired_data` | `1.0` |
-| `send_error_digest` (management command) | `snapadmin_send_error_digest` | `1.0` |
-| `snapadmin_info` (underscored console script) | `snapadmin-info` | `1.0` |
-| `snapadmin_license_check` (underscored console script) | `snapadmin-license-check` | `1.0` |
+| `SNAPADMIN_REST_API_ENABLED` | `True` | `False` |
+| `SNAPADMIN_GRAPHQL_ENABLED` | `True` | `False` |
 
-**Default changing at `1.0`, not yet flipped:**
-
-| Setting | Today's default | `1.0` default | Warns today via |
-|---|---|---|---|
-| `SNAPADMIN_REST_API_ENABLED` | `True` | `False` | `snapadmin.W014`, when left unset and the route is actually mounted |
-| `SNAPADMIN_GRAPHQL_ENABLED` | `True` | `False` | `snapadmin.W014`, same condition |
-
-Both flip because a project migrating from a plain Django admin never asked for an API at all, yet
-gets one — writable, unless `api_write_fields` is set per model — the moment `snapadmin.urls` is
-included. Pin either setting explicitly, at any time, to opt out of the flip and keep today's
-behaviour past `1.0`. See the migration guide.
-
-The three management-command aliases print their removal date on stderr every time they run (see
-`snapadmin/management/aliases.py`). The two underscored console scripts are a duplicate spelling of
-the dashed ones declared in `pyproject.toml`, kept only because `snapadmin_info`/`snapadmin_license_check`
-read naturally as Python-style names; the dashed `snapadmin-info` / `snapadmin-license-check` forms
-are the ones that stay past `1.0`.
+Both flipped because a project migrating from a plain Django admin never asked for an API at all,
+yet got one — writable, unless `api_write_fields` was set per model — the moment `snapadmin.urls`
+was included. Pin either setting explicitly to `True` to restore the pre-`1.0` behaviour. See
+[the migration guide](docs/migrations/0.1.0b7_to_1.0.0.md).
 
 ## Reporting a vulnerability
 
@@ -470,9 +465,9 @@ Key protections:
 
 ### Attack-surface reduction & extension guards
 - Each surface can be **switched off**: `SNAPADMIN_REST_API_ENABLED`, `SNAPADMIN_GRAPHQL_ENABLED`,
-  `SNAPADMIN_SWAGGER_ENABLED` (disabling removes the routes entirely). Both default to `True` today
-  — see the API-stability table above, this default is deprecated and flips to `False` at `1.0`.
-  The user-management API (`SNAPADMIN_USER_API_ENABLED`) is **off by default**.
+  `SNAPADMIN_SWAGGER_ENABLED` (disabling removes the routes entirely). Both default to `False` — a
+  project opts in explicitly, rather than the pre-`1.0` behaviour of opting out. The user-management
+  API (`SNAPADMIN_USER_API_ENABLED`) is likewise **off by default**.
 - The **bulk ES reindex endpoint** is off by default (`SNAPADMIN_REINDEX_API_ENABLED`) and
   `IsAdminUser`-gated when enabled.
 - **Deletion guards** — `SnapModel.api_can_delete(request)` and the `SNAPADMIN_API_DELETE_GUARD` dotted
@@ -484,9 +479,8 @@ Key protections:
 - Serve everything over **HTTPS** — API tokens and session cookies are bearer credentials.
 - Keep the dashboard gated (leave `SNAPADMIN_DASHBOARD_PUBLIC` unset/`False`).
 - Keep `SNAPADMIN_GRAPHIQL_ENABLED` off in production and `SNAPADMIN_GRAPHQL_REQUIRE_AUTH = True`.
-- Pin `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` explicitly rather than relying on
-  the built-in default — both flip to `False` at `1.0` (`snapadmin.W014` warns while either is
-  left unset with the surface actually mounted).
+- `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` default to `False` — turn on only the
+  surface(s) the project actually serves, rather than both by habit.
 - Scope API tokens with `allowed_models` (and `allowed_scopes` for your own endpoints) and set an
   `expiration_date`; rotate a leaked token with `POST /api/tokens/<id>/rotate/` rather than deleting
   and reissuing it — the row, its scopes and its history survive, and the old key stops authenticating

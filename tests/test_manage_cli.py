@@ -130,11 +130,23 @@ class TestEntryPoints:
         manage_cli.info_main()
         assert recorded[0]["cmd"][3:] == ["--brief"]
 
+    @pytest.mark.skipif(sys.version_info < (3, 11), reason="tomllib is stdlib only on Python 3.11+")
+    def test_underscored_spelling_removed_at_1_0(self):
+        """The underscored duplicate (snapadmin_info / snapadmin_license_check) was
+        a deprecated alias slated for removal in 1.0 (SECURITY.md's API-stability
+        table) — `manage.py snapadmin_info` and the dashed console scripts stay."""
+        import tomllib
+
+        pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+        with open(pyproject, "rb") as fh:
+            data = tomllib.load(fh)
+        scripts = data["tool"]["poetry"]["scripts"]
+        assert "snapadmin_info" not in scripts
+        assert "snapadmin_license_check" not in scripts
+
     @pytest.mark.parametrize("script,target", [
         ("snapadmin-info", "snapadmin.manage_cli:info_main"),
-        ("snapadmin_info", "snapadmin.manage_cli:info_main"),
         ("snapadmin-license-check", "snapadmin.manage_cli:license_check_main"),
-        ("snapadmin_license_check", "snapadmin.manage_cli:license_check_main"),
     ])
     def test_declared_in_pyproject(self, script, target):
         """Both spellings ship — neither should be a 'command not found' dead end."""

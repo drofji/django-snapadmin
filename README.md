@@ -321,7 +321,7 @@ The questions a tech lead or a manager asks before approving a dependency:
 | **Only HR should see salary?** | [`api_field_permissions`](https://drofji.github.io/django-snapadmin/#field-permissions) gates a field's very presence, per Django permission — absent from a response for anyone lacking it, an explicit `400` naming the field on a denied write, orthogonal to masking (which only controls display) |
 | **Multi-tenant SaaS?** | [Row-level tenant isolation](https://drofji.github.io/django-snapadmin/#multi-tenancy) — opt a model in with `tenant_scoped = True` plus a tenant column, and every generated surface (admin, REST, GraphQL, Elasticsearch routing, exports, imports, the offline cache) becomes unreachable without a bound tenant: default-deny, not opt-out. Logical isolation, not physical — the limitation is documented as plainly as the feature |
 | **Is it tested?** | **100% line coverage** on the shipped package, enforced in CI. The matrix runs Python 3.10–3.13 × Django 5.2/6.0 on every push |
-| **Will it break on upgrade?** | A written [API-stability policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md): deprecations warn before removal and name their replacement. Still beta — pin an exact version in production |
+| **Will it break on upgrade?** | A written [API-stability policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md), covered by semantic versioning as of `1.0`: deprecations warn before removal and name their replacement |
 | **Will it survive our load?** | Read-replica routing, estimated counts, paging caps, streaming exports, and a reusable [quota primitive](https://drofji.github.io/django-snapadmin/#quotas) (`snapadmin.limits.reserve()`) for per-tenant windows, concurrency caps and outbound-call cooldowns. [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) |
 | **Single sign-on?** | [SSO / OAuth2 login helper](https://drofji.github.io/django-snapadmin/#enterprise-config); auth is pluggable — JWT, session, or your own |
 | **How do we know it is up?** | Health probes, error-spike alerts and daily digests to email, Slack, Discord, Teams or Telegram. `snapadmin-info --health-check` exits non-zero for your monitoring |
@@ -336,8 +336,7 @@ The questions a tech lead or a manager asks before approving a dependency:
 pip install django-snapadmin
 ```
 
-Requires **Python ≥ 3.10** and **Django ≥ 5.2**. The package is **beta** — pin an exact version in
-production.
+Requires **Python ≥ 3.10** and **Django ≥ 5.2**. Pin an exact version in production.
 
 **Adding it to an existing project?** Run `snapadmin-init`. It inspects your project and prints a
 checklist plus the exact snippets to paste. It edits nothing, so there is nothing to undo.
@@ -415,14 +414,14 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
 
     # ── REST API — pip install django-snapadmin[api] ────────────────────────
-    # SNAPADMIN_REST_API_ENABLED / SNAPADMIN_SWAGGER_ENABLED default to True,
-    # so most installs want this even though it is technically optional.
+    # Needed only if you set SNAPADMIN_REST_API_ENABLED/SNAPADMIN_SWAGGER_ENABLED
+    # to True — both default to False.
     "rest_framework",
     "drf_spectacular",
     "django_filters",
 
     # ── GraphQL — pip install django-snapadmin[graphql] ──────────────────────
-    # SNAPADMIN_GRAPHQL_ENABLED defaults to True. Independent of [api].
+    # Needed only with SNAPADMIN_GRAPHQL_ENABLED = True (default False). Independent of [api].
     "graphene_django",
 
     # ── SnapAdmin ───────────────────────────────────────────────────────────
@@ -460,8 +459,8 @@ is safe for commercial and proprietary use. Everything with a licence caveat is 
 
 | Extra | Pulls in | Gives you |
 |-------|----------|-----------|
-| `api` | `djangorestframework`, `drf-spectacular`, `django-filter` | The REST API + OpenAPI schema/Swagger/ReDoc — **on by default** (`SNAPADMIN_REST_API_ENABLED`/`SNAPADMIN_SWAGGER_ENABLED`), so most installs want it |
-| `graphql` | `graphene-django` | The generated GraphQL schema — **on by default** (`SNAPADMIN_GRAPHQL_ENABLED`), independent of `api` |
+| `api` | `djangorestframework`, `drf-spectacular`, `django-filter` | The REST API + OpenAPI schema/Swagger/ReDoc — needed once you set `SNAPADMIN_REST_API_ENABLED`/`SNAPADMIN_SWAGGER_ENABLED` to `True` (default `False`) |
+| `graphql` | `graphene-django` | The generated GraphQL schema — needed once you set `SNAPADMIN_GRAPHQL_ENABLED` to `True` (default `False`), independent of `api` |
 | `theme` | `django-unfold` | The themed admin UI (stock Django admin without it) |
 | `elasticsearch` | `elasticsearch` | Full-text search, `DUAL` / `ES_ONLY` models |
 | `celery` | `celery`, `django-celery-beat`, `django-celery-results` | Background tasks: async export, GDPR purge, digests, backups |
@@ -489,16 +488,15 @@ matrix, extras gotchas, and the MySQL driver licence note.
 Every surface is a plain Django setting. Switching one off removes its routes entirely:
 
 ```python
-SNAPADMIN_REST_API_ENABLED       = True    # REST CRUD endpoints — deprecated default, flips to False at 1.0
-SNAPADMIN_GRAPHQL_ENABLED        = True    # GraphQL endpoint — same deprecation, see SECURITY.md
+SNAPADMIN_REST_API_ENABLED       = True    # REST CRUD endpoints — off by default, opt in explicitly
+SNAPADMIN_GRAPHQL_ENABLED        = True    # GraphQL endpoint — same, off by default
 SNAPADMIN_SWAGGER_ENABLED        = True    # Swagger UI + ReDoc
 SNAPADMIN_URL_PREFIX             = ""      # relocate the whole API surface
 SNAPADMIN_CONNECTIVITY_ENABLED   = False   # admin-wide health poll + offline save-guard (opt-in)
 ```
 
-Pin the first two explicitly — `snapadmin.W014` warns while either is left at its built-in `True`
-and its route is actually mounted, since a plain-admin migration that never asked for an API
-otherwise gets one anyway.
+The first two default to `False` — a plain-admin migration that never asked for an API doesn't get
+one by accident. Set them to `True` to serve REST and/or GraphQL.
 
 Don't want to decide all ~90 of them? `SNAPADMIN_PROFILE = "admin"` (or `"api"` / `"full"`) picks
 sane defaults for the handful that actually matter — an explicit setting always overrides it.

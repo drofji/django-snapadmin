@@ -11,9 +11,6 @@ Purges, in order: every registered SnapModel's ``data_retention_days`` (and any
 against ``SNAPADMIN_AUDIT_RETENTION_DAYS``, and — when
 ``SNAPADMIN_EXPORT_RETENTION_DAYS`` is set — finished export/reindex job rows
 and their published files.
-
-``purge_expired_data`` (no prefix) still works as a deprecated alias — see
-:mod:`snapadmin.management.aliases`.
 """
 
 from django.core.management.base import BaseCommand

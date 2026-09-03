@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "django-snapadmin"
-version = "0.1.0b7"
+version = "1.0.0"
 description = "Define your Django models once — instantly get an admin panel, REST API, GraphQL and full-text search. Zero boilerplate."
 authors = ["Alexander Wiese"]
 license = "MIT"
@@ -10,7 +10,7 @@ repository = "https://github.com/drofji/django-snapadmin.git"
 documentation = "https://drofji.github.io/django-snapadmin/"
 keywords = ["django", "admin", "rest-api", "graphql", "elasticsearch", "unfold", "declarative"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Environment :: Web Environment",
     "Framework :: Django",
     "Framework :: Django :: 5.2",
@@ -61,14 +61,12 @@ snapadmin-init = "snapadmin.integrate.cli:main"
 # `snapadmin-new <project>` — generates a project you keep (admin + REST API + GraphQL
 # from one worked model; SQLite by default, --full adds Docker/Postgres/Redis/ES).
 snapadmin-new = "snapadmin.scaffold.cli:main"
-# Shims that forward to the manage.py commands of the same name. Both spellings are
-# registered on purpose: the dashed one matches the console scripts above, the
-# underscored one matches the management-command name people read in the docs and
-# then type in a shell. Neither should be a "command not found" dead end.
+# Shims that forward to the manage.py commands of the same name. The underscored
+# spellings (snapadmin_info / snapadmin_license_check) were removed in 1.0, per the
+# deprecation window announced in SECURITY.md's API-stability policy — use these
+# dashed forms, or `manage.py snapadmin_info` / `manage.py snapadmin_license_check`.
 snapadmin-info = "snapadmin.manage_cli:info_main"
-snapadmin_info = "snapadmin.manage_cli:info_main"
 snapadmin-license-check = "snapadmin.manage_cli:license_check_main"
-snapadmin_license_check = "snapadmin.manage_cli:license_check_main"
 
 [tool.poetry.dependencies]
 python = ">=3.10"

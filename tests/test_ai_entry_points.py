@@ -112,11 +112,6 @@ MAPPED_COMMANDS = [
     "snapadmin_restore",
     "snapadmin_rollback",
     "snapadmin_subject_request",
-    # Deprecated unprefixed aliases (still work, print a rename notice) — the
-    # docstring names them as a group rather than individually.
-    "db_backup",
-    "purge_expired_data",
-    "send_error_digest",
 ]
 
 

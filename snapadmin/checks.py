@@ -17,7 +17,6 @@ from urllib.parse import urlparse
 from django.apps import apps
 from django.conf import settings
 from django.core.checks import Error, Info, Warning
-from django.urls import reverse
 
 from snapadmin import conf
 from snapadmin.conf import get_setting
@@ -973,58 +972,10 @@ def check_fetch_by_max_values(app_configs, **kwargs):
     )]
 
 
-def _snapadmin_urls_mounted(name: str) -> bool:
-    """Whether a URL name from ``snapadmin.urls`` actually resolves.
-
-    ``manage.py check`` runs long before any request, so there is no live
-    URLconf to inspect for "is snapadmin.urls included" beyond asking the
-    resolver itself. A stable route name registered unconditionally whenever
-    the relevant branch of ``snapadmin/urls.py`` runs (``api-health`` for
-    REST, ``graphql`` for GraphQL) is the only reliable signal: it resolves
-    if and only if that branch executed, which is exactly "the surface is
-    mounted with today's setting". Anything else (no ``ROOT_URLCONF``, a
-    project that never includes ``snapadmin.urls`` at all, a genuinely
-    broken URLconf) means there is nothing this check can usefully say, so
-    it stays silent rather than guessing.
-    """
-    try:
-        reverse(name)
-        return True
-    except Exception:
-        return False
-
-
-def check_api_defaults_unset(app_configs, **kwargs):
-    """Warn: ``SNAPADMIN_REST_API_ENABLED`` / ``_GRAPHQL_ENABLED`` left at today's default.
-
-    Both default to ``True``, so including ``snapadmin.urls`` exposes generated
-    read/write endpoints for every registered model — without a per-model
-    ``api_write_fields`` allowlist, every field is writable (``snapadmin.W004``
-    already covers that half on its own). A project migrating from a plain
-    Django admin never asked for an API at all, yet gets one anyway. Both
-    settings are deprecated to default to ``False`` starting at SnapAdmin
-    1.0 (see the migration guide); this warns now, while there is still time
-    to pin the setting deliberately, rather than only at the 1.0 upgrade
-    itself. Silent once the setting is set explicitly (either value), and
-    silent when ``snapadmin.urls`` was never included at all — see
-    :func:`_snapadmin_urls_mounted`.
-    """
-    unset = []
-    if not hasattr(settings, "SNAPADMIN_REST_API_ENABLED") and _snapadmin_urls_mounted("api-health"):
-        unset.append("SNAPADMIN_REST_API_ENABLED")
-    if not hasattr(settings, "SNAPADMIN_GRAPHQL_ENABLED") and _snapadmin_urls_mounted("graphql"):
-        unset.append("SNAPADMIN_GRAPHQL_ENABLED")
-    if not unset:
-        return []
-    return [Warning(
-        f"{' and '.join(unset)} left unset, defaulting to True. This default flips to False at "
-        "SnapAdmin 1.0 — every registered model's REST/GraphQL surface is exposed today with no "
-        "explicit choice made.",
-        hint="Pin the setting(s) explicitly to keep today's behaviour past 1.0 (e.g. "
-             "SNAPADMIN_REST_API_ENABLED = True), or set them to False to adopt the future "
-             "default early. See the migration guide.",
-        id="snapadmin.W014",
-    )]
+# snapadmin.W014 ("SNAPADMIN_REST_API_ENABLED/_GRAPHQL_ENABLED left unset while mounted")
+# retired at 1.0 (#V1a): its premise — a setting left unset defaults to True and is
+# still mounted — became structurally impossible the moment the default flipped to
+# False (D4). Never reuse this id.
 
 
 def check_api_extras_installed(app_configs, **kwargs):
@@ -1123,7 +1074,6 @@ ALL_CHECKS = [
     check_unfold_theme,
     check_snapadmin_profile,
     check_snapadmin_profile_contradiction,
-    check_api_defaults_unset,
     check_api_extras_installed,
     check_empty_admin_forms,
     check_tenant_scoping,

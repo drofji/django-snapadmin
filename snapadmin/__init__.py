@@ -242,9 +242,6 @@ Operations
         are the GDPR subject-access declaration: a registered model that never
         declares ``subject_path`` (or ``None``) at all, or one that declares a
         malformed path — see ``manage.py snapadmin_subject_request`` below.
-        ``W014`` fires when ``SNAPADMIN_REST_API_ENABLED``/``_GRAPHQL_ENABLED``
-        is left unset while its route is actually mounted — both default to
-        ``True`` today but are deprecated to default to ``False`` at ``1.0``.
         ``W015`` catches a registered model whose generated admin form would
         render with no fields at all (no ``show_in_form=True`` anywhere),
         whatever the cause — see ``SNAPADMIN_SHOW_IN_FORM_DEFAULT`` below.
@@ -289,10 +286,8 @@ Management commands
     ``snapadmin_info``, ``snapadmin_license_check``, ``snapadmin_reindex``,
     ``snapadmin_import``, ``snapadmin_audit_export``, ``snapadmin_health_alert``,
     ``snapadmin_db_backup``, ``snapadmin_purge_expired_data``, ``snapadmin_send_error_digest``,
-    ``snapadmin_restore``, ``snapadmin_rollback``, ``snapadmin_subject_request``. The three
-    GDPR/error-digest ones were once unprefixed (``db_backup``, ``purge_expired_data``,
-    ``send_error_digest``); those names still work as deprecated aliases that print
-    a rename notice. ``snapadmin_restore``/``snapadmin_rollback`` are dry-run by
+    ``snapadmin_restore``, ``snapadmin_rollback``, ``snapadmin_subject_request``.
+    ``snapadmin_restore``/``snapadmin_rollback`` are dry-run by
     default — pass ``--confirm`` to actually restore or roll back.
     ``snapadmin_subject_request export|delete --model app.Model --identifier VALUE
     --user USERNAME`` is the GDPR subject-access command — export (unmasked,
