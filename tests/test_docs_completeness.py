@@ -113,7 +113,10 @@ class TestCheckIdsExplained:
 
 class TestExtrasListedEverywhere:
     def _declared_extras(self) -> list[str]:
-        import tomllib
+        # `tomllib` is stdlib only on 3.11+; the suite still runs on 3.10, where
+        # skipping is right — this asserts a property of the repo's own files,
+        # not of the package, so one interpreter checking it is enough.
+        tomllib = pytest.importorskip("tomllib")
 
         with open(REPO_ROOT / "pyproject.toml", "rb") as fh:
             data = tomllib.load(fh)

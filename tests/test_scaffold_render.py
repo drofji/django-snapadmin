@@ -303,7 +303,6 @@ def test_requirements_cover_every_third_party_app_in_installed_apps(tmp_path, fu
     ``test_scaffold_e2e.py`` cannot catch this: it runs in the development environment, where every
     extra is already installed.
     """
-    import tomllib
     import pathlib as _pathlib
 
     dest = tmp_path / "myshop"
@@ -311,6 +310,12 @@ def test_requirements_cover_every_third_party_app_in_installed_apps(tmp_path, fu
 
     apps = _installed_apps((dest / "myshop" / "settings.py").read_text(encoding="utf-8"))
     extras_requested = _requested_extras((dest / "requirements.txt").read_text(encoding="utf-8"))
+
+    # `tomllib` is stdlib only on 3.11+ and the suite still runs on 3.10. Skip
+    # *after* generating, so the generator itself is still exercised there and
+    # the coverage gate holds; only the pyproject cross-check needs the parser,
+    # and that asserts a property of the repo one interpreter can settle.
+    tomllib = pytest.importorskip("tomllib")
 
     pyproject = tomllib.loads(
         (_pathlib.Path(render.__file__).parents[2] / "pyproject.toml").read_text(encoding="utf-8")
