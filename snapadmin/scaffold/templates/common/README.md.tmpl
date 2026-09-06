@@ -6,7 +6,7 @@ all generated from the models in `$app_name/models.py`.
 
 ## Run it
 
-    pip install django-snapadmin
+    pip install -r requirements.txt
     python manage.py migrate
     python manage.py createsuperuser
     python manage.py runserver
@@ -18,6 +18,10 @@ Then open:
 - http://127.0.0.1:8000/api/graphql/ — GraphiQL (while `DEBUG=True`)
 
 No Docker, no PostgreSQL, no manual settings edits — SQLite is the default database.
+
+Install from `requirements.txt` rather than a bare `pip install django-snapadmin`: this project
+serves a REST API and a GraphQL endpoint, which live behind the `[api]` and `[graphql]` extras,
+and the requirements file already asks for them.
 
 ## The worked example
 

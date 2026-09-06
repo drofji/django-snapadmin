@@ -240,3 +240,102 @@ class TestCamelCase:
     )
     def test_camel_case(self, name, expected):
         assert render._camel_case(name) == expected
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The generated project must be installable from its own requirements.txt
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: Django app label -> the distribution on PyPI that provides it. Only the third-party apps the
+#: generated ``INSTALLED_APPS`` can contain need an entry; Django's own ``django.contrib.*`` and
+#: the generated project's own app are skipped by the test.
+_APP_TO_DISTRIBUTION = {
+    "rest_framework": "djangorestframework",
+    "drf_spectacular": "drf-spectacular",
+    "django_filters": "django-filter",
+    "graphene_django": "graphene-django",
+    "unfold": "django-unfold",
+    "django_ckeditor_5": "django-ckeditor-5",
+    "django_celery_beat": "django-celery-beat",
+    "django_celery_results": "django-celery-results",
+    "extra_settings": "django-extra-settings",
+    "admin_auto_filters": "django-admin-autocomplete-filter",
+}
+
+
+def _installed_apps(settings_text: str) -> list[str]:
+    """The app labels the rendered settings module lists, ignoring commented-out lines."""
+    body = settings_text.split("INSTALLED_APPS = [", 1)[1].split("]", 1)[0]
+    apps = []
+    for line in body.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith('"') or line.startswith("'"):
+            apps.append(line.strip("\"',"))
+    return apps
+
+
+def _requested_extras(requirements_text: str) -> set[str]:
+    """The extras the generated requirements.txt asks for on the django-snapadmin line."""
+    for line in requirements_text.splitlines():
+        line = line.strip()
+        if not line.startswith("django-snapadmin"):
+            continue
+        if "[" not in line:
+            return set()
+        return {e.strip() for e in line.split("[", 1)[1].split("]", 1)[0].split(",")}
+    raise AssertionError("requirements.txt does not depend on django-snapadmin at all")
+
+
+@pytest.mark.parametrize("full", [False, True], ids=["minimal", "full"])
+def test_requirements_cover_every_third_party_app_in_installed_apps(tmp_path, full):
+    """``pip install -r requirements.txt`` then ``manage.py check`` must work in a clean venv.
+
+    The generated ``INSTALLED_APPS`` lists ``rest_framework``, ``drf_spectacular``,
+    ``django_filters`` and ``graphene_django``. Those moved behind the ``[api]``/``[graphql]``
+    extras (#DEP1e) and a bare ``pip install django-snapadmin`` no longer brings them, so a
+    requirements line without the extras produces a project that dies at ``django.setup()`` with
+    ``ModuleNotFoundError: No module named 'rest_framework'`` — before any SnapAdmin check or
+    friendly ``ImproperlyConfigured`` gets a chance to explain it. The scaffold's whole promise is
+    that ``migrate`` and ``runserver`` work immediately with no manual edits.
+
+    ``test_scaffold_e2e.py`` cannot catch this: it runs in the development environment, where every
+    extra is already installed.
+    """
+    import tomllib
+    import pathlib as _pathlib
+
+    dest = tmp_path / "myshop"
+    render.generate_project(dest, project_name="myshop", app_name="catalog", full=full)
+
+    apps = _installed_apps((dest / "myshop" / "settings.py").read_text(encoding="utf-8"))
+    extras_requested = _requested_extras((dest / "requirements.txt").read_text(encoding="utf-8"))
+
+    pyproject = tomllib.loads(
+        (_pathlib.Path(render.__file__).parents[2] / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    declared_extras: dict[str, list[str]] = pyproject["tool"]["poetry"]["extras"]
+    # distribution -> the extras that ship it, straight from pyproject so a renamed extra fails here
+    provided_by: dict[str, set[str]] = {}
+    for extra, distributions in declared_extras.items():
+        for distribution in distributions:
+            provided_by.setdefault(distribution, set()).add(extra)
+
+    uncovered = []
+    for app in apps:
+        if app.startswith("django.contrib.") or app in {"snapadmin", "catalog"}:
+            continue
+        distribution = _APP_TO_DISTRIBUTION.get(app)
+        assert distribution, f"{app!r} is in the generated INSTALLED_APPS but this test has no " \
+                             f"mapping for which distribution provides it — add one"
+        shipping_extras = provided_by.get(distribution, set())
+        if shipping_extras and not (shipping_extras & extras_requested):
+            uncovered.append(f"{app} (needs one of {sorted(shipping_extras)})")
+
+    assert not uncovered, (
+        "the generated requirements.txt requests "
+        f"{sorted(extras_requested) or 'no extras'}, which does not install: "
+        + ", ".join(uncovered)
+        + " — the generated project will not boot from its own requirements file"
+    )

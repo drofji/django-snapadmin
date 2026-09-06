@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-02 18:11+0000\n"
+"POT-Creation-Date: 2026-09-05 21:27+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -282,6 +282,27 @@ msgstr "Résumé calculé"
 msgid "Showcase"
 msgstr "Vitrine"
 
+msgid "SKU"
+msgstr "Référence"
+
+msgid "Warehouse"
+msgstr "Entrepôt"
+
+msgid "On Hand"
+msgstr "Stock disponible"
+
+msgid "Reorder Cost"
+msgstr "Coût de réapprovisionnement"
+
+msgid "Counted At"
+msgstr "Compté le"
+
+msgid "Legacy Stock Level"
+msgstr "Niveau de stock"
+
+msgid "Legacy Stock Levels"
+msgstr "Niveaux de stock"
+
 msgid "SnapAdmin Custom Dashboard"
 msgstr "Tableau de bord SnapAdmin personnalisé"
 
@@ -492,22 +513,21 @@ msgid "Advanced Settings"
 msgstr "Paramètres avancés"
 
 #, fuzzy
-#| msgid "System dashboard"
-msgid "System Health"
-msgstr "Tableau de bord système"
+#~| msgid "System dashboard"
+#~ msgid "System Health"
+#~ msgstr "Tableau de bord système"
 
-msgid "Language"
-msgstr "Langue"
+#~ msgid "Language"
+#~ msgstr "Langue"
 
-msgid "Managed Models"
-msgstr "Modèles gérés"
-
+#~ msgid "Managed Models"
+#~ msgstr "Modèles gérés"
 
 #, python-format
-msgid "File extension '%(ext)s' is not allowed. Allowed: %(allowed)s"
-msgstr ""
-"L'extension de fichier '%(ext)s' n'est pas autorisée. Autorisées : "
-"%(allowed)s"
+#~ msgid "File extension '%(ext)s' is not allowed. Allowed: %(allowed)s"
+#~ msgstr ""
+#~ "L'extension de fichier '%(ext)s' n'est pas autorisée. Autorisées : "
+#~ "%(allowed)s"
 
 #~ msgid "GDPR — delete records older than data_retention_days on each model"
 #~ msgstr ""

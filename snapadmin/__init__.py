@@ -169,7 +169,11 @@ Operations
         (default ``["db"]``) optionally bundles ``media`` and an AGE-encrypted
         ``env`` alongside the database — loose per-part files sharing one run's
         timestamp, plus an always-unencrypted ``manifest.json`` sidecar.
-        Retention (``SNAPADMIN_BACKUP_KEEP``) applies per part.
+        Retention (``SNAPADMIN_BACKUP_KEEP``) applies per part. With
+        ``SNAPADMIN_SHARDING`` enabled, the ``"db"`` part becomes one
+        ``"db.<shard_name>"`` part per shard's primary (never a replica),
+        each independently checksummed and retention-pruned — an unsharded
+        project's bundle is unaffected.
     ``snapadmin.restore``
         Restoring a bundle ``snapadmin.backup`` produced — fetch from any
         configured destination, verify the manifest's per-part checksum,
@@ -192,7 +196,36 @@ Operations
         ``SnapErrorMonitorMiddleware`` — add it to ``MIDDLEWARE`` to feed
         unhandled request exceptions into ``snapadmin.monitoring``.
     ``snapadmin.reindexing`` · ``snapadmin.etl`` · ``snapadmin.db``
-        Elasticsearch reindexing, ETL helpers, database routing.
+        Elasticsearch reindexing, ETL helpers, and a single-alias read-replica
+        router (``SNAPADMIN_ANALYTICS_DB_ALIAS``) for SnapAdmin's own
+        auto-generated read views — a narrower, simpler sibling of
+        ``snapadmin.sharding`` below, independent of it.
+    ``snapadmin.sharding``
+        Optional, declarative multi-shard/read-replica database routing —
+        entirely inert unless ``SNAPADMIN_SHARDING = {"ENABLED": True, ...}``.
+        ``registration`` parses the setting (an auto-distributed flat
+        ``DATABASES`` list, or an explicit ``SHARDS`` mapping) and injects the
+        DSNs into ``settings.DATABASES``; ``router.SnapAdminRouter``
+        (registered automatically) resolves a query's shard by
+        ``modulo``/``hash``/``range``/a ``CUSTOM_ROUTER_FUNC``, fails writes
+        over to a live replica when the primary is down, and selects a read
+        replica by ``random``/``round_robin``/``first_available``, falling
+        back to (or, with ``HA_SETTINGS['FALLBACK_TO_PRIMARY'] = False``,
+        refusing in favour of) the primary once every replica is down;
+        ``health`` is the cached TCP-reachability probe behind that decision.
+        ``state``/``decorators`` give ``snap_master_only()``/
+        ``snap_target(shard=..., replica=...)`` — ``contextvars``-based (so
+        async-safe), usable as a context manager or a decorator on a sync or
+        ``async def`` function alike. A model opts in with ``shard_key`` (a
+        ``SnapModel`` attribute or ``snap_model()`` keyword, resolved through
+        ``get_model_meta`` exactly like ``tenant_scoped``) — no model,
+        including Django's own ``auth``/``sessions``/``admin`` tables, is ever
+        routed without asking. ``ids.uuid7()`` is an opt-in, stdlib-only
+        RFC 9562 time-ordered UUID helper for a model that wants a
+        collision-free primary key across shards. Backs
+        ``manage.py snap_migrate`` and the sharded branch of
+        ``manage.py snapadmin_db_backup`` — both touch every shard's
+        **primary** only, never a replica.
     ``snapadmin.tasks`` · ``snapadmin.celery_compat``
         Celery tasks and Beat schedules (``[celery]`` extra). The module imports
         without Celery: the compat shim keeps the task names and runs a task
@@ -227,12 +260,25 @@ Operations
         then the active ``SNAPADMIN_PROFILE`` preset (``admin`` / ``api`` /
         ``full``), then the built-in default — collapsing "99 settings to
         configure" to one line for a new project without changing behaviour
-        for an install that already sets things explicitly.
+        for an install that already sets things explicitly. Also the one place
+        the API surfaces' default lives (``REST_API_ENABLED_DEFAULT`` /
+        ``GRAPHQL_ENABLED_DEFAULT``, both ``False`` since 1.0): every read site
+        imports it rather than spelling it out, because the 1.0 flip first
+        landed in ``urls.py`` alone and left ten other sites reporting an API
+        that was no longer mounted. Each profile likewise states its values
+        outright instead of mirroring the defaults — that mirroring is what
+        made ``SNAPADMIN_PROFILE = "api"`` invert to "API off" at 1.0 — so
+        ``"full"`` and an unset profile are no longer the same thing.
     ``snapadmin.checks``
-        Django system checks — warnings ``snapadmin.W001``…``W015`` and errors
-        ``snapadmin.E001``…``E012`` catch misconfiguration at startup, so read
+        Django system checks — warnings ``snapadmin.W001``…``W018`` and errors
+        ``snapadmin.E001``…``E019`` catch misconfiguration at startup, so read
         them before debugging behaviour. The masking checks are *errors* because
         a mistyped rule fails open: it masks nothing and says nothing.
+        ``E013``–``E016`` cover ``SNAPADMIN_SHARDING``: an unresolvable DSN or
+        shard shape, an unrecognised ``STRATEGY``/``REPLICA_SELECTION`` or a
+        ``'custom'`` strategy with no importable ``CUSTOM_ROUTER_FUNC``, and a
+        ``'range'`` strategy with a shard missing its ``RANGE`` or two
+        overlapping ranges.
         ``E007`` is the backup ``.env``-without-encryption refusal: ``env`` in
         ``SNAPADMIN_BACKUP_INCLUDE`` with no ``SNAPADMIN_BACKUP_AGE_RECIPIENTS``
         configured fails closed rather than shipping plaintext secrets. ``E008``
@@ -257,6 +303,22 @@ Operations
         (``pyrage``, the optional ``[age]`` extra; or the ``age`` command-line
         tool) behind one ``encrypt_stream``/``decrypt_stream`` interface. Used
         by ``snapadmin.backup`` when ``SNAPADMIN_BACKUP_AGE_RECIPIENTS`` is set.
+        ``generate_keypair()`` mints a fresh identity/recipient pair through
+        either backend — ``manage.py snapadmin_age_keygen`` is the CLI in
+        front of it, writing the private key straight to a git-ignored
+        ``.age/`` directory instead of ever printing it.
+    ``snapadmin.encryption``
+        Field-level encryption — ciphertext at rest in the database, ordinary
+        Python values in application code. ``snapadmin.encryption.keys`` resolves
+        the ``SNAPADMIN_ENCRYPTION`` keyset from a ``KEY_PROVIDER`` (KMS/Vault),
+        a mounted ``KEY_FILE``, the ``SNAPADMIN_ENCRYPTION_KEYS`` environment
+        variable or the settings dict — first hit wins, sources are never
+        merged — and guarantees that no key is ever rendered into a log, a
+        ``repr`` or an exception (only its id and fingerprint). Keys are
+        generated with ``manage.py snapadmin_encryption_key``; the keyset is
+        ordered, so the first key encrypts and every key decrypts, which is what
+        makes rotation possible without downtime. Nothing here runs, and no
+        dependency is imported, until a model declares an encrypted field.
     ``snapadmin.theme_i18n``
         Catalog entries for the Unfold theme's own interface strings, which
         ``django-unfold`` ships untranslated — without them a themed admin renders
@@ -286,9 +348,19 @@ Management commands
     ``snapadmin_info``, ``snapadmin_license_check``, ``snapadmin_reindex``,
     ``snapadmin_import``, ``snapadmin_audit_export``, ``snapadmin_health_alert``,
     ``snapadmin_db_backup``, ``snapadmin_purge_expired_data``, ``snapadmin_send_error_digest``,
-    ``snapadmin_restore``, ``snapadmin_rollback``, ``snapadmin_subject_request``.
+    ``snapadmin_restore``, ``snapadmin_rollback``, ``snapadmin_subject_request``,
+    ``snapadmin_encryption_key``, ``snap_migrate``, ``snapadmin_age_keygen``.
     ``snapadmin_restore``/``snapadmin_rollback`` are dry-run by
     default — pass ``--confirm`` to actually restore or roll back.
+    ``snap_migrate`` runs ``migrate`` against every ``SNAPADMIN_SHARDING`` shard's
+    primary (sequentially, or all at once with ``--parallel``), never a replica.
+    ``snapadmin_age_keygen`` generates an AGE keypair for
+    ``SNAPADMIN_BACKUP_AGE_RECIPIENTS``, writes the private key to a git-ignored
+    ``.age/`` directory and prints only the public recipient.
+    ``snapadmin_encryption_key`` generates a field-encryption key and prints it
+    once, as the environment line to paste into a secret store — never into a
+    settings module. ``--rotate`` prints a key to prepend to the existing keyset
+    and the ids already in it, never their material.
     ``snapadmin_subject_request export|delete --model app.Model --identifier VALUE
     --user USERNAME`` is the GDPR subject-access command — export (unmasked,
     reusing the existing ``SnapExportJob`` machinery) or delete (dry-run by
@@ -307,6 +379,15 @@ fallback), ``SNAPADMIN_BACKUP_*``, ``SNAPADMIN_RESTORE_SNAPSHOT_*``
 ``SNAPADMIN_HEALTH_ALERT_*`` / ``SNAPADMIN_ALERT_*`` (monitoring and alert
 delivery), ``SNAPADMIN_AUDIT_*`` and
 ``SNAPADMIN_MASKED_FIELDS`` / ``SNAPADMIN_MASKING_RULES`` (audit and PII),
+``SNAPADMIN_ENCRYPTION`` (one dict: the field-encryption keyset and where it is
+read from — ``KEY_PROVIDER``, ``KEY_FILE``, ``KEYS``, ``STRICT``; the
+``SNAPADMIN_ENCRYPTION_KEYS`` and ``SNAPADMIN_ENCRYPTION_KEY_FILE`` environment
+variables configure the same thing without touching settings),
+``SNAPADMIN_SHARDING`` (one dict: multi-shard/read-replica routing —
+``ENABLED``, ``STRATEGY``, ``SHARD_KEY``, ``REPLICA_SELECTION``,
+``HA_SETTINGS``, and either an auto-distributed flat ``DATABASES`` list or an
+explicit ``SHARDS`` mapping — unset or ``ENABLED: False`` is a complete
+no-op),
 ``SNAPADMIN_EXPORT_*``,
 ``SNAPADMIN_SSO_*``, plus layout keys (``SNAPADMIN_URL_PREFIX``,
 ``SNAPADMIN_APP_LABELS``, ``SNAPADMIN_HIDDEN_APPS``, ``SNAPADMIN_NESTED_APPS``,
@@ -320,9 +401,10 @@ Optional extras
 ---------------
 The base install carries only permissive licences (MIT/BSD/Apache) and is safe
 for commercial use. ``pip install django-snapadmin[<extra>]``:
-``api`` (DRF, drf-spectacular, django-filter — ``SNAPADMIN_REST_API_ENABLED`` /
-``SNAPADMIN_SWAGGER_ENABLED``, both on by default), ``graphql`` (graphene-django —
-``SNAPADMIN_GRAPHQL_ENABLED``, on by default, independent of ``api``),
+``api`` (DRF, drf-spectacular, django-filter — needed once
+``SNAPADMIN_REST_API_ENABLED`` / ``SNAPADMIN_SWAGGER_ENABLED`` is on; both default
+to off since 1.0), ``graphql`` (graphene-django — ``SNAPADMIN_GRAPHQL_ENABLED``,
+also off by default, independent of ``api``),
 ``theme`` (Unfold UI), ``elasticsearch``, ``celery``, ``backup`` (SFTP),
 ``age`` (pyrage, for encrypted backups — ``SNAPADMIN_BACKUP_AGE_RECIPIENTS``),
 ``s3`` (boto3, for S3-compatible offsite backups — ``SNAPADMIN_BACKUP_S3_*``),

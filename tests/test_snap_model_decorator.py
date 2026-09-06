@@ -138,6 +138,41 @@ class TestDecoratorMetadata:
         assert registry.meta_for(Ledger) == {"api_write_fields": None}
 
 
+# ── shard_key (#SHARD1e) — mirrors tenant_scoped exactly ─────────────────────
+
+class TestShardKeyMetadata:
+    def test_default_is_none_on_both_doors(self):
+        class Plain(SnapModel):
+            class Meta:
+                app_label = "demo"
+                abstract = True
+
+        Ledger = _make_plain_model()
+
+        assert registry.get_model_meta(Plain, "shard_key", None) is None
+        assert registry.get_model_meta(Ledger, "shard_key", None) is None
+
+    def test_a_snapmodel_subclass_reads_its_class_attribute(self):
+        class Sharded(SnapModel):
+            shard_key = "user_id"
+
+            class Meta:
+                app_label = "demo"
+                abstract = True
+
+        assert registry.get_model_meta(Sharded, "shard_key", None) == "user_id"
+
+    def test_a_decorated_plain_model_reads_the_keyword(self):
+        Ledger = _make_plain_model(shard_key="user_id")
+
+        assert registry.get_model_meta(Ledger, "shard_key", None) == "user_id"
+
+    def test_true_round_trips_for_the_project_wide_default(self):
+        Ledger = _make_plain_model(shard_key=True)
+
+        assert registry.get_model_meta(Ledger, "shard_key", None) is True
+
+
 class TestAccessorFallback:
     def test_a_snapmodel_subclass_still_reads_its_class_attributes(self):
         class Gadget(SnapModel):

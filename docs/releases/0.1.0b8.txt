@@ -1,18 +1,41 @@
-1.0.0 — 2026-09-03 — First Stable Release
-==========================================
+0.1.0b8 — 2026-09-06 — Eighth Beta
+==================================
 
-The public API is now covered by semantic versioning (see SECURITY.md's API-stability policy).
-This release closes the beta-series deprecation window announced across several 0.1.0b releases —
-three breaking changes below are the result — and adds the largest batch of new capability the
-project has shipped in one release: row-level multi-tenancy, GDPR subject-access export/deletion,
-CSV/NDJSON import, a cache-backed quota primitive, user-defined REST actions, field-level
-permission guards, and a from-scratch documentation completeness sweep. ``models.py`` (2882 lines)
-was also split into ``snapadmin.es``/``snapadmin.jobs``/``snapadmin.admin_gen`` behind an unchanged
+This release closes the beta-series deprecation window announced across several ``0.1.0b``
+releases — the deprecated command aliases and underscored console scripts named under
+``Removed`` below are the result — and adds the largest batch of new capability the project has
+shipped in one release: row-level multi-tenancy, GDPR subject-access export/deletion, CSV/NDJSON
+import, a cache-backed quota primitive, user-defined REST actions, field-level permission
+guards, field-encryption key management, declarative database sharding and read-replica
+routing, and a from-scratch documentation completeness sweep. ``models.py`` (2882 lines) was
+also split into ``snapadmin.es``/``snapadmin.jobs``/``snapadmin.admin_gen`` behind an unchanged
 public facade — an internal reorganisation with no import-path impact, mentioned here for
-completeness rather than under a heading below.
+completeness rather than under a heading below. This is a beta release: the public API is not
+yet covered by semantic versioning (see ``SECURITY.md``'s current API-stability policy) —
+breaking changes remain possible in the ``0.x`` series, always announced here and in
+``CHANGELOG.md``, with a migration guide when manual steps are involved.
 
 Breaking
 --------
+
+* **``SNAPADMIN_PROFILE = "full"`` (and ``"api"``) now really turn the REST and GraphQL surfaces on
+  — check this one before upgrading if you set either.** Read the Fixed entry above for why; the
+  consequence is what matters here. Originally, both presets were empty dicts that fell
+  through to the built-in defaults, and those defaults had just flipped to ``False`` — so a project
+  carrying ``SNAPADMIN_PROFILE = "full"`` (documented at the time as a no-op) was actually running
+  **admin-only, with no API mounted at all**. After this release the same setting mounts REST,
+  GraphQL and Swagger for every registered model, which is what the profile table in the
+  documentation has always promised and what the name says.
+
+  That is a widening of your HTTP attack surface on upgrade, not a cosmetic change, and it lands
+  without any edit to your settings. It matters most because ``api_write_fields`` is unset by
+  default: on a model that never restricted it, every field not named in ``api_exclude_fields``
+  becomes writable through the generated API (``snapadmin.W004`` warns about exactly this). Before
+  upgrading, either confirm you want those surfaces — and audit the write allowlists and PII
+  masking on every registered model first — or pin ``SNAPADMIN_REST_API_ENABLED = False`` and
+  ``SNAPADMIN_GRAPHQL_ENABLED = False`` explicitly, which still wins over any profile. Removing
+  ``SNAPADMIN_PROFILE`` entirely also restores the admin-only behaviour, since an unset profile
+  applies no preset at all.
 
 * **The shipped ``admin.js``'s select2 auto-init is now opt-in.** Only a ``<select>`` carrying a
   ``snapadmin-select2`` class (or ``data-snapadmin-select2`` attribute) gets initialised — not
@@ -36,7 +59,7 @@ Breaking
   ask for one. This is the flip the beta series announced via ``snapadmin.W014`` (now retired —
   its premise, "left unset and still mounted," is unreachable once unset means off); pin either
   setting to ``True`` to restore the previous behaviour. See the migration guide:
-  ``docs/migrations/0.1.0b7_to_1.0.0.md``.
+  ``docs/migrations/0.1.0b7_to_0.1.0b8.md``.
 
 * **``djangorestframework``, ``drf-spectacular``, ``django-filter`` and ``graphene-django`` are no
   longer core dependencies.** They moved behind two new extras: ``[api]`` (the first three — REST
@@ -44,18 +67,10 @@ Breaking
   ``[api]``). A bare ``pip install django-snapadmin`` now pulls only Django, structlog and nh3. Both
   features above default to ``False``, so most installs only need the matching extra once they turn
   a surface on: ``pip install django-snapadmin[api,graphql]`` (or ``[all]``, which reproduces the
-  pre-1.0 dependency graph — a no-op upgrade for an install that already has everything). Turning a
+  pre-0.1.0b8 dependency graph — a no-op upgrade for an install that already has everything). Turning a
   feature on with its extra missing fails loudly — ``snapadmin.urls`` raises
   ``ImproperlyConfigured`` naming the extra, and the new check ``snapadmin.E010`` catches it even
-  earlier, at ``manage.py check``. See the migration guide: ``docs/migrations/0.1.0b7_to_1.0.0.md``.
-
-* **The deprecated command aliases and underscored console scripts are removed**, per the removal
-  window ``SECURITY.md``'s API-stability policy announced through the beta series:
-  ``db_backup``/``purge_expired_data``/``send_error_digest`` (management commands — use
-  ``snapadmin_db_backup``/``snapadmin_purge_expired_data``/``snapadmin_send_error_digest``) and the
-  underscored ``snapadmin_info``/``snapadmin_license_check`` console scripts (use the dashed
-  ``snapadmin-info``/``snapadmin-license-check``, or ``manage.py snapadmin_info``/
-  ``manage.py snapadmin_license_check``, both of which are unaffected).
+  earlier, at ``manage.py check``. See the migration guide: ``docs/migrations/0.1.0b7_to_0.1.0b8.md``.
 
 Retro-note (this heading is new — two known historical cases predate it and were never called out
 per release):
@@ -65,6 +80,7 @@ per release):
   broke with ``ValueError: too many values to unpack`` during admin autodiscovery. The shape is
   pinned going forward (see the generated-admin fix in this same release) so it cannot shift
   silently again.
+
 * ``django-admin-rangefilter`` stopped being a dependency in ``0.1.0b6`` — already documented
   under that release's ``Removed`` heading; see ``docs/releases/0.1.0b6.txt`` rather than
   duplicating the note here.
@@ -97,6 +113,96 @@ per release):
 
 Added
 -----
+
+* **Encrypted model fields get their key management layer.** Field-level encryption — ciphertext at
+  rest in the database, ordinary Python values in application code — rests entirely on one thing
+  being configured correctly, and this release ships that part: the keyset. One dict,
+  ``SNAPADMIN_ENCRYPTION``, is resolved from four sources, most secure first, and the **first one
+  configured wins — they are never merged**, so a stray environment variable cannot half-override a
+  secret store. In order: ``KEY_PROVIDER`` (a dotted path to a callable, the hook for KMS, Vault or
+  Secrets Manager, so nothing secret touches settings *or* the environment; called once per process,
+  never per query), ``KEY_FILE`` (a mounted container secret, also settable as
+  ``SNAPADMIN_ENCRYPTION_KEY_FILE``), the ``SNAPADMIN_ENCRYPTION_KEYS`` environment variable
+  (``id:key`` entries, comma- or newline-separated — the ``.env`` path), and finally literal
+  ``KEYS`` in the settings module, which works but is warned about whenever ``DEBUG`` is off,
+  because a key in a settings module is a key in version control.
+
+  ``python manage.py snapadmin_encryption_key`` generates a key and prints it once, as the
+  environment line to paste into a secret store — it writes it nowhere. ``--rotate`` prints a key to
+  prepend plus the ids already configured, and never their material: the keyset is ordered, the
+  first key encrypts, every key decrypts, and each ciphertext records the id of the key that wrote
+  it, so rotation is prepending one line, deploying, re-encrypting, and only then dropping the old
+  key.
+
+  Two properties are enforced rather than documented. The encryption key can never be Django's
+  ``SECRET_KEY`` (``snapadmin.E017`` fails ``manage.py check``): ``SECRET_KEY`` is rotated for
+  session and CSRF reasons, and reusing it means the damage only becomes visible after a rotation,
+  when every encrypted column is already unreadable. And key material is never rendered — not into a
+  ``repr``, a ``str``, a log line, an exception message or any ``snapadmin_info`` section; only a key
+  id and a short domain-separated fingerprint, which exists so that a restore into an environment
+  holding a *different* keyset is diagnosable instead of looking like data corruption.
+
+  The design is fail-closed. An encrypted field declared with no resolvable keyset stops startup
+  (``snapadmin.E018``); a malformed keyset is reported (``snapadmin.E019``) rather than skipped; a
+  mounted key file readable by group or others is flagged (``snapadmin.W016``); and
+  ``STRICT: False`` relaxes only the startup check, never the runtime refusal to touch an encrypted
+  field without a key (``snapadmin.W018`` says so out loud). ``snapadmin_info --section features``
+  now reports ``field_encryption`` with the key source, key count and keyset fingerprint.
+
+  Existing projects are unaffected in every respect: with no encrypted field declared, the setting is
+  never read, no dependency is imported and no query changes. The ``SnapEncrypted*Field`` family that
+  consumes this layer ships next.
+
+* **Declarative database sharding and read-replica routing.** A project outgrowing one database can
+  now add shards and read replicas by editing one settings dict —
+  ``SNAPADMIN_SHARDING = {"ENABLED": True, ...}`` — instead of hand-rolling Django's ``DATABASES``/
+  ``DATABASE_ROUTERS`` plumbing. Two configuration shapes resolve to the same thing: a flat
+  ``DATABASES`` list of DSNs that the module auto-slices into shards and replicas
+  (``SHARDING_ENABLED``/``MIRRORING_ENABLED``/``REPLICAS_PER_SHARD``), or an explicit ``SHARDS``
+  mapping naming exactly which DSN is which shard's primary/replica. ``SnapAdminRouter`` (registered
+  automatically) resolves a query's shard by ``modulo``, ``hash``, ``range`` or a ``CUSTOM_ROUTER_FUNC``,
+  fails writes over to a live replica when the primary is down (``HA_SETTINGS['AUTO_FAILOVER']``,
+  off by default — enable it only against a replica that can genuinely be promoted, since a
+  read-only standby rejects the write anyway and one that accepts it diverges from the primary and
+  loses those rows when replication resumes), and
+  selects a read replica by ``random``/``round_robin``/``first_available`` — falling back to the
+  primary when every replica is down, or raising when ``HA_SETTINGS['FALLBACK_TO_PRIMARY']`` is
+  ``False`` rather than silently loading the primary with the traffic replicas exist to shield it
+  from. ``snap_master_only()``/``snap_target(shard=..., replica=...)`` force routing for one block of
+  code — both work as a context manager and as a decorator, on a plain function or an ``async def``
+  one alike, via ``contextvars`` so one request's override never leaks into a concurrent one. A model
+  ``STRATEGY`` defaults to ``modulo``, which maps a key to a shard with ``int(value) % shard_count``
+  and therefore needs an integer key: shard by a string or ``UUID`` key with ``STRATEGY = "hash"``
+  instead, or the router raises ``ShardResolutionError`` naming the field, the strategy and the
+  value's *type* — never the value itself, since a shard key is frequently a natural key such as an
+  email address and that message reaches logs and error pages. ``snapadmin_info --section features``
+  reports the shard count, the replica count and the active strategy, and reports a shard map
+  holding an unparseable DSN as off rather than claiming a capability that cannot resolve. A model
+  opts in with a ``shard_key`` attribute (or the matching ``snap_model()`` keyword) — mirroring how
+  ``tenant_scoped`` opts a model into multi-tenancy — so nothing, including Django's own ``auth``/
+  ``sessions``/``admin`` tables, is ever sharded without asking. ``python manage.py snap_migrate``
+  runs migrations against every shard's primary (sequentially, or all at once with ``--parallel``),
+  and ``manage.py snapadmin_db_backup`` now backs up every shard's primary too, one independently
+  checksummed manifest part per shard — a replica is never touched by either command. A new
+  ``snapadmin.sharding.ids.uuid7()`` helper generates RFC 9562 time-ordered UUIDs for a model that
+  wants a collision-free primary key across shards (opt-in — switching a primary key type is the one
+  schema change this feature accepts, and it is entirely the adopting project's own choice). With
+  ``SNAPADMIN_SHARDING`` unset or ``ENABLED: False``, nothing here runs: no new ``DATABASES`` entry,
+  no extra router, no query overhead — an existing single-database project is unaffected.
+
+* **Generate AGE backup-encryption keypairs from the library.** ``SNAPADMIN_BACKUP_AGE_RECIPIENTS``
+  has always *consumed* age public keys generated some other way; ``python manage.py
+  snapadmin_age_keygen`` now generates one, using the same ``pyrage``/``age-keygen`` backend
+  resolution the backup encryption pipeline already uses. The keypair is written to a new ``.age/``
+  directory at the project root — only the public recipient is ever printed, the private key is
+  written once and never logged. Before writing anything, the command checks the project's
+  ``.gitignore`` for a rule that would already exclude ``.age/`` — recognising not just a literal
+  ``.age``/``.age/`` line but broader patterns too (a leading-slash anchor, a ``**/`` prefix or
+  ``/**`` suffix, and a blanket dotfile rule like ``.*``) — and appends one with a clear message if
+  none is found, rather than silently trusting the private key won't end up committed. Every run
+  closes with an unmissable reminder to move the private key to a secure location and delete the
+  local ``.age/`` directory, which is a convenience for generation, never a place to keep a private
+  key long-term.
 
 * **``snap_field()`` reaches full parity with ``Snap*Field`` — every constructor kwarg is now
   accepted.** Three that used to raise ``ValueError`` are now supported: ``required=True``
@@ -532,8 +638,95 @@ Changed
 * ``SNAPADMIN_CONNECTIVITY_ENABLED`` gates the admin-wide connectivity layer and now defaults to
   ``False`` — see Breaking, above.
 
+Removed
+-------
+
+* **The deprecated command aliases and underscored console scripts are removed in this release**,
+  closing the beta-series removal window announced since ``0.1.0b6`` and reiterated in
+  ``SECURITY.md``'s API-stability policy:
+  ``db_backup``/``purge_expired_data``/``send_error_digest`` (management commands — use
+  ``snapadmin_db_backup``/``snapadmin_purge_expired_data``/``snapadmin_send_error_digest``) and the
+  underscored ``snapadmin_info``/``snapadmin_license_check`` console scripts (use the dashed
+  ``snapadmin-info``/``snapadmin-license-check``, or ``manage.py snapadmin_info``/
+  ``manage.py snapadmin_license_check``, both of which are unaffected). There is no runtime
+  fallback left — see the migration guide: ``docs/migrations/0.1.0b7_to_0.1.0b8.md``.
+
 Fixed
 -----
+
+* **The REST/GraphQL default-off flip above now reaches every layer, not just the URLconf.** This
+  release changed ``SNAPADMIN_REST_API_ENABLED`` and ``SNAPADMIN_GRAPHQL_ENABLED`` to default to
+  ``False``, but the change landed only in ``snapadmin/urls.py`` — the module that decides what is *mounted*. Every
+  module that decides what is *reported* kept its own ``True``, so a project that never set either
+  switch got an install that mounted no API while insisting one was there: ``manage.py check``
+  raised two ``snapadmin.E010`` errors demanding the ``[api]``/``[graphql]`` extras for surfaces
+  that would never be served (blocking startup under ``DEBUG = False``),
+  ``snapadmin_info --section features`` listed ``rest_api`` and ``graphql`` as adopted, the
+  ``snapadmin_info`` API and GraphQL health probes ran against endpoints that were not mounted, and
+  the system dashboard rendered links to ``/api/`` and ``/api/graphql/``. All eleven read sites now
+  resolve the default from one place (``snapadmin.conf.REST_API_ENABLED_DEFAULT`` /
+  ``GRAPHQL_ENABLED_DEFAULT``), and a test fails the build if a new read site spells the default out
+  for itself again. A project that sets either switch explicitly is unaffected — this only changes
+  what an install that never configured the API reports about itself.
+
+* **``SNAPADMIN_PROFILE = "api"`` no longer turns the API off.** The ``api`` and ``full`` presets
+  were empty dicts, on the reasoning that the built-in defaults already turned REST and GraphQL on,
+  so there was nothing for a preset to move. When those defaults flipped to ``False`` above, both
+  profiles inverted along with them, and ``api`` — a profile whose entire purpose is "REST +
+  GraphQL on" — began resolving ``SNAPADMIN_REST_API_ENABLED``, ``SNAPADMIN_GRAPHQL_ENABLED`` and
+  ``SNAPADMIN_SWAGGER_ENABLED`` to ``False``, contradicting the preset table in the documentation.
+  Both profiles now state their values explicitly, so a profile means what its name says regardless
+  of what any built-in default happens to be. One consequence worth noting: ``full`` and "no
+  profile" used to be interchangeable and are not any more — ``full`` turns the surfaces on, while
+  leaving ``SNAPADMIN_PROFILE`` unset remains exactly the pre-profile behaviour it has always been.
+
+* **A project generated by ``snapadmin-new`` now installs from its own ``requirements.txt``.** The
+  generated settings list ``rest_framework``, ``drf_spectacular``, ``django_filters`` and
+  ``graphene_django`` in ``INSTALLED_APPS``, but the requirements file asked for a bare
+  ``django-snapadmin`` — and those four packages moved behind the ``[api]`` and ``[graphql]``
+  extras, so a clean environment got a project that died at ``django.setup()`` with
+  ``ModuleNotFoundError: No module named 'rest_framework'``, before any SnapAdmin check could
+  explain why. The requirements file now asks for ``django-snapadmin[api,graphql]``, and the
+  generated README says to install from it rather than by package name. This is the scaffold's
+  core promise — ``migrate`` then ``runserver``, no manual edits — so it is now pinned by a test
+  that maps every third-party app in the generated ``INSTALLED_APPS`` back to the extra that ships
+  it. (The existing end-to-end test could not catch this: it runs in a development environment
+  where every extra is already present.)
+
+* **The demo project now actually demonstrates the three capabilities it was silent about.**
+  ``demo/README.md`` claimed the project "deliberately exercises" PII masking while
+  ``SNAPADMIN_MASKED_FIELDS`` and ``SNAPADMIN_MASKING_RULES`` were both empty dicts and
+  ``snapadmin_info --section features`` reported ``pii_masking: off``. Masking is now configured for
+  real (``CustomerProfile.bio``, redacted behind one narrow permission). Two further capabilities had
+  shipped with no demo surface at all and now have one: ``@snap_model`` — the second of the two
+  documented ways to declare a model, which had zero usages even though the documentation gives it a
+  whole capability matrix — and ``api_field_permissions``. Both land on one new plain
+  ``django.db.models.Model``, ``LegacyStockLevel``, opted in with the decorator rather than by
+  subclassing, with the trade-offs visible rather than described: no Elasticsearch, no retention
+  purge, and a hand-written ``ModelAdmin`` because the generator has nothing to work from. Its
+  ``reorder_cost`` is readable only with ``demo.view_stock_cost``, which is the field-permission
+  guard doing the thing masking cannot — removing a field rather than starring it.
+
+* **The system dashboard's REST and GraphQL links are reversed rather than spelled out.** They were
+  the literals ``/api/`` and ``/api/graphql/`` while the Swagger link beside them already used
+  ``reverse()``, so under ``SNAPADMIN_URL_PREFIX`` — or in any project that includes
+  ``snapadmin.urls`` somewhere other than ``/api/`` — the dashboard advertised two endpoints that
+  answered 404, on the very surfaces it had just reported as enabled. A surface that is switched on
+  but whose URLconf was never included now costs that one link instead of raising inside the view.
+
+* **Stale references cleaned out of shipped comments and test docstrings.** Fourteen ``issue #N``
+  markers survived in ``snapadmin/nesting.py``, ``demo/core/settings.py``, ``demo/core/urls.py`` and
+  ``demo/dist.env``; there is no public issue tracker, so GitHub rendered each as a link to nothing.
+  The descriptive half of each is kept (an "issue #7 — DORA / ISO 27001" note is now simply
+  "DORA / ISO 27001"); the historical release notes for 0.1.0a8/a9 keep theirs, because those record
+  what was published at the time. Two test docstrings also documented modules that no longer exist
+  (``snapadmin/api/tasks.py``, ``management/commands/purge_expired_data.py``, both renamed releases
+  ago) — an AI assistant reading them for orientation was being pointed at files that are not there.
+
+* **``snapadmin_license_check`` tests no longer depend on the day they are run.** The ``--json``
+  report's ``curated_age_days`` was asserted to be ``0``, which is only true on the date the curated
+  licence table was last reviewed; the suite turned red every day after. No change to the command's
+  behaviour.
 
 * **A project's own ``admin_overrides`` no longer loses to the generated admin.** The generated
   ``get_readonly_fields`` and ``safe_html_<field>`` display methods are now merged onto the admin

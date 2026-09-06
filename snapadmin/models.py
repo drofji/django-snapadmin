@@ -851,6 +851,17 @@ class SnapModel(AdminGenMixin, models.Model):
     # setting, can override it too. None (the default) resolves to "tenant_id".
     tenant_field: str | None = None
 
+    # Database sharding (#SHARD1e). Set shard_key to opt this model into
+    # snapadmin.sharding's SnapAdminRouter — a model that never sets it (the
+    # default) is entirely untouched, exactly like tenant_scoped above, and
+    # resolved the same way (get_model_meta(), so a @snap_model()-decorated
+    # plain model carries the same keyword). A string names the field the
+    # router shards by (shard_key = "user_id"); True uses the project-wide
+    # default (SNAPADMIN_SHARDING['SHARD_KEY'], itself defaulting to "id").
+    # Inert unless SNAPADMIN_SHARDING['ENABLED'] is also True. See
+    # snapadmin.sharding for the full mechanism.
+    shard_key: str | bool | None = None
+
     # Offline mode
     # Set offline_mode = True to enable client-side caching (IndexedDB) of this model's
     # admin list view. When the browser loses connectivity, a red offline banner appears
@@ -2298,8 +2309,7 @@ def _as_lookup_map(value: Any) -> Any:
 #: yet — the model-side mirror of ``fields._SNAP_FIELD_WRAPPER_DOCUMENTED_EXCLUSIONS``
 #: (#PAR1d). Each is tracked by a specific #RFC1g capability that needs more than
 #: a keyword to retrofit (an attached manager, a shared purge classmethod, an
-#: admin-generation refactor) — see the #RFC1g verdict table in
-#: ``.claude/roadmap.md``. ``objects`` (the attached ``EsManager``) is
+#: admin-generation refactor). ``objects`` (the attached ``EsManager``) is
 #: deliberately not tracked here: it is a manager instance, not a scalar/list
 #: config value, so there is no sensible ``objects=`` keyword to add in the
 #: first place. ``tests/test_snap_model_decorator.py``'s drift guard asserts
@@ -2337,6 +2347,7 @@ def snap_model(
     subject_path: str | None = _UNSET,
     is_data_subject: bool = _UNSET,
     subject_identifier: str | None = _UNSET,
+    shard_key: str | bool | None = _UNSET,
 ) -> Callable[[type[models.Model]], type[models.Model]]:
     """Opt a plain ``django.db.models.Model`` into SnapAdmin, without subclassing.
 
@@ -2437,6 +2448,12 @@ def snap_model(
         ``check_subject_paths``, not merely documented).
     :param subject_identifier: The field name on *this* model holding the raw
         identifier value, required when ``is_data_subject=True``.
+    :param shard_key: Opts this model into ``snapadmin.sharding``'s
+        ``SnapAdminRouter`` — a string names the field to shard by
+        (``shard_key="user_id"``), ``True`` uses the project-wide default
+        (``SNAPADMIN_SHARDING['SHARD_KEY']``). Left unset, the model is
+        untouched by sharding, mirroring ``tenant_scoped``. Inert unless
+        ``SNAPADMIN_SHARDING['ENABLED']`` is also ``True``.
     :raises TypeError: if applied to anything that is not a ``models.Model``
         subclass.
     """
@@ -2454,6 +2471,7 @@ def snap_model(
         "subject_path": subject_path,
         "is_data_subject": is_data_subject,
         "subject_identifier": subject_identifier,
+        "shard_key": shard_key,
     }
     given = {name: value for name, value in meta.items() if value is not _UNSET}
 

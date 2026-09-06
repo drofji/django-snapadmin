@@ -30,7 +30,9 @@ class TestTextReport:
         assert "Django" in out
         assert "Vulnerability scan:" in out
         assert f"Curated data last reviewed: {CURATED_REVIEWED_ON.isoformat()}" in out
-        assert "Curated licence data is over" not in out  # fresh — no staleness warning
+        # Whether the staleness warning fires is a function of today's date, so it is pinned by
+        # test_stale_curated_data_warns / test_fresh_curated_data_does_not_warn with an injected
+        # age instead — asserting either way here would make this test expire on a calendar date.
 
     def test_stale_curated_data_warns(self, monkeypatch):
         monkeypatch.setattr(CMD + ".curated_staleness", lambda: (200, True))
@@ -77,15 +79,26 @@ class TestTextReport:
 
 
 class TestJsonReport:
-    def test_json_structure(self):
+    def test_json_structure(self, monkeypatch):
+        # curated_staleness() is injected rather than left on the live clock: it returns
+        # date.today() - CURATED_REVIEWED_ON, so any hardcoded age here is only true on the day
+        # the curated table was last reviewed and turns the suite red every day after.
+        monkeypatch.setattr(CMD + ".curated_staleness", lambda: (42, False))
         payload = json.loads(_run(as_json=True))
         assert "packages" in payload
         assert "verdict" in payload
         assert "vulnerability_scan" in payload
         assert payload["vulnerability_scan"]["ran"] is False
         assert payload["curated_reviewed_on"] == CURATED_REVIEWED_ON.isoformat()
-        assert payload["curated_age_days"] == 0
+        assert payload["curated_age_days"] == 42
         assert payload["curated_stale"] is False
+
+    def test_json_reports_stale_curated_data(self, monkeypatch):
+        """The staleness verdict reaches --json, not just the text report."""
+        monkeypatch.setattr(CMD + ".curated_staleness", lambda: (200, True))
+        payload = json.loads(_run(as_json=True))
+        assert payload["curated_age_days"] == 200
+        assert payload["curated_stale"] is True
 
     def test_json_verbose_includes_uncurated(self, monkeypatch):
         monkeypatch.setattr(CMD + ".audit_uncurated", lambda: [("mystery", "GPL-3.0", Tier.RESTRICTED)])

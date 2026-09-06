@@ -11,6 +11,12 @@ from django.test import override_settings
 
 from snapadmin.diagnostics import features as features_collector
 from snapadmin.diagnostics import get_collector
+from snapadmin.encryption import keys as encryption_keys
+
+
+def raising_key_provider():
+    """A KEY_PROVIDER that fails with something other than ImproperlyConfigured."""
+    raise RuntimeError("vault unreachable")
 
 
 def _collect(*, verbose=False):
@@ -126,13 +132,20 @@ class TestSettingsGatedCapabilities:
             data = _collect(verbose=True)
         assert data["details"]["backups"] == "db, destinations: local, restored"
 
-    @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.customer": ["email", "origin"]})
+    # Both settings are pinned, not just SNAPADMIN_MASKED_FIELDS: the demo project
+    # dogfoods masking through SNAPADMIN_MASKING_RULES, and a rule declares its field
+    # sensitive on its own, so leaving the rules ambient would let the demo's own
+    # configuration count towards the number this test asserts.
+    @override_settings(
+        SNAPADMIN_MASKED_FIELDS={"demo.customer": ["email", "origin"]},
+        SNAPADMIN_MASKING_RULES={},
+    )
     def test_pii_masking_counts_fields(self):
         data = _collect(verbose=True)
         assert data["pii_masking"] is True
         assert data["details"]["pii_masking"] == "2 fields"
 
-    @override_settings(SNAPADMIN_MASKED_FIELDS={})
+    @override_settings(SNAPADMIN_MASKED_FIELDS={}, SNAPADMIN_MASKING_RULES={})
     def test_pii_masking_off_when_unconfigured(self):
         assert _collect()["pii_masking"] is False
 
@@ -154,6 +167,87 @@ class TestSettingsGatedCapabilities:
     def test_pii_masking_counts_the_union_not_the_sum(self):
         data = _collect(verbose=True)
         assert data["details"]["pii_masking"] == "2 fields, 1 rule"
+
+    def test_field_encryption_off_when_no_key_resolves(self):
+        encryption_keys.reset_keyset()
+        assert _collect()["field_encryption"] is False
+
+    def test_field_encryption_on_reports_source_and_fingerprint_only(self):
+        import base64
+
+        material = base64.urlsafe_b64encode(b"k" * 32).decode()
+        with override_settings(SNAPADMIN_ENCRYPTION={"KEYS": [{"id": "k1", "key": material}]}):
+            encryption_keys.reset_keyset()
+            try:
+                data = _collect(verbose=True)
+                keyset = encryption_keys.get_keyset()
+            finally:
+                encryption_keys.reset_keyset()
+        assert data["field_encryption"] is True
+        detail = data["details"]["field_encryption"]
+        assert detail == f"settings, 1 key, fingerprint {keyset.fingerprint}"
+        assert material not in detail
+
+    def test_field_encryption_reports_a_broken_keyset_as_off(self):
+        with override_settings(SNAPADMIN_ENCRYPTION={"KEYS": [{"id": "k1", "key": "nonsense !!"}]}):
+            encryption_keys.reset_keyset()
+            try:
+                data = _collect(verbose=True)
+            finally:
+                encryption_keys.reset_keyset()
+        assert data["field_encryption"] is False
+        assert data["details"]["field_encryption"] == "misconfigured — run manage.py check"
+
+    def test_a_raising_key_provider_does_not_blank_the_whole_report(self):
+        """One broken probe must never cost the other 25 rows.
+
+        `Collector.collect` replaces the entire capability report with a single
+        `collector_error` if a probe raises, so a `KEY_PROVIDER` that fails with
+        anything other than `ImproperlyConfigured` would turn `snapadmin_info`
+        into the one thing it exists to prevent: a report that says nothing
+        instead of saying what is on.
+        """
+        with override_settings(SNAPADMIN_ENCRYPTION={
+            "KEY_PROVIDER": "tests.test_diagnostics_features.raising_key_provider",
+        }):
+            encryption_keys.reset_keyset()
+            try:
+                data = _collect(verbose=True)
+            finally:
+                encryption_keys.reset_keyset()
+        assert "collector_error" not in data
+        assert data["field_encryption"] is False
+        assert data["details"]["field_encryption"] == "misconfigured — run manage.py check"
+        assert data["rest_api"] is not None  # the neighbouring rows survived
+
+    def test_sharding_off_when_unset(self):
+        assert _collect()["sharding"] is False
+
+    @override_settings(SNAPADMIN_SHARDING={
+        "ENABLED": True,
+        "STRATEGY": "hash",
+        "SHARDS": {
+            "s1": {"PRIMARY": "postgres://u:p@h1:5432/db", "REPLICAS": ["postgres://u:p@r1:5432/db"]},
+            "s2": {"PRIMARY": "postgres://u:p@h2:5432/db"},
+        },
+    })
+    def test_sharding_on_reports_shard_replica_counts_and_strategy(self):
+        data = _collect(verbose=True)
+        assert data["sharding"] is True
+        assert data["details"]["sharding"] == "2 shards, 1 replica, strategy 'hash'"
+
+    @override_settings(SNAPADMIN_SHARDING={"ENABLED": False, "SHARDS": {
+        "s1": {"PRIMARY": "postgres://u:p@h1:5432/db"}}})
+    def test_sharding_off_when_disabled_even_with_shards_declared(self):
+        assert _collect()["sharding"] is False
+
+    @override_settings(SNAPADMIN_SHARDING={"ENABLED": True, "SHARDS": {"s": {"PRIMARY": "redis://a:6379/0"}}})
+    def test_sharding_reports_a_broken_config_as_off(self):
+        """Mirrors the encryption collector: never claim a capability is on when
+        it cannot even resolve. `manage.py check` reports the specifics (E013)."""
+        data = _collect(verbose=True)
+        assert data["sharding"] is False
+        assert data["details"]["sharding"] == "misconfigured — run manage.py check"
 
     @override_settings(SNAPADMIN_HEALTH_ALERT_EMAILS=["ops@example.com"])
     def test_health_alerts_on_with_recipients(self):
@@ -296,7 +390,23 @@ class TestModelBasedCapabilities:
         monkeypatch.setattr(Product, "api_write_fields", ["name"], raising=False)
         assert _collect()["write_allowlist"] is True
 
-    def test_decorated_models_off_when_every_model_subclasses_snapmodel(self):
+    def test_decorated_models_detected_in_the_demo(self):
+        """The demo opts one plain model in with @snap_model, so this reads on."""
+        data = _collect(verbose=True)
+        assert data["decorated_models"] is True
+        assert "plain model" in data["details"]["decorated_models"]
+
+    def test_decorated_models_off_when_every_model_subclasses_snapmodel(self, monkeypatch):
+        """The "off" half, scoped to an explicit model list.
+
+        It used to read the live registry and pass only because no installed model was
+        decorated — so the day the demo grew one (which is the feature working as
+        intended) the test failed for a reason that had nothing to do with the collector.
+        """
+        from demo.apps.shop.models import Customer, Product
+        monkeypatch.setattr(
+            features_collector, "_concrete_snap_models", lambda: [Product, Customer],
+        )
         data = _collect(verbose=True)
         assert data["decorated_models"] is False
         assert "decorated_models" not in data.get("details", {})
@@ -362,9 +472,18 @@ class TestSnapActions:
 
 
 class TestFieldPermissions:
-    def test_off_by_default(self):
-        # No demo model declares api_field_permissions by default.
-        assert _collect()["field_permissions"] is False
+    def test_off_when_no_model_in_scope_declares_any(self):
+        # Scoped to an explicit model list, like test_detected_when_configured below.
+        # Reading the live registry instead used to work only while no demo model
+        # declared api_field_permissions — LegacyStockLevel now does, on purpose.
+        from demo.apps.shop.models import Product
+        enabled, detail = features_collector._field_permissions([Product])
+        assert enabled is False
+        assert detail == ""
+
+    def test_detected_in_the_demo(self):
+        """The demo declares one guarded field, so the live report reads on."""
+        assert _collect()["field_permissions"] is True
 
     def test_detected_when_configured(self, monkeypatch):
         # Scoped to an explicit model list (mirrors

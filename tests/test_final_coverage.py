@@ -7,9 +7,9 @@ Targeted tests closing the final coverage gaps across snapadmin/ so that
 Covers the previously-uncovered lines in:
   - snapadmin/api/authentication.py  (UnicodeDecodeError token header)
   - snapadmin/api/graphql.py         (single/list resolvers + introspection error)
-  - snapadmin/api/tasks.py           (ES_ONLY skip in purge_expired_data)
+  - snapadmin/tasks.py               (ES_ONLY skip in purge_expired_data)
   - snapadmin/api/views.py           (get_queryset model-not-found)
-  - snapadmin/management/commands/purge_expired_data.py (ES_ONLY skip)
+  - snapadmin/management/commands/snapadmin_purge_expired_data.py (ES_ONLY skip)
   - snapadmin/models.py              (SnapSaveMixin paths, ES error paths,
                                       FieldDoesNotExist register paths)
   - snapadmin/urls.py                (GraphQL wiring failure branch)

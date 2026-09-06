@@ -288,7 +288,10 @@ def test_snap_model_decorator_signature():
     attaches none of the machinery that would act on them. ``subject_path``/
     ``is_data_subject``/``subject_identifier`` (#FUT4a/#FUT4b) are pure registry
     metadata — no runtime machinery needed — so they *are* accepted here, unlike
-    the ``es_*``/``data_retention_*`` families.
+    the ``es_*``/``data_retention_*`` families. ``shard_key`` (#SHARD1e) is the
+    same shape of exception: pure registry metadata read by
+    ``snapadmin.sharding.router.SnapAdminRouter``, no runtime machinery attached
+    by the decorator itself.
     """
     from snapadmin.models import snap_model
 
@@ -296,7 +299,7 @@ def test_snap_model_decorator_signature():
         "api_exclude_fields", "api_write_fields", "api_read_only",
         "api_http_method_names", "api_filter_lookups", "api_default_text_lookups",
         "api_json_filters", "offline_mode", "offline_cache_limit", "search_fields",
-        "subject_path", "is_data_subject", "subject_identifier",
+        "subject_path", "is_data_subject", "subject_identifier", "shard_key",
     ]
     assert all(
         param.kind is inspect.Parameter.KEYWORD_ONLY

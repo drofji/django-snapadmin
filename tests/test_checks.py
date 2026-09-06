@@ -1194,6 +1194,123 @@ class TestEmptyAdminForms:
         assert "demo.ExchangeRate" not in _w015_message()
 
 
+# ── sharding config (E013-E016) ───────────────────────────────────────────────
+
+class TestShardingConfig:
+    def test_disabled_is_clean(self):
+        assert checks.check_sharding_config(None) == []
+
+    @override_settings(SNAPADMIN_SHARDING={
+        "ENABLED": True,
+        "SHARDS": {"s": {"PRIMARY": "redis://a:6379/0"}},
+    })
+    def test_unparseable_dsn_errors(self):
+        assert [e.id for e in checks.check_sharding_config(None)] == ["snapadmin.E013"]
+
+    @override_settings(SNAPADMIN_SHARDING={
+        "ENABLED": True,
+        "SHARDS": {"s": {"PRIMARY": "postgres://u:p@h:5432/db"}},
+    })
+    def test_valid_config_is_clean(self):
+        assert checks.check_sharding_config(None) == []
+
+    @override_settings(SNAPADMIN_SHARDING={
+        "ENABLED": True,
+        "SHARDS": {"s": {
+            "PRIMARY": "postgres://u:p@h:5432/db",
+            "REPLICAS": ["redis://replica:6379/0"],
+        }},
+    })
+    def test_unparseable_replica_dsn_errors(self):
+        """A valid primary does not excuse an unparseable replica.
+
+        The primary parses, so only the replica loop can catch this one — a
+        shard whose replicas are misconfigured routes every read at a database
+        that cannot be reached.
+        """
+        assert [e.id for e in checks.check_sharding_config(None)] == ["snapadmin.E013"]
+
+
+class TestShardingStrategy:
+    def test_disabled_is_clean(self):
+        assert checks.check_sharding_strategy(None) == []
+
+    @override_settings(SNAPADMIN_SHARDING={"ENABLED": True, "STRATEGY": "bogus"})
+    def test_unknown_strategy_errors(self):
+        assert [e.id for e in checks.check_sharding_strategy(None)] == ["snapadmin.E014"]
+
+    @override_settings(SNAPADMIN_SHARDING={"ENABLED": True, "STRATEGY": "custom"})
+    def test_custom_strategy_with_no_router_func_errors(self):
+        assert [e.id for e in checks.check_sharding_strategy(None)] == ["snapadmin.E014"]
+
+    @override_settings(SNAPADMIN_SHARDING={
+        "ENABLED": True, "STRATEGY": "custom", "CUSTOM_ROUTER_FUNC": "does.not.exist",
+    })
+    def test_custom_strategy_with_unimportable_router_func_errors(self):
+        assert [e.id for e in checks.check_sharding_strategy(None)] == ["snapadmin.E014"]
+
+    @override_settings(SNAPADMIN_SHARDING={
+        "ENABLED": True, "STRATEGY": "custom",
+        "CUSTOM_ROUTER_FUNC": "snapadmin.checks.check_sharding_strategy",
+    })
+    def test_custom_strategy_with_importable_router_func_is_clean(self):
+        assert checks.check_sharding_strategy(None) == []
+
+    @override_settings(SNAPADMIN_SHARDING={"ENABLED": True, "REPLICA_SELECTION": "bogus"})
+    def test_unknown_replica_selection_errors(self):
+        assert [e.id for e in checks.check_sharding_strategy(None)] == ["snapadmin.E015"]
+
+    @override_settings(SNAPADMIN_SHARDING={"ENABLED": True})
+    def test_default_strategy_and_selection_are_clean(self):
+        assert checks.check_sharding_strategy(None) == []
+
+
+class TestShardingRanges:
+    def test_disabled_is_clean(self):
+        assert checks.check_sharding_ranges(None) == []
+
+    @override_settings(SNAPADMIN_SHARDING={"ENABLED": True, "STRATEGY": "modulo"})
+    def test_non_range_strategy_is_clean(self):
+        assert checks.check_sharding_ranges(None) == []
+
+    @override_settings(SNAPADMIN_SHARDING={
+        "ENABLED": True, "STRATEGY": "range",
+        "SHARDS": {"s": {"PRIMARY": "postgres://u:p@h:5432/db"}},
+    })
+    def test_missing_range_errors(self):
+        assert [e.id for e in checks.check_sharding_ranges(None)] == ["snapadmin.E016"]
+
+    @override_settings(SNAPADMIN_SHARDING={
+        "ENABLED": True, "STRATEGY": "range",
+        "SHARDS": {
+            "s1": {"PRIMARY": "postgres://u:p@a:5432/db", "RANGE": (0, 100)},
+            "s2": {"PRIMARY": "postgres://u:p@b:5432/db", "RANGE": (50, 150)},
+        },
+    })
+    def test_overlapping_ranges_error(self):
+        assert [e.id for e in checks.check_sharding_ranges(None)] == ["snapadmin.E016"]
+
+    @override_settings(SNAPADMIN_SHARDING={
+        "ENABLED": True, "STRATEGY": "range",
+        "SHARDS": {
+            "s1": {"PRIMARY": "postgres://u:p@a:5432/db", "RANGE": (0, 100)},
+            "s2": {"PRIMARY": "postgres://u:p@b:5432/db", "RANGE": (101, 200)},
+        },
+    })
+    def test_non_overlapping_ranges_are_clean(self):
+        assert checks.check_sharding_ranges(None) == []
+
+    @override_settings(SNAPADMIN_SHARDING={
+        "ENABLED": True, "STRATEGY": "range",
+        "SHARDS": {"s": {}},  # no PRIMARY — get_shards() itself raises
+    })
+    def test_unresolvable_shards_defers_to_check_sharding_config(self):
+        # A shard shape that get_shards() itself cannot resolve at all (as
+        # opposed to a resolvable shape with a bad DSN) must not also raise
+        # here or double-report — that is check_sharding_config's job.
+        assert checks.check_sharding_ranges(None) == []
+
+
 # ── integration ──────────────────────────────────────────────────────────────
 
 class TestIntegration:

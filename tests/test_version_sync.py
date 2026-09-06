@@ -124,3 +124,100 @@ class TestReleaseStateSites:
         site = "CHANGELOG.md top released section"
         found = _find(r"^## ([^\s]+) — ", rest, site)
         _assert_site_matches(found, site)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# llms.txt — the AI-facing entry point, and the one release-state site nothing
+# in this file used to check
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: Words that describe the package as not yet stable. ``llms.txt`` is usually the first and
+#: sometimes the only thing an AI assistant reads about SnapAdmin, so a stale one of these does not
+#: just misinform — it gets repeated as advice ("pin it, the package is beta").
+_PRERELEASE_WORDS = ("beta", "alpha", "pre-release", "prerelease")
+
+#: A version is a stable release when it carries no PEP 440 pre-release/dev segment.
+_PRERELEASE_MARKER = re.compile(r"(a|b|rc|\.dev)\d*$")
+
+
+class TestLlmsTxtMatchesTheReleaseState:
+    """``llms.txt`` survived the 1.0.0 cut still opening with "the package is beta".
+
+    Every other release-state site in this file was checked at release time and updated; this one
+    was not, because nothing asserted it. The two copies were byte-identical and every anchor it
+    linked to resolved, so ``test_ai_entry_points.py`` passed throughout — structure was pinned,
+    the claim was not.
+    """
+
+    def _summary_line(self) -> str:
+        """The blockquote directly under the H1 — llmstxt.org's one-paragraph summary."""
+        for path in (REPO_ROOT / "llms.txt", REPO_ROOT / "docs" / "llms.txt"):
+            assert path.exists(), f"{path} is missing"
+        text = (REPO_ROOT / "llms.txt").read_text(encoding="utf-8")
+        match = re.search(r"^> (.+)$", text, re.MULTILINE)
+        assert match, "llms.txt has no `> ...` summary line under its H1"
+        return match.group(1)
+
+    def test_summary_does_not_call_a_stable_release_a_prerelease(self):
+        if _PRERELEASE_MARKER.search(VERSION):
+            return  # genuinely a pre-release — saying so is correct
+        summary = self._summary_line().lower()
+        stale = [word for word in _PRERELEASE_WORDS if word in summary]
+        assert not stale, (
+            f"llms.txt's summary still calls the package {stale} while pyproject.toml is at the "
+            f"stable version {VERSION!r} — an assistant reading it will repeat that as advice"
+        )
+
+    def test_a_prerelease_is_still_described_as_one(self):
+        """The inverse: going back to a pre-release must not leave a 'stable' claim behind."""
+        if not _PRERELEASE_MARKER.search(VERSION):
+            return
+        summary = self._summary_line().lower()
+        assert any(word in summary for word in _PRERELEASE_WORDS), (
+            f"pyproject.toml is at the pre-release {VERSION!r} but llms.txt's summary does not say "
+            "so — it reads as a stable-release claim"
+        )
+
+    def test_both_copies_carry_the_same_summary(self):
+        """Cheap here, and the failure it catches (an edit applied to one copy) is common."""
+        root = (REPO_ROOT / "llms.txt").read_text(encoding="utf-8")
+        served = (REPO_ROOT / "docs" / "llms.txt").read_text(encoding="utf-8")
+        assert root == served, "llms.txt and docs/llms.txt have drifted — edit one, cp it over the other"
+
+
+class TestLlmsTxtCarriesTheAdoptionDecisions:
+    """The section an assistant is meant to raise with a developer before writing any wiring.
+
+    Without it the decisions are still *documented* — but only spread across the Operations link
+    lines, which is where they were before, and which is why an assistant reading llms.txt could
+    describe every feature accurately and still never mention that ``subject_path`` is mandatory.
+    """
+
+    def _text(self) -> str:
+        return (REPO_ROOT / "llms.txt").read_text(encoding="utf-8")
+
+    def test_the_section_exists(self):
+        assert "## Decisions to settle with the developer" in self._text()
+
+    def test_it_names_the_decisions_that_fail_quietly(self):
+        text = self._text()
+        section = text.split("## Decisions to settle with the developer", 1)[1].split("\n## ", 1)[0]
+        # Each of these is either mandatory (subject_path), or defaults to the permissive answer
+        # (write allowlists, masking), or does nothing without infrastructure (retention purge).
+        for token in (
+            "subject_path",
+            "snapadmin.E011",
+            "api_write_fields",
+            "SNAPADMIN_MASKED_FIELDS",
+            "api_field_permissions",
+            "tenant_scoped",
+            "SNAPADMIN_BACKUP_AGE_RECIPIENTS",
+            "CELERY_BEAT_SCHEDULE",
+            "SNAPADMIN_PROFILE",
+        ):
+            assert token in section, f"the decisions section never mentions {token}"
+
+    def test_it_links_the_runnable_form_of_itself(self):
+        """The prose list is the conversation; the checklist is how each answer gets proven."""
+        section = self._text().split("## Decisions to settle with the developer", 1)[1]
+        assert "#integration-checklist" in section.split("\n## ", 1)[0]

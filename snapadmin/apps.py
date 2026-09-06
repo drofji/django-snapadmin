@@ -3,10 +3,12 @@ Django ``AppConfig`` for SnapAdmin.
 
 ``SnapAdminConfig.ready()`` wires the package's startup work: connecting the
 ``post_migrate`` hook that ensures Elasticsearch indices/mappings, installing the
-nested-app shim, registering the ``snapadmin.*`` system checks, and applying the
-optional Unfold re-styling of the extra_settings admin and of Django's built-in
-``auth`` admin. Every optional integration it touches is guarded so a missing/
-half-installed package degrades rather than crashing ``django.setup()``.
+nested-app shim, configuring optional multi-shard/read-replica database routing
+(``snapadmin.sharding``), registering the ``snapadmin.*`` system checks, and
+applying the optional Unfold re-styling of the extra_settings admin and of
+Django's built-in ``auth`` admin. Every optional integration it touches is
+guarded so a missing/half-installed package (or a sharding misconfiguration)
+degrades rather than crashing ``django.setup()``.
 """
 
 from django.apps import AppConfig, apps
@@ -66,6 +68,9 @@ class SnapAdminConfig(AppConfig):
     def ready(self):
         post_migrate.connect(sync_es_mappings, sender=self)
         install_nested_apps()
+
+        from snapadmin.sharding.registration import configure_sharding
+        configure_sharding()
 
         from snapadmin.checks import register_checks
         register_checks()

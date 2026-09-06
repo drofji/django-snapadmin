@@ -10,17 +10,25 @@ the small HTML side.
 
 import os
 import platform
+
+import structlog
 from django.contrib.auth.mixins import AccessMixin
 from django.views.generic import TemplateView
 from django.conf import settings
-from django.urls import reverse
+from django.urls import NoReverseMatch, reverse
 from django.db import connections
 from django.db.utils import OperationalError
 from django.utils.text import capfirst
 from django.utils.translation import gettext_lazy as _
 
 from snapadmin import __version__
-from snapadmin.conf import get_setting
+from snapadmin.conf import (
+    GRAPHQL_ENABLED_DEFAULT,
+    REST_API_ENABLED_DEFAULT,
+    get_setting,
+)
+
+logger = structlog.get_logger(__name__)
 
 #: Display label per service-probe state. The raw state stays on the context as
 #: ``status`` because the template turns it into a CSS class (``status-online``);
@@ -78,18 +86,18 @@ class DashboardView(StaffRequiredMixin, TemplateView):
             {"name": _("Admin Panel"), "url": reverse("admin:index"), "icon": "admin_panel_settings"},
         ]
 
-        rest_api_enabled = get_setting("SNAPADMIN_REST_API_ENABLED", True)
-        graphql_enabled = get_setting("SNAPADMIN_GRAPHQL_ENABLED", True)
+        rest_api_enabled = get_setting("SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT)
+        graphql_enabled = get_setting("SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_ENABLED_DEFAULT)
         if rest_api_enabled:
-            links.append({"name": _("REST API Root"), "url": "/api/", "icon": "api"})
+            self._append_route(links, "api-root", _("REST API Root"), "api")
             # Swagger documents the REST API, so — like `urls.py` — it follows
             # REST's resolved value by default rather than hardcoding True,
             # which would otherwise claim Swagger is on when REST itself is off.
             if get_setting("SNAPADMIN_SWAGGER_ENABLED", rest_api_enabled):
-                links.append({"name": _("Swagger Docs"), "url": reverse("swagger-ui"), "icon": "menu_book"})
+                self._append_route(links, "swagger-ui", _("Swagger Docs"), "menu_book")
 
         if graphql_enabled:
-            links.append({"name": _("GraphQL API"), "url": "/api/graphql/", "icon": "account_tree"})
+            self._append_route(links, "graphql", _("GraphQL API"), "account_tree")
 
         # Registered Models
         from django.apps import apps
@@ -197,6 +205,24 @@ class DashboardView(StaffRequiredMixin, TemplateView):
         })
 
         return services
+
+    @staticmethod
+    def _append_route(links: list[dict[str, str]], route_name: str, label: str, icon: str) -> None:
+        """Add a quick link for *route_name*, or nothing if that route is not mounted.
+
+        Reversed rather than hardcoded: ``SNAPADMIN_URL_PREFIX`` relocates the whole
+        surface, and a project is free to ``include(snapadmin.urls)`` somewhere other
+        than ``/api/``, either of which turned the old literal ``/api/`` and
+        ``/api/graphql/`` links into 404s on a dashboard that claimed the feature was on.
+
+        A missing route is skipped instead of raising: the switch says the surface is
+        enabled, but a project can enable it and still not include the URLconf, and a
+        dashboard that 500s is worse than one short a link.
+        """
+        try:
+            links.append({"name": label, "url": reverse(route_name), "icon": icon})
+        except NoReverseMatch:
+            logger.debug("dashboard_link_route_missing", route=route_name)
 
     def _get_environment_details(self):
         # Environment Detection

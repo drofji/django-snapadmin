@@ -305,3 +305,76 @@ class TestPyrageParsingErrors:
             crypto.encrypt_stream(
                 io.BytesIO(big_plaintext), FailingWriter(), [recipient], backend="pyrage"
             )
+
+
+# ── generate_keypair (#BKP2) ──────────────────────────────────────────────────
+
+@pytest.mark.parametrize("backend", BACKENDS)
+class TestGenerateKeypair:
+    def test_returns_a_working_identity_and_recipient(self, backend, tmp_path):
+        identity, recipient = crypto.generate_keypair(backend=backend)
+
+        assert identity.startswith(crypto._AGE_IDENTITY_PREFIX)
+        assert crypto.looks_like_recipient(recipient)
+
+        identity_path = tmp_path / "identity.txt"
+        identity_path.write_text(identity + "\n")
+
+        ciphertext = _encrypt_to_file(tmp_path, "ct.age", PLAINTEXT, [recipient], backend=backend)
+        out = _decrypt_to_bytes(tmp_path, "pt.bin", ciphertext, identity_path, backend=backend)
+        assert out == PLAINTEXT
+
+    def test_two_calls_produce_different_keys(self, backend):
+        identity1, recipient1 = crypto.generate_keypair(backend=backend)
+        identity2, recipient2 = crypto.generate_keypair(backend=backend)
+        assert identity1 != identity2
+        assert recipient1 != recipient2
+
+
+class TestGenerateKeypairAuto:
+    def test_auto_prefers_pyrage(self):
+        identity, recipient = crypto.generate_keypair(backend="auto")
+        assert identity.startswith(crypto._AGE_IDENTITY_PREFIX)
+        assert crypto.looks_like_recipient(recipient)
+
+    def test_auto_falls_back_to_binary_when_pyrage_unavailable(self, monkeypatch):
+        def missing_pyrage():
+            raise ImproperlyConfigured("pyrage not installed (simulated)")
+
+        monkeypatch.setattr(crypto, "_generate_keypair_pyrage", missing_pyrage)
+        identity, recipient = crypto.generate_keypair(backend="auto")
+        assert identity.startswith(crypto._AGE_IDENTITY_PREFIX)
+        assert crypto.looks_like_recipient(recipient)
+
+
+class TestGenerateKeypairErrors:
+    def test_unknown_backend_raises(self):
+        with pytest.raises(ImproperlyConfigured, match="not one of"):
+            crypto.generate_keypair(backend="bogus")
+
+    def test_missing_age_keygen_binary_raises_improperly_configured(self, monkeypatch):
+        monkeypatch.setattr(crypto.shutil, "which", lambda name: None)
+        with pytest.raises(ImproperlyConfigured, match="age-keygen"):
+            crypto.generate_keypair(backend="binary")
+
+    def test_age_keygen_nonzero_exit_raises_age_error(self, monkeypatch):
+        monkeypatch.setattr(crypto.shutil, "which", lambda name: "/usr/bin/age-keygen")
+
+        class FakeCompleted:
+            returncode = 1
+            stderr = b"simulated age-keygen failure"
+
+        monkeypatch.setattr(crypto.subprocess, "run", lambda *a, **k: FakeCompleted())
+        with pytest.raises(crypto.AgeError, match="simulated age-keygen failure"):
+            crypto.generate_keypair(backend="binary")
+
+    def test_unparseable_age_keygen_output_raises_age_error(self, monkeypatch):
+        monkeypatch.setattr(crypto.shutil, "which", lambda name: "/usr/bin/age-keygen")
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = b"garbage, not real age-keygen output\n"
+
+        monkeypatch.setattr(crypto.subprocess, "run", lambda *a, **k: FakeCompleted())
+        with pytest.raises(crypto.AgeError, match="did not contain a recognisable"):
+            crypto.generate_keypair(backend="binary")

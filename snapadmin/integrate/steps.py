@@ -21,7 +21,8 @@ _INSTALLED_APPS_SNIPPET = (
     '    "django.contrib.auth", "django.contrib.contenttypes",\n'
     '    "django.contrib.sessions", "django.contrib.messages", "django.contrib.staticfiles",\n'
     "    # REST API — pip install django-snapadmin[api]. GraphQL — [graphql], independent of it.\n"
-    "    # Both features default to on (SNAPADMIN_REST_API_ENABLED/SNAPADMIN_GRAPHQL_ENABLED).\n"
+    "    # Both default to OFF since 1.0 — list these apps only alongside\n"
+    "    # SNAPADMIN_REST_API_ENABLED = True / SNAPADMIN_GRAPHQL_ENABLED = True.\n"
     '    "rest_framework", "drf_spectacular", "django_filters", "graphene_django",\n'
     '    "snapadmin",\n'
     "    # your apps …\n"

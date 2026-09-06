@@ -22,7 +22,9 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 from django.utils import timezone
 
-from demo.apps.shop.models import AuditLog, Category, Customer, Order, Product, SearchLog, Tag
+from demo.apps.shop.models import (
+    AuditLog, Category, Customer, LegacyStockLevel, Order, Product, SearchLog, Tag,
+)
 
 
 # ─── Sample data pools ───────────────────────────────────────────────────────
@@ -151,6 +153,7 @@ class Command(BaseCommand):
             search_logs = self._seed_search_logs(count)
             orders      = self._seed_orders(customers, products, count)
             audit_logs  = self._seed_audit_logs(count)
+            stock       = self._seed_stock_levels(products)
             admin       = self._ensure_superuser()
             token       = self._ensure_api_token(admin) if admin else None
 
@@ -163,6 +166,7 @@ class Command(BaseCommand):
         self.stdout.write(f"   Orders     : {len(orders)}")
         self.stdout.write(f"   SearchLogs : {len(search_logs)}")
         self.stdout.write(f"   AuditLogs  : {len(audit_logs)}")
+        self.stdout.write(f"   StockLevels: {len(stock)}")
         self.stdout.write("")
         self.stdout.write(f"   Admin URL : http://localhost:8000/admin/")
         self.stdout.write(f"   Username  : admin")
@@ -197,6 +201,7 @@ class Command(BaseCommand):
         Product.objects.all().delete()
         Category.objects.all().delete()
         Tag.objects.all().delete()
+        LegacyStockLevel.objects.all().delete()
         try:
             SearchLog.objects.all().delete()
         except Exception:
@@ -210,6 +215,33 @@ class Command(BaseCommand):
         for name, slug in CATEGORIES:
             cat, is_new = Category.objects.get_or_create(slug=slug, defaults={"name": name, "is_active": True})
             created.append(cat)
+        return created
+
+    def _seed_stock_levels(self, products: list) -> list:
+        """Rows for the one model the demo opts in with @snap_model rather than SnapModel.
+
+        Seeded like everything else: an empty table would make the second door look
+        half-wired in the admin, which is the opposite of what it is here to show.
+        """
+        self.stdout.write("   Creating legacy stock levels…")
+        warehouses = ("north", "south", "central")
+        created = []
+        # Keyed off the loop index, not product.pk: _seed_products() uses
+        # bulk_create(ignore_conflicts=True), which by design leaves the primary key
+        # unset on the returned instances.
+        for index, product in enumerate(products):
+            row, _ = LegacyStockLevel.objects.get_or_create(
+                sku=f"SKU-{index:05d}",
+                warehouse=warehouses[index % len(warehouses)],
+                defaults={
+                    "on_hand": 5 + (index * 7) % 120,
+                    # Deliberately not derived from Product.price: this is the buying
+                    # price the api_field_permissions guard on the model hides from
+                    # anyone without demo.view_stock_cost.
+                    "reorder_cost": round(float(product.price) * 0.6, 2),
+                },
+            )
+            created.append(row)
         return created
 
     def _seed_tags(self) -> list:

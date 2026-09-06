@@ -125,19 +125,31 @@ class TestSnapModelRegistration:
 # ── equivalence with the predicate the gates used to run ─────────────────────
 
 class TestGatesSelectTheSameModels:
-    def test_registry_matches_the_old_inheritance_test_for_every_model(self):
-        """Holds because no installed model uses ``@snap_model``.
+    def test_registry_diverges_from_inheritance_only_for_decorated_models(self):
+        """Relaxed on 2026-09-05, exactly as this test's previous docstring anticipated.
 
-        The decorator (see ``tests/test_snap_model_decorator.py``) is the one way
-        a model can be registered without subclassing ``SnapModel``; every model
-        this project installs still subclasses it, so the equivalence with the
-        predicate the gates used to run is exact. Should a decorated plain model
-        ever join an installed app, this sweep is the test that must be relaxed —
-        deliberately, not by deleting it.
+        It used to assert that ``is_registered()`` and "subclasses ``SnapModel``" pick
+        the same models, which held only because no installed model used
+        ``@snap_model``. The demo now opts one plain model in with the decorator — that
+        is the second door working as designed, not a regression — so the equivalence is
+        no longer exact.
+
+        The sweep keeps its teeth rather than being deleted: every divergence must be a
+        model that was deliberately decorated, and that set is asserted by name. A model
+        that ends up registered by accident still fails here, and so does a decorated
+        model that silently stops being registered.
         """
-        for model in apps.get_models():
-            expected = issubclass(model, SnapModel) and model is not SnapModel
-            assert registry.is_registered(model) is expected, model._meta.label
+        from demo.apps.shop.models import LegacyStockLevel
+
+        diverged = {
+            model for model in apps.get_models()
+            if registry.is_registered(model)
+            is not (issubclass(model, SnapModel) and model is not SnapModel)
+        }
+        assert diverged == {LegacyStockLevel}, (
+            "registry membership diverges from SnapModel inheritance for models that "
+            f"were not deliberately decorated: {sorted(m._meta.label for m in diverged)}"
+        )
 
     def test_the_demo_models_are_registered(self):
         """A guard against the sweep above passing on an empty/degenerate set."""

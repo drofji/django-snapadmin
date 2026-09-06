@@ -10,14 +10,14 @@ so a project that turned GraphQL off is never falsely alerted.
 
 from __future__ import annotations
 
-from snapadmin.conf import get_setting
+from snapadmin.conf import GRAPHQL_ENABLED_DEFAULT, get_setting
 from snapadmin.diagnostics.registry import register
 
 
 @register("graphql", title="GraphQL", icon="🕸", order=36, health_probe=True)
 def collect(*, verbose: bool) -> dict:
     """Collect the GraphQL section."""
-    if not get_setting("SNAPADMIN_GRAPHQL_ENABLED", True):
+    if not get_setting("SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_ENABLED_DEFAULT):
         return {"enabled": False}
 
     data: dict = {"enabled": True}

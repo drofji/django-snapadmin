@@ -250,7 +250,7 @@
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <h2>⚡ SnapAdmin</h2>
-    <span>Documentation v1.0.0</span>
+    <span>Documentation v0.1.0b8</span>
   </div>
   <div class="nav-search">
     <input type="search" id="navSearch" placeholder="Filter sections…" autocomplete="off">
@@ -296,7 +296,9 @@
       <li><a href="#logging">Structured Logging</a></li>
       <li><a href="#gdpr">GDPR / Data Retention</a></li>
       <li><a href="#gdpr-subject-request">GDPR Subject-Access Requests</a></li>
+      <li><a href="#field-encryption">Field Encryption</a></li>
       <li><a href="#multi-tenancy">Multi-Tenancy</a></li>
+      <li><a href="#sharding">Database Sharding</a></li>
       <li><a href="#enterprise-config">Enterprise Config</a></li>
       <li><a href="#integrating">Integrating (Auth / JWT / ETL)</a></li>
       <li><a href="#profiles">SNAPADMIN_PROFILE Presets</a></li>
@@ -333,20 +335,26 @@
     <p class="subtitle">Automatic, beautiful, production-ready Django Admin — zero boilerplate. REST &amp; GraphQL, Elasticsearch, offline mode and GDPR retention, all from your model definitions.</p>
 
     <div class="callout callout-success" style="text-align: left; margin: 18px auto 0;">
-      <strong>What's New in v1.0.0 — first stable release</strong>
-      <a href="#multi-tenancy">Row-level multi-tenancy</a> (default-deny across every generated
-      surface), <a href="#gdpr-subject-request">GDPR subject-access export/deletion</a>, CSV/NDJSON
+      <strong>What's New in v0.1.0b8 — eighth beta</strong>
+      <a href="#field-encryption">Field-encryption key management</a>
+      (<code>SNAPADMIN_ENCRYPTION</code>), <a href="#sharding">declarative database sharding and
+      read-replica routing</a> (<code>SNAPADMIN_SHARDING</code>), and a new
+      <code>manage.py snapadmin_age_keygen</code> command join <a href="#multi-tenancy">row-level
+      multi-tenancy</a> (default-deny across every generated surface),
+      <a href="#gdpr-subject-request">GDPR subject-access export/deletion</a>, CSV/NDJSON
       <a href="#bulk-import">import</a> mirroring the async export, a <a href="#quotas">cache-backed
-      quota primitive</a> and user-defined <a href="#snap-action">REST actions</a> join the existing
-      admin/REST/GraphQL/Elasticsearch generation. <strong>Three breaking changes to know about
+      quota primitive</a> and user-defined <a href="#snap-action">REST actions</a> on top of the
+      existing admin/REST/GraphQL/Elasticsearch generation. <strong>Breaking changes to know about
       before upgrading — see the <a href="#migration-guides">migration guide</a>:</strong>
       <code>SNAPADMIN_REST_API_ENABLED</code>/<code>SNAPADMIN_GRAPHQL_ENABLED</code> now default to
       <code>False</code> (pin either to <code>True</code> to keep serving them); DRF/drf-spectacular/
       django-filter/graphene-django moved behind the new <a href="#extras"><code>[api]</code>/
-      <code>[graphql]</code></a> extras; and the deprecated <code>db_backup</code>/
+      <code>[graphql]</code></a> extras; the deprecated <code>db_backup</code>/
       <code>purge_expired_data</code>/<code>send_error_digest</code> command aliases plus the
       underscored <code>snapadmin_info</code>/<code>snapadmin_license_check</code> console scripts,
-      announced for removal since the beta series, are gone.
+      announced for removal since the beta series, are removed in this release; and
+      <code>SNAPADMIN_PROFILE = "full"</code>/<code>"api"</code> now really mount REST, GraphQL and
+      Swagger, per their documented meaning.
     </div>
 
     <div class="card-grid">
@@ -383,7 +391,7 @@
   <pre><code>pip install git+https://github.com/drofji/django-snapadmin.git</code></pre>
 
   <h3>Compatibility</h3>
-  <p>SnapAdmin requires <strong>Python ≥ 3.10</strong> and <strong>Django ≥ 5.2</strong> (no upper bound pinned). As of <code>1.0</code> (<code>Development Status :: 5 - Production/Stable</code>) the public API is covered by semantic versioning — see <a href="https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md">SECURITY.md</a>. Pin an exact version in production regardless.</p>
+  <p>SnapAdmin requires <strong>Python ≥ 3.10</strong> and <strong>Django ≥ 5.2</strong> (no upper bound pinned). SnapAdmin is currently a pre-1.0 beta (<code>Development Status :: 4 - Beta</code>); semantic versioning begins once a future <code>1.0</code> ships — see <a href="https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md">SECURITY.md</a> for the current API-stability policy. Pin an exact version in production regardless.</p>
   <table>
     <tr><th></th><th>Versions</th><th>Status</th></tr>
     <tr><td><strong>Python</strong></td><td>3.10 · 3.11 · 3.12 · 3.13</td><td>Supported and <strong>tested in CI</strong> on every version (declared floor 3.10).</td></tr>
@@ -2620,6 +2628,19 @@ SNAPADMIN_BACKUP_AGE_BACKEND = "auto"</code></pre>
   encrypted with one restores fine with the other, or with the plain <code>age</code> command run by
   hand on a jump host with no Django involved at all.</p>
 
+  <p>Don't have a keypair yet? Generate one from the library, through either backend:</p>
+  <pre><code>python manage.py snapadmin_age_keygen</code></pre>
+  <p>The private key is written once, to a new <code>.age/</code> directory at the project root, and
+  is <strong>never printed or logged</strong> — only the public recipient is, ready to paste into
+  <code>SNAPADMIN_BACKUP_AGE_RECIPIENTS</code> above. Before writing anything, the command checks the
+  project's <code>.gitignore</code> for a rule that would already exclude <code>.age/</code> —
+  recognising more than a literal <code>.age</code>/<code>.age/</code> line (a leading-slash anchor, a
+  <code>**/</code> prefix or <code>/**</code> suffix, and a blanket dotfile rule like <code>.*</code>)
+  — and appends one, with a visible message, if none is found. Every run closes with a reminder: move
+  the private key to a secure location (a password manager, a secrets vault, an encrypted volume) and
+  delete the local <code>.age/</code> directory — it is a convenience for generation, never long-term
+  storage for a private key.</p>
+
   <div class="callout callout-info">
     <strong>What this protects against — and what it does not.</strong>
     Encryption protects the backup once it has <em>left</em> the server that produced it: a
@@ -3188,6 +3209,85 @@ Nothing was deleted. Resolve the blocking rows manually (delete or reassign them
     <tr><td><code>snapadmin.E012</code></td><td>Error</td><td>A declared <code>subject_path</code> is malformed: <code>is_data_subject=True</code> with no/mismatched <code>subject_identifier</code>, over 3 relation hops, unresolvable via this model's own forward relations, or a multi-hop path on an <code>ES_ONLY</code> model.</td></tr>
   </table>
 
+  <!-- ── Field encryption ─────────────────────────────────────────────────── -->
+  <h2 id="field-encryption">🔐 Field Encryption — Keys</h2>
+  <p>Encrypted model fields keep <strong>ciphertext in the database and hand your code the ordinary
+  Python value</strong>. All of that rests on one thing being configured correctly: the
+  <strong>keyset</strong>. This section is the keyset — where the key comes from, how it rotates,
+  and the startup checks that stop a column from quietly staying plaintext.</p>
+
+  <div class="callout callout-info">
+    <strong>Nothing runs until a model asks for it.</strong> With no encrypted field declared,
+    <code>SNAPADMIN_ENCRYPTION</code> is never read, no dependency is imported, and no query
+    changes. The <code>SnapEncrypted*Field</code> family builds on this layer and is documented
+    with the release that ships it.
+  </div>
+
+  <h3>Generating a key</h3>
+  <pre><code>python manage.py snapadmin_encryption_key            # the first key
+python manage.py snapadmin_encryption_key --rotate   # a key to prepend</code></pre>
+  <p>The key is printed <strong>once</strong>, as the environment line to paste into your secret
+  store — the command writes it nowhere. <code>--rotate</code> prints the new key plus the ids
+  already in the keyset, never their material: rotating is prepending one line.</p>
+
+  <h3>Where the key comes from</h3>
+  <p>Four sources, most secure first. <strong>The first one configured wins — sources are never
+  merged</strong>, so a stray environment variable can never silently half-override a secret
+  store.</p>
+  <table>
+    <tr><th>#</th><th>Source</th><th>Use it when</th></tr>
+    <tr><td>1</td><td><code>SNAPADMIN_ENCRYPTION["KEY_PROVIDER"]</code> — a dotted path to a callable returning the keyset</td><td>KMS, Vault, Secrets Manager. Nothing secret touches settings <em>or</em> the environment. Called once per process, so a network lookup is not a per-query cost.</td></tr>
+    <tr><td>2</td><td><code>SNAPADMIN_ENCRYPTION["KEY_FILE"]</code>, or the <code>SNAPADMIN_ENCRYPTION_KEY_FILE</code> environment variable</td><td>A Docker or Kubernetes secret mounted read-only. <code>snapadmin.W016</code> warns if the file is readable by group or others.</td></tr>
+    <tr><td>3</td><td>The <code>SNAPADMIN_ENCRYPTION_KEYS</code> environment variable</td><td>The 12-factor / <code>.env</code> path — <code>id:key</code> entries separated by commas or newlines.</td></tr>
+    <tr><td>4</td><td><code>SNAPADMIN_ENCRYPTION["KEYS"]</code> in the settings module</td><td>Tests and local development. <code>snapadmin.W017</code> warns whenever <code>DEBUG</code> is off: a key in a settings module is a key in version control.</td></tr>
+  </table>
+
+  <pre><code>SNAPADMIN_ENCRYPTION = {
+    # Ordered: the FIRST key encrypts, EVERY key decrypts.
+    "KEYS": [{"id": "2026-09", "key": "&lt;32 bytes, base64url&gt;"}],
+
+    # Better — keep the material out of settings entirely:
+    "KEY_PROVIDER": "myapp.secrets.load_snapadmin_keys",
+    "KEY_FILE": "/run/secrets/snapadmin_encryption",
+
+    "STRICT": True,   # default
+}</code></pre>
+
+  <h3>Rotation</h3>
+  <p>The keyset is <strong>ordered</strong>: the first key encrypts everything written from now on,
+  and every key in the list can decrypt. Rotating is therefore prepending, with no downtime and no
+  migration:</p>
+  <ol>
+    <li><code>manage.py snapadmin_encryption_key --rotate</code> and prepend the printed line.</li>
+    <li>Deploy. New writes use the new key; existing rows keep opening with the old one, because
+    every ciphertext records the id of the key it was written with.</li>
+    <li>Re-encrypt the stored rows, then drop the old key from the list — not before. Dropping a
+    key while rows still name it makes those rows permanently unreadable.</li>
+  </ol>
+
+  <h3>Two rules the package enforces for you</h3>
+  <p><strong>Never <code>SECRET_KEY</code>.</strong> Reusing Django's <code>SECRET_KEY</code> as
+  encryption key material is the classic mistake here: <code>SECRET_KEY</code> is rotated for
+  session and CSRF reasons, and the damage only becomes visible <em>after</em> a rotation, when
+  every encrypted column has already become unreadable. <code>snapadmin.E017</code> fails
+  <code>manage.py check</code> if the two are the same value.</p>
+  <p><strong>Key material is never rendered.</strong> No <code>repr</code>, no <code>str</code>, no
+  log line, no exception message and no <code>snapadmin_info</code> section emits key bytes — only
+  a key's id and its <em>fingerprint</em>, a short digest safe to print and to compare between
+  environments. A restore into an environment whose keyset fingerprint differs is the one failure
+  that looks like data corruption but is not, which is why the fingerprint is displayable at all.</p>
+
+  <h3>Startup checks</h3>
+  <table>
+    <tr><th>Check</th><th>Severity</th><th>Fires when</th></tr>
+    <tr><td><code>snapadmin.E017</code></td><td>Error</td><td>A configured key is Django's <code>SECRET_KEY</code> (verbatim, or base64-encoded).</td></tr>
+    <tr><td><code>snapadmin.E018</code></td><td>Error</td><td>A model declares an encrypted field and no keyset resolves. Fail-closed by default: a column that is supposed to hold ciphertext never quietly receives plaintext instead.</td></tr>
+    <tr><td><code>snapadmin.E019</code></td><td>Error</td><td><code>SNAPADMIN_ENCRYPTION</code> is unresolvable — an unimportable <code>KEY_PROVIDER</code>, a missing <code>KEY_FILE</code>, a key that is not 32 base64url bytes, a duplicate key id.</td></tr>
+    <tr><td><code>snapadmin.W016</code></td><td>Warning</td><td>The mounted <code>KEY_FILE</code> is readable by group or others.</td></tr>
+    <tr><td><code>snapadmin.W017</code></td><td>Warning</td><td>Key material sits in the settings module (<code>KEYS</code>) with <code>DEBUG</code> off.</td></tr>
+    <tr><td><code>snapadmin.W018</code></td><td>Warning</td><td>An encrypted field has no keyset while <code>STRICT</code> is off. Startup continues — but every read and write of that field still fails: <code>STRICT</code> relaxes this check only, never the runtime guarantee.</td></tr>
+  </table>
+
   <!-- ── Multi-tenancy ─────────────────────────────────────────────────────── -->
   <h2 id="multi-tenancy">🏘️ Multi-Tenancy</h2>
   <p>Row-level tenant isolation, opt-in per model. A model declares itself tenant-scoped and adds a
@@ -3600,6 +3700,99 @@ def product_catalog_source(job):
   value, user)</code>, the same choke point the built-in source goes through, so
   <a href="#masking-rules">configured rules</a> apply to your rows too.</p>
 
+  <!-- ── Database Sharding ────────────────────────────────────────────────── -->
+  <h2 id="sharding">🗄️ Database Sharding &amp; Replica Routing</h2>
+  <p>A separate, more general mechanism from the single-alias read-replica routing above — for a
+  project partitioning data across <strong>multiple physical databases</strong>, not just steering
+  reads to one replica. Inert unless configured: with <code>SNAPADMIN_SHARDING</code> unset or
+  <code>ENABLED: False</code>, nothing changes — no new <code>DATABASES</code> entry, no extra
+  router, no query overhead.</p>
+
+  <p>Two configuration shapes resolve to the same thing. The simple path — a flat list of DSNs the
+  module slices into shards/replicas automatically:</p>
+  <pre><code># settings.py
+SNAPADMIN_SHARDING = {
+    "ENABLED": True,
+    "SHARDING_ENABLED": True,    # partition data across shards
+    "MIRRORING_ENABLED": True,   # give each shard read replicas
+    "REPLICAS_PER_SHARD": 1,     # 1 primary + 1 replica per shard, sliced in order
+    "DATABASES": [
+        "postgres://user:pass@s1-primary:5432/db",
+        "postgres://user:pass@s1-replica:5432/db",
+        "postgres://user:pass@s2-primary:5432/db",
+        "postgres://user:pass@s2-replica:5432/db",
+    ],
+}</code></pre>
+  <p>Or full manual control — an explicit mapping naming exactly which DSN is which shard's
+  primary/replica:</p>
+  <pre><code>SNAPADMIN_SHARDING = {
+    "ENABLED": True,
+    "STRATEGY": "range",             # modulo | hash | range | custom
+    "SHARDS": {
+        "shard_1": {
+            "PRIMARY": "postgres://user:pass@s1-primary:5432/db",
+            "REPLICAS": ["postgres://user:pass@s1-replica:5432/db"],
+            "RANGE": (0, 1000000),   # only read for STRATEGY == "range"
+        },
+        "shard_2": {
+            "PRIMARY": "postgres://user:pass@s2-primary:5432/db",
+            "RANGE": (1000001, 2000000),
+        },
+    },
+}</code></pre>
+
+  <p>A model opts in with <code>shard_key</code> — the field to shard by, or <code>True</code> for the
+  project-wide default (<code>SNAPADMIN_SHARDING['SHARD_KEY']</code>, default <code>"id"</code>) —
+  mirroring how <a href="#multi-tenancy"><code>tenant_scoped</code></a> opts a model into
+  multi-tenancy. No model, including Django's own <code>auth</code>/<code>sessions</code>/
+  <code>admin</code> tables, is ever routed across shards without explicitly asking:</p>
+  <pre><code>class Order(SnapModel):
+    shard_key = "customer_id"
+    ...</code></pre>
+
+  <details class="info">
+  <summary><span class="info-glyph">?</span> Forcing routing for one block of code</summary>
+  <p><code>snap_master_only()</code> forces every read <em>and</em> write in scope onto each shard's
+  primary, bypassing replica selection and failover — for code that must see its own just-written
+  data immediately. <code>snap_target(shard="shard_2", replica=True)</code> forces routing onto one
+  named shard regardless of the row's own shard key. Both work as a context manager or as a decorator,
+  on a plain function or an <code>async def</code> one alike:</p>
+  <pre><code>from snapadmin.sharding.decorators import snap_master_only, snap_target
+
+with snap_master_only():
+    Order.objects.filter(id=order_id).update(status="paid")
+    assert Order.objects.get(id=order_id).status == "paid"  # no replication lag
+
+@snap_target(shard="shard_2")
+def read_from_shard_2():
+    return list(Order.objects.all())</code></pre>
+  </details>
+
+  <p><code>manage.py snap_migrate</code> runs migrations against every shard's <strong>primary</strong>
+  only — sequentially, or all at once with <code>--parallel</code> — and never touches a replica,
+  since replication already propagates schema at the database layer.
+  <code>manage.py snapadmin_db_backup</code> does the same for backups: with sharding enabled, the
+  <code>"db"</code> bundle part becomes one independently-checksummed
+  <code>"db.&lt;shard_name&gt;"</code> part per shard's primary.</p>
+
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Description</th></tr>
+    <tr><td><code>SNAPADMIN_SHARDING['ENABLED']</code></td><td><code>False</code></td><td>Master switch — everything below is inert until this is <code>True</code>.</td></tr>
+    <tr><td><code>STRATEGY</code></td><td><code>"modulo"</code></td><td><code>modulo</code> / <code>hash</code> (CRC32) / <code>range</code> / <code>custom</code> (a dotted <code>CUSTOM_ROUTER_FUNC</code>).</td></tr>
+    <tr><td><code>SHARD_KEY</code></td><td><code>"id"</code></td><td>Project-wide default field name for a model whose own <code>shard_key</code> is <code>True</code>.</td></tr>
+    <tr><td><code>REPLICA_SELECTION</code></td><td><code>"round_robin"</code></td><td><code>random</code> / <code>round_robin</code> / <code>first_available</code>.</td></tr>
+    <tr><td><code>HA_SETTINGS.AUTO_FAILOVER</code></td><td><code>False</code></td><td>Promote a live replica to serve writes when the primary is unreachable. <strong>Only point this at a replica that can actually be promoted.</strong> A read-only standby rejects the write anyway (PostgreSQL reports <code>cannot execute INSERT in a read-only transaction</code>, which reads as an application bug rather than "the primary is down"); a replica that <em>does</em> accept writes — MySQL without <code>super_read_only</code> — diverges from the primary and loses those rows when replication resumes. Left <code>False</code>, a downed primary surfaces as a plain connection error.</td></tr>
+    <tr><td><code>HA_SETTINGS.HEALTH_CHECK_TIMEOUT</code></td><td><code>1.0</code></td><td>Seconds before a TCP reachability probe gives up on a host.</td></tr>
+    <tr><td><code>HA_SETTINGS.FALLBACK_TO_PRIMARY</code></td><td><code>True</code></td><td>Read from the primary when every replica is down; <code>False</code> raises instead.</td></tr>
+  </table>
+  <table>
+    <tr><th>Check</th><th>Severity</th><th>Fires when</th></tr>
+    <tr><td><code>snapadmin.E013</code></td><td>Error</td><td><code>SNAPADMIN_SHARDING</code> is enabled but a DSN or the <code>SHARDS</code>/<code>DATABASES</code> shape cannot be resolved.</td></tr>
+    <tr><td><code>snapadmin.E014</code></td><td>Error</td><td>An unrecognised <code>STRATEGY</code>, or <code>'custom'</code> with no importable <code>CUSTOM_ROUTER_FUNC</code>.</td></tr>
+    <tr><td><code>snapadmin.E015</code></td><td>Error</td><td>An unrecognised <code>REPLICA_SELECTION</code>.</td></tr>
+    <tr><td><code>snapadmin.E016</code></td><td>Error</td><td><code>STRATEGY == "range"</code> with a shard missing its <code>RANGE</code>, or two overlapping ranges.</td></tr>
+  </table>
+
   <!-- ── Bulk Import ───────────────────────────────────────────────────────── -->
   <h2 id="bulk-import">📥 Bulk Import</h2>
   <p>The write-side counterpart to async export, mirroring its architecture (chunking, progress,
@@ -3852,17 +4045,17 @@ stale_sync(
   defaults for the handful of settings that actually differ depending on how you use the
   package — everything else keeps its built-in default regardless of profile.</p>
   <pre><code># settings.py
-SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset, same as "full")</code></pre>
+SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset — no profile applied)</code></pre>
   <ul>
     <li><strong><code>admin</code></strong> — admin UI only. Turns REST, GraphQL, Swagger and
     GraphiQL off, for a project that only wants the generated Django admin and nothing else
     exposed over HTTP.</li>
-    <li><strong><code>api</code></strong> — REST + GraphQL on, admin used minimally. Currently
-    settings-identical to <code>full</code>, since REST and GraphQL already default to on — the
-    profile exists as a self-documenting declaration of intent and a place future admin-specific
-    settings can attach to.</li>
-    <li><strong><code>full</code></strong> — today's defaults. Explicitly setting
-    <code>SNAPADMIN_PROFILE = "full"</code> is a documented no-op.</li>
+    <li><strong><code>api</code></strong> — REST + GraphQL on, admin used minimally. Turns REST,
+    GraphQL and Swagger on explicitly; GraphiQL follows <code>DEBUG</code>. Settings-identical to
+    <code>full</code> today — the two differ as declarations of intent, and as the places future
+    api- or admin-specific settings will attach to.</li>
+    <li><strong><code>full</code></strong> — every generated surface on: REST, GraphQL and Swagger,
+    with GraphiQL following <code>DEBUG</code>.</li>
   </ul>
   <p><strong>Precedence: an explicit setting always wins.</strong> A profile only fills in a
   setting nothing else configured — <code>get_setting(name, default)</code> checks, in order: an
@@ -3870,13 +4063,22 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset, same as
   <code>SNAPADMIN_PROFILE</code> unset skips the profile step entirely, so every existing install
   resolves exactly as it did before this feature existed — that is the upgrade guarantee, and it
   is pinned by a test that walks every setting the package reads.</p>
+  <p><strong>Since 0.1.0b8, <code>full</code> and "no profile" are no longer the same thing.</strong>
+  They used to be: every preset value equalled the built-in default, so <code>full</code> was a
+  documented no-op. Then <code>SNAPADMIN_REST_API_ENABLED</code> and
+  <code>SNAPADMIN_GRAPHQL_ENABLED</code> flipped to <code>False</code> (see
+  <a href="#migration-guides">the 1.0 migration guide</a>), and a profile that merely mirrored the
+  defaults would have inverted with them — <code>api</code>, whose whole purpose is "REST + GraphQL
+  on", would have turned them off. Each profile now states its values outright, so a profile means
+  what its name says no matter what the defaults do. Leaving <code>SNAPADMIN_PROFILE</code> unset
+  is still exactly the pre-profile behaviour.</p>
   <table>
-    <tr><th>Setting</th><th><code>admin</code></th><th><code>api</code></th><th><code>full</code> (built-in default)</th></tr>
-    <tr><td><code>SNAPADMIN_REST_API_ENABLED</code></td><td><code>False</code></td><td><code>True</code></td><td><code>True</code></td></tr>
-    <tr><td><code>SNAPADMIN_GRAPHQL_ENABLED</code></td><td><code>False</code></td><td><code>True</code></td><td><code>True</code></td></tr>
-    <tr><td><code>SNAPADMIN_SWAGGER_ENABLED</code></td><td><code>False</code></td><td><code>True</code></td><td><code>True</code></td></tr>
-    <tr><td><code>SNAPADMIN_GRAPHIQL_ENABLED</code></td><td><code>False</code></td><td>follows <code>DEBUG</code></td><td>follows <code>DEBUG</code></td></tr>
-    <tr><td>every other <code>SNAPADMIN_*</code> setting</td><td colspan="3">unchanged — same built-in default in every profile</td></tr>
+    <tr><th>Setting</th><th><code>admin</code></th><th><code>api</code></th><th><code>full</code></th><th>no profile (built-in default)</th></tr>
+    <tr><td><code>SNAPADMIN_REST_API_ENABLED</code></td><td><code>False</code></td><td><code>True</code></td><td><code>True</code></td><td><code>False</code></td></tr>
+    <tr><td><code>SNAPADMIN_GRAPHQL_ENABLED</code></td><td><code>False</code></td><td><code>True</code></td><td><code>True</code></td><td><code>False</code></td></tr>
+    <tr><td><code>SNAPADMIN_SWAGGER_ENABLED</code></td><td><code>False</code></td><td><code>True</code></td><td><code>True</code></td><td><code>False</code></td></tr>
+    <tr><td><code>SNAPADMIN_GRAPHIQL_ENABLED</code></td><td><code>False</code></td><td>follows <code>DEBUG</code></td><td>follows <code>DEBUG</code></td><td>follows <code>DEBUG</code></td></tr>
+    <tr><td>every other <code>SNAPADMIN_*</code> setting</td><td colspan="4">unchanged — same built-in default in every profile</td></tr>
   </table>
   <div class="callout callout-info">
     <strong>Why "ES off" in <code>admin</code> isn't a setting</strong>
@@ -3982,6 +4184,9 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset, same as
   <table>
     <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
     <tr><td><code>SNAPADMIN_MASKING_RULES</code></td><td><code>{}</code></td><td>Per-field masking rules (regex / redaction) and per-field PII permissions</td></tr>
+    <tr><td><code>SNAPADMIN_ENCRYPTION</code></td><td><code>{}</code></td><td>Field-encryption keyset and where it is read from — <code>KEY_PROVIDER</code> / <code>KEY_FILE</code> / <code>KEYS</code> / <code>STRICT</code> (see <a href="#field-encryption">Field Encryption</a>)</td></tr>
+    <tr><td><code>SNAPADMIN_ENCRYPTION_KEYS</code></td><td>—</td><td><code>id:key</code> entries (comma- or newline-separated) configuring the same keyset from the environment</td></tr>
+    <tr><td><code>SNAPADMIN_ENCRYPTION_KEY_FILE</code></td><td>—</td><td>Path to a mounted secret holding the same content</td></tr>
     <tr><td><code>SNAPADMIN_AUDIT_LOG_ENABLED</code></td><td><code>True</code></td><td>Record admin create/update/delete as an immutable audit trail</td></tr>
     <tr><td><code>SNAPADMIN_AUDIT_RETENTION_DAYS</code></td><td><code>365</code></td><td>Retention window for <code>snapadmin_audit_export --purge</code></td></tr>
     <tr><td><code>SNAPADMIN_ESTIMATED_COUNT</code></td><td><code>True</code></td><td>Use PostgreSQL's fast row estimate for huge, unfiltered changelists</td></tr>
@@ -4218,7 +4423,7 @@ snapadmin-info --health-check    # probes only; non-zero exit on failure</code><
   Ok: ✓
   Detail: run `manage.py check` for the full text
 📦 Version &amp; Status
-  Version: 1.0.0
+  Version: 0.1.0b8
   Status: pre-release
   Django: 6.0.6
   Python: 3.12.4
@@ -4608,14 +4813,14 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
         <td><a href="https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/0.1.0a11_to_0.1.0b1.md">0.1.0a11_to_0.1.0b1.md</a></td>
       </tr>
       <tr>
-        <td>0.1.0b7 → 1.0.0 (REST/GraphQL moved to <code>[api]</code>/<code>[graphql]</code> extras, both default off)</td>
-        <td><a href="https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/0.1.0b7_to_1.0.0.md">0.1.0b7_to_1.0.0.md</a></td>
+        <td>0.1.0b7 → 0.1.0b8 (REST/GraphQL moved to <code>[api]</code>/<code>[graphql]</code> extras, both default off, deprecated aliases removed)</td>
+        <td><a href="https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/0.1.0b7_to_0.1.0b8.md">0.1.0b7_to_0.1.0b8.md</a></td>
       </tr>
     </tbody>
   </table>
 
   <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
-    SnapAdmin v1.0.0 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
+    SnapAdmin v0.1.0b8 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
   </div>
 
   <!-- ── AI Assistants ─────────────────────────────────────────────────────── -->
@@ -4633,7 +4838,7 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
     no JavaScript. It states what SnapAdmin is, carries the three-step quickstart, lists the facts an
     assistant should not have to infer — snap-only field kwargs add no migration, import paths are the
     public contract, the Unfold theme is optional, misconfiguration surfaces as
-    <code>snapadmin.W001</code>–<code>W015</code> and <code>snapadmin.E001</code>–<code>E012</code> —
+    <code>snapadmin.W001</code>–<code>W018</code> and <code>snapadmin.E001</code>–<code>E019</code> —
     and then links every section of this page with a
     line describing what it covers.
   </p>
@@ -4931,7 +5136,7 @@ SNAPADMIN_BACKUP_NETWORK_DIR=/mnt/box/snapadmin</code></pre>
 
   <!-- ── Sandbox / Demo ─────────────────────────────────────────────────────── -->
   <h2 id="demo-models">📦 Demo App — Model Overview</h2>
-  <p>The <code>demo/</code> app contains pre-built models that showcase every SnapAdmin feature. Each model uses a different Elasticsearch storage mode.</p>
+  <p>The <code>demo/</code> app contains pre-built models that showcase every SnapAdmin feature. Most differ by Elasticsearch storage mode; the last differs by how it was declared at all.</p>
 
   <table>
     <tr><th>Model</th><th>ES Mode</th><th>Demonstrates</th></tr>
@@ -4964,6 +5169,15 @@ SNAPADMIN_BACKUP_NETWORK_DIR=/mnt/box/snapadmin</code></pre>
       <td><code>Showcase</code></td>
       <td><span style="background:#f1f5f9;color:#475569;padding:1px 6px;border-radius:4px;font-size:11px;font-weight:700">DB_ONLY</span></td>
       <td>All 30 field types in one model, tabs, rows, WYSIWYG, phone, color</td>
+    </tr>
+    <tr>
+      <td><code>LegacyStockLevel</code></td>
+      <td>—</td>
+      <td>The <a href="#two-ways">other door</a>: a plain <code>django.db.models.Model</code> opted in
+      with <code>@snap_model</code> instead of subclassing, with the consequences visible — no ES, no
+      retention purge, and a hand-written <code>ModelAdmin</code> because nothing is generated for it.
+      Also carries the demo's <a href="#field-permissions"><code>api_field_permissions</code></a>
+      guard (<code>reorder_cost</code> is readable only with <code>demo.view_stock_cost</code>)</td>
     </tr>
   </table>
 

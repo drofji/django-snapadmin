@@ -42,6 +42,15 @@ before a single byte reaches disk: ``pg_dump``/SQLite → gzip → age → the `
 file. No plaintext or plain-gzip artefact is ever written, even transiently. With the
 setting empty (the default) nothing changes — this is the exact behaviour described above.
 
+**Sharded backups (#SHARD1h)** — with ``SNAPADMIN_SHARDING['ENABLED']`` on
+(:mod:`snapadmin.sharding`), the ``"db"`` bundle part becomes one
+``"db.<shard_name>"`` part per shard's *primary* database — never a replica,
+the same aliases :func:`snapadmin.sharding.registration.iter_primary_aliases`
+gives ``manage.py snap_migrate``. Each shard's dump is produced, checksummed
+in the manifest and retention-pruned independently, exactly like the existing
+``media``/``env`` parts already are. An un-sharded project's bundle keeps
+today's plain ``"db"`` part, byte-for-byte.
+
 **Task-status outcome convention** — :func:`run_due_backups` / :func:`run_backup` report
 ``status`` (``"ok"`` / ``"partial"`` / ``"noop"`` / ``"disabled"``) and ``failed`` alongside
 the existing keys, and **raise** :class:`BackupError` when every destination failed or the
@@ -57,6 +66,7 @@ import gzip
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -74,6 +84,7 @@ from django.utils import timezone
 from snapadmin import __version__, crypto
 from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
+from snapadmin.sharding.registration import get_shards, is_sharding_enabled
 
 logger = get_logger(__name__)
 
@@ -187,6 +198,25 @@ def get_backup_config() -> BackupConfig:
 # Dump creation
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _shard_primary_targets() -> list[tuple[str, str]]:
+    """``[(shard_name, primary_alias), ...]``, sorted by shard name.
+
+    Empty when ``SNAPADMIN_SHARDING`` is off or misconfigured — degrades the
+    same way :func:`snapadmin.sharding.registration.configure_sharding` and
+    :func:`~snapadmin.sharding.router.SnapAdminRouter.allow_migrate` do,
+    since a broken sharding config must not stop backups on the default
+    database from running. ``manage.py check`` already reports the same
+    misconfiguration loudly (``snapadmin.E013``).
+    """
+    if not is_sharding_enabled():
+        return []
+    try:
+        shards = get_shards()
+    except ImproperlyConfigured:
+        return []
+    return [(name, shard.primary_alias) for name, shard in sorted(shards.items())]
+
+
 def _sqlite_source_path(db: dict) -> str:
     source = str(db["NAME"])
     if source == ":memory:" or "mode=memory" in source:
@@ -255,21 +285,29 @@ def _copy_mysql_into(db: dict, writer: BinaryIO) -> None:
         raise BackupError(f"mysqldump failed: {stderr_output.decode(errors='replace')}")
 
 
-def create_db_dump(target_dir: Path) -> Path:
-    """Produce a gzip-compressed dump of the default database in target_dir."""
-    db = settings.DATABASES["default"]
+def create_db_dump(target_dir: Path, *, alias: str = "default", label: str | None = None) -> Path:
+    """Produce a gzip-compressed dump of the ``alias`` database in target_dir.
+
+    ``label`` (unset by default — the plain, unsharded filename, unchanged)
+    embeds a shard identifier into the filename when backing up one shard's
+    primary among several, so two shards backed up in the same run never
+    collide on the same timestamped name — see
+    :func:`build_backup_bundle`'s sharded branch and :func:`_shard_primary_targets`.
+    """
+    db = settings.DATABASES[alias]
     engine = db["ENGINE"]
     stamp = timezone.now().strftime("%Y%m%d-%H%M%S")
     target_dir.mkdir(parents=True, exist_ok=True)
+    prefix = f"{BACKUP_PREFIX}{label}-" if label else BACKUP_PREFIX
 
     if "sqlite" in engine:
-        out = target_dir / f"{BACKUP_PREFIX}{stamp}.sqlite3.gz"
+        out = target_dir / f"{prefix}{stamp}.sqlite3.gz"
         with gzip.open(out, "wb") as dst:
             _copy_sqlite_into(db, dst)
         return out
 
     if "postgresql" in engine:
-        out = target_dir / f"{BACKUP_PREFIX}{stamp}.sql.gz"
+        out = target_dir / f"{prefix}{stamp}.sql.gz"
         try:
             with gzip.open(out, "wb") as dst:
                 _copy_postgres_into(db, dst)
@@ -279,7 +317,7 @@ def create_db_dump(target_dir: Path) -> Path:
         return out
 
     if "mysql" in engine:
-        out = target_dir / f"{BACKUP_PREFIX}{stamp}.sql.gz"
+        out = target_dir / f"{prefix}{stamp}.sql.gz"
         try:
             with gzip.open(out, "wb") as dst:
                 _copy_mysql_into(db, dst)
@@ -360,17 +398,21 @@ def _gzip_into(writer: BinaryIO, copy_fn: Callable[[BinaryIO], None]) -> None:
         copy_fn(gz)
 
 
-def create_encrypted_db_dump(target_dir: Path, config: BackupConfig) -> Path:
+def create_encrypted_db_dump(
+    target_dir: Path, config: BackupConfig, *, alias: str = "default", label: str | None = None,
+) -> Path:
     """Like :func:`create_db_dump`, but gzip-then-AGE-encrypted in one stream.
 
     Requires ``config.age_recipients`` to be non-empty (checked by the caller,
     which is what decides whether to call this function or the plain one at
-    all — see :func:`run_backup`).
+    all — see :func:`run_backup`). ``alias``/``label`` mean exactly what they
+    mean on :func:`create_db_dump`.
     """
-    db = settings.DATABASES["default"]
+    db = settings.DATABASES[alias]
     engine = db["ENGINE"]
     stamp = timezone.now().strftime("%Y%m%d-%H%M%S")
     target_dir.mkdir(parents=True, exist_ok=True)
+    prefix = f"{BACKUP_PREFIX}{label}-" if label else BACKUP_PREFIX
 
     if "sqlite" in engine:
         _sqlite_source_path(db)  # validate early, before the pipe thread starts
@@ -385,7 +427,7 @@ def create_encrypted_db_dump(target_dir: Path, config: BackupConfig) -> Path:
     else:
         raise BackupError(f"Unsupported database engine for backups: {engine}")
 
-    out = target_dir / f"{BACKUP_PREFIX}{stamp}.{suffix}"
+    out = target_dir / f"{prefix}{stamp}.{suffix}"
     tmp = out.with_name(out.name + ".tmp")
     reader, thread = _stream_through_pipe(lambda w: _gzip_into(w, copy_fn))
     try:
@@ -601,10 +643,16 @@ def write_manifest(target_dir: Path, config: BackupConfig, stamp: str, parts: di
 def build_backup_bundle(target_dir: Path, config: BackupConfig) -> dict[str, Path]:
     """Produce every part named in config.include, plus the manifest.
 
-    Returns a dict keyed by part name ("db", "media", "env", "manifest") to
-    the produced file. A part whose builder returns None (media/env with
-    nothing to back up) is simply absent from the result — the manifest still
-    lists only what actually exists.
+    Returns a dict keyed by part name to the produced file. A part whose
+    builder returns None (media/env with nothing to back up) is simply
+    absent from the result — the manifest still lists only what actually
+    exists. With ``SNAPADMIN_SHARDING`` enabled, the ``"db"`` entry becomes
+    one ``"db.<shard_name>"`` entry per shard's *primary* (never a replica —
+    see :func:`_shard_primary_targets`), each independently produced,
+    checksummed and, on retention, pruned — a plain ``"db"`` key is used only
+    when sharding is off, so an existing single-database project's bundle
+    shape (part name, filename, retention grouping) is byte-for-byte
+    unchanged.
     """
     check_env_requires_encryption(config)  # fail closed before any part is built
     stamp = timezone.now().strftime("%Y%m%d-%H%M%S")
@@ -613,8 +661,22 @@ def build_backup_bundle(target_dir: Path, config: BackupConfig) -> dict[str, Pat
     parts: dict[str, Path] = {}
     for name in config.include:
         if name == "db":
-            dump = create_encrypted_db_dump(target_dir, config) if config.age_recipients else create_db_dump(target_dir)
-            parts["db"] = dump
+            shard_targets = _shard_primary_targets()
+            if shard_targets:
+                for shard_name, alias in shard_targets:
+                    dump = (
+                        create_encrypted_db_dump(target_dir, config, alias=alias, label=shard_name)
+                        if config.age_recipients
+                        else create_db_dump(target_dir, alias=alias, label=shard_name)
+                    )
+                    parts[f"db.{shard_name}"] = dump
+            else:
+                dump = (
+                    create_encrypted_db_dump(target_dir, config)
+                    if config.age_recipients
+                    else create_db_dump(target_dir)
+                )
+                parts["db"] = dump
         elif name == "media":
             media = create_media_bundle(target_dir, config, stamp)
             if media is not None:
@@ -635,19 +697,29 @@ def build_backup_bundle(target_dir: Path, config: BackupConfig) -> dict[str, Pat
 # Destinations
 # ─────────────────────────────────────────────────────────────────────────────
 
+#: Every part filename this module writes follows ``{prefix}{stamp}.{ext}``
+#: with ``stamp = strftime("%Y%m%d-%H%M%S")`` — an 8-digit date, a dash, a
+#: 6-digit time, immediately followed by a dot. Matching that shape and
+#: capturing everything before it recovers the exact prefix a file was
+#: written with, whether or not it carries a shard segment (#SHARD1h) —
+#: "snapadmin-db-shard_1-20260826-000000.sql.gz" and
+#: "snapadmin-db-20260826-000000.sql.gz" both resolve correctly with the one
+#: pattern, no shard-specific special-casing needed.
+_STAMP_SUFFIX_RE = re.compile(r"^(.+?)\d{8}-\d{6}\.")
+
+
 def _part_prefix_for(name: str) -> str:
     """The stored filename's own part prefix, e.g. "snapadmin-media-20260826….tar.gz.age" -> "snapadmin-media-".
 
     Retention prunes per part (#BKP1a-4): a run that includes media must not
     starve the db dump's retention headroom, so "keep N" means "keep N of
-    each part", not N total. Falls back to BACKUP_PREFIX for any name that
-    (unexpectedly) matches none of the known prefixes, preserving today's
-    only-`db`-exists behaviour exactly.
+    each part", not N total — and, since #SHARD1h, "keep N of each shard's
+    db dump" too, for the same reason. Falls back to BACKUP_PREFIX for any
+    name that (unexpectedly) carries no recognisable timestamp, preserving
+    today's only-`db`-exists behaviour exactly.
     """
-    for prefix in PART_PREFIXES.values():
-        if name.startswith(prefix):
-            return prefix
-    return BACKUP_PREFIX
+    match = _STAMP_SUFFIX_RE.match(name)
+    return match.group(1) if match else BACKUP_PREFIX
 
 
 def _prune_directory(directory: Path, keep: int, prefix: str) -> int:
@@ -1227,8 +1299,15 @@ def run_backup(destinations: list[str], *, config: BackupConfig | None = None) -
 
         # The part named in the summary's "results" entry per destination —
         # "db" when present (matches every existing caller/test's expectation
-        # of one location string), else whichever part actually shipped.
-        primary_part = "db" if "db" in parts else next(iter(parts))
+        # of one location string), else the first shard's "db.<shard_name>"
+        # when sharded, else whichever part actually shipped. The manifest
+        # (built above, already covering every "db.*" entry) stays the
+        # authoritative full list either way — this is a one-line summary,
+        # not the whole picture, exactly like it already was for media/env.
+        primary_part = next(
+            (name for name in parts if name == "db" or name.startswith("db.")),
+            next(iter(parts)),
+        )
 
         state = _load_state(config)
         for dest in destinations:

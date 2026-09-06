@@ -27,6 +27,11 @@ prefers ``pyrage`` if importable, else the CLI if found on ``PATH``),
 ``"pyrage"`` or ``"binary"``. The two explicit modes fail loudly, naming their
 own missing dependency, rather than silently falling through to the other —
 the choice is always observable, never an environment-dependent coin-flip.
+
+:func:`generate_keypair` (#BKP2) generates a fresh identity/recipient pair
+through either backend — ``manage.py snapadmin_age_keygen`` is the CLI in
+front of it, writing the private key to a git-ignored ``.age/`` directory
+rather than ever printing it.
 """
 from __future__ import annotations
 
@@ -137,6 +142,72 @@ def resolve_backend(configured: str, binary_path: str = "") -> str:
         f"SNAPADMIN_BACKUP_AGE_BACKEND={configured!r} is not one of "
         f"{BACKENDS!r}."
     )
+
+
+def _generate_keypair_pyrage() -> tuple[str, str]:
+    pyrage = _load_pyrage()
+    identity = pyrage.x25519.Identity.generate()
+    return str(identity), str(identity.to_public())
+
+
+def _parse_age_keygen_output(text: str) -> tuple[str, str]:
+    identity = None
+    recipient = None
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("# public key:"):
+            recipient = line.split(":", 1)[1].strip()
+        elif line.startswith(_AGE_IDENTITY_PREFIX):
+            identity = line
+    if not identity or not recipient:
+        raise AgeError(
+            "`age-keygen` output did not contain a recognisable identity/public key pair."
+        )
+    return identity, recipient
+
+
+def _generate_keypair_binary() -> tuple[str, str]:
+    keygen_path = shutil.which("age-keygen")
+    if keygen_path is None:
+        raise ImproperlyConfigured(
+            "AGE key generation needs the `age-keygen` command-line tool (ships alongside "
+            "`age`), which was not found on PATH. Install it (e.g. `apt install age` on "
+            "Debian/Ubuntu, `brew install age` on macOS), or set backend='pyrage' to "
+            "generate with the pyrage library instead."
+        )
+    process = subprocess.run([keygen_path], capture_output=True)
+    if process.returncode != 0:
+        raise AgeError(f"`age-keygen` failed: {process.stderr.decode(errors='replace').strip()}")
+    return _parse_age_keygen_output(process.stdout.decode("utf-8", errors="replace"))
+
+
+def generate_keypair(*, backend: str = "auto") -> tuple[str, str]:
+    """Generate a fresh age identity/recipient pair: ``(identity, recipient)``.
+
+    ``identity`` is the private key (``AGE-SECRET-KEY-1…``) — store it
+    securely and never log or print it beyond the one place a caller writes
+    it to disk. ``recipient`` is the public key (``age1…``) — safe to print,
+    share, and paste into ``SNAPADMIN_BACKUP_AGE_RECIPIENTS``.
+
+    ``backend`` follows the same three values as everywhere else in this
+    module (``"auto"``/``"pyrage"``/``"binary"``), but resolves independently
+    of :func:`resolve_backend`: generation only needs ``age-keygen`` (a
+    binary that ships alongside, but is distinct from, ``age`` itself), so a
+    host with `age-keygen` but not `age` on ``PATH`` can still generate here
+    even though :func:`resolve_backend` would refuse that combination for
+    encrypt/decrypt.
+    """
+    if backend == "pyrage":
+        return _generate_keypair_pyrage()
+    if backend == "binary":
+        return _generate_keypair_binary()
+    if backend == "auto":
+        try:
+            return _generate_keypair_pyrage()
+        except ImproperlyConfigured:
+            pass
+        return _generate_keypair_binary()
+    raise ImproperlyConfigured(f"backend={backend!r} is not one of {BACKENDS!r}.")
 
 
 def looks_like_recipient(value: str) -> bool:

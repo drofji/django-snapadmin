@@ -5,32 +5,41 @@ version-by-version summary; the full, prose release notes for each version live 
 [the docs repository](https://github.com/drofji/django-snapadmin/tree/main/docs/releases/) 
 (shipped in the source distribution) and online in the project documentation.
 
-The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning. As of `1.0.0` the
-public API is covered by semantic versioning — see `SECURITY.md`'s API-stability policy.
+The project follows [PEP 440](https://peps.python.org/pep-0440/) versioning. Semantic versioning
+begins once the project reaches a stable `1.0` release; until then, see `SECURITY.md`'s
+API-stability policy for what counts as public API and how breaking changes are handled during
+the `0.x` beta series.
 
 ## Unreleased
 
-### Breaking
-
-Breaking: none
-
-## 1.0.0 — 2026-09-03
+## 0.1.0b8 — 2026-09-06
 
 ### Breaking
+- **`SNAPADMIN_PROFILE = "full"` / `"api"` now mount REST, GraphQL and Swagger.** Originally, both
+  presets were empty and fell through to the freshly-flipped `False` defaults below, so a project
+  setting either was running admin-only. Restoring the documented meaning widens the HTTP surface on
+  upgrade with no settings edit — and `api_write_fields` is unset by default, so previously
+  unexposed models become writable. Audit write allowlists and masking first, or pin
+  `SNAPADMIN_REST_API_ENABLED = False` / `SNAPADMIN_GRAPHQL_ENABLED = False` (explicit always beats
+  a profile), or drop `SNAPADMIN_PROFILE` altogether.
+
 - The shipped `admin.js`'s select2 auto-init is now **opt-in**: only a `<select>` carrying a
   `snapadmin-select2` class (or `data-snapadmin-select2` attribute) gets initialised, not every
   `<select>` on the page. The old broad selector reached the changelist's own action dropdown and
   silently broke bulk actions on a theme that binds it through Alpine. Add the class to a field's
   widget to opt it back in.
+
 - `SNAPADMIN_CONNECTIVITY_ENABLED` now defaults to `False` (previously always on): the admin-wide
   health poll, save-blocking guard and sidebar sync badge no longer load unless explicitly enabled
   *and* at least one registered model has `offline_mode = True`. A deployment with
   `SNAPADMIN_REST_API_ENABLED = False` used to poll a 404ing `/api/health/` forever and block every
   Save button — set `SNAPADMIN_CONNECTIVITY_ENABLED = True` to restore the previous behaviour.
+
 - `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` now default to `False` (previously
   `True`) — a project including `snapadmin.urls` no longer gets a writable REST/GraphQL surface
   for every registered model without asking for one. Pin either to `True` to restore the previous
   behaviour. See the migration guide.
+
 - `djangorestframework`, `drf-spectacular`, `django-filter` and `graphene-django` are no longer
   core dependencies — they moved behind two new extras, `[api]` and `[graphql]`. A bare
   `pip install django-snapadmin` now pulls only Django, structlog and nh3; both features above
@@ -38,21 +47,19 @@ Breaking: none
   `pip install django-snapadmin[api,graphql]` (or `[all]`, a no-op upgrade for an install that
   already has everything). New check `snapadmin.E010` catches a feature left on with its extra
   missing. See the migration guide.
-- The deprecated command aliases and underscored console scripts are removed:
-  `db_backup`/`purge_expired_data`/`send_error_digest` (use `snapadmin_db_backup`/
-  `snapadmin_purge_expired_data`/`snapadmin_send_error_digest`) and the underscored
-  `snapadmin_info`/`snapadmin_license_check` console scripts (use the dashed spellings, or
-  `manage.py snapadmin_info`/`manage.py snapadmin_license_check`, both unaffected).
+
 - Retro-note (this heading is new): `SnapModel.get_admin_fields()`'s return arity silently grew
   from four values to five in an earlier pre-1.0 release with no changelog entry — now pinned so
   it cannot shift silently again. `django-admin-rangefilter` stopped being a dependency in
   `0.1.0b6`, already documented there under `Removed` — see that entry rather than duplicating it.
+
 - `snapadmin.backup.run_backup()` / `run_due_backups()`, and the `purge_expired_data` /
   `send_error_digest` / `run_es_reindex` / `send_health_alert` Celery tasks, now **raise** instead
   of returning a dict when every unit of work failed (previously reported as a normal, if
   unhelpful, return value). Code calling these directly and branching on the return value for a
   total-failure case must now catch the exception instead (`BackupError`, `SnapPurgeError`,
   `AlertDeliveryError`, `ReindexError`) — see the task-outcome convention under Fixed, below.
+
 - `snapadmin.purge_expired_data` / `snapadmin_purge_expired_data` now also purge the audit log
   (`SnapadminAuditLog`) automatically, against `SNAPADMIN_AUDIT_RETENTION_DAYS` — a setting that
   already documented a 365-day default but, until now, was only ever read by
@@ -60,6 +67,7 @@ Breaking: none
   Beat and has audit rows older than 365 days will see them deleted on the first run after
   upgrading. Set `SNAPADMIN_AUDIT_RETENTION_DAYS = 0` to keep every audit row indefinitely, as
   before.
+
 - **Every registered model must now declare `subject_path`.** New check `snapadmin.E011` fails
   `manage.py check` for **any** registered `SnapModel`/`@snap_model` model that never declares
   `subject_path` at all — `subject_path = None` is a valid, explicit answer ("this model carries
@@ -70,63 +78,111 @@ Breaking: none
   personal data) before `manage.py check` passes again after upgrading. See the migration guide.
 
 ### Added
+- Key management for field-level encryption: `SNAPADMIN_ENCRYPTION` configures one ordered keyset,
+  resolved from a `KEY_PROVIDER` (KMS/Vault), a mounted `KEY_FILE`, the `SNAPADMIN_ENCRYPTION_KEYS`
+  environment variable or the settings module — most secure first, first hit wins, never merged.
+  `manage.py snapadmin_encryption_key [--rotate]` generates a key and prints it once. Key material
+  is never written to a log, a `repr` or an exception; only a key id and a fingerprint. Reusing
+  Django's `SECRET_KEY` is refused (`snapadmin.E017`), an encrypted field without a keyset stops
+  startup (`snapadmin.E018`), and `snapadmin_info --section features` reports the key source and
+  keyset fingerprint. Nothing is read or imported until a model declares an encrypted field; the
+  field types themselves ship next.
+
+- Declarative database sharding and read-replica routing: `SNAPADMIN_SHARDING = {"ENABLED": True,
+  ...}` configures any number of shards/replicas (an auto-sliced flat `DATABASES` list, or an
+  explicit `SHARDS` mapping), and `SnapAdminRouter` routes reads/writes by `modulo`/`hash`/`range`/
+  a custom function, with primary failover and replica fallback. A model opts in with `shard_key`
+  (mirrors `tenant_scoped`); `snap_master_only()`/`snap_target(...)` force routing per block, sync or
+  `async def`. `manage.py snap_migrate` migrates every shard's primary; `manage.py
+  snapadmin_db_backup` now backs up every shard's primary too, never a replica. `STRATEGY` defaults
+  to `modulo`, which needs an integer shard key — shard by a string or UUID key with
+  `STRATEGY = "hash"`, or the router raises `ShardResolutionError` naming the field (never the
+  value, which is often a natural key such as an email address). `HA_SETTINGS['AUTO_FAILOVER']`
+  (default `False`) fails writes over to a live replica when the primary is down: enable it only
+  against a replica that can genuinely be promoted, since a read-only standby rejects the write
+  anyway and one that accepts it diverges from the primary. `snapadmin_info --section features`
+  reports the shard and replica counts and the active strategy. Unset/disabled, this is a complete
+  no-op for an existing single-database project.
+
+- `manage.py snapadmin_age_keygen` generates an AGE keypair for
+  `SNAPADMIN_BACKUP_AGE_RECIPIENTS` directly from the library, writing it to a git-ignored `.age/`
+  directory — the private key is never printed, and the command adds a `.gitignore` rule (checking
+  for one first, including broad patterns like a bare `.*`) rather than trusting one already exists.
+
 - `snap_field()` now accepts every `Snap*Field` constructor kwarg — `required` and the file-upload
   trio (`allowed_extensions`/`allowed_encodings`/`max_size_bytes`) are no longer refused.
+
 - `SNAPADMIN_PROFILE = "admin" | "api" | "full"` picks sane defaults for the handful of settings
   that actually differ by use case, instead of deciding all ~90 individually. Unset (or `"full"`)
   changes nothing — every existing install keeps its current behaviour.
+
 - `snapadmin_info`'s `inventory` section now reports, per model, which registration door it came
   through (`SnapModel` subclass vs. `@snap_model` decorator) and which capabilities that door
   leaves inactive (Elasticsearch mirroring, retention purge, generated admin).
+
 - `@snap_property` decorates a method into a computed, display-only admin column — the decorator
   form of `SnapFunctionField` (no database column, no migration). Works identically on a
   `SnapModel` subclass and on a `@snap_model`-decorated plain model.
+
 - `get_model_meta()` gains a third precedence tier: a project-wide `SNAPADMIN_<NAME>` setting,
   consulted between the class attribute and the caller's built-in default. Only reachable on the
   `@snap_model` route — a `SnapModel` subclass always has a class attribute to answer from.
+
 - A runnable integration checklist (Must work / Should be configured / Data safety /
   Optional-scale), documented at `#integration-checklist` and now printed by `snapadmin-init`
   itself — every row is ✅/❌/⚠️, never a false green for anything it can't check without a live
   project.
+
 - Database backups can be encrypted in-stream with AGE (`SNAPADMIN_BACKUP_AGE_RECIPIENTS`) — any
   one of N configured recipients decrypts a bundle independently. Two interchangeable backends
   (`pyrage`, the new optional `[age]` extra, or the `age` CLI). Empty (the default) changes nothing.
+
 - `SNAPADMIN_BACKUP_INCLUDE` bundles media and an encrypted `.env` alongside the database backup
   (default `["db"]`, opt-in). Every run now also writes an unencrypted `manifest.json` sidecar;
   retention (`SNAPADMIN_BACKUP_KEEP`) applies per part.
+
 - `manage.py snapadmin_restore` restores a backup bundle — dry-run by default, `--confirm` to
   perform it. Verifies the manifest checksum before touching anything, supports `--only`/`--skip`
   part selection, fetches straight from a configured destination (`<destination>:<name>`), and
   prints exactly which identity an encrypted bundle needs.
+
 - `manage.py snapadmin_rollback` undoes a restore: `snapadmin_restore --confirm` automatically
   snapshots the current live state before touching anything (aborting the restore if the snapshot
   itself fails), and `snapadmin_rollback [<id>]` restores it back. Its own short retention
   (`SNAPADMIN_RESTORE_SNAPSHOT_KEEP`, default 3) is separate from `SNAPADMIN_BACKUP_KEEP`.
+
 - A fifth backup destination: any S3-compatible object store (`SNAPADMIN_BACKUP_S3_*`, the new
   optional `[s3]` extra, `boto3`) — AWS S3, MinIO, Backblaze B2, Hetzner Object Storage or Wasabi via
   `SNAPADMIN_BACKUP_S3_ENDPOINT_URL`. Supports the ambient AWS credential chain when no explicit key
   is set. A worked SFTP recipe for Hetzner Storage Box (a different, non-S3 product) is now in the
   docs. New check `snapadmin.W011` flags an incompletely configured S3 destination.
+
 - `snapadmin_info` gains a `backups` section (destinations, last run per destination, encryption
   status, recipient fingerprints); the `features` section's backup line now also names the active
   destinations and whether a restore has ever run.
+
 - `SnapModel.get_admin_fields()` returns a pinned `AdminFieldSets` named tuple (`form_fields`,
   `list_display`, `search_fields`, `list_filter`, `autocomplete_fields`) instead of a bare 5-tuple —
   backward-compatible by construction, since positional unpacking, indexing and `len()` all keep
   working; a future sixth member stays a breaking change, just an announced one.
+
 - `SnapModel.get_admin_media()` — the base admin `(js, css)` asset lists as a public, typed
   classmethod, so a project overriding `register_admin()` can extend the real lists instead of
   copying a snapshot that rots at the next release.
+
 - `APIToken.allowed_scopes` (new field, one migration) plus `token_has_scope()` scope a token to a
   project's own endpoints, not just SnapAdmin's generated model routes — SnapAdmin only stores and
   matches the free-form strings, the meaning is the project's. Empty denies every scope check
   (fail-closed), unlike `allowed_models`.
+
 - `POST /api/tokens/<id>/rotate/` (also `APIToken.rotate()`) replaces a token's secret in place —
   same row, id, scopes and history — and returns the new raw key once; the old key stops
   authenticating immediately. Written to the audit trail.
+
 - `POST /api/tokens/<id>/deactivate/` flips `is_active` off without deleting the row — the
   documented revocation path. A regular user manages their own tokens (list, rotate, deactivate)
   without needing to be a superuser.
+
 - `snapadmin_reindex --verify` compares the Elasticsearch document count against the source row
   count once a model's run finishes (discounting documents ES itself rejected, and skipped
   entirely for `ES_ONLY` models, which have no independent source to compare against) and exits
@@ -135,29 +191,35 @@ Breaking: none
   throttles the per-chunk progress line so a multi-hour run in a detached container doesn't fill
   the log with one line per chunk; the line reporting a model's completion, cancellation or
   failure always prints regardless of the throttle.
+
 - `snapadmin.limits.reserve(key, windows, concurrency)` — a cache-backed quota primitive for
   per-tenant/per-token limits across several time windows at once, a concurrency cap, and an
   explicit `cooldown()` after an upstream 429, with no opinion about what `key` means (an inbound
   API guard and an outbound client call use it identically). Counters are per-process unless
   `SNAPADMIN_LIMITS_CACHE_ALIAS` points at a shared cache; an evicted counter fails open, never
   closed. Demonstrated in the demo project's `sync_exchange_rates --rate-limit N`.
+
 - `SnapModel.data_retention_files` — a list of `SnapFileField`/`SnapImageField` names whose storage
   objects are deleted along with an expiring row, so a GDPR purge no longer leaves an orphaned file
   (unreachable, but undeletable without a separate storage sweep) behind. Files are deleted before
   the row; a storage failure raises `SnapPurgeError` and leaves the row intact for a retry, and a
   path another live row still references is skipped rather than deleted out from under it. Unset
   (the default) changes nothing.
+
 - `SNAPADMIN_EXPORT_RETENTION_DAYS` — opt-in (unset by default) cleanup of finished
   `SnapExportJob`/`SnapReindexJob` rows and their published files past the window, plus a sweep for
   any export file left behind with no job row at all. Runs from the same
   `snapadmin.purge_expired_data` task/command as every other retention sweep.
+
 - New check `snapadmin.W012`: retention is configured somewhere (a model's `data_retention_days`,
   the audit log's on-by-default window, or `SNAPADMIN_EXPORT_RETENTION_DAYS`) but no
   `CELERY_BEAT_SCHEDULE` entry runs `snapadmin.purge_expired_data` to actually enforce it.
+
 - A single table in the docs (`#retention-table`) listing every table SnapAdmin can auto-delete,
   its setting, and its recommended schedule — the audit log, error events, export/reindex jobs,
   expired API tokens and model-level `data_retention_days` were previously documented separately,
   each looking automatic on its own with no way to see what the whole picture actually covers.
+
 - `@snap_action` turns a model method into a user-defined REST action —
   `POST /api/models/<app_label>/<Model>/<pk>/<name>/` for a `detail=True` action (the default), or
   the list-level route with `detail=False`. Bound by the model's own `api_read_only`/
@@ -165,12 +227,14 @@ Breaking: none
   permission, derived from the action's methods or given explicitly. Discoverable per model via
   `GET /api/models/schema/`. New check `snapadmin.E008` catches an action whose methods conflict
   with its own model's CRUD policy at boot instead of at first request.
+
 - `api_field_permissions` (model-level metadata, e.g. `{"salary": {"read": "hr.view_salary",
   "write": "hr.change_salary"}}`) gates a field's very presence in a REST/GraphQL response and
   rejects a denied write with a `400` naming the field — orthogonal to PII masking, which only
   controls whether an already-present field is raw or starred. Wired into REST (serializer +
   filter/ordering/search) and GraphQL this round; the admin form and export gain the same guard in
   a follow-up.
+
 - `manage.py snapadmin_import` — CSV/NDJSON import, the write-side counterpart to async export,
   backed by a new `SnapImportJob` (one migration) mirroring the export job's architecture: header-name
   column mapping (plus an explicit `--map` override), a configurable natural-key duplicate rule,
@@ -180,6 +244,7 @@ Breaking: none
   `--resume` can never re-create a row an earlier attempt already committed. Write-surface rules
   (`api_write_fields`/`api_exclude_fields`/`api_read_only`/masking) are enforced up front, not as a
   follow-up.
+
 - **GDPR subject-access requests** — `manage.py snapadmin_subject_request export|delete --model
   app.Model --identifier VALUE --user USERNAME` exports or deletes everything reachable from one data
   subject, across every registered model's own `subject_path` declaration (a forward `__`-joined ORM
@@ -193,6 +258,7 @@ Breaking: none
   protected relation (`on_delete=PROTECT`) refuses the whole run up front instead of deleting in
   dependency order. `@snap_model()` also accepts `subject_path`/`is_data_subject`/
   `subject_identifier` as new keyword arguments.
+
 - `POST /api/models/<app>/<Model>/fetch-by/` fetches a large explicit key set in one call —
   `{"field": "sku", "values": [...]}` streamed as NDJSON, the counterpart to `export`'s filtered
   streaming. `field` must be `unique=True` or `db_index=True` (`400` otherwise, naming the
@@ -200,11 +266,13 @@ Breaking: none
   truncation over it — new check `snapadmin.W013` flags a ceiling raised so high it defeats the
   cap). Same permissions and masking as `export`; reachable via `POST` even on an `api_read_only`
   model, since it never writes. Not supported for `ES_ONLY` models (no DB column to index).
+
 - The async surface: `asave`/`adelete`/`arefresh_from_db` on `SnapModel` (Django's own native async
   model methods since 5.2 — a test now pins that they reach `SnapModel`'s own `save()`/`delete()`
   overrides, including the Elasticsearch mirror and wysiwyg sanitize-on-write) and
   `aget`/`afirst`/`alast` on `EsManager`/`EsQuerySet`. Out of scope: async DRF ViewSets, an async
   Elasticsearch client, bulk async operations.
+
 - Row-level multi-tenancy (`snapadmin.tenancy`): a model opts in with `tenant_scoped = True` plus a
   tenant column (`tenant_field()`), and every generated surface — admin, REST, GraphQL,
   Elasticsearch routing, async export/import jobs, the offline cache — then requires a bound tenant
@@ -215,26 +283,64 @@ Breaking: none
   `snapadmin.E009` flags a `tenant_scoped = True` declaration that cannot actually be enforced.
   Isolation is logical, not physical — `snapadmin.backup`'s database dumps run below the ORM and are
   not tenant-scoped at all, documented as plainly as the feature.
+
 - `snapadmin_license_check` now reports how stale its curated licence map is (last-reviewed date,
   age in days) and warns loudly past 180 days unreviewed — also in the `--json` payload.
 
 ### Changed
 - The shipped `admin.js`'s select2 initialisation is opt-in now — see Breaking, above, for the
   migration note.
+
 - `SNAPADMIN_CONNECTIVITY_ENABLED` gates the admin-wide connectivity layer and now defaults to
   `False` — see Breaking, above.
 
 ### Fixed
+- The `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` default-off flip above had only
+  reached `snapadmin/urls.py`. Ten other read sites still defaulted to `True`, so an install that
+  set neither switch mounted no API while `manage.py check` failed with two `snapadmin.E010`
+  errors demanding the `[api]`/`[graphql]` extras, `snapadmin_info --section features` reported
+  both surfaces as adopted, and the dashboard linked to `/api/`. All read sites now share one
+  default.
+
+- `SNAPADMIN_PROFILE = "api"` turned REST, GraphQL and Swagger **off** instead of on: the `api` and
+  `full` presets were empty and silently inverted when the built-in defaults flipped to `False` above. Every
+  profile now states its values explicitly. `full` and "no profile" are no longer equivalent.
+
+- A project generated by `snapadmin-new` could not start from its own `requirements.txt`: it lists
+  the four API-stack apps in `INSTALLED_APPS` while requesting a bare `django-snapadmin`, which no
+  longer ships them. The generated requirements now ask for `django-snapadmin[api,graphql]`.
+
+- The demo project claimed in its README to exercise PII masking while shipping it switched off, and
+  had no surface at all for `@snap_model` or `api_field_permissions`. All three are now really
+  configured, and `snapadmin_info --section features` reports them on.
+
+- The system dashboard linked `/api/` and `/api/graphql/` as literals, so both 404'd under
+  `SNAPADMIN_URL_PREFIX` or a non-`/api/` mount point; they are reversed now, and a surface enabled
+  without its URLconf included drops the link instead of raising.
+
+- Removed fourteen dangling `issue #N` references from shipped comments and demo config (no public
+  tracker exists, so each rendered as a broken link), and corrected two test docstrings that named
+  modules renamed several releases ago.
+
+- `demo/dist.env` now documents `SNAPADMIN_API_DELETE_GUARD`, the one env-driven demo setting it
+  never named, and a test keeps that file in step with the demo settings module.
+
+- `snapadmin_license_check`'s `--json` test asserted a value derived from the current date, turning
+  the suite red the day after the curated licence table was reviewed. Command behaviour unchanged.
+
 - A project's own `admin_overrides["get_readonly_fields"]` / `admin_overrides["safe_html_<field>"]`
   no longer get silently clobbered by the generator: the generated callables are merged onto the
   admin class before `admin_overrides`, never written into it, so a project's own override always
   wins regardless of write order. Previously a project's own `get_readonly_fields` could vanish,
   taking every change form on the site down with `FieldError: Unknown field(s)`, with nothing logged.
+
 - Off `DEBUG`, the shipped media no longer downloads jQuery twice: the base admin JS now picks
   `jquery.js` / `jquery.min.js` the same way Django's own `ModelAdmin.media` does, so the two media
   lists collapse into a single entry on merge.
+
 - The system dashboard's GitHub link pointed at the retired `drofji/snapadmin` (dead) instead of
   `drofji/django-snapadmin`.
+
 - **A scheduled task that did nothing, or half-failed, no longer looks like a success.** All six
   Celery tasks (`run_db_backups`, `purge_expired_data`, `purge_expired_tokens`, `send_error_digest`,
   `run_es_reindex`, `send_health_alert`) now return a `status` key — `"ok"` / `"partial"` /
@@ -243,30 +349,45 @@ Breaking: none
   six: alert when `status != "ok"`, page when the Celery task state is `FAILURE`. Fixes the reported
   incident where a disabled backup schedule ran "successfully" for weeks with no backup ever taken,
   and a silently-failing offsite destination never surfaced anywhere but a log line.
+
 - `run_db_backups`'s due-time check (`_is_due()`) no longer skips a day when a run completes even
   slightly later than the previous day's ideal slot — a small tolerance (2% of the destination's own
   interval) absorbs realistic scheduler jitter without materially changing when a backup actually
   runs. A new check, `snapadmin.W010`, warns when the Celery Beat entry for `run_db_backups` runs
   less often than the shortest configured `SNAPADMIN_BACKUP_*_EVERY_HOURS` — that combination
   silently drops days regardless of the tolerance above.
+
 - `create_db_dump()` (and the AGE-encrypted path) now supports MySQL via `mysqldump`, alongside the
   existing PostgreSQL and SQLite support — the credential handled the same way as the PostgreSQL
   branch (`MYSQL_PWD` environment variable, never a command-line argument).
+
 - The dynamic model API answers an unknown or unregistered model the same way on every action,
   including `retrieve`/`update`/`partial_update` — previously provided by DRF without an explicit
   guard, so they fell through to filtering an empty queryset instead of the consistent 404 body the
   other five actions already built for themselves. The check now runs once in `initial()`.
+
 - `POST /api/exports/<id>/cancel/` now stamps `finished_at` alongside `status=cancelled`, matching
   completion and failure — a cancelled job can leave a real partial file on disk, and until now it
   was invisible to anything measuring a retention window on `finished_at` (including the new
   `SNAPADMIN_EXPORT_RETENTION_DAYS` purge).
 
+### Removed
+- **The deprecated command aliases and underscored console scripts are removed in this release.**
+  This closes the beta-series removal window announced since `0.1.0b6` and reiterated in
+  `SECURITY.md`'s API-stability policy: `db_backup`/`purge_expired_data`/`send_error_digest` (use
+  `snapadmin_db_backup`/`snapadmin_purge_expired_data`/`snapadmin_send_error_digest`) and the
+  underscored `snapadmin_info`/`snapadmin_license_check` console scripts (use the dashed spellings,
+  or `manage.py snapadmin_info`/`manage.py snapadmin_license_check`, both unaffected) are gone —
+  there is no runtime fallback. See the migration guide.
+
 ### Security
 - `snap_field(field, wysiwyg=True)` now sanitizes on write, matching `SnapRichTextField` — closing
   a gap where the wrapper route stored raw HTML unsanitized.
+
 - Backing up `env` with no `SNAPADMIN_BACKUP_AGE_RECIPIENTS` configured is refused fail-closed
   (system check `snapadmin.E007` plus a matching runtime guard) — a `.env` file's secrets are never
   written to a backup destination unencrypted.
+
 - An unresolvable model on the dynamic API now denies every HTTP verb instead of falling back to
   full CRUD (`_resolve_http_method_names()`), and the 404 guard runs after authentication and
   permission checks — asserted by a dedicated test — so an anonymous probe cannot use a 404-vs-401

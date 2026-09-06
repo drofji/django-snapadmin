@@ -193,10 +193,17 @@ export ceilings from a web form, with no deploy trail.
 This project deliberately exercises SnapAdmin's security posture — the same
 controls documented in the root [`SECURITY.md`](../SECURITY.md): the staff-gated
 system dashboard, PII masking (`SNAPADMIN_MASKED_FIELDS` + the per-field
-`SNAPADMIN_MASKING_RULES`), the immutable audit trail and its per-object diff
-timeline, per-model API field-exposure/write allowlists, API pagination and
-throttling, and the validated async export. Treat `demo/` as a reference for how
-to wire those into a real project, not just a feature tour.
+`SNAPADMIN_MASKING_RULES`, applied to `CustomerProfile.bio`), field-level
+permission guards (`api_field_permissions` on `LegacyStockLevel.reorder_cost`,
+which decides whether a field is in the response at all — the orthogonal control
+to masking, which only decides whether a visible value is starred), the immutable
+audit trail and its per-object diff timeline, per-model API field-exposure/write
+allowlists, API pagination and throttling, and the validated async export. Treat
+`demo/` as a reference for how to wire those into a real project, not just a
+feature tour.
+
+Every claim in this section is checkable rather than aspirational — run
+`python manage.py snapadmin_info --section features` and read the ✓/✗ list.
 
 ## Translations
 

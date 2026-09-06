@@ -236,7 +236,7 @@ class Order(snap_models.SnapModel):
     # Multi-tenancy dogfood (#FUT1) — an order belongs to exactly one
     # storefront/organisation, a natural tenant boundary distinct from the
     # GDPR subject concern below (Customer is the subject; Order is the
-    # tenant boundary — kept separate on purpose, see .claude/roadmap.md).
+    # tenant boundary — the two are kept separate on purpose).
     tenant_id = tenant_field()
     tenant_scoped = True
 
@@ -514,3 +514,59 @@ class Showcase(snap_models.SnapModel):
     class Meta:
         verbose_name = _("Showcase")
         verbose_name_plural = _("Showcase")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The other door — a plain Django model, opted in from outside
+# ─────────────────────────────────────────────────────────────────────────────
+# Every model above subclasses SnapModel. This one deliberately does not: it is a
+# plain django.db.models.Model with plain Django fields, standing in for the table
+# you already have in a brownfield project and are not going to rewrite. The
+# @snap_model decorator registers it and records its configuration without touching
+# its field layer, so opting in costs no migration of its own.
+#
+# The trade-offs are real, documented on the decorator, and visible here: a
+# decorated plain model gets no Elasticsearch mirroring, no retention purge and no
+# generated admin — which is why demo/apps/shop/admin.py registers a plain
+# ModelAdmin for it by hand rather than leaving it out of the admin entirely.
+@snap_models.snap_model(
+    # Only the counted quantity is client-settable; everything else is written by
+    # the warehouse system that owns this table.
+    api_write_fields=["on_hand"],
+    search_fields=["sku", "warehouse"],
+    # Stock rows describe goods, not people — no data subject to reach from here.
+    # This still has to be stated: silence is snapadmin.E011, not a default.
+    subject_path=None,
+)
+class LegacyStockLevel(django_models.Model):
+    sku = django_models.CharField(max_length=64, db_index=True, verbose_name=_("SKU"))
+    warehouse = django_models.CharField(max_length=64, verbose_name=_("Warehouse"))
+    on_hand = django_models.IntegerField(default=0, verbose_name=_("On Hand"))
+    reorder_cost = django_models.DecimalField(
+        max_digits=10, decimal_places=2, default=0, verbose_name=_("Reorder Cost"),
+    )
+    counted_at = django_models.DateTimeField(auto_now=True, verbose_name=_("Counted At"))
+
+    # Field-level permission guards (#FUT3) — deliberately shown on this model rather
+    # than on a SnapModel, because api_field_permissions is model-level metadata read
+    # through get_model_meta(): it resolves from a class attribute on a decorated plain
+    # model exactly as it does from a SnapModel subclass.
+    #
+    # Orthogonal to the PII masking configured in demo/core/settings.py, and the pair is
+    # worth comparing: masking decides whether an already-visible value is starred,
+    # this decides whether the field is in the response at all. What a buying price
+    # costs the business if it leaks is not "a starred string" — it is absent, or it is
+    # a competitor's margin, so it wants this guard and not that one.
+    api_field_permissions = {
+        "reorder_cost": {"read": "demo.view_stock_cost"},
+    }
+
+    def __str__(self):
+        return f"{self.sku} @ {self.warehouse}"
+
+    class Meta:
+        verbose_name = _("Legacy Stock Level")
+        verbose_name_plural = _("Legacy Stock Levels")
+        # A narrow, purpose-made permission — the point of a field guard is lost if the
+        # permission unlocking it is one every staff user already holds.
+        permissions = [("view_stock_cost", "Can view stock reorder cost")]

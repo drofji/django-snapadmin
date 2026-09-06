@@ -15,7 +15,7 @@ receive backported patches — upgrade to the newest version to get security fix
 
 | Version | Supported |
 |---------|-----------|
-| Latest release on PyPI (currently `1.0.0`) | ✅ |
+| Latest release on PyPI (currently `0.1.0b8`) | ✅ |
 | Any older pre-`1.0` release | ❌ (upgrade) |
 
 ## API stability and compatibility policy
@@ -52,11 +52,12 @@ CI runs the full suite on every push against the compatibility matrix — what a
 that suite already verified against a clone of this repository, not a second, unverified copy
 trailing behind inside every install.
 
-**Before `1.0` (the `0.x` beta series):** breaking changes were possible but never silent. Each one
-was called out in [`CHANGELOG.md`](CHANGELOG.md) and the release notes, with a migration guide when
-manual steps were involved.
+**Right now (the `0.x` beta series, before `1.0` ships):** breaking changes are possible but never
+silent. Each one is called out in [`CHANGELOG.md`](CHANGELOG.md) and the release notes, with a
+migration guide when manual steps are involved.
 
-**From `1.0` onward:** the project follows semantic versioning.
+**From `1.0` onward** (a future release — no `1.0` has shipped yet): the project will follow
+semantic versioning.
 
 | Change | Allowed in |
 |---|---|
@@ -70,8 +71,8 @@ be removed: a `DeprecationWarning` for a Python name, a notice on stderr for a m
 (so a cron job piping stdout still surfaces it). Both name the replacement. A security fix that
 cannot be made backward-compatible is the one exception, and is documented as such in the advisory.
 
-**Removed at the `1.0.0` cut**, per the announced beta-series removal window — upgrading from any
-pre-`1.0` release needs the corresponding change:
+**Removed in `0.1.0b8`**, per the announced beta-series removal window — upgrading from any
+older pre-`0.1.0b8` release needs the corresponding change:
 
 | Removed name | Use instead |
 |---|---|
@@ -81,17 +82,17 @@ pre-`1.0` release needs the corresponding change:
 | `snapadmin_info` (underscored console script) | `snapadmin-info` (or `manage.py snapadmin_info`) |
 | `snapadmin_license_check` (underscored console script) | `snapadmin-license-check` (or `manage.py snapadmin_license_check`) |
 
-**Defaults flipped at the `1.0.0` cut:**
+**Defaults flipped in `0.1.0b8`:**
 
-| Setting | Pre-`1.0` default | `1.0` default |
+| Setting | Pre-`0.1.0b8` default | `0.1.0b8` default |
 |---|---|---|
 | `SNAPADMIN_REST_API_ENABLED` | `True` | `False` |
 | `SNAPADMIN_GRAPHQL_ENABLED` | `True` | `False` |
 
 Both flipped because a project migrating from a plain Django admin never asked for an API at all,
 yet got one — writable, unless `api_write_fields` was set per model — the moment `snapadmin.urls`
-was included. Pin either setting explicitly to `True` to restore the pre-`1.0` behaviour. See
-[the migration guide](docs/migrations/0.1.0b7_to_1.0.0.md).
+was included. Pin either setting explicitly to `True` to restore the pre-`0.1.0b8` behaviour. See
+[the migration guide](docs/migrations/0.1.0b7_to_0.1.0b8.md).
 
 ## Reporting a vulnerability
 
@@ -130,12 +131,24 @@ Key protections:
   related object the caller may not view resolves as a `Permission denied.` error rather than
   leaking its data. The GraphiQL playground follows `DEBUG` unless overridden with
   `SNAPADMIN_GRAPHIQL_ENABLED` — keep it off in production.
-- **The dynamic model API only ever resolves `SnapModel` subclasses.** `/api/models/<app>/<model>/`
-  404s for any Django model that isn't declared as a `SnapModel` (e.g. `auth.User`), regardless of the
-  caller's Django permissions — the generic API surface can never be used to read or write a model that
-  wasn't intentionally opted in via `SnapModel`.
+- **The dynamic model API only ever resolves models that were deliberately opted in.**
+  `/api/models/<app>/<model>/` 404s for any Django model SnapAdmin does not have in its registry
+  (e.g. `auth.User`), regardless of the caller's Django permissions, so the generic API surface can
+  never be used to read or write a model nobody opted in.
+  **Auditing your exposure means listing the registry, not grepping for `SnapModel`.** There are two
+  ways into it — subclassing `SnapModel`, and decorating a plain `django.db.models.Model` with
+  `@snap_model(...)` — and both are served identically; `snapadmin.registry.is_registered(model)` is
+  the single gate every surface asks. A model opted in with the decorator is easy to miss when
+  reviewing by eye, because nothing in its class statement says "SnapAdmin". Run
+  `python manage.py snapadmin_info --section inventory` for the authoritative list: every registered
+  model, which door it came through, and what it exposes.
 - **`SNAPADMIN_PROFILE = "admin"` reduces exposed surface by default.** It turns REST, GraphQL,
   Swagger and GraphiQL off — a smaller attack surface for a project that only serves the Django admin.
+  The other two profiles do the opposite and should be chosen as deliberately: `"api"` and `"full"`
+  turn REST, GraphQL and Swagger **on** for every registered model. Since `0.1.0b8` the built-in
+  default for those switches is `False`, so leaving `SNAPADMIN_PROFILE` unset is the minimal-exposure
+  posture, and setting `"full"` is an explicit decision to serve an API — not, as an earlier release
+  described it, a no-op.
   An explicit `SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED` still overrides it either way;
   `manage.py check` warns (`snapadmin.W009`) when an explicit setting silently disagrees with the
   active profile, so re-enabling a surface a profile turned off is never silent. See
@@ -283,6 +296,28 @@ Key protections:
   backtrack catastrophically (`(a+)+`); values over 4096 characters skip the regex. Every one of those
   paths — plus a replacement referencing a group the pattern lacks — falls back to the built-in
   masker, so a broken rule degrades to *more* masking, never to raw data.
+- **Field-encryption key management** — encrypted model fields (rolling out from 1.1) read their key
+  material through one resolver, `snapadmin.encryption.keys`, configured by the single
+  `SNAPADMIN_ENCRYPTION` dict. Four sources are tried most-secure-first and **never merged**, so a
+  stray environment variable cannot half-override a secret store: `KEY_PROVIDER` (a dotted path to a
+  callable — the KMS/Vault hook, keeping material out of settings *and* the environment), `KEY_FILE`
+  or `SNAPADMIN_ENCRYPTION_KEY_FILE` (a mounted container secret), the `SNAPADMIN_ENCRYPTION_KEYS`
+  environment variable, then literal `KEYS` in the settings module. The last is supported but warned
+  about (`snapadmin.W016` when the mounted key file is group/world-readable, `snapadmin.W017` when key
+  material sits in a settings module with `DEBUG` off) — a key in a settings module is a key in
+  version control. Reusing Django's `SECRET_KEY` as encryption key material is refused outright
+  (`snapadmin.E017`): `SECRET_KEY` is rotated for session and CSRF reasons, and each rotation would
+  otherwise make every encrypted column permanently unreadable. Key material is never rendered — not
+  into a `repr`, a `str`, a log line, an exception message or any `snapadmin_info` section; only a key
+  id and a short domain-separated fingerprint, which exists so a restore into an environment holding a
+  *different* keyset is diagnosable rather than looking like data corruption. The design is
+  fail-closed: an encrypted field declared with no resolvable keyset stops `manage.py check`
+  (`snapadmin.E018`), a malformed keyset is reported rather than skipped (`snapadmin.E019`), and
+  `STRICT: False` relaxes only that startup check — the runtime still refuses to read or write an
+  encrypted field without a key (`snapadmin.W018` says so), never falling back to storing plaintext.
+  The keyset is ordered — the first key encrypts, every key decrypts, and each ciphertext records the
+  id of the key that wrote it — so rotation is prepending one key and re-encrypting, with the old key
+  removed only once no row still names it.
 - **Reading the audit trail is not a way around masking** — the audit-log admin renders each entry's
   diff as a masked field-level table and offers a per-object timeline at
   `/admin/snapadmin/snapadminauditlog/timeline/<app_label>/<model>/<object_id>/`. Both are gated on
@@ -384,6 +419,21 @@ Key protections:
     Debian 12+/Ubuntu 22.04+). Both implement the identical, standardised file format, so a bundle
     encrypted with one restores fine with the other — or with the plain `age` CLI run by hand on a
     jump host with no Django involved at all.
+- **Generating AGE keypairs (`manage.py snapadmin_age_keygen`)** — the library can mint the keypair
+  itself, through the same `pyrage`/`age-keygen` backend resolution as encryption. The private key
+  (identity) is written to disk exactly once and never printed, logged, or returned in the command's
+  own output — only the public recipient is, since that half is safe to share. Before writing
+  anything, the command checks the project's `.gitignore` for a rule that already excludes the
+  `.age/` directory the keypair lands in — recognising more than a literal `.age`/`.age/` line (a
+  leading-slash anchor, a `**/` prefix or `/**` suffix, and a blanket dotfile rule like `.*`) — and
+  appends one with a visible message if none is found, rather than trusting one is already there.
+  Every run closes with an explicit reminder to move the private key to a secure location (a
+  password manager, a secrets vault, an encrypted volume) and delete the local `.age/` directory —
+  it exists only as a generation convenience, never as long-term storage for key material. **Not a
+  full `.gitignore` engine** — mid-pattern `**` and negation-line ordering are out of scope; a
+  `!`-negation line is always treated as *not* covering `.age/` (it can also never remove coverage a
+  broader rule already gave, which is the safe direction for a check whose job is "warn when in
+  doubt").
 - **Backup bundle contents — the `.env` fail-closed rule** — `SNAPADMIN_BACKUP_INCLUDE` (default
   `["db"]`) can extend a run to `media` and/or `env` (a project `.env`/secrets file). Including `env`
   with `SNAPADMIN_BACKUP_AGE_RECIPIENTS` empty is refused **fail closed**, in two independent places:
@@ -417,6 +467,24 @@ Key protections:
     the real backup policy for disk — they are a safety net with a short half-life, not a backup.
 - **Read-replica routing** (`SNAPADMIN_ANALYTICS_DB_ALIAS`) keeps read-only list/retrieve off the
   primary; writes always stay on `default`.
+- **Database sharding (`SNAPADMIN_SHARDING`)** — a separate, more general mechanism from the single
+  read-replica alias above, for a project partitioning data across multiple physical databases.
+  **DSNs belong in environment variables, never hard-coded in a settings module** —
+  `SNAPADMIN_SHARDING['SHARDS'][...]['PRIMARY']`/`['REPLICAS']` are plain connection strings
+  embedding credentials, exactly like `DATABASES` itself, and should be built from `os.environ`
+  the same way. Health checks that drive failover/fallback (`HA_SETTINGS`) are a **TCP reachability
+  probe only** — a successful socket connect proves the host is listening on the right port, not
+  that the database is actually accepting queries or that the named database exists; treat a
+  "failover succeeded" outcome as "the replica was reachable," not as a guarantee of replication
+  currency. **Sharding is opt-in per model** (`shard_key`, mirroring `tenant_scoped`) — no model,
+  including Django's own `auth`/`sessions`/`admin`/`contenttypes` tables, is ever routed across
+  shards without explicitly asking. A misconfigured `SNAPADMIN_SHARDING` degrades to sharding
+  staying off (logged, surfaced loudly by `manage.py check` — `snapadmin.E013`–`E016`) rather than
+  crashing `django.setup()` on every deploy, **except** `allow_migrate()`, which always degrades to
+  "no opinion" on a broken config specifically so it can never block an unrelated app's migration.
+  `python manage.py snap_migrate` and the sharding-aware `manage.py snapadmin_db_backup` both target
+  every shard's **primary only** — a replica is never migrated or dumped directly, since replication
+  already propagates both at the database layer.
 - **Alert webhook URLs are credentials** — a Slack/Discord/Teams incoming-webhook URL and a Telegram
   bot token let their holder post into your channel, so `SNAPADMIN_ALERT_WEBHOOKS` entries belong in
   environment variables, not in committed settings. SnapAdmin never writes one to a log line (a
@@ -466,7 +534,7 @@ Key protections:
 ### Attack-surface reduction & extension guards
 - Each surface can be **switched off**: `SNAPADMIN_REST_API_ENABLED`, `SNAPADMIN_GRAPHQL_ENABLED`,
   `SNAPADMIN_SWAGGER_ENABLED` (disabling removes the routes entirely). Both default to `False` — a
-  project opts in explicitly, rather than the pre-`1.0` behaviour of opting out. The user-management
+  project opts in explicitly, rather than the pre-`0.1.0b8` behaviour of opting out. The user-management
   API (`SNAPADMIN_USER_API_ENABLED`) is likewise **off by default**.
 - The **bulk ES reindex endpoint** is off by default (`SNAPADMIN_REINDEX_API_ENABLED`) and
   `IsAdminUser`-gated when enabled.

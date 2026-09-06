@@ -158,3 +158,66 @@ class TestNoDeadLinks:
         links = re.findall(r'https://github\.com/drofji/django-snapadmin/blob/main/([^"\s]+)', html)
         missing = sorted({path for path in links if not (REPO_ROOT / path).is_file()})
         assert not missing, f"docs/index.html links to a repo file that does not exist: {missing}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Every env-driven demo setting is discoverable from dist.env
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestDistEnvParity:
+    """``demo/dist.env`` is the file a new deployment copies to ``.env``.
+
+    ``TestSettingsDiscoverable`` above already pins that every setting the *package* reads appears
+    in ``demo/core/settings.py``. This pins the next hop: a setting the demo settings module reads
+    **from the environment** has to be named in ``dist.env`` too, or someone starting from that file
+    has no way to discover it exists. A commented-out example line counts — several settings are
+    genuinely optional and documenting them switched off is the right shape; the failure this
+    catches is the setting mentioned nowhere at all.
+    """
+
+    #: Settings whose value is a dict or a list of dicts. They are configured in
+    #: ``settings.py`` directly because an env var cannot express them, so they read nothing from
+    #: the environment and never reach the check below — listed here so the exclusion is a stated
+    #: decision rather than an accident of the regex.
+    STRUCTURED_ONLY = {
+        "SNAPADMIN_MASKED_FIELDS",
+        "SNAPADMIN_MASKING_RULES",
+        "SNAPADMIN_EXPORT_SOURCES",
+        "SNAPADMIN_NESTED_APPS",
+        "SNAPADMIN_HIDDEN_APPS",
+        "SNAPADMIN_APP_LABELS",
+        "SNAPADMIN_SSO_PROVIDERS",
+        "SNAPADMIN_SSO_ALLOWED_HOSTS",
+        "SNAPADMIN_ALERT_WEBHOOKS",
+        "SNAPADMIN_TENANT_RESOLVER",
+        "SNAPADMIN_TENANT_USER_RESOLVER",
+    }
+
+    def _env_driven_settings(self) -> set[str]:
+        text = (REPO_ROOT / "demo" / "core" / "settings.py").read_text(encoding="utf-8")
+        names: set[str] = set()
+        for reader in ("os.getenv", "env_bool", "env_int", "env_list"):
+            names |= set(
+                re.findall(
+                    re.escape(reader) + r"\(\s*['\"](SNAPADMIN_[A-Z0-9_]+)['\"]", text
+                )
+            )
+        return names
+
+    def test_every_env_driven_setting_is_named_in_dist_env(self):
+        dist_env = (REPO_ROOT / "demo" / "dist.env").read_text(encoding="utf-8")
+        declared = set(re.findall(r"^#?\s*(SNAPADMIN_[A-Z0-9_]+)=", dist_env, re.MULTILINE))
+        missing = sorted(self._env_driven_settings() - declared - self.STRUCTURED_ONLY)
+        assert not missing, (
+            "setting(s) read from the environment by demo/core/settings.py but never named in "
+            f"demo/dist.env, so a deployment copying that file cannot discover them: {missing}"
+        )
+
+    def test_the_structured_exclusions_are_really_not_env_driven(self):
+        """Keeps the exclusion list honest — an entry that starts reading the environment
+        must move out of it rather than sit there granting a permanent exemption."""
+        leaked = sorted(self.STRUCTURED_ONLY & self._env_driven_settings())
+        assert not leaked, (
+            f"{leaked} now read the environment, so they belong in dist.env — "
+            "remove them from STRUCTURED_ONLY"
+        )

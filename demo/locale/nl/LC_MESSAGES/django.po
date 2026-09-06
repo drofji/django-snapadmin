@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PACKAGE VERSION\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-09-02 18:12+0000\n"
+"POT-Creation-Date: 2026-09-05 21:27+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -282,6 +282,27 @@ msgstr "Berekende samenvatting"
 msgid "Showcase"
 msgstr "Etalage"
 
+msgid "SKU"
+msgstr "Artikelnummer"
+
+msgid "Warehouse"
+msgstr "Magazijn"
+
+msgid "On Hand"
+msgstr "Voorraad"
+
+msgid "Reorder Cost"
+msgstr "Inkoopprijs"
+
+msgid "Counted At"
+msgstr "Geteld op"
+
+msgid "Legacy Stock Level"
+msgstr "Voorraadniveau"
+
+msgid "Legacy Stock Levels"
+msgstr "Voorraadniveaus"
+
 msgid "SnapAdmin Custom Dashboard"
 msgstr "Aangepast SnapAdmin-dashboard"
 
@@ -491,20 +512,20 @@ msgid "Advanced Settings"
 msgstr "Geavanceerde instellingen"
 
 #, fuzzy
-#| msgid "System dashboard"
-msgid "System Health"
-msgstr "Systeemdashboard"
+#~| msgid "System dashboard"
+#~ msgid "System Health"
+#~ msgstr "Systeemdashboard"
 
-msgid "Language"
-msgstr "Taal"
+#~ msgid "Language"
+#~ msgstr "Taal"
 
-msgid "Managed Models"
-msgstr "Beheerde modellen"
-
+#~ msgid "Managed Models"
+#~ msgstr "Beheerde modellen"
 
 #, python-format
-msgid "File extension '%(ext)s' is not allowed. Allowed: %(allowed)s"
-msgstr "Bestandsextensie '%(ext)s' is niet toegestaan. Toegestaan: %(allowed)s"
+#~ msgid "File extension '%(ext)s' is not allowed. Allowed: %(allowed)s"
+#~ msgstr ""
+#~ "Bestandsextensie '%(ext)s' is niet toegestaan. Toegestaan: %(allowed)s"
 
 #~ msgid "GDPR — delete records older than data_retention_days on each model"
 #~ msgstr "AVG — records ouder dan data_retention_days per model verwijderen"

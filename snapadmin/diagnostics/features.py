@@ -2,7 +2,9 @@
 Feature-adoption collector for ``snapadmin_info`` (the ``features`` section).
 
 A commerce-readiness checklist: for each business-important SnapAdmin capability —
-backups, retention-based deletion, audit trail, PII masking (fields and rules), the REST/GraphQL APIs,
+backups, retention-based deletion, audit trail, PII masking (fields and rules), field encryption,
+database sharding,
+the REST/GraphQL APIs,
 API tokens, Elasticsearch, background tasks, health/error alerting, rate limiting,
 the read-only / write / delete guards, user-defined REST actions, field-level permission
 guards and SSO — report whether it is actually turned on or in use in *this* project
@@ -24,7 +26,11 @@ from django.apps import apps
 from django.conf import settings
 from django.db.models import Model
 
-from snapadmin.conf import get_setting
+from snapadmin.conf import (
+    GRAPHQL_ENABLED_DEFAULT,
+    REST_API_ENABLED_DEFAULT,
+    get_setting,
+)
 from snapadmin.diagnostics.registry import register
 from snapadmin.registry import get_model_meta, is_registered
 
@@ -178,6 +184,82 @@ def _retention_detail(model_count: int, file_model_count: int, audit_on: bool, e
     return ", ".join(parts)
 
 
+def _encryption() -> tuple[bool, str]:
+    """``(on, "env, 2 keys, fingerprint 1a2b3c4d5e6f")`` — ids and digests only.
+
+    "On" means key material actually resolves, not that the setting exists: a
+    project can carry ``SNAPADMIN_ENCRYPTION`` with only ``STRICT`` in it. The
+    detail names the *source* the keyset came from and its fingerprint, which is
+    the value to compare between two environments — a restore into a host
+    holding a different keyset is the one failure that looks like data
+    corruption but is not. Key material itself is never printed here or
+    anywhere else.
+    """
+    from snapadmin.encryption import keys as encryption_keys
+
+    try:
+        keyset = encryption_keys.get_keyset()
+    except Exception:
+        # Deliberately broad, like every neighbouring probe: `Collector.collect`
+        # replaces the *entire* capability report with one `collector_error` if
+        # anything escapes here, so a KEY_PROVIDER raising `RuntimeError` or a
+        # non-UTF-8 KEY_FILE raising `UnicodeDecodeError` would cost all the
+        # other rows too — the exact failure `snapadmin_info` exists to prevent.
+        # `manage.py check` reports the specifics (snapadmin.E019); the audit's
+        # job is to not claim a capability is on when it cannot even resolve.
+        return False, "misconfigured — run manage.py check"
+    if keyset is None:
+        return False, ""
+    return True, (
+        f"{keyset.source.value}, {_count(len(keyset), 'key')}, "
+        f"fingerprint {keyset.fingerprint}"
+    )
+
+
+def _sharding() -> tuple[bool, str]:
+    """``(on, "2 shards, 1 replica, strategy 'hash'")`` — the routing shape.
+
+    "On" means the shard map actually resolves, not merely that
+    ``SNAPADMIN_SHARDING`` exists: a project can carry the setting with
+    ``ENABLED: False``, or with a DSN the parser rejects. The detail names what
+    a sharded deployment most needs to confirm at a glance — how many shards the
+    router believes it has, how many replicas back them, and which strategy maps
+    a key to a shard, since a strategy mismatch between two environments routes
+    the same row to different databases.
+    """
+    from snapadmin.sharding.registration import (
+        get_shards,
+        get_sharding_config,
+        is_sharding_enabled,
+        parse_dsn,
+    )
+
+    if not is_sharding_enabled():
+        return False, ""
+    try:
+        shards = get_shards()
+        # Resolving the map is not enough: `get_shards` accepts a DSN string it
+        # never parses, so validate each one the way check_sharding_config does
+        # — an unparseable DSN means the router cannot reach that database.
+        for shard in shards.values():
+            parse_dsn(shard.primary_dsn)
+            for replica_dsn in shard.replica_dsns:
+                parse_dsn(replica_dsn)
+    except Exception:
+        # Broad for the same reason as `_encryption` above: one probe must never
+        # blank the whole report. A CUSTOM_ROUTER_FUNC that fails to import, or
+        # a DSN shape the parser trips over, raises more than ImproperlyConfigured.
+        # `manage.py check` reports the specifics (snapadmin.E013); the audit's
+        # job is to not claim a capability is on when it cannot even resolve.
+        return False, "misconfigured — run manage.py check"
+    replicas = sum(len(shard.replica_dsns) for shard in shards.values())
+    strategy = get_sharding_config().get("STRATEGY", "modulo")
+    return True, (
+        f"{_count(len(shards), 'shard')}, {_count(replicas, 'replica')}, "
+        f"strategy {strategy!r}"
+    )
+
+
 def _capabilities() -> list[tuple[str, bool, str]]:
     """Every audited capability as ``(key, enabled, detail)`` in report order."""
     from snapadmin.models import SnapadminAuditLog
@@ -234,14 +316,16 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     tenant_scoped_models = sum(1 for m in models if get_model_meta(m, "tenant_scoped", False))
 
     return [
-        ("rest_api", bool(get_setting("SNAPADMIN_REST_API_ENABLED", True)), _extra_missing_detail("rest_framework", "drf_spectacular", "django_filters", extra="api")),
-        ("graphql", bool(get_setting("SNAPADMIN_GRAPHQL_ENABLED", True)), _extra_missing_detail("graphene_django", extra="graphql")),
+        ("rest_api", bool(get_setting("SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT)), _extra_missing_detail("rest_framework", "drf_spectacular", "django_filters", extra="api")),
+        ("graphql", bool(get_setting("SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_ENABLED_DEFAULT)), _extra_missing_detail("graphene_django", extra="graphql")),
         ("audit_trail", bool(get_setting("SNAPADMIN_AUDIT_LOG_ENABLED", True)), ""),
         ("error_monitoring", bool(get_setting("SNAPADMIN_ERROR_MONITOR_ENABLED", True)), ""),
         ("backups", bool(get_setting("SNAPADMIN_BACKUP_ENABLED", False)), _backup_detail()),
         ("retention_purge", retention > 0 or audit_retention_on or bool(export_retention_days),
          _retention_detail(retention, retention_files, audit_retention_on, export_retention_days)),
         ("pii_masking", masked_fields > 0, _masking_detail(masked_fields, ruled_fields)),
+        ("field_encryption", *_encryption()),
+        ("sharding", *_sharding()),
         ("api_tokens", *_api_tokens()),
         ("elasticsearch", es_enabled, _count(es_models, "indexed model") if es_enabled else ""),
         ("background_tasks", bool(getattr(settings, "CELERY_BROKER_URL", None)), ""),

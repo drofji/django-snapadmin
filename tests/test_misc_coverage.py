@@ -5,9 +5,9 @@ Covers miscellaneous missing lines across:
   - snapadmin/api/authentication.py
   - snapadmin/api/filters.py
   - snapadmin/api/graphql.py
-  - snapadmin/api/tasks.py
+  - snapadmin/tasks.py
   - snapadmin/api/views.py
-  - snapadmin/management/commands/purge_expired_data.py
+  - snapadmin/management/commands/snapadmin_purge_expired_data.py
   - snapadmin/validators.py
   - snapadmin/fields.py (SnapOneToOneField)
   - snapadmin/admin.py (formfield_for_dbfield)
@@ -204,7 +204,7 @@ class TestApiViewsEdgeCases:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# management/commands/purge_expired_data.py
+# management/commands/snapadmin_purge_expired_data.py
 # ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.mark.django_db

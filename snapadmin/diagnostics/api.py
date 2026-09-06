@@ -12,14 +12,14 @@ from __future__ import annotations
 
 from django.urls import reverse
 
-from snapadmin.conf import get_setting
+from snapadmin.conf import REST_API_ENABLED_DEFAULT, get_setting
 from snapadmin.diagnostics.registry import register
 
 
 @register("api", title="REST API", icon="🔌", order=34, health_probe=True)
 def collect(*, verbose: bool) -> dict:
     """Collect the REST API section."""
-    if not get_setting("SNAPADMIN_REST_API_ENABLED", True):
+    if not get_setting("SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT):
         return {"enabled": False}
 
     data: dict = {"enabled": True}

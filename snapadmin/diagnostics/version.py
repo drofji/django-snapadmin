@@ -14,15 +14,21 @@ import django
 from django.conf import settings
 
 from snapadmin import __version__
-from snapadmin.conf import get_setting
+from snapadmin.conf import (
+    GRAPHQL_ENABLED_DEFAULT,
+    REST_API_ENABLED_DEFAULT,
+    get_setting,
+)
 from snapadmin.diagnostics.registry import register
 from snapadmin.quickstart import stamp
 
 # (label, setting name, default). ``default=None`` means "follow DEBUG" (graphiql only).
 _FEATURE_FLAGS: tuple[tuple[str, str, bool | None], ...] = (
-    ("rest_api", "SNAPADMIN_REST_API_ENABLED", True),
-    ("swagger", "SNAPADMIN_SWAGGER_ENABLED", True),
-    ("graphql", "SNAPADMIN_GRAPHQL_ENABLED", True),
+    ("rest_api", "SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT),
+    # Swagger has no default of its own — it follows whatever rest_api resolved to,
+    # which _flag() cannot express, so `collect()` overwrites this row below.
+    ("swagger", "SNAPADMIN_SWAGGER_ENABLED", REST_API_ENABLED_DEFAULT),
+    ("graphql", "SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_ENABLED_DEFAULT),
     ("graphiql", "SNAPADMIN_GRAPHIQL_ENABLED", None),
     ("user_api", "SNAPADMIN_USER_API_ENABLED", False),
     ("reindex_api", "SNAPADMIN_REINDEX_API_ENABLED", False),

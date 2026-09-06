@@ -1,7 +1,7 @@
 """
 snapadmin/nesting.py
 
-Nest SnapAdmin sections into existing Django app groups (issues #4 / #16).
+Nest SnapAdmin sections into existing Django app groups.
 
 By default every app is its own top-level block on the admin index. On a busy
 install that clutters the sidebar. These settings let you fold auto-generated

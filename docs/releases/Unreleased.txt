@@ -6,8 +6,3 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
-
-Breaking
---------
-
-Breaking: none

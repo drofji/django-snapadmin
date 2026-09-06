@@ -15,7 +15,7 @@ urlpatterns = [
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
     path('logout/', auth_views.LogoutView.as_view(next_page='landing'), name='logout'),
     path('admin/', admin.site.urls),
-    # i18n: set_language view backing the SnapAdmin language switcher (issue #9).
+    # i18n: set_language view backing the SnapAdmin language switcher.
     path('i18n/', include('django.conf.urls.i18n')),
     path('api/', include('snapadmin.urls')),
     path('demo/search/', product_search, name='product-search'),

@@ -84,6 +84,8 @@ MAPPED_MODULES = [
     "snapadmin.conf",
     "snapadmin.checks",
     "snapadmin.crypto",
+    "snapadmin.encryption",
+    "snapadmin.sharding",
     "snapadmin.theme_i18n",
     "snapadmin.diagnostics",
     "snapadmin.licensing",
@@ -112,6 +114,9 @@ MAPPED_COMMANDS = [
     "snapadmin_restore",
     "snapadmin_rollback",
     "snapadmin_subject_request",
+    "snapadmin_encryption_key",
+    "snap_migrate",
+    "snapadmin_age_keygen",
 ]
 
 

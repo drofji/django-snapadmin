@@ -10,16 +10,24 @@ actionable hint. Everything here is advisory: a warning never blocks boot, and
 each check is a no-op when its feature is unconfigured.
 """
 
+import os
 import re
+import stat
 from datetime import timedelta
 from urllib.parse import urlparse
 
 from django.apps import apps
 from django.conf import settings
 from django.core.checks import Error, Info, Warning
+from django.core.exceptions import ImproperlyConfigured
+from django.utils.module_loading import import_string
 
 from snapadmin import conf
-from snapadmin.conf import get_setting
+from snapadmin.conf import (
+    GRAPHQL_ENABLED_DEFAULT,
+    REST_API_ENABLED_DEFAULT,
+    get_setting,
+)
 from snapadmin.registry import get_model_meta, is_registered
 
 
@@ -264,7 +272,7 @@ def _api_writable_models():
 
 
 def check_api_write_fields(app_configs, **kwargs):
-    if not get_setting("SNAPADMIN_REST_API_ENABLED", True):
+    if not get_setting("SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT):
         return []
     unguarded = sorted(
         model._meta.label
@@ -293,7 +301,7 @@ def check_api_read_only(app_configs, **kwargs):
     instead. Quiet once the model sets ``api_read_only`` or an explicit
     ``api_http_method_names`` policy, so the tradeoff is a deliberate choice.
     """
-    if not get_setting("SNAPADMIN_REST_API_ENABLED", True):
+    if not get_setting("SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT):
         return []
     inert = sorted(
         model._meta.label
@@ -575,8 +583,10 @@ def check_snapadmin_profile(app_configs, **kwargs):
         return []
     return [Error(
         f"SNAPADMIN_PROFILE = {profile!r} is not a recognised profile.",
-        hint=f"Choose one of {', '.join(conf.PROFILES)}, or unset it to keep "
-             "today's defaults (equivalent to 'full').",
+        hint=f"Choose one of {', '.join(conf.PROFILES)}, or unset it to apply no "
+             "profile at all. Note that unset is not the same as 'full': since 1.0 "
+             "'full' turns the REST and GraphQL surfaces on, while unset leaves them "
+             "at their built-in default of off.",
         id="snapadmin.E006",
     )]
 
@@ -669,7 +679,7 @@ def check_snap_action_read_only_conflict(app_configs, **kwargs):
     and is discoverable via ``GET /api/models/schema/``, yet nothing can ever
     reach it. Caught at boot instead of at first request.
     """
-    if not get_setting("SNAPADMIN_REST_API_ENABLED", True):
+    if not get_setting("SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT):
         return []
     try:
         from snapadmin.api.views import _SAFE_HTTP_METHOD_NAMES, iter_snap_actions
@@ -978,12 +988,141 @@ def check_fetch_by_max_values(app_configs, **kwargs):
 # False (D4). Never reuse this id.
 
 
+def check_sharding_config(app_configs, **kwargs):
+    """Error: ``SNAPADMIN_SHARDING`` is enabled but its DSNs/shard shape don't resolve.
+
+    ``SnapAdminConfig.ready()`` already guards
+    :func:`snapadmin.sharding.registration.configure_sharding` against exactly
+    this failure — a bad DSN degrades to sharding staying effectively off
+    rather than crashing ``django.setup()`` on every deploy (see
+    ``snapadmin/apps.py``'s module docstring). This check exists so the same
+    problem is also surfaced loudly through ``manage.py check``/CI, instead of
+    only a quiet ``logger.error()`` line.
+    """
+    from snapadmin.sharding.registration import get_shards, is_sharding_enabled, parse_dsn
+
+    if not is_sharding_enabled():
+        return []
+    try:
+        for shard in get_shards().values():
+            parse_dsn(shard.primary_dsn)
+            for replica_dsn in shard.replica_dsns:
+                parse_dsn(replica_dsn)
+    except ImproperlyConfigured as exc:
+        return [Error(
+            f"SNAPADMIN_SHARDING is enabled but could not be resolved: {exc}",
+            hint="Fix the DSN(s) or the 'SHARDS'/'DATABASES' shape in "
+                 "SNAPADMIN_SHARDING. Until this is fixed, sharding stays "
+                 "effectively off — every query runs on 'default'.",
+            id="snapadmin.E013",
+        )]
+    return []
+
+
+def check_sharding_strategy(app_configs, **kwargs):
+    """Error: ``STRATEGY``/``REPLICA_SELECTION`` not recognised, or a ``'custom'``
+    ``STRATEGY`` with no importable ``CUSTOM_ROUTER_FUNC``."""
+    from snapadmin.sharding.registration import (
+        REPLICA_SELECTIONS, STRATEGIES, get_sharding_config, is_sharding_enabled,
+    )
+
+    if not is_sharding_enabled():
+        return []
+    raw = get_sharding_config()
+    errors = []
+
+    strategy = raw.get("STRATEGY", "modulo")
+    if strategy not in STRATEGIES:
+        errors.append(Error(
+            f"SNAPADMIN_SHARDING['STRATEGY'] = {strategy!r} is not recognised.",
+            hint=f"Choose one of {STRATEGIES}.",
+            id="snapadmin.E014",
+        ))
+    elif strategy == "custom":
+        func_path = raw.get("CUSTOM_ROUTER_FUNC")
+        if not func_path:
+            errors.append(Error(
+                "SNAPADMIN_SHARDING['STRATEGY'] = 'custom' but 'CUSTOM_ROUTER_FUNC' "
+                "is not set.",
+                hint="Set 'CUSTOM_ROUTER_FUNC' to a dotted path, e.g. "
+                     "'my_app.utils.custom_shard_selector'.",
+                id="snapadmin.E014",
+            ))
+        else:
+            try:
+                import_string(func_path)
+            except ImportError as exc:
+                errors.append(Error(
+                    f"SNAPADMIN_SHARDING['CUSTOM_ROUTER_FUNC'] = {func_path!r} could "
+                    f"not be imported: {exc}.",
+                    hint="Check the dotted path is correct and importable.",
+                    id="snapadmin.E014",
+                ))
+
+    selection = raw.get("REPLICA_SELECTION", "round_robin")
+    if selection not in REPLICA_SELECTIONS:
+        errors.append(Error(
+            f"SNAPADMIN_SHARDING['REPLICA_SELECTION'] = {selection!r} is not recognised.",
+            hint=f"Choose one of {REPLICA_SELECTIONS}.",
+            id="snapadmin.E015",
+        ))
+    return errors
+
+
+def check_sharding_ranges(app_configs, **kwargs):
+    """Error: ``STRATEGY == 'range'`` needs a non-overlapping ``RANGE`` on every shard.
+
+    Only meaningful for the explicit ``SHARDS`` mapping (Mode B) — the
+    auto-distributed ``DATABASES`` list (Mode A) never sets ``RANGE`` at all,
+    so pairing it with ``STRATEGY = 'range'`` always reports every shard as
+    missing one.
+    """
+    from snapadmin.sharding.registration import get_shards, get_sharding_config, is_sharding_enabled
+
+    if not is_sharding_enabled():
+        return []
+    raw = get_sharding_config()
+    if raw.get("STRATEGY", "modulo") != "range":
+        return []
+    try:
+        shards = get_shards()
+    except ImproperlyConfigured:
+        return []  # already reported by check_sharding_config
+
+    missing = sorted(name for name, shard in shards.items() if shard.value_range is None)
+    if missing:
+        return [Error(
+            f"SNAPADMIN_SHARDING['STRATEGY'] = 'range' but shard(s) {missing} declare "
+            "no 'RANGE'.",
+            hint="Every shard needs a 'RANGE': (low, high) pair when using the range "
+                 "strategy.",
+            id="snapadmin.E016",
+        )]
+
+    ordered = sorted(
+        ((shard.value_range, name) for name, shard in shards.items()),
+        key=lambda pair: pair[0][0],
+    )
+    errors = []
+    for (prev_range, prev_name), (curr_range, curr_name) in zip(ordered, ordered[1:]):
+        if curr_range[0] <= prev_range[1]:
+            errors.append(Error(
+                f"SNAPADMIN_SHARDING ranges overlap: {prev_name!r} {prev_range} and "
+                f"{curr_name!r} {curr_range}.",
+                hint="Each shard's RANGE must be non-overlapping.",
+                id="snapadmin.E016",
+            ))
+    return errors
+
+
 def check_api_extras_installed(app_configs, **kwargs):
     """Error: a feature is enabled but the extra its packages moved behind (#DEP1e) is absent.
 
-    ``SNAPADMIN_REST_API_ENABLED`` / ``SNAPADMIN_SWAGGER_ENABLED`` default to ``True`` and need
-    the ``[api]`` extra (djangorestframework, drf-spectacular, django-filter);
-    ``SNAPADMIN_GRAPHQL_ENABLED`` defaults to ``True`` and needs ``[graphql]`` (graphene-django).
+    ``SNAPADMIN_REST_API_ENABLED`` / ``SNAPADMIN_SWAGGER_ENABLED`` need the ``[api]`` extra
+    (djangorestframework, drf-spectacular, django-filter) and ``SNAPADMIN_GRAPHQL_ENABLED`` needs
+    ``[graphql]`` (graphene-django). All three default to ``False`` since 1.0, so this check is
+    silent on an install that never asked for an API — it fires once a project turns one on, or
+    selects a profile (``api``/``full``) that does.
     Importing ``snapadmin.urls`` with the setting on and the extra missing already raises
     ``ImproperlyConfigured`` naming the fix — but only once something actually imports the
     URLconf. This gives the same answer through ``manage.py check`` even when nothing has yet,
@@ -993,7 +1132,7 @@ def check_api_extras_installed(app_configs, **kwargs):
     import importlib.util
 
     errors = []
-    rest_enabled = get_setting("SNAPADMIN_REST_API_ENABLED", True)
+    rest_enabled = get_setting("SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT)
     swagger_enabled = get_setting("SNAPADMIN_SWAGGER_ENABLED", rest_enabled)
     if (rest_enabled or swagger_enabled) and any(
         importlib.util.find_spec(name) is None
@@ -1007,7 +1146,7 @@ def check_api_extras_installed(app_configs, **kwargs):
             id="snapadmin.E010",
         ))
 
-    if get_setting("SNAPADMIN_GRAPHQL_ENABLED", True) and importlib.util.find_spec("graphene_django") is None:
+    if get_setting("SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_ENABLED_DEFAULT) and importlib.util.find_spec("graphene_django") is None:
         errors.append(Error(
             "GraphQL is enabled but the [graphql] extra (graphene-django) is not installed.",
             hint="pip install django-snapadmin[graphql], or set SNAPADMIN_GRAPHQL_ENABLED = False.",
@@ -1054,6 +1193,130 @@ def check_empty_admin_forms(app_configs, **kwargs):
     )]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Field-level encryption (#CRYPT1a)
+#
+# Encryption is the one feature whose misconfiguration is invisible until it is
+# expensive: a column that silently stays plaintext looks exactly like one that
+# is protected, and a key that turns out to be SECRET_KEY only fails after the
+# next SECRET_KEY rotation, when the data is already unreadable. These three
+# checks are what makes the feature fail closed at startup instead.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _encryption_keyset():
+    """``(keyset, error_message)`` — resolving a keyset never explodes a check.
+
+    A malformed ``SNAPADMIN_ENCRYPTION`` raises ``ImproperlyConfigured`` by
+    design, but ``manage.py check`` exists to *report* that, not to die of it,
+    so the error is turned into a message by :func:`check_encryption_keys` and
+    the other two checks simply stand down.
+    """
+    from snapadmin.encryption import keys as encryption_keys
+
+    try:
+        return encryption_keys.get_keyset(), None
+    except ImproperlyConfigured as exc:
+        return None, str(exc)
+
+
+def check_encryption_keys(app_configs, **kwargs):
+    """Validate the configured keyset itself."""
+    from snapadmin.encryption import keys as encryption_keys
+
+    keyset, error = _encryption_keyset()
+    if error:
+        return [Error(
+            f"SNAPADMIN_ENCRYPTION is misconfigured: {error}",
+            hint="Encrypted fields cannot be read or written until this resolves. "
+                 "Generate a key with `python manage.py snapadmin_encryption_key`.",
+            id="snapadmin.E019",
+        )]
+    if keyset is None:
+        return []
+
+    messages = []
+    reused = [key.id for key in keyset if encryption_keys.matches_secret_key(key)]
+    if reused:
+        messages.append(Error(
+            f"SNAPADMIN_ENCRYPTION key(s) {', '.join(repr(key_id) for key_id in reused)} "
+            "reuse Django's SECRET_KEY as encryption key material.",
+            hint="SECRET_KEY is rotated for session and CSRF reasons; every rotation would "
+                 "make every encrypted column permanently unreadable. Generate a dedicated "
+                 "key with `python manage.py snapadmin_encryption_key`.",
+            id="snapadmin.E017",
+        ))
+
+    if keyset.source is encryption_keys.KeySource.SETTINGS and not settings.DEBUG:
+        messages.append(Warning(
+            "SNAPADMIN_ENCRYPTION['KEYS'] holds key material directly in the settings "
+            "module, with DEBUG off.",
+            hint=f"A key in a settings module is a key in version control. Move it to the "
+                 f"{encryption_keys.ENV_KEYS} environment variable, to "
+                 "SNAPADMIN_ENCRYPTION['KEY_FILE'] (a mounted secret), or to "
+                 "SNAPADMIN_ENCRYPTION['KEY_PROVIDER'] (a KMS/Vault lookup).",
+            id="snapadmin.W017",
+        ))
+    return messages
+
+
+def check_encryption_key_file(app_configs, **kwargs):
+    """Warn when the mounted key file is readable by anyone but its owner."""
+    from snapadmin.encryption import keys as encryption_keys
+
+    path = encryption_keys.configured_key_file()
+    if not path:
+        return []
+    _keyset, error = _encryption_keyset()
+    if error:
+        return []
+    try:
+        mode = os.stat(path).st_mode
+    except OSError:
+        # Unreadable/vanished is already reported as E015 by the check above;
+        # a permission probe must never be the thing that fails the run.
+        return []
+    if not mode & (stat.S_IRGRP | stat.S_IROTH):
+        return []
+    return [Warning(
+        f"The SnapAdmin encryption key file {path!r} is readable by group or others "
+        f"(mode {stat.filemode(mode)}).",
+        hint="Every process on the host can read your encryption key. Restrict it to its "
+             "owner (chmod 600), and prefer a secret mounted read-only for the "
+             "application user.",
+        id="snapadmin.W016",
+    )]
+
+
+def check_encryption_required(app_configs, **kwargs):
+    """Refuse to start with encrypted fields declared and no key to serve them."""
+    from snapadmin.encryption import keys as encryption_keys
+
+    keyset, error = _encryption_keyset()
+    if error or keyset is not None:
+        return []
+    if not encryption_keys.has_encrypted_fields():
+        return []
+
+    message = (
+        "This project declares encrypted model fields, but no SnapAdmin encryption key "
+        "is configured."
+    )
+    hint = (
+        "Generate one with `python manage.py snapadmin_encryption_key` and set it via the "
+        f"{encryption_keys.ENV_KEYS} environment variable, SNAPADMIN_ENCRYPTION['KEY_FILE'] "
+        "or SNAPADMIN_ENCRYPTION['KEY_PROVIDER']."
+    )
+    if encryption_keys.is_strict():
+        return [Error(message, hint=hint, id="snapadmin.E018")]
+    return [Warning(
+        f"{message} SNAPADMIN_ENCRYPTION['STRICT'] is off, so startup continues — but "
+        "every read or write of an encrypted field will still fail.",
+        hint=f"{hint} STRICT only relaxes this startup check; it never lets an encrypted "
+             "field fall back to storing plaintext.",
+        id="snapadmin.W018",
+    )]
+
+
 ALL_CHECKS = [
     check_analytics_db_alias,
     check_masked_fields,
@@ -1077,6 +1340,12 @@ ALL_CHECKS = [
     check_api_extras_installed,
     check_empty_admin_forms,
     check_tenant_scoping,
+    check_sharding_config,
+    check_sharding_strategy,
+    check_sharding_ranges,
+    check_encryption_keys,
+    check_encryption_key_file,
+    check_encryption_required,
 ]
 
 

@@ -89,7 +89,7 @@ MIDDLEWARE = [
     # Must sit directly after SecurityMiddleware.
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    # i18n (issue #9): must sit after SessionMiddleware and before CommonMiddleware
+    # i18n: must sit after SessionMiddleware and before CommonMiddleware
     # so the active locale is resolved from the session/cookie/Accept-Language.
     'django.middleware.locale.LocaleMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -164,7 +164,7 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 USE_TZ = True
 
-# i18n (issue #9). SnapAdmin ships translation catalogs for these locales; a
+# i18n. SnapAdmin ships translation catalogs for these locales; a
 # missing string falls back to English automatically. The admin language
 # switcher (snapadmin/language_switcher.html) posts to django's set_language.
 from django.utils.translation import gettext_lazy as _i18n  # noqa: E402
@@ -394,7 +394,25 @@ SNAPADMIN_REINDEX_TUNE_DEFAULT = env_bool('SNAPADMIN_REINDEX_TUNE_DEFAULT', Fals
 # 'default'. Empty / unknown alias → no routing (safe for single-DB installs).
 SNAPADMIN_ANALYTICS_DB_ALIAS = os.getenv('SNAPADMIN_ANALYTICS_DB_ALIAS', '')
 
-# Enterprise SSO/OAuth2 login buttons (issue #13). SnapAdmin only *renders* the
+# Declarative multi-shard/read-replica database routing (snapadmin.sharding) — a
+# separate, more general mechanism from the single-alias routing above. Left off
+# here: the demo runs one database and has no reason to shard it. Shown as an
+# example only; DSNs belong in environment variables, never hard-coded like this.
+# SNAPADMIN_SHARDING = {
+#     'ENABLED': True,
+#     'STRATEGY': 'modulo',        # modulo | hash | range | custom
+#     'SHARD_KEY': 'id',
+#     'REPLICA_SELECTION': 'round_robin',
+#     'HA_SETTINGS': {'AUTO_FAILOVER': True, 'FALLBACK_TO_PRIMARY': True},
+#     'SHARDS': {
+#         'shard_1': {
+#             'PRIMARY': os.getenv('SHARD1_PRIMARY_DSN', ''),
+#             'REPLICAS': [os.getenv('SHARD1_REPLICA_DSN', '')],
+#         },
+#     },
+# }
+
+# Enterprise SSO/OAuth2 login buttons. SnapAdmin only *renders* the
 # providers you already wired into AUTHENTICATION_BACKENDS / URLconf — it adds no
 # auth dependency. Exposed on the login page and at /api/sso-providers/.
 # Format: {"<key>": {"label": "...", "url": "/accounts/<p>/login/", "icon": "..."}}.
@@ -410,31 +428,68 @@ SNAPADMIN_SSO_ALLOWED_HOSTS = []
 # nh3 allowlist, or point this at a dotted path to your own Callable[[str], str].
 # SNAPADMIN_HTML_SANITIZER = "myapp.security.clean_html"
 
-# PII masking (issue #12). Map "app_label.ModelName" → list of sensitive fields
+# PII masking. Map "app_label.ModelName" → list of sensitive fields
 # obfuscated in the admin + REST API for users lacking `snapadmin.view_raw_pii`
 # (superusers always see raw). Empty → masking off.
-SNAPADMIN_MASKED_FIELDS = {}
+# The demo dogfoods masking rather than leaving it switched off in the project that
+# is meant to demonstrate it. `CustomerProfile.bio` is free text written about a
+# person one hop from the data subject (Customer, subject_identifier = "email") —
+# the kind of field that holds whatever a support agent happened to type, which is
+# exactly what masking is for. Superusers always see raw values, so log in as a
+# plain staff user to see the effect.
+#
+# Customer's own fields are deliberately left unmasked here: the package's masking
+# suite uses that model as its fixture, so configuring it in the shipped demo
+# settings would silently rewrite the baseline of 26 tests. That coupling is a
+# latent problem in those tests rather than a reason to under-configure the demo —
+# it is filed separately, and until it is fixed this model is the honest surface.
+SNAPADMIN_MASKED_FIELDS = {
+    'demo.CustomerProfile': ['bio'],
+}
 
 # Per-field masking rules. Says *how* each sensitive field is obfuscated (a regex
 # "pattern"+"replacement", or a "replacement" on its own to redact the whole value)
 # and which "permission" unlocks that one field — instead of the blanket
 # `snapadmin.view_raw_pii`, which reveals every masked field of every model.
 # Naming a field here also marks it sensitive, so this setting works on its own.
-# Try it: set the rule below, log in as a non-superuser and open the Customers
-# changelist, /api/demo/customer/ or an audit entry's diff.
-SNAPADMIN_MASKING_RULES = {}
-#   {"demo.Customer": {"email": {"pattern": r"[^@]", "replacement": "#"},
-#                      "first_name": {"replacement": "[redacted]",
-#                                     "permission": "demo.view_customer"}}}
+# The rule below redacts the value whole and unlocks it with one narrow permission
+# instead of the blanket `snapadmin.view_raw_pii`, which would reveal every masked
+# field of every model at once. Try it: log in as a non-superuser without
+# `demo.view_customerprofile` and open the Customer Profiles changelist,
+# /api/models/demo/CustomerProfile/ or an audit entry's diff.
+SNAPADMIN_MASKING_RULES = {
+    'demo.CustomerProfile': {
+        'bio': {'replacement': '[redacted]', 'permission': 'demo.view_customerprofile'},
+    },
+}
 
-# Admin-index nesting (issues #4 / #16). Fold auto-generated sections into
+# Field-level encryption (#CRYPT1). One dict configures the keyset that encrypted
+# model fields are written and read with. Absent or empty = off: no encrypted
+# column, no dependency imported, nothing to configure. The demo runs without it
+# — this block documents the shape; a real deployment sets the key through the
+# environment (SNAPADMIN_ENCRYPTION_KEYS in dist.env) or a mounted secret file,
+# never in this file. Generate a key with `manage.py snapadmin_encryption_key`.
+# SNAPADMIN_ENCRYPTION = {
+#     # Ordered: the FIRST key encrypts, EVERY key decrypts. Rotation = prepend
+#     # a new key, deploy, re-encrypt with `manage.py snapadmin_encrypt_fields
+#     # --rotate`, then drop the old one.
+#     "KEYS": [{"id": "2026-09", "key": "<32 bytes, base64url>"}],
+#     # Better: keep the material out of settings entirely. First hit wins.
+#     "KEY_PROVIDER": "myapp.secrets.load_snapadmin_keys",  # KMS / Vault lookup
+#     "KEY_FILE": "/run/secrets/snapadmin_encryption",      # mounted secret
+#     # A missing keyset is a startup error while any encrypted field exists.
+#     # Turning this off relaxes only that check — never the runtime guarantee.
+#     "STRICT": True,
+# }
+
+# Admin-index nesting. Fold auto-generated sections into
 # existing app groups, hide groups, or rename headings — no custom AdminSite.
 # All empty → the index is left exactly as Django builds it.
 SNAPADMIN_NESTED_APPS = {}   # {"snapadmin": "auth"} → move snapadmin models under "auth"
 SNAPADMIN_HIDDEN_APPS = []   # ["silk"]            → drop these groups from the index
 SNAPADMIN_APP_LABELS = {}    # {"auth": "Administration"} → rename a group's heading
 
-# Audit trail (issue #7 — DORA / ISO 27001). Records every admin create/update/
+# Audit trail (DORA / ISO 27001). Records every admin create/update/
 # delete as an immutable SnapadminAuditLog (who/what/when + before/after diff).
 # Export for a SIEM with `manage.py snapadmin_audit_export`.
 SNAPADMIN_AUDIT_LOG_ENABLED = env_bool('SNAPADMIN_AUDIT_LOG_ENABLED', True)
@@ -452,14 +507,14 @@ SNAPADMIN_AUDIT_RETENTION_DAYS = int(os.getenv('SNAPADMIN_AUDIT_RETENTION_DAYS',
 SNAPADMIN_TENANT_RESOLVER = 'demo.core.tenancy.resolve_demo_tenant'
 SNAPADMIN_TENANT_USER_RESOLVER = 'demo.core.tenancy.resolve_demo_tenant_for_user'
 
-# Large-dataset performance (issue #5). Replace the changelist's expensive
+# Large-dataset performance. Replace the changelist's expensive
 # COUNT(*) with PostgreSQL's fast planner estimate on unfiltered listings of
 # tables larger than the threshold; exact count everywhere else. Off → always
 # exact. Only affects huge PG tables — small/filtered/other-DB views unchanged.
 SNAPADMIN_ESTIMATED_COUNT = env_bool('SNAPADMIN_ESTIMATED_COUNT', True)
 SNAPADMIN_ESTIMATED_COUNT_THRESHOLD = int(os.getenv('SNAPADMIN_ESTIMATED_COUNT_THRESHOLD', '100000'))
 
-# Async background export (issue #6). POST /api/exports/ enqueues a Celery job
+# Async background export. POST /api/exports/ enqueues a Celery job
 # that streams a model's rows to CSV/JSON in resumable chunks; poll, cancel and
 # download via the API. Requires Celery + a broker (runs inline under eager mode).
 # export_format also accepts "xlsx" (a real workbook via openpyxl, installed here
@@ -733,7 +788,7 @@ REST_FRAMEWORK = {
 SPECTACULAR_SETTINGS = {
     'TITLE': 'SnapAdmin API',
     'DESCRIPTION': 'SnapAdmin Auto-generated API Documentation',
-    'VERSION': '1.0.0',
+    'VERSION': '0.1.0b8',
     'SERVE_INCLUDE_SCHEMA': False,
     'SECURITY': [{'TokenAuth': []}],
     'COMPONENT_SPLIT_PATCH': True,
