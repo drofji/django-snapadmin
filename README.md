@@ -95,10 +95,10 @@ rather than take on trust.
 
 | Question | Evidence |
 |---|---|
-| **Is it tested?** | **3,900+ tests** and **100% line coverage** on the shipped package (9,400+ statements), enforced in CI — the build fails below 100% |
+| **Is it tested?** | **4,300+ tests** and **100% line coverage** on the shipped package (10,400+ statements), enforced in CI — the build fails below 100% |
 | **On our Python and Django?** | Every push runs the full matrix: **Python 3.10–3.13 × Django 5.2 / 6.0** |
-| **Will an upgrade break us?** | **276 tests exist only to fail** if a public name, signature or default changes — a breaking change cannot ship by accident |
-| **Are the docs actually true?** | **98 tests** assert that the README, the docs site and the in-package module map describe the code that really ships |
+| **Will an upgrade break us?** | **270+ tests exist only to fail** if a public name, signature or default changes — a breaking change cannot ship by accident |
+| **Are the docs actually true?** | **95+ tests** assert that the README, the docs site and the in-package module map describe the code that really ships |
 | **Does the whole pipeline still connect?** | An end-to-end smoke test posts the real admin form, then proves the REST API serves that same row and the audit trail recorded it |
 | **Is `snapadmin-info` telling the truth?** | **200+ tests** cover the diagnostics report; every capability probe is tested both switched **on and off**, so the readiness audit cannot report a false green |
 | **Can we ship it commercially?** | MIT. The base install carries **only** permissive licences (MIT/BSD/Apache); anything copyleft is an opt-in extra. `snapadmin-license-check` audits what you actually installed |
@@ -122,7 +122,7 @@ The questions a tech lead or a manager asks before approving a dependency:
 | **Personal data in the API?** | [PII masking](https://drofji.github.io/django-snapadmin/#pii-masking) — declare a field sensitive once and it is masked in the admin, REST, GraphQL, exports **and** the audit diff. Per-field rules can unlock one field for one permission |
 | **Only HR should see salary?** | [`api_field_permissions`](https://drofji.github.io/django-snapadmin/#field-permissions) gates a field's very presence, per Django permission — absent from a response for anyone lacking it, an explicit `400` naming the field on a denied write, orthogonal to masking (which only controls display) |
 | **Multi-tenant SaaS?** | [Row-level tenant isolation](https://drofji.github.io/django-snapadmin/#multi-tenancy) — opt a model in with `tenant_scoped = True` plus a tenant column, and every generated surface (admin, REST, GraphQL, Elasticsearch routing, exports, imports, the offline cache) becomes unreachable without a bound tenant: default-deny, not opt-out. Logical isolation, not physical — the limitation is documented as plainly as the feature |
-| **Is it tested?** | **100% line coverage** on the shipped package, enforced in CI, across 3,900+ tests. The matrix runs Python 3.10–3.13 × Django 5.2/6.0 on every push. [What those tests cover](#quality--compatibility) |
+| **Is it tested?** | **100% line coverage** on the shipped package, enforced in CI, across 4,300+ tests. The matrix runs Python 3.10–3.13 × Django 5.2/6.0 on every push. [What those tests cover](#quality--compatibility) |
 | **Will it break on upgrade?** | A written [API-stability policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md), covered by semantic versioning as of `1.0`: deprecations warn before removal and name their replacement — and a [contract suite](#backward-compatibility-is-a-test-not-a-promise) fails the build if a public name changes |
 | **Will it survive our load?** | Read-replica routing, estimated counts, paging caps, streaming exports, and a reusable [quota primitive](https://drofji.github.io/django-snapadmin/#quotas) (`snapadmin.limits.reserve()`) for per-tenant windows, concurrency caps and outbound-call cooldowns. [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) |
 | **Single sign-on?** | [SSO / OAuth2 login helper](https://drofji.github.io/django-snapadmin/#enterprise-config); auth is pluggable — JWT, session, or your own |
@@ -470,8 +470,8 @@ the legal question in one command
 This is a package other people's products depend on, so the test suite is treated as part of the
 product rather than as developer hygiene. Concretely, on the current release:
 
-- **3,900+ tests**, run on every push.
-- **100% line coverage** on the shipped `snapadmin/` package — 9,400+ statements, no exclusions, no
+- **4,300+ tests**, run on every push.
+- **100% line coverage** on the shipped `snapadmin/` package — 10,400+ statements, no exclusions, no
   `# pragma: no cover` to hide untested code. CI runs
   `pytest --cov=snapadmin --cov-fail-under=100`, so a pull request that adds an untested line fails.
 - **The full compatibility matrix on every push** — Python 3.10 / 3.11 / 3.12 / 3.13 × Django 5.2
@@ -514,8 +514,8 @@ diagnostics package, including **60+ in `tests/test_diagnostics_features.py` alo
 capability probe in the readiness audit is exercised **both switched on and switched off**. A
 capability cannot ship without a probe, and a probe cannot ship without both tests.
 
-The same standard applies to the rest of the operator surface: **142 tests** on the startup system
-checks, **62** on the licence audit and its command, and full suites on the scaffolding
+The same standard applies to the rest of the operator surface: **150+ tests** on the startup system
+checks, **60+** on the licence audit and its command, and full suites on the scaffolding
 (`snapadmin-new`), the read-only integrator (`snapadmin-init`) and the demo fetcher
 (`snapadmin-demo`).
 
