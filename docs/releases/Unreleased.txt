@@ -150,3 +150,28 @@ Changed
   ``SECURITY.md`` gains the threat model for the field layer — the AEAD and nonce guarantees, the
   rename caveat, every leak surface and its default, the blind-index equality leak, and the
   restore-across-keysets failure that looks like data corruption and is not.
+
+Fixed
+-----
+
+* **``collectstatic`` no longer fails on a manifest static-files backend.** The vendored Chart.js
+  bundle ended with a ``//# sourceMappingURL=chart.umd.js.map`` comment, and that ``.map`` file is
+  not shipped — a source map is a devtools convenience with no place in a released minified bundle.
+  Django's ``ManifestStaticFilesStorage`` rewrites exactly that comment when it post-processes
+  collected JavaScript, so it looked for a file that was never there and aborted with a missing-file
+  error. That backend is not exotic: whitenoise's ``CompressedManifestStaticFilesStorage`` is the
+  usual production recommendation, which meant ``collectstatic`` — and with it the image build or
+  the deploy — died outright for anyone following it.
+
+  There was no configuration route around it. ``WHITENOISE_MANIFEST_STRICT = False`` and a
+  ``manifest_strict = False`` subclass both govern missing *manifest entries* at request time, not
+  a referenced file that genuinely is not on disk at collection time; the only workaround was to
+  ``touch`` an empty ``.map`` into ``site-packages`` during the build. The comment is now stripped
+  from the shipped bundle, and the modification is recorded in
+  ``snapadmin/static/snapadmin/vendor/THIRD_PARTY_LICENSES.txt`` alongside the upstream attribution.
+
+  The suite now pins the general property rather than this one file: every shipped ``.css`` and
+  ``.js`` asset is walked, each reference a manifest backend would rewrite — CSS ``url()`` and
+  ``sourceMappingURL`` in either comment form — is resolved against the package, and any shipped
+  asset advertising a source map at all is rejected. The next vendored bundle is covered before it
+  reaches a deployment.

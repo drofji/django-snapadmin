@@ -8,6 +8,10 @@ chart.umd.min.js
     Chart.js v4.4.1
     (c) Chart.js Contributors — MIT License
     https://www.chartjs.org/  ·  https://github.com/chartjs/Chart.js
+    The upstream bundle is unmodified except that its trailing
+    `sourceMappingURL` comment was removed: the `.map` file is not shipped, and
+    a manifest static-files backend fails `collectstatic` over the dangling
+    reference.
     Full licence text: LICENSE-chartjs.txt
 
 material-icons.css, material-icons.woff2

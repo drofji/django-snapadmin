@@ -49,6 +49,15 @@ the `0.x` beta series.
 - The field-encryption documentation is split into the field types (`#field-encryption`) and the
   keyset (`#encryption-keys`); `SECURITY.md` gains the field layer's threat model.
 
+### Fixed
+- `collectstatic` no longer fails on a manifest static-files backend. The vendored Chart.js bundle
+  ended with a `sourceMappingURL` comment pointing at a `.map` file the package does not ship, so
+  `ManifestStaticFilesStorage` — including whitenoise's `CompressedManifestStaticFilesStorage`, the
+  usual production choice — aborted post-processing with a missing-file error and took the image
+  build or deploy down with it. Neither `WHITENOISE_MANIFEST_STRICT = False` nor a
+  `manifest_strict = False` subclass worked around it, because the file really was absent. The
+  comment is gone from the shipped bundle.
+
 ## 0.1.0b8 — 2026-09-06
 
 ### Breaking
