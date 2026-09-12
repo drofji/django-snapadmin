@@ -117,7 +117,12 @@ class SnapField:
         Add a sidebar filter in the admin and a ``?field=`` query filter in the API.
         Default ``False``.
     ``editable``
-        Allow changes through the form and the API. Default ``True``.
+        Allow changes through the form and the API. Default ``True``. The one
+        Snap kwarg that is also a Django kwarg, deliberately: ``editable=False``
+        sets ``Field.editable``, which is what makes the restriction hold in a
+        hand-written ``ModelForm`` or DRF serializer too, not only in the admin
+        SnapAdmin generates. It still adds no migration — the mixin's
+        ``deconstruct()`` keeps it out, since it affects no column.
     ``required``
         ``True`` yields ``null=False, blank=False``; the default ``False`` yields
         ``null=True, blank=True``. Set it instead of the two Django kwargs so the
@@ -137,7 +142,11 @@ class SnapField:
     **None of these add a database migration.** They are stripped in
     :meth:`handleDjangoKwargs` before Django sees the field and are absent from
     ``deconstruct()``, so adding or changing one leaves ``makemigrations`` with
-    nothing to detect.
+    nothing to detect. ``editable`` is the one that needs help to keep that
+    promise: it is passed through to Django on purpose (see above), and
+    ``Field.deconstruct()`` would report it, so the mixin's ``deconstruct()``
+    wrapper drops it again — an ``editable=False`` already recorded by an
+    earlier release's ``AlterField`` converges with no further migration.
     """
 
     def _initializeSnapLogic(self, **kwargs) -> dict:
@@ -234,6 +243,18 @@ class SnapField:
         # default (null=True), producing wrong migrations for mandatory fields.
         # Force the resolved null/blank into the deconstructed kwargs so a
         # field always round-trips to the same column definition.
+        #
+        # `editable` goes the other way, and is the one Snap kwarg that is also
+        # a Django one. The collision is deliberate — Django's `editable` is
+        # what makes "no changes through the form or the API" true outside the
+        # code SnapAdmin generates (it drops the field from every ModelForm,
+        # skips it in full_clean(), and DRF maps it to read_only=True) — but
+        # `Field.deconstruct()` emits it whenever it differs from the default,
+        # and it affects no column. Left in, `editable=False` on 24 fields is 24
+        # AlterFields that sqlmigrate renders as `(no-op)` and a red
+        # `makemigrations --check`. Popping it on both sides of every
+        # comparison also means a project that already generated such a
+        # migration converges with no further migration at all (#EXT1c).
         super().__init_subclass__(**kwargs)
         base_deconstruct = getattr(cls, "deconstruct", None)
         # Non-database Snap fields (SnapFunctionField etc.) have no deconstruct
@@ -246,6 +267,7 @@ class SnapField:
             if hasattr(self, "null"):
                 kw["null"] = self.null
                 kw["blank"] = self.blank
+            kw.pop(SnapFieldAttributeEnum.EDITABLE.value, None)
             return name, path, args, kw
 
         cls.deconstruct = deconstruct
@@ -388,6 +410,31 @@ def _attach_file_validator(
     field.deconstruct = types.MethodType(deconstruct, field)
 
 
+def _detach_editable_from_deconstruct(field: models.Field) -> None:
+    """Keep a wrapper-set ``editable`` out of ``deconstruct()``.
+
+    :func:`snap_field`'s "adds no database migration" promise rests on its
+    kwargs being applied *after* ``Field.__init__``. That holds for every
+    attribute SnapAdmin invented, and fails for the one it shares with Django:
+    ``Field.deconstruct()`` reports **live attribute state**, not the arguments
+    the constructor was given, so a post-hoc ``setattr(field, "editable", ...)``
+    lands in it exactly as a constructor kwarg would.
+
+    Only a wrapper-set value is stripped. A caller who wrote
+    ``snap_field(models.CharField(..., editable=False), searchable=True)`` meant
+    Django's kwarg, migration included, and removing it from their history would
+    be the same bug pointed the other way.
+    """
+    original_deconstruct = field.deconstruct
+
+    def deconstruct(self):
+        name, path, args, kwargs = original_deconstruct()
+        kwargs.pop(SnapFieldAttributeEnum.EDITABLE.value, None)
+        return name, path, args, kwargs
+
+    field.deconstruct = types.MethodType(deconstruct, field)
+
+
 def snap_field(field: models.Field, **kwargs: bool | str | None) -> models.Field:
     """Attach SnapAdmin metadata to a plain Django field instance, in place.
 
@@ -426,12 +473,20 @@ def snap_field(field: models.Field, **kwargs: bool | str | None) -> models.Field
     this way; pass ``show_in_form=`` explicitly if you need it raised here).
 
     Adds no database migration for every kwarg **except** ``required``: the
-    metadata kwargs are mutated *after* ``Field.__init__`` already recorded its
-    constructor arguments, so none of them can appear in ``deconstruct()``.
-    ``required`` is the deliberate exception — it is schema-affecting by
-    design, same as passing ``null=``/``blank=`` directly to the Django field,
-    and **can** produce a migration the same way changing a ``Snap*Field``'s
-    ``required`` would.
+    metadata kwargs are mutated *after* ``Field.__init__``, and SnapAdmin
+    invented every attribute name they set, so Django's ``deconstruct()`` has
+    no reason to look at them. ``required`` is the deliberate exception — it is
+    schema-affecting by design, same as passing ``null=``/``blank=`` directly
+    to the Django field, and **can** produce a migration the same way changing
+    a ``Snap*Field``'s ``required`` would.
+
+    ``editable`` needs help to keep that promise, being the one name shared with
+    Django: ``Field.deconstruct()`` reports live attribute state rather than
+    constructor arguments, so it would emit a wrapper-set ``editable`` and turn
+    a form-level flag into a no-op ``AlterField``. It is stripped — see
+    :func:`_detach_editable_from_deconstruct`, which leaves an ``editable=``
+    passed to the *Django* field's own constructor exactly where the caller put
+    it.
 
     ``wysiwyg=True`` also binds the same sanitize-on-write guarantee
     ``SnapRichTextField``/``SnapTextField(wysiwyg=True)`` get from
@@ -461,6 +516,9 @@ def snap_field(field: models.Field, **kwargs: bool | str | None) -> models.Field
         if key in skip:
             continue
         setattr(field, key, value)
+
+    if SnapFieldAttributeEnum.EDITABLE.value in kwargs:
+        _detach_editable_from_deconstruct(field)
 
     if getattr(field, "wysiwyg", False):
         _bind_wysiwyg_pre_save(field)

@@ -889,7 +889,7 @@ class Product(models.Model):
     <tr><td><code>show_in_form</code></td><td>bool</td><td>False<sup>*</sup></td><td>Shows field in change form</td></tr>
     <tr><td><code>searchable</code></td><td>bool</td><td>False</td><td>Adds to <code>search_fields</code></td></tr>
     <tr><td><code>filterable</code></td><td>bool</td><td>False</td><td>Smart sidebar filter (type-aware)</td></tr>
-    <tr><td><code>editable</code></td><td>bool</td><td>True</td><td>Always read-only when False</td></tr>
+    <tr><td><code>editable</code></td><td>bool</td><td>True</td><td>Always read-only when False. The one flag also passed through to Django's own <code>Field.editable</code>, deliberately — that is what keeps the restriction true in a hand-written <code>ModelForm</code> or DRF serializer, not just the generated admin. It still adds no migration: <code>deconstruct()</code> drops it, because it affects no column</td></tr>
     <tr><td><code>updatable</code></td><td>bool</td><td>True</td><td>Read-only after first save when False</td></tr>
     <tr><td><code>row</code></td><td>str</td><td>None</td><td>Group fields into a horizontal row</td></tr>
     <tr><td><code>tab</code></td><td>str</td><td>None</td><td>Place field into a specific Unfold tab</td></tr>
@@ -980,9 +980,14 @@ class Product(models.Model):
   there is nothing new to read: <code>snap_field()</code> writes the identical attribute names a
   <code>Snap*Field</code> stores on itself, not a second place to look. It returns the field, so
   the call composes inline with the field declaration, and it adds no migration for every flag
-  above: the attributes are set <em>after</em> Django's <code>Field.__init__</code> already
-  recorded its constructor arguments, so <code>deconstruct()</code> never reports them. An
-  unrecognised kwarg raises <code>ValueError</code> naming it, rather than doing nothing.</p>
+  above: the attributes are set <em>after</em> Django's <code>Field.__init__</code>, and SnapAdmin
+  invented every name they use, so <code>deconstruct()</code> has no reason to look at them.
+  <code>editable</code> is the exception that proves it — the one name shared with Django, whose
+  <code>deconstruct()</code> reports <em>live attribute state</em> rather than the arguments the
+  constructor was given, so a wrapper-set value would land in a migration. It is stripped, while an
+  <code>editable=</code> you passed to the Django field's own constructor stays exactly where you
+  put it. An unrecognised kwarg raises <code>ValueError</code> naming it, rather than doing
+  nothing.</p>
 
   <p><code>snap_field()</code> reaches full parity with every <code>Snap*Field</code> constructor
   kwarg, including three that used to be refused:</p>

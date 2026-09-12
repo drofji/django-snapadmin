@@ -64,6 +64,15 @@ the `0.x` beta series.
   section 1 installed the extras, expected their API to survive the upgrade, and lost it on the next
   boot. All three are corrected, and the guides now spell out that restoring a surface takes both
   the extra and the setting.
+- `editable=False` no longer generates a migration. It is the one Snap field kwarg that is also a
+  Django one — passed through on purpose, so the restriction holds in a hand-written `ModelForm` or
+  DRF serializer and not only in the generated admin — but `Field.deconstruct()` reported it, so
+  putting it on 24 fields produced 24 `AlterField` operations that `sqlmigrate` renders as `(no-op)`
+  and a red `makemigrations --check` in CI, against the `SnapField` docstring's explicit promise.
+  `deconstruct()` now drops it on both sides of every comparison, so a project that already
+  generated such a migration needs no action: nothing further is detected. `snap_field()` had the
+  same leak and is fixed the same way, while an `editable=` passed to the wrapped Django field's own
+  constructor is still reported, because there it really is the Django kwarg.
 
 ## 0.1.0b8 — 2026-09-06
 

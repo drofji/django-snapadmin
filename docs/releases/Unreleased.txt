@@ -196,3 +196,33 @@ Fixed
   a claim that either switch defaults to on, with each claim attributed to the setting it is
   actually about so a neighbouring setting's correct ``# default True`` is not swept up. Release
   notes are deliberately out of scope: describing a past default is their job.
+
+* **``editable=False`` no longer produces a no-op migration.** ``SnapField``'s docstring promises
+  that none of the Snap-only kwargs add a database migration — "they are stripped in
+  ``handleDjangoKwargs`` before Django sees the field and are absent from ``deconstruct()``". That
+  was false for exactly one of them. ``editable`` is also the name of Django's own
+  ``Field.editable``, and SnapAdmin passes it through deliberately: that is what makes "no changes
+  through the form or the API" true in a hand-written ``ModelForm`` or a DRF serializer, and not
+  only in the admin SnapAdmin generates. The cost was that ``Field.deconstruct()`` reports
+  ``editable`` whenever it differs from the default, so declaring it on 24 fields of one model
+  produced an ``AlterField`` for all 24 — every one of which ``sqlmigrate`` renders as ``(no-op)``,
+  and any project running ``makemigrations --check`` as a build gate went red with nothing in the
+  documentation to explain why.
+
+  The attribute stays where it is; only the migration surface is fixed. The ``deconstruct()``
+  wrapper that already pins ``null``/``blank`` now drops ``editable``, which affects no column on
+  any backend. Because both sides of the autodetector's comparison are deconstructed the same way,
+  **a project that already generated one of these migrations needs to do nothing**: the historical
+  ``AlterField(editable=False)`` and the live field compare equal, and no further migration is
+  detected. Nothing changes at runtime — the field is still excluded from forms, still skipped by
+  ``full_clean()``, still ``read_only`` in a generated serializer, and still read-only in the
+  generated admin.
+
+  ``snap_field()`` carried the same defect on a second surface, and its docstring the same false
+  reasoning: it argued that setting attributes *after* ``Field.__init__`` puts them out of reach of
+  ``deconstruct()``. That holds for every attribute SnapAdmin invented, but ``Field.deconstruct()``
+  reports **live attribute state** rather than recorded constructor arguments, so a post-hoc
+  ``setattr(field, "editable", False)`` landed in a migration just the same. It is now stripped —
+  but only when ``editable=`` was passed to ``snap_field()`` itself. A caller who wrote
+  ``snap_field(models.CharField(..., editable=False), searchable=True)`` meant Django's kwarg,
+  migration included, and it is left exactly where they put it.

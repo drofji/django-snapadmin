@@ -908,6 +908,177 @@ class TestValidatorDeconstructStability:
         assert not any(isinstance(v, SnapColorValidator) for v in kwargs["validators"])
 
 
+# ── `editable` must not reach a migration (#EXT1c) ─────────────────────────────
+
+class TestEditableIsNotAMigration:
+    """``editable`` is the one Snap kwarg that is also a Django kwarg.
+
+    That collision is deliberate and stays: Django's ``editable`` is what
+    delivers SnapAdmin's documented meaning ("allow changes through the form and
+    the API") everywhere SnapAdmin does not generate the code itself — it drops
+    the field from every ModelForm, skips it in ``full_clean()``, and DRF's
+    ``ModelSerializer`` maps it to ``read_only=True``. Storing the Snap meaning
+    somewhere else would mean reimplementing all three and losing them for
+    hand-written forms and serializers.
+
+    What must not survive the collision is ``Field.deconstruct()``. ``editable``
+    has no effect on any column, so a project that adds it to 24 fields should
+    get 24 read-only fields and **no** migration — not an ``AlterField`` per
+    field that ``sqlmigrate`` renders as ``(no-op)`` and a red
+    ``makemigrations --check`` in CI.
+    """
+
+    def _state(self, field):
+        from django.db import models as dj_models
+        from django.db.migrations.state import ModelState, ProjectState
+
+        state = ProjectState()
+        state.add_model(
+            ModelState(
+                "ext1c",
+                "Thing",
+                [("id", dj_models.AutoField(primary_key=True)), ("name", field)],
+            )
+        )
+        return state
+
+    def _changes(self, before, after):
+        from django.db.migrations.autodetector import MigrationAutodetector
+        from django.db.migrations.questioner import NonInteractiveMigrationQuestioner
+
+        detector = MigrationAutodetector(
+            self._state(before),
+            self._state(after),
+            NonInteractiveMigrationQuestioner({"ask_rename": False}),
+        )
+        return detector._detect_changes()
+
+    @pytest.mark.parametrize("field_name", [
+        "SnapCharField",
+        "SnapTextField",
+        "SnapIntegerField",
+        "SnapBooleanField",
+        "SnapDateField",
+        "SnapUUIDField",
+        "SnapJSONField",
+    ])
+    def test_deconstruct_omits_editable(self, field_name):
+        import snapadmin.fields as fields
+
+        cls = getattr(fields, field_name)
+        kwargs = {"max_length": 10} if field_name == "SnapCharField" else {}
+        assert "editable" not in cls(editable=False, **kwargs).deconstruct()[3]
+
+    def test_the_runtime_flag_still_says_read_only(self):
+        """Stripping the *migration* must not strip the behaviour it exists for."""
+        from snapadmin.fields import SnapCharField
+
+        field = SnapCharField(max_length=10, editable=False)
+        assert field.editable is False
+
+    def test_adding_editable_generates_no_migration(self):
+        """The reporter's case: ``editable=False`` on an append-only model."""
+        from snapadmin.fields import SnapCharField
+
+        changes = self._changes(
+            SnapCharField(max_length=10),
+            SnapCharField(max_length=10, editable=False),
+        )
+        assert changes == {}, f"editable=False produced a no-op migration: {changes}"
+
+    def test_a_project_that_already_migrated_editable_stays_quiet(self):
+        """Both sides of the comparison strip it, so an ``AlterField(editable=False)``
+        already in someone's migration history converges with no further migration —
+        the upgrade needs no action from them."""
+        from snapadmin.fields import SnapCharField
+
+        changes = self._changes(
+            SnapCharField(max_length=10, editable=False),
+            SnapCharField(max_length=10, editable=False),
+        )
+        assert changes == {}
+
+    def test_a_real_schema_change_is_still_detected(self):
+        """A guard that suppresses every AlterField would be worse than the bug."""
+        from snapadmin.fields import SnapCharField
+
+        changes = self._changes(
+            SnapCharField(max_length=10, editable=False),
+            SnapCharField(max_length=20, editable=False),
+        )
+        assert changes, "max_length changed and the autodetector saw nothing"
+
+    def test_auto_now_still_deconstructs_cleanly(self):
+        """``auto_now`` sets the Snap flag too (``__reinitializeAutoNow``); Django
+        already drops ``editable`` for it, and the strip must not disturb that."""
+        from snapadmin.fields import SnapDateTimeField
+
+        field = SnapDateTimeField(auto_now=True)
+        kwargs = field.deconstruct()[3]
+        assert field.editable is False
+        assert "editable" not in kwargs
+        assert kwargs["auto_now"] is True
+
+
+class TestSnapFieldWrapperEditableIsNotAMigration:
+    """``snap_field()`` sets its kwargs *after* ``Field.__init__``, and its docstring
+    took that to mean none of them can reach ``deconstruct()``. That reasoning does
+    not hold for ``editable``: ``Field.deconstruct()`` reads live attributes rather
+    than recorded constructor arguments, so a post-hoc ``setattr`` lands in it just
+    the same. Same defect as the ``Snap*Field`` half, second surface.
+    """
+
+    def test_deconstruct_omits_editable_passed_to_the_wrapper(self):
+        from django.db import models as dj_models
+
+        from snapadmin.fields import snap_field
+
+        field = snap_field(dj_models.CharField(max_length=10), editable=False)
+        assert field.editable is False
+        assert "editable" not in field.deconstruct()[3]
+
+    def test_the_callers_own_editable_kwarg_is_left_alone(self):
+        """A caller who put ``editable=False`` on the *Django* field meant the Django
+        kwarg, migration and all. Stripping that would invent a spurious AlterField
+        in their history — the exact bug, pointed the other way."""
+        from django.db import models as dj_models
+
+        from snapadmin.fields import snap_field
+
+        field = snap_field(dj_models.CharField(max_length=10, editable=False), searchable=True)
+        assert field.deconstruct()[3]["editable"] is False
+
+    def test_other_wrapper_kwargs_are_untouched(self):
+        from django.db import models as dj_models
+
+        from snapadmin.fields import snap_field
+
+        field = snap_field(
+            dj_models.CharField(max_length=10),
+            editable=False,
+            searchable=True,
+            show_in_list=False,
+        )
+        assert field.deconstruct()[3] == {"max_length": 10}
+        assert field.searchable is True
+        assert field.show_in_list is False
+
+    def test_the_wrapper_still_strips_its_file_validator(self):
+        """The two deconstruct overrides compose — binding one must not drop the other."""
+        from django.db import models as dj_models
+
+        from snapadmin.fields import snap_field
+
+        field = snap_field(
+            dj_models.FileField(),
+            editable=False,
+            allowed_extensions=["pdf"],
+        )
+        kwargs = field.deconstruct()[3]
+        assert "editable" not in kwargs
+        assert not kwargs.get("validators")
+
+
 # ── SnapFileField / SnapImageField validator config round-trips (BUG A / BUG B) ─
 
 class TestFileFieldValidatorConfig:
