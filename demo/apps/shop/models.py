@@ -220,8 +220,19 @@ class CustomerProfile(snap_models.SnapModel):
     )
     newsletter = snap_fields.SnapBooleanField(default=False, verbose_name=_("Newsletter Opt-in"), show_in_form=True, filterable=True)
     bio = snap_fields.SnapTextField(blank=True, verbose_name=_("Bio"), show_in_form=True)
+    # Field-level encryption (#CRYPT1): ciphertext in the column, an ordinary
+    # string in Python. blind_index=True adds the tax_id_bi sibling column so
+    # `CustomerProfile.objects.get(tax_id="…")` still works — equality only; the
+    # database cannot sort, range-compare or substring-search a value it cannot
+    # read, and asking it to raises a FieldError instead of matching nothing.
+    # Encrypted fields are masked in the API, exports and the changelist by
+    # default, and never reach Elasticsearch or the audit trail's diff.
+    tax_id = snap_fields.SnapEncryptedCharField(
+        max_length=32, blind_index=True, verbose_name=_("Tax ID"),
+        show_in_form=True, show_in_list=False,
+    )
 
-    api_write_fields = ["customer", "newsletter", "bio"]
+    api_write_fields = ["customer", "newsletter", "bio", "tax_id"]
     subject_path = "customer__email"  # one hop to the Customer subject's email
 
     class Meta:

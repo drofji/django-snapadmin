@@ -169,8 +169,14 @@ class TestSettingsGatedCapabilities:
         assert data["details"]["pii_masking"] == "2 fields, 1 rule"
 
     def test_field_encryption_off_when_no_key_resolves(self):
-        encryption_keys.reset_keyset()
-        assert _collect()["field_encryption"] is False
+        """The suite settings carry a keyset (the demo encrypts a column), so
+        "unconfigured" has to be stated rather than assumed."""
+        with override_settings(SNAPADMIN_ENCRYPTION={}):
+            encryption_keys.reset_keyset()
+            try:
+                assert _collect()["field_encryption"] is False
+            finally:
+                encryption_keys.reset_keyset()
 
     def test_field_encryption_on_reports_source_and_fingerprint_only(self):
         import base64
@@ -185,8 +191,19 @@ class TestSettingsGatedCapabilities:
                 encryption_keys.reset_keyset()
         assert data["field_encryption"] is True
         detail = data["details"]["field_encryption"]
-        assert detail == f"settings, 1 key, fingerprint {keyset.fingerprint}"
+        assert detail.startswith(f"settings, 1 key, fingerprint {keyset.fingerprint}")
         assert material not in detail
+
+    def test_field_encryption_counts_the_fields_actually_encrypted(self):
+        """A configured key with nothing encrypted is a real state, and common.
+
+        Key management shipped a release before the field types did, so the
+        adoption audit has to tell "the key is set up" apart from "the key is
+        in use". The demo encrypts ``CustomerProfile.tax_id``, so the live
+        count is one.
+        """
+        data = _collect(verbose=True)
+        assert "1 field encrypted" in data["details"]["field_encryption"]
 
     def test_field_encryption_reports_a_broken_keyset_as_off(self):
         with override_settings(SNAPADMIN_ENCRYPTION={"KEYS": [{"id": "k1", "key": "nonsense !!"}]}):

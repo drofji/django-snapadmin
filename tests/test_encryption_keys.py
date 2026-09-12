@@ -275,10 +275,17 @@ class TestResolutionSources:
         assert keymod.get_keyset() is None
         assert keymod.is_configured() is False
 
-    def test_setting_absent_entirely_resolves_to_no_keyset(self):
-        """The default state of every existing install: the setting is simply not there."""
+    def test_setting_absent_entirely_resolves_to_no_keyset(self, settings):
+        """The default state of every existing install: the setting is not there.
+
+        Stated by deleting it rather than by asserting the test project happens
+        to lack it — the suite settings *do* define one now, because the demo
+        dogfoods an encrypted column (``CustomerProfile.tax_id``). The point of
+        this test is the absent-setting code path, not the project's own shape.
+        """
         from django.conf import settings as django_settings
 
+        del settings.SNAPADMIN_ENCRYPTION
         assert not hasattr(django_settings, "SNAPADMIN_ENCRYPTION")
         assert keymod.get_keyset() is None
 
@@ -479,7 +486,15 @@ class TestNoMaterialEverLeaks:
 
 class TestHasEncryptedFields:
     def test_false_for_a_project_with_no_encrypted_field(self):
-        assert keymod.has_encrypted_fields() is False
+        """Mocked rather than read off the live registry.
+
+        The demo declares ``CustomerProfile.tax_id``, so the live answer is now
+        ``True`` — see :class:`TestDetectionOnTheRealProject` below, which
+        asserts exactly that. This one is about the negative branch.
+        """
+        models = [_FakeModel(_FakeField(False)), _FakeModel(_FakeField(False))]
+        with mock.patch("snapadmin.encryption.keys.apps.get_models", return_value=models):
+            assert keymod.has_encrypted_fields() is False
 
     def test_true_when_any_model_declares_one(self):
         models = [_FakeModel(_FakeField(False)), _FakeModel(_FakeField(True))]
@@ -500,12 +515,37 @@ def _ids(messages) -> list[str]:
     return [message.id for message in messages]
 
 
+class TestDetectionOnTheRealProject:
+    def test_the_demo_is_detected_as_using_encryption(self):
+        """The shipped demo encrypts ``CustomerProfile.tax_id``.
+
+        Which makes this the end-to-end version of the detection test: the
+        marker attribute set by ``SnapEncryptedCharField`` is found by a walk
+        over the real app registry, with no fixture in between.
+        """
+        assert keymod.has_encrypted_fields() is True
+
+
 class TestEncryptionChecksAreInert:
     def test_no_message_for_an_unconfigured_project(self, settings):
+        """No key, no encrypted field — the whole feature stays silent.
+
+        ``has_encrypted_fields`` is mocked because the suite runs against the
+        demo, which does declare one; an install that has never touched
+        encryption is the state being described here.
+        """
         settings.SNAPADMIN_ENCRYPTION = {}
-        assert checks.check_encryption_keys(None) == []
-        assert checks.check_encryption_key_file(None) == []
-        assert checks.check_encryption_required(None) == []
+        with mock.patch(
+            "snapadmin.encryption.keys.has_encrypted_fields", return_value=False
+        ):
+            assert checks.check_encryption_keys(None) == []
+            assert checks.check_encryption_key_file(None) == []
+            assert checks.check_encryption_required(None) == []
+
+    def test_a_declared_field_with_no_key_is_a_startup_error(self, settings):
+        """The fail-closed pair, now reachable without a fixture at all."""
+        settings.SNAPADMIN_ENCRYPTION = {}
+        assert _ids(checks.check_encryption_required(None)) == ["snapadmin.E018"]
 
     def test_registered_with_the_rest(self):
         for check in (

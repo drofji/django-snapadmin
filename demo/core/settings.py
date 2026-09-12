@@ -469,18 +469,33 @@ SNAPADMIN_MASKING_RULES = {
 # — this block documents the shape; a real deployment sets the key through the
 # environment (SNAPADMIN_ENCRYPTION_KEYS in dist.env) or a mounted secret file,
 # never in this file. Generate a key with `manage.py snapadmin_encryption_key`.
-# SNAPADMIN_ENCRYPTION = {
-#     # Ordered: the FIRST key encrypts, EVERY key decrypts. Rotation = prepend
-#     # a new key, deploy, re-encrypt with `manage.py snapadmin_encrypt_fields
-#     # --rotate`, then drop the old one.
-#     "KEYS": [{"id": "2026-09", "key": "<32 bytes, base64url>"}],
-#     # Better: keep the material out of settings entirely. First hit wins.
-#     "KEY_PROVIDER": "myapp.secrets.load_snapadmin_keys",  # KMS / Vault lookup
-#     "KEY_FILE": "/run/secrets/snapadmin_encryption",      # mounted secret
-#     # A missing keyset is a startup error while any encrypted field exists.
-#     # Turning this off relaxes only that check — never the runtime guarantee.
-#     "STRICT": True,
-# }
+# CustomerProfile.tax_id is a SnapEncryptedCharField, so the demo needs a real
+# keyset — an encrypted field with no key is a startup error (snapadmin.E018),
+# deliberately, so a column that is supposed to hold ciphertext can never
+# quietly receive plaintext instead.
+#
+# The value below is a **fixed, published, worthless** development key so that
+# `snapadmin-demo` works the moment it is unpacked. It is in version control,
+# which means it protects nothing: treat every value the demo encrypts as
+# public. A real deployment sets SNAPADMIN_ENCRYPTION_KEYS in the environment
+# (see dist.env), mounts a KEY_FILE, or points KEY_PROVIDER at a KMS/Vault
+# lookup — the environment beats the literal below, so setting it is all it
+# takes. Generate one with `manage.py snapadmin_encryption_key`.
+SNAPADMIN_ENCRYPTION = {
+    # Ordered: the FIRST key encrypts, EVERY key decrypts. Rotation = prepend
+    # a new key, deploy, re-encrypt with `manage.py snapadmin_encrypt_fields
+    # --rotate`, then drop the old one.
+    "KEYS": [{
+        "id": "demo",
+        "key": "c25hcGFkbWluLWRlbW8ta2V5LW5vdC1hLXNlY3JldCE=",  # 32 bytes, base64url
+    }],
+    # Better: keep the material out of settings entirely. First hit wins.
+    # "KEY_PROVIDER": "myapp.secrets.load_snapadmin_keys",  # KMS / Vault lookup
+    # "KEY_FILE": "/run/secrets/snapadmin_encryption",      # mounted secret
+    # A missing keyset is a startup error while any encrypted field exists.
+    # Turning this off relaxes only that check — never the runtime guarantee.
+    "STRICT": True,
+}
 
 # Admin-index nesting. Fold auto-generated sections into
 # existing app groups, hide groups, or rename headings — no custom AdminSite.

@@ -6,3 +6,147 @@ Add new changes here as you develop features. When you release, this file will b
 Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Security.
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
+
+Added
+-----
+
+* **The cipher behind field-level encryption.** ``0.1.0b8`` shipped key management —
+  ``SNAPADMIN_ENCRYPTION``, the four key sources, rotation-ready ordered keysets and
+  ``manage.py snapadmin_encryption_key`` — with nothing yet to encrypt. This release adds the
+  cipher itself: AES-256-GCM behind a new optional ``[encryption]`` extra
+  (``pip install django-snapadmin[encryption]``, which pulls ``cryptography``, dual-licensed
+  Apache-2.0 or BSD-3 and so still proprietary-safe).
+
+  Every encrypted value is stored as one self-describing text envelope,
+  ``snap1.<key id>.<nonce>.<ciphertext+tag>``, which is what makes the rest of the feature
+  possible: the row itself records which key opens it, so rotating a key never requires downtime;
+  the ``snap1`` prefix makes ciphertext greppable in a database dump and makes re-saving a loaded
+  row detectably *already* encrypted rather than encrypting it twice; and text rather than binary
+  keeps ``dumpdata``, fixtures, ``loaddata`` and a psql session working. The nonce is freshly
+  random on every single write, and each envelope is authenticated against its own
+  ``app_label.model.field``, so a ciphertext copied out of one column and pasted into another
+  fails to decrypt instead of quietly relocating a secret.
+
+  Failure is always loud and never silent: a dropped key id, a modified payload, a value bound to
+  a different column and an envelope written by a newer SnapAdmin each raise a ``DecryptionError``
+  that names the key *id* and the column — never key material, never the plaintext, never in a
+  log line. ``cryptography`` is imported lazily, so a project that encrypts nothing neither needs
+  nor loads it, and a project that forgets the extra gets an ``ImproperlyConfigured`` naming it
+  rather than a ``ModuleNotFoundError`` from inside a save.
+
+* **The ``SnapEncrypted*Field`` family.** Eight new field types —
+  ``SnapEncryptedCharField``, ``…TextField``, ``…EmailField``, ``…JSONField``, ``…IntegerField``,
+  ``…DecimalField``, ``…DateField`` and ``…DateTimeField`` — each its plain counterpart plus
+  encryption. Declare one and nothing above the field changes: a ``SnapEncryptedDateField`` still
+  renders a date picker, still validates a date, still hands your code a ``datetime.date``. Only
+  the column changes, to text holding a ``snap1.`` envelope::
+
+      class Patient(snap_models.SnapModel):
+          name = snap.SnapCharField(max_length=200)
+          ssn  = snap.SnapEncryptedCharField(max_length=32, show_in_list=False)
+
+  ``None`` is stored as SQL ``NULL`` and never encrypted, so ``__isnull`` keeps working and an
+  empty string stays distinguishable from a missing one. Re-saving a loaded row, a
+  ``bulk_update()``, a ``QuerySet.update()`` and a fixture reload all refuse to encrypt an
+  envelope twice — the one failure in this feature that is both silent and permanent. ``dumpdata``
+  emits the ciphertext rather than the plaintext, so a fixture is no more sensitive than the
+  database it came from, and ``loaddata`` stores it straight back without needing the key.
+
+  What you give up is what the database can no longer see: it cannot compare, order or index a
+  value it cannot read, so ``icontains``, ``gt``, ``startswith`` and ``ORDER BY`` are impossible
+  rather than merely unsupported on an encrypted column. Note also that the ciphertext is bound to
+  its own ``app_label.model.field`` — that is what stops a value being moved between columns, and
+  it means **renaming the app, model or field requires re-encrypting the rows**.
+
+* **Lookup guards, and an opt-in blind index for equality.** An encrypted column is opaque to SQL,
+  and the dangerous part was never that a query would fail — it is that ``filter(ssn="…")`` would
+  *succeed* and return nothing, because it was comparing against a ciphertext carrying a fresh
+  random nonce. Encrypted data quietly becoming invisible data is a failure no exception announces.
+
+  So every lookup an encrypted column cannot answer honestly now raises a ``FieldError`` naming the
+  field, the lookup and what is available instead. ``__isnull`` always works (NULL is never
+  encrypted). Everything else — ``icontains``, ``gt``, ``startswith``, ``range``, a ``__year``
+  transform, a key transform on an encrypted ``JSONField`` — is refused, and so is a plain
+  ``exact`` unless the field opts into a blind index.
+
+  ``blind_index=True`` adds a ``<field>_bi`` sibling column holding
+  ``HMAC-SHA256(index key, value)`` and rewrites ``__exact`` and ``__in`` onto it, so the SQL that
+  reaches the database contains no plaintext in any parameter. The index key is HKDF-derived from
+  the keyset with the field's own ``app.model.field`` as derivation info, never the encryption key
+  itself, and never shared between columns. Lookups match under **every** key in the keyset, so
+  prepending a new key during a rotation keeps existing rows findable with no rebuild and no
+  downtime. Adding ``unique=True`` moves the constraint to the index, where it means what you
+  meant — a unique constraint on ciphertext would be satisfied by every row.
+
+  **The leak this buys, stated plainly:** a blind index makes *equality* observable. Two rows with
+  the same value have the same index, so anyone who can read the column can count duplicates and
+  confirm a guess. That is a fair trade for an email address and a bad one for a national ID with
+  a known format and a small search space — which is why it is off by default.
+
+* **Every surface that could re-emit the plaintext now has a tested default.** A field decrypts
+  transparently, which is the feature and also the problem: by the time a serializer, an exporter
+  or a search indexer sees the value it is an ordinary Python string, and each of those is a
+  separate place a secret can escape into a store with a different threat model.
+
+  - **Elasticsearch.** Encrypted fields are excluded from the auto-derived mapping *and* from the
+    document itself, so nothing reaches the cluster even if an explicit ``es_mapping`` names one —
+    which is now a startup error (``snapadmin.E020``) rather than a surprise.
+  - **The audit trail.** It records *that* an encrypted field changed and never what it changed
+    from or to, in both the SnapAdmin trail and Django's own admin history message. An audit log is
+    a table people get broad read access to precisely because it is meant to be safe; a diff of
+    secrets would make it a second copy of them.
+  - **Exports, REST, GraphQL, the changelist and imports.** An encrypted field is treated as a
+    masked field automatically, so all six surfaces inherit the PII permission model already in the
+    project — no second permission concept, and a role that should see the value is granted it the
+    usual way, with a per-field rule in ``SNAPADMIN_MASKING_RULES``.
+  - **Declarations the column cannot honour** are refused at startup instead of failing quietly
+    later: ``searchable=True`` without a blind index (``E021``) would search ciphertext with
+    ``icontains`` and report the row missing; ``unique=True`` without one (``E022``) is satisfied by
+    every row, since each ciphertext has its own nonce; ``Meta.ordering`` on an encrypted field
+    (``E023``) sorts by the envelope, and unlike a filter it cannot be refused at query time.
+    ``W019`` flags an index no lookup can use, ``W020`` a blind-index column whose source field has
+    gone.
+
+* **The demo encrypts something real.** ``CustomerProfile.tax_id`` is a
+  ``SnapEncryptedCharField(blind_index=True)`` — a worked example of the whole feature: ciphertext
+  in the column, an ordinary string in Python, ``get(tax_id="…")` still working, and masking,
+  audit and Elasticsearch behaviour visible in a project you can run. The demo ships a fixed,
+  published development key so it works unpacked; it is in version control and therefore protects
+  nothing, which the settings file says in as many words.
+
+* **``manage.py snapadmin_encrypt_fields`` — converting data that is already in the table.**
+  Two moments the ORM cannot handle on its own, plus one repair::
+
+      python manage.py snapadmin_encrypt_fields --adopt --apply    # encrypt what was there
+      python manage.py snapadmin_encrypt_fields --rotate --apply   # move rows onto the new key
+      python manage.py snapadmin_encrypt_fields --reindex --apply  # rebuild blind indexes
+
+  ``--adopt`` is for the rows that were already in a column when it was switched to an encrypted
+  field: they are still plaintext, and every read of one raises until they are converted.
+  ``--rotate`` moves rows written under an older key onto the active one, which is what finally
+  lets the old key be dropped from the keyset. ``--reindex`` rebuilds the ``<field>_bi`` columns —
+  the repair path for a table changed with ``bulk_update()`` or ``QuerySet.update()``, neither of
+  which refreshes a sibling column they were not told to write.
+
+  **It writes nothing without ``--apply``**: an encryption mistake on stored data is not
+  recoverable by re-running something, so the mode you get by accident is the one that only
+  reports. It walks by primary key in batches (``--batch-size``), so a killed run resumes with
+  ``--start-pk``, and works on any orderable primary key, integer or not. A row it cannot convert
+  is counted, named by primary key and skipped rather than aborting the pass and leaving the table
+  half-converted with no summary — the exit is still an error, after everything convertible has
+  been converted. Nothing it prints contains a key or a value, including when the failure came
+  from a malformed legacy value.
+
+Changed
+-------
+
+* **``snapadmin_info --section features`` now reports how many fields are actually encrypted**, not
+  only that a keyset resolves. A configured key with nothing encrypted is a real state and was a
+  common one — key management shipped a release before the field types did — and an adoption audit
+  that cannot tell "the key is set up" from "the key is in use" is not auditing adoption.
+
+* **The documentation for field encryption is now in two halves**: the field types
+  (``#field-encryption``) and the keyset they rest on (``#encryption-keys``), in that reading order.
+  ``SECURITY.md`` gains the threat model for the field layer — the AEAD and nonce guarantees, the
+  rename caveat, every leak surface and its default, the blind-index equality leak, and the
+  restore-across-keysets failure that looks like data corruption and is not.

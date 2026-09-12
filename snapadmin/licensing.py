@@ -125,6 +125,7 @@ _CURATED: tuple[LicenseInfo, ...] = (
     LicenseInfo("paramiko", "LGPL-2.1", extra="backup", guidance=_LGPL_NOTE),
     LicenseInfo("pyrage", "MIT", extra="age"),
     LicenseInfo("boto3", "Apache-2.0", extra="s3"),
+    LicenseInfo("cryptography", "Apache-2.0 OR BSD-3-Clause", extra="encryption"),
     LicenseInfo(
         "django-ckeditor-5",
         "GPL-2.0-or-later OR Commercial",
@@ -142,7 +143,7 @@ CURATED: dict[str, LicenseInfo] = {info.normalized: info for info in _CURATED}
 #: metadata. A hand-curated table's whole risk is drifting silently — bump this whenever `_CURATED`
 #: changes, so `curated_staleness()` (surfaced by `snapadmin_license_check`) has something honest to
 #: measure against.
-CURATED_REVIEWED_ON: date = date(2026, 9, 3)
+CURATED_REVIEWED_ON: date = date(2026, 9, 12)
 
 #: How many days `_CURATED` may go unreviewed before `snapadmin_license_check` warns about it.
 CURATED_STALE_AFTER_DAYS: int = 180

@@ -115,6 +115,7 @@ MAPPED_COMMANDS = [
     "snapadmin_rollback",
     "snapadmin_subject_request",
     "snapadmin_encryption_key",
+    "snapadmin_encrypt_fields",
     "snap_migrate",
     "snapadmin_age_keygen",
 ]

@@ -296,7 +296,7 @@ Key protections:
   backtrack catastrophically (`(a+)+`); values over 4096 characters skip the regex. Every one of those
   paths — plus a replacement referencing a group the pattern lacks — falls back to the built-in
   masker, so a broken rule degrades to *more* masking, never to raw data.
-- **Field-encryption key management** — encrypted model fields (rolling out from 1.1) read their key
+- **Field-encryption key management** — encrypted model fields read their key
   material through one resolver, `snapadmin.encryption.keys`, configured by the single
   `SNAPADMIN_ENCRYPTION` dict. Four sources are tried most-secure-first and **never merged**, so a
   stray environment variable cannot half-override a secret store: `KEY_PROVIDER` (a dotted path to a
@@ -318,6 +318,70 @@ Key protections:
   The keyset is ordered — the first key encrypts, every key decrypts, and each ciphertext records the
   id of the key that wrote it — so rotation is prepending one key and re-encrypting, with the old key
   removed only once no row still names it.
+- **Encrypted model fields** — the `SnapEncrypted*Field` family (Char, Text, Email, JSON, Integer,
+  Decimal, Date, DateTime) stores **AES-256-GCM ciphertext at rest** in a text column and hands
+  application code the ordinary Python value. AEAD, so a modified ciphertext fails to decrypt rather
+  than decrypting into something else; a **fresh random 96-bit nonce on every write**, never a
+  counter and never derived from the value; and the envelope authenticated against its own
+  `app_label.model.field`, so a value lifted out of one column and pasted into another fails to
+  decrypt instead of quietly relocating a secret. The binding deliberately excludes the primary key,
+  so row copies and PK-changing restores keep working — with two consequences stated rather than
+  buried. **Renaming the app, model or field invalidates existing rows** until they are
+  re-encrypted. And because the primary key is not bound, a ciphertext from one row of a column
+  will decrypt in *another* row of the same column: an actor who can already read the stored
+  ciphertext and write that column can move a value between rows. Reading the raw ciphertext means
+  database access or a role with the field unmasked — at which point the plaintext is available
+  anyway — so this is the accepted cost of keeping `INSERT … SELECT`, fixtures and restores
+  working. Bind the primary key into your own application-level integrity check if a column needs
+  to resist that. Failure is always loud: a dropped
+  key id, a tampered payload, a value bound to a different column and an envelope from a newer
+  SnapAdmin each raise, naming the key *id* and the column and never key material or the value.
+  Nothing on the encrypt/decrypt path logs.
+- **Encrypted values do not reach the surfaces that would re-emit them.** A field decrypts
+  transparently, so every layer above the ORM receives an ordinary Python value; each has a tested
+  default rather than a convention. Elasticsearch: excluded from the mapping and the document (a
+  second datastore with a different threat model, which also keeps the value in its own inverted
+  index — naming one in an explicit `es_mapping` is `snapadmin.E020`). Audit trail: records *that*
+  an encrypted field changed, never the before/after values, in both the SnapAdmin trail and
+  Django's own admin history message. REST, GraphQL, exports, the changelist and imports: masked by
+  default through the existing PII permission model, unlocked per field with a
+  `SNAPADMIN_MASKING_RULES` permission rule. `dumpdata` emits the ciphertext, not the plaintext, so
+  a fixture is no more sensitive than the database it came from. Declarations the column cannot
+  honour are refused at startup rather than failing quietly: `searchable=True` without a blind index
+  (`snapadmin.E021`) would search ciphertext with `icontains` and report the row missing;
+  `unique=True` without one (`E022`) is satisfied by every row, since each ciphertext has its own
+  nonce; `Meta.ordering` on an encrypted field (`E023`) sorts by the envelope, and unlike a filter
+  it cannot be refused at query time; and `filterable=True` (`E024`) would have the admin print
+  every distinct plaintext into the changelist sidebar, because a sidebar filter reads the column's
+  distinct values *through the ORM*, which decrypts them. The generated admin also drops encrypted
+  fields from `sortable_by`, and they stay off the changelist by default.
+- **The blind-index sibling is protected exactly as the column is.** `<field>_bi` is a
+  deterministic function of the value, so a caller who is masked out of the field but served its
+  index has an offline equality oracle over it. The sibling is therefore masked wherever the field
+  is, and the REST filter generator emits no filter for either — a filter on the ciphertext would
+  be a documented 500, and one on the index would work, which is worse.
+- **Lookups fail loudly rather than silently matching nothing.** The database cannot compare, order
+  or index a column it cannot read, so `icontains`, `gt`, `startswith`, `range`, transforms and
+  `ORDER BY` raise a `FieldError` naming the field. That is a security property, not ergonomics:
+  a query that succeeds and returns an empty result turns encrypted data into invisible data, which
+  nothing announces and no downstream test catches. `blind_index=True` restores `__exact` / `__in`
+  and `unique=True` through a `<field>_bi` sibling column holding `HMAC-SHA256(index key, NFC
+  value)`, with the index key **HKDF-derived from the keyset, never the encryption key**, and the
+  field's own `app.model.field` as derivation info so indexes cannot be correlated between columns.
+  Lookups match under every key in the keyset, so a rotation needs no rebuild. **The leak it buys
+  its usefulness with:** a blind index makes *equality* observable — two rows holding the same value
+  have the same index, so anyone who can read the column can count duplicates and confirm a guess.
+  Against a low-entropy column with a known format that is a dictionary attack away from the value.
+  Reasonable for an email address; wrong for a national ID. Off by default.
+- **Backup and restore across keysets.** A database dump carries ciphertext, so restoring it into an
+  environment with a different keyset produces rows that cannot be read — the failure that looks
+  most like data corruption and is not. `manage.py snapadmin_info` prints the keyset *fingerprint*
+  precisely so the two environments can be compared before anyone concludes anything.
+  `manage.py snapadmin_encrypt_fields` converts stored data (`--adopt` an existing plaintext column,
+  `--rotate` rows onto the active key, `--reindex` blind-index columns); it writes nothing without
+  `--apply`, is resumable by primary key, counts a row it cannot convert instead of aborting the
+  pass, and prints no key material or value on any path, including a failure caused by a malformed
+  legacy value.
 - **Reading the audit trail is not a way around masking** — the audit-log admin renders each entry's
   diff as a masked field-level table and offers a per-object timeline at
   `/admin/snapadmin/snapadminauditlog/timeline/<app_label>/<model>/<object_id>/`. Both are gated on

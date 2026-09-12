@@ -34,6 +34,16 @@ DATABASES = {
     },
 }
 
+# ── Field encryption: a fixed test keyset ────────────────────────────────────
+# CustomerProfile.tax_id is encrypted, and an encrypted field with no keyset is
+# a startup error by design. Pinned here rather than inherited so the suite is
+# never at the mercy of SNAPADMIN_ENCRYPTION_KEYS in the developer's shell, and
+# so a test that asserts on stored ciphertext gets the same key every run.
+# Worthless by construction: it is in version control.
+SNAPADMIN_ENCRYPTION = {
+    "KEYS": [{"id": "test", "key": "c25hcGFkbWluLXRlc3Qta2V5LW5vdC1hLXNlY3JldCE="}],
+}
+
 # ── Elasticsearch: always disabled ───────────────────────────────────────────
 ELASTICSEARCH_ENABLED = False
 

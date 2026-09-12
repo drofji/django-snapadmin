@@ -35,6 +35,8 @@ from __future__ import annotations
 import json
 from math import isfinite
 
+from django.core.exceptions import FieldDoesNotExist
+
 from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
 
@@ -44,6 +46,43 @@ logger = get_logger(__name__)
 CREATE = "create"
 UPDATE = "update"
 DELETE = "delete"
+
+
+#: What an encrypted field's before/after values are recorded as.
+#:
+#: An audit trail is a table people are given broad read access to precisely
+#: because it is supposed to be safe to read, and it is the one place where a
+#: value someone took the trouble to encrypt would otherwise sit in plaintext
+#: — twice, once as "old" and once as "new". Recording *that* the field changed
+#: is what the trail is for; recording what it changed to would make the trail
+#: a second copy of the secret.
+REDACTED = "<encrypted>"
+
+
+def field_is_encrypted(model, field_name: str) -> bool:
+    """Whether ``model.field_name`` is an encrypted field.
+
+    By marker attribute, like every other encryption-aware surface, so a
+    project's own ``SnapEncrypted*Field`` subclass is recognised and nothing
+    here has to import the cipher.
+    """
+    try:
+        field = model._meta.get_field(field_name)
+    except (FieldDoesNotExist, AttributeError):
+        # A form field with no model field behind it (a plain ``forms.Field``
+        # added to the admin form). Not encrypted, and not our business.
+        return False
+    return bool(getattr(field, "is_snap_encrypted", False))
+
+
+def change_entry(model, field_name: str, old, new) -> dict:
+    """One audit-trail diff entry, with an encrypted field's values redacted."""
+    if field_is_encrypted(model, field_name):
+        return {
+            "old": REDACTED if old is not None else None,
+            "new": REDACTED if new is not None else None,
+        }
+    return {"old": format_value(old), "new": format_value(new)}
 
 
 def audit_enabled() -> bool:

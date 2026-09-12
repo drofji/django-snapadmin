@@ -68,11 +68,11 @@ class TestNormalize:
 
 class TestCuratedMap:
     def test_curated_has_core_and_extras(self):
-        assert len(CURATED) == 19
+        assert len(CURATED) == 20
         # djangorestframework/drf-spectacular/django-filter ([api]) and graphene-django
         # ([graphql]) moved out of core at #DEP1e — Django, structlog and nh3 remain.
         assert sum(1 for i in CURATED.values() if i.is_core) == 3
-        assert sum(1 for i in CURATED.values() if not i.is_core) == 16
+        assert sum(1 for i in CURATED.values() if not i.is_core) == 17
 
     def test_license_info_properties(self):
         paramiko = CURATED["paramiko"]
@@ -169,7 +169,7 @@ class TestCuratedStaleness:
 class TestScan:
     def test_scan_curated_marks_installed(self):
         statuses = scan_curated()
-        assert len(statuses) == 19
+        assert len(statuses) == 20
         django = next(s for s in statuses if s.info.package == "Django")
         assert django.installed is True
         assert django.version is not None

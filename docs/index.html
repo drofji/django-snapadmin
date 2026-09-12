@@ -297,6 +297,7 @@
       <li><a href="#gdpr">GDPR / Data Retention</a></li>
       <li><a href="#gdpr-subject-request">GDPR Subject-Access Requests</a></li>
       <li><a href="#field-encryption">Field Encryption</a></li>
+      <li><a href="#encryption-keys">Encryption Keys &amp; Rotation</a></li>
       <li><a href="#multi-tenancy">Multi-Tenancy</a></li>
       <li><a href="#sharding">Database Sharding</a></li>
       <li><a href="#enterprise-config">Enterprise Config</a></li>
@@ -481,6 +482,7 @@
     <tr><td><code>wysiwyg</code></td><td><code>django-snapadmin[wysiwyg]</code></td><td><code>django-ckeditor-5</code></td><td>Rich-text fields (<code>SnapRichTextField</code> / <code>wysiwyg=True</code>) — <strong>bundles CKEditor 5 (GPL-or-commercial)</strong></td></tr>
     <tr><td><code>autocomplete-filter</code></td><td><code>django-snapadmin[autocomplete-filter]</code></td><td><code>django-admin-autocomplete-filter</code></td><td><code>AutocompleteFilter</code> list filters in your own admin (LGPL)</td></tr>
     <tr><td><code>xlsx</code></td><td><code>django-snapadmin[xlsx]</code></td><td><code>openpyxl</code></td><td>XLSX output for the <a href="#async-export">async export API</a> (MIT — optional for size, not licence)</td></tr>
+    <tr><td><code>encryption</code></td><td><code>django-snapadmin[encryption]</code></td><td><code>cryptography</code></td><td>AES-256-GCM for <a href="#field-encryption">encrypted model fields</a> (Apache-2.0 or BSD-3 — optional for weight, not licence)</td></tr>
     <tr><td><code>all</code></td><td><code>django-snapadmin[all]</code></td><td>everything above</td><td>—</td></tr>
   </table>
 
@@ -3210,7 +3212,7 @@ Nothing was deleted. Resolve the blocking rows manually (delete or reassign them
   </table>
 
   <!-- ── Field encryption ─────────────────────────────────────────────────── -->
-  <h2 id="field-encryption">🔐 Field Encryption — Keys</h2>
+  <h2 id="field-encryption">🔐 Field Encryption</h2>
   <p>Encrypted model fields keep <strong>ciphertext in the database and hand your code the ordinary
   Python value</strong>. All of that rests on one thing being configured correctly: the
   <strong>keyset</strong>. This section is the keyset — where the key comes from, how it rotates,
@@ -3219,10 +3221,153 @@ Nothing was deleted. Resolve the blocking rows manually (delete or reassign them
   <div class="callout callout-info">
     <strong>Nothing runs until a model asks for it.</strong> With no encrypted field declared,
     <code>SNAPADMIN_ENCRYPTION</code> is never read, no dependency is imported, and no query
-    changes. The <code>SnapEncrypted*Field</code> family builds on this layer and is documented
-    with the release that ships it.
+    changes. Encryption needs the <code>[encryption]</code> extra
+    (<code>pip install django-snapadmin[encryption]</code>, which pulls
+    <code>cryptography</code> — Apache-2.0 or BSD-3, so still proprietary-safe); a project that
+    encrypts nothing neither needs nor loads it.
+  </div>
+  <p>Two halves, and they are read in this order: <a href="#encrypted-field-types">the field
+  types</a> — what you declare, what you get back and what you give up — and <strong>the
+  keyset</strong> below, which everything else rests on.</p>
+
+  <h3 id="encrypted-field-types">Declaring an encrypted field</h3>
+  <p>Each type is its plain counterpart plus encryption. Nothing above the field changes — a
+  <code>SnapEncryptedDateField</code> still renders a date picker, still validates a date and still
+  hands your code a <code>datetime.date</code>. Only the column changes, to text holding a
+  <code>snap1.</code> envelope.</p>
+
+  <pre><code>from snapadmin import fields as snap, models as snap_models
+
+class Patient(snap_models.SnapModel):
+    name    = snap.SnapCharField(max_length=200, searchable=True)
+    ssn     = snap.SnapEncryptedCharField(max_length=32, show_in_list=False)
+    email   = snap.SnapEncryptedEmailField(blind_index=True)   # still findable by value
+    notes   = snap.SnapEncryptedTextField()
+
+patient.ssn = "123-45-6789"
+patient.save()
+# the column now holds: snap1.2026-09.&lt;nonce&gt;.&lt;ciphertext&gt;
+Patient.objects.get(pk=patient.pk).ssn      # → "123-45-6789"</code></pre>
+
+  <table>
+    <tr><th>Field</th><th>Python value you get back</th></tr>
+    <tr><td><code>SnapEncryptedCharField</code></td><td><code>str</code>. <code>max_length</code> is optional here and bounds the <em>plaintext</em> — the column is text.</td></tr>
+    <tr><td><code>SnapEncryptedTextField</code></td><td><code>str</code>, multi-line.</td></tr>
+    <tr><td><code>SnapEncryptedEmailField</code></td><td><code>str</code>, still validated as an address on the way in.</td></tr>
+    <tr><td><code>SnapEncryptedJSONField</code></td><td>Whatever you stored. The document is encrypted <em>whole</em>, so key lookups and containment queries are impossible — keep the keys you query on in their own columns.</td></tr>
+    <tr><td><code>SnapEncryptedIntegerField</code></td><td><code>int</code>. No sums, no ordering, no range filters.</td></tr>
+    <tr><td><code>SnapEncryptedDecimalField</code></td><td><code>Decimal</code>, quantised to <code>decimal_places</code> exactly as the unencrypted field would be.</td></tr>
+    <tr><td><code>SnapEncryptedDateField</code></td><td><code>datetime.date</code>, stored ISO-8601.</td></tr>
+    <tr><td><code>SnapEncryptedDateTimeField</code></td><td><code>datetime.datetime</code>, stored ISO-8601 with its offset.</td></tr>
+  </table>
+
+  <p><code>None</code> is written as SQL <code>NULL</code> and never encrypted, so
+  <code>__isnull</code> keeps working and <code>""</code> stays distinguishable from "no value".
+  Re-saving a loaded row, a <code>bulk_update()</code>, a <code>QuerySet.update()</code> and a
+  fixture reload all refuse to encrypt an already-encrypted value a second time — double encryption
+  is the one failure here that is both silent and permanent.</p>
+
+  <h3 id="encrypted-field-queries">What you can still query</h3>
+  <div class="callout callout-warning">
+    <strong>The database cannot read the column, so it cannot compare, order or index it.</strong>
+    <code>icontains</code>, <code>gt</code>, <code>startswith</code>, <code>range</code>, a
+    <code>__year</code> transform and <code>ORDER BY</code> are <em>impossible</em>, not merely
+    unsupported. Each raises a <code>FieldError</code> naming the field. That is deliberate: the
+    alternative is a query that succeeds and matches nothing, which turns encrypted data into
+    invisible data — a failure nothing announces and no test downstream catches.
+  </div>
+  <table>
+    <tr><th>Lookup</th><th>Works?</th></tr>
+    <tr><td><code>__isnull</code></td><td>✅ Always — NULL is never encrypted.</td></tr>
+    <tr><td><code>__exact</code> / <code>=</code>, <code>__in</code></td><td>✅ <strong>only with <code>blind_index=True</code></strong>. Refused otherwise.</td></tr>
+    <tr><td>Everything else</td><td>❌ <code>FieldError</code>. Keep what you need to query on in a separate, unencrypted column.</td></tr>
+  </table>
+
+  <h3 id="blind-index">The blind index</h3>
+  <p><code>blind_index=True</code> adds a <code>&lt;field&gt;_bi</code> sibling column holding
+  <code>HMAC-SHA256(index key, value)</code>, and rewrites <code>__exact</code> and
+  <code>__in</code> onto it — so the SQL that reaches the database carries no plaintext in any
+  parameter, query log or slow-query report. The index key is <strong>HKDF-derived from the
+  keyset with the field's own <code>app.model.field</code> as derivation info</strong>, never the
+  encryption key itself and never shared between columns. Adding <code>unique=True</code> moves
+  the constraint to the index, where it means what you meant — a unique constraint on ciphertext
+  is satisfied by every row, since each has its own nonce.</p>
+  <p>Lookups match under <strong>every</strong> key in the keyset, so prepending a key during a
+  rotation keeps existing rows findable with no rebuild and no downtime;
+  <code>snapadmin_encrypt_fields --rotate</code> converges the stored indexes afterwards.</p>
+
+  <div class="callout callout-warning">
+    <strong>A blind index makes equality observable.</strong> Two rows with the same value have the
+    same index, so anyone who can read the column can count duplicates, spot the most common value
+    and confirm a guess. Against a low-entropy column with a known format — a national ID, a
+    postcode, a date of birth — that is a dictionary attack away from the value itself. It is a fair
+    trade for an email address, where equality is why you are storing the column at all, and a bad
+    one for an ID number. It is off by default, deliberately.
   </div>
 
+  <p>Case is significant, matching Django's own <code>exact</code>; only Unicode NFC normalisation
+  is applied, so the same string typed composed or decomposed still matches.</p>
+  <div class="callout callout-warning">
+    <strong>Three write paths cannot refresh the sibling column</strong>, because Django writes only
+    the columns it was told to write: <code>bulk_update()</code>, <code>QuerySet.update()</code>, and
+    <code>save(update_fields=[...])</code> on a plain <code>models.Model</code> (a
+    <code>SnapModel</code> adds the sibling to <code>update_fields</code> for you). A row changed
+    that way keeps its old index and silently stops being findable by its new value. Either name the
+    <code>&lt;field&gt;_bi</code> column alongside the field, or repair the table afterwards with
+    <code>manage.py snapadmin_encrypt_fields --reindex --apply</code>.
+  </div>
+  <p>The sibling column is treated as <strong>exactly as sensitive as the column it indexes</strong>
+  — masked in the API, exports and the changelist, and never given a generated API filter. It is a
+  deterministic function of the value, so serving it to a caller who is denied the field itself
+  would hand them an offline equality oracle over it.</p>
+
+  <h3 id="encrypted-field-surfaces">Where the plaintext does <em>not</em> go</h3>
+  <p>The field decrypts transparently, which means every layer above the ORM receives an ordinary
+  Python value and would happily emit it. Each surface has a tested default:</p>
+  <table>
+    <tr><th>Surface</th><th>Default</th></tr>
+    <tr><td>Elasticsearch</td><td>Excluded from the mapping <em>and</em> the document. A second datastore with a different threat model, which also keeps the value in its own inverted index. Naming one in an explicit <code>es_mapping</code> is <code>snapadmin.E020</code>.</td></tr>
+    <tr><td>Audit trail</td><td>Records <em>that</em> the field changed, never the before/after values — in the SnapAdmin trail and in Django's own admin history message.</td></tr>
+    <tr><td>REST, GraphQL, exports, changelist, imports</td><td>Masked, through the existing <a href="#pii-masking">PII masking</a> permission model. Grant a role the raw value with a per-field rule in <code>SNAPADMIN_MASKING_RULES</code>.</td></tr>
+    <tr><td><code>dumpdata</code> / fixtures</td><td>Emits the <strong>ciphertext</strong>, so a dump is no more sensitive than the database it came from. <code>loaddata</code> stores it back unchanged and needs no key.</td></tr>
+    <tr><td><code>pg_dump</code> / <code>mysqldump</code> / SnapAdmin backups</td><td>Ciphertext, necessarily. See the restore caveat below.</td></tr>
+  </table>
+
+  <h3 id="encrypted-field-adoption">Adopting an existing column</h3>
+  <p>Switching a column that already holds data to an encrypted field is <strong>a schema change in
+  your project</strong> — the column type becomes text, plus the optional <code>_bi</code> sibling —
+  and the rows already in it stay plaintext. Every read of one raises until it is converted, which
+  is correct: the alternative is a column silently holding a mixture.</p>
+  <ol>
+    <li>Change the field, <code>makemigrations</code>, <code>migrate</code>. This is the one place
+    field-level encryption cannot honour SnapAdmin's "avoid migrations" norm.</li>
+    <li><code>python manage.py snapadmin_encrypt_fields --adopt --models app.Model</code> — reports
+    what it would convert, and changes nothing.</li>
+    <li>Re-run it with <code>--apply</code>.</li>
+  </ol>
+  <pre><code>python manage.py snapadmin_encrypt_fields --adopt --apply     # encrypt what was already there
+python manage.py snapadmin_encrypt_fields --rotate --apply    # move rows onto the active key
+python manage.py snapadmin_encrypt_fields --reindex --apply   # rebuild blind-index columns</code></pre>
+  <p>It writes nothing without <code>--apply</code>, walks by primary key in batches
+  (<code>--batch-size</code>, resume a killed run with <code>--start-pk</code>), and counts a row it
+  cannot convert instead of stopping on it — the run finishes, then exits with an error listing the
+  failures by primary key.</p>
+
+  <h3 id="encrypted-field-caveats">Three caveats worth reading before you ship</h3>
+  <p><strong>Renaming breaks decryption.</strong> Every ciphertext is authenticated against its own
+  <code>app_label.model.field</code> — that is what stops a value being lifted out of one column and
+  pasted into another. It also means renaming the app, the model or the field changes the binding,
+  and rows written under the old name stop decrypting until they are re-encrypted. Plan a rename
+  like a data migration.</p>
+  <p><strong>A restore needs the keyset that wrote the dump.</strong> A database dump carries
+  ciphertext, so restoring it into an environment with a different keyset produces rows that cannot
+  be read — which looks exactly like data corruption and is not. Compare the keyset
+  <em>fingerprint</em> that <code>manage.py snapadmin_info</code> prints between the two
+  environments before concluding anything.</p>
+  <p><strong>Dropping a key is irreversible.</strong> A key can only leave the keyset once no row
+  still names it. <code>--rotate</code> is what makes that true; there is no way back afterwards.</p>
+
+  <h2 id="encryption-keys">Keys and rotation</h2>
   <h3>Generating a key</h3>
   <pre><code>python manage.py snapadmin_encryption_key            # the first key
 python manage.py snapadmin_encryption_key --rotate   # a key to prepend</code></pre>
@@ -3283,9 +3428,16 @@ python manage.py snapadmin_encryption_key --rotate   # a key to prepend</code></
     <tr><td><code>snapadmin.E017</code></td><td>Error</td><td>A configured key is Django's <code>SECRET_KEY</code> (verbatim, or base64-encoded).</td></tr>
     <tr><td><code>snapadmin.E018</code></td><td>Error</td><td>A model declares an encrypted field and no keyset resolves. Fail-closed by default: a column that is supposed to hold ciphertext never quietly receives plaintext instead.</td></tr>
     <tr><td><code>snapadmin.E019</code></td><td>Error</td><td><code>SNAPADMIN_ENCRYPTION</code> is unresolvable — an unimportable <code>KEY_PROVIDER</code>, a missing <code>KEY_FILE</code>, a key that is not 32 base64url bytes, a duplicate key id.</td></tr>
+    <tr><td><code>snapadmin.E020</code></td><td>Error</td><td>An explicit <code>es_mapping</code> names an encrypted field. Indexing it would ship the plaintext to Elasticsearch — a second datastore with a different threat model, which also keeps the value in its own inverted index. SnapAdmin excludes it from the document regardless, so the entry only ever misleads.</td></tr>
+    <tr><td><code>snapadmin.E021</code></td><td>Error</td><td><code>searchable=True</code> on an encrypted field with no <code>blind_index=True</code>. The admin search box and the REST <code>?search=</code> filter build an <code>icontains</code> over ciphertext, which matches nothing — the search would report the row does not exist.</td></tr>
+    <tr><td><code>snapadmin.E022</code></td><td>Error</td><td><code>unique=True</code> on an encrypted field with no <code>blind_index=True</code>. Every ciphertext carries its own random nonce, so the constraint is satisfied by every row and enforces nothing. With a blind index it moves to the <code>&lt;field&gt;_bi</code> column and means what you meant.</td></tr>
+    <tr><td><code>snapadmin.E023</code></td><td>Error</td><td><code>Meta.ordering</code> sorts by an encrypted field. The database orders by the base64url envelope, which bears no relation to the value. Unlike a filter, ordering cannot be refused at query time — this check is the only thing that catches it.</td></tr>
+    <tr><td><code>snapadmin.E024</code></td><td>Error</td><td><code>filterable=True</code> on an encrypted field. A sidebar filter reads the column's distinct values <em>through the ORM</em>, which decrypts them — so the admin would print every distinct plaintext into the sidebar for anyone who can open the changelist, then fail when the filter is applied. Unlike the others, a blind index cannot make this one safe: what the filter offers is exactly what the encryption is hiding.</td></tr>
     <tr><td><code>snapadmin.W016</code></td><td>Warning</td><td>The mounted <code>KEY_FILE</code> is readable by group or others.</td></tr>
     <tr><td><code>snapadmin.W017</code></td><td>Warning</td><td>Key material sits in the settings module (<code>KEYS</code>) with <code>DEBUG</code> off.</td></tr>
     <tr><td><code>snapadmin.W018</code></td><td>Warning</td><td>An encrypted field has no keyset while <code>STRICT</code> is off. Startup continues — but every read and write of that field still fails: <code>STRICT</code> relaxes this check only, never the runtime guarantee.</td></tr>
+    <tr><td><code>snapadmin.W019</code></td><td>Warning</td><td><code>db_index=True</code> on an encrypted field with no blind index. Not wrong, just dead weight: no lookup can use an index on a column every comparison is refused on.</td></tr>
+    <tr><td><code>snapadmin.W020</code></td><td>Warning</td><td>A <code>SnapBlindIndexField</code> whose <code>source_field</code> names no field on the model. Its value can no longer be derived, so it keeps whatever was written last while the field it tracks moves on.</td></tr>
   </table>
 
   <!-- ── Multi-tenancy ─────────────────────────────────────────────────────── -->

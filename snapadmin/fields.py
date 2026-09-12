@@ -5,13 +5,22 @@ Custom field layer on top of Django's standard model fields.
 ...
 """
 
+import datetime
+import decimal
+import json
 import types
 import typing
 from enum import Enum
 
 from django import forms
 from django.db import models
+from django.db.backends.utils import format_number
 from django.core import checks, validators
+from django.core.exceptions import FieldDoesNotExist, FieldError, ImproperlyConfigured
+from django.db.models.expressions import Col
+from django.db.models.lookups import Lookup
+from django.db.models.query_utils import DeferredAttribute
+from django.utils.functional import cached_property
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
@@ -815,6 +824,711 @@ class SnapColorField(models.CharField, SnapField):
 
     def deconstruct(self):
         return _strip_auto_validator(super().deconstruct(), self._snap_auto_validator)
+
+# ===========================================================================
+# Encrypted fields (#CRYPT1c)
+# ===========================================================================
+
+# ── The blind index (#CRYPT1d) ───────────────────────────────────────────────
+
+class _BlindIndexAttribute(DeferredAttribute):
+    """Descriptor that derives the blind index from the live source value.
+
+    The sibling column is derived data, and derived data goes stale. Computing
+    it on read rather than trusting what was last written means it is correct
+    for ``Model.validate_unique()`` — which runs *before* the save that would
+    have refreshed it — and for any code that reads the attribute between an
+    assignment and a save.
+
+    Three fallbacks, all to the stored value: the source field was deferred
+    (``.only(...)``), no keyset resolves yet, or the source holds something that
+    cannot be encoded. None of them can silently write a wrong index: the value
+    that reaches the column comes back through here at ``pre_save`` time, and a
+    write with no keyset is refused outright by the encrypted field itself.
+    """
+
+    def __get__(self, instance, cls=None):
+        if instance is not None:
+            derived = self.field.derive_from_instance(instance)
+            if derived is not _NO_INDEX:
+                return derived
+        return super().__get__(instance, cls)
+
+    def __set__(self, instance, value) -> None:
+        """Store the assigned value, and — crucially — make this a *data*
+        descriptor.
+
+        ``DeferredAttribute`` defines only ``__get__``, which makes it a
+        non-data descriptor: an entry in ``instance.__dict__`` shadows it
+        completely and ``__get__`` is never consulted again. Since
+        ``Model.__init__`` writes every field into ``__dict__``, the derivation
+        above would never run without this method. The assigned value is kept
+        because it is what the fallbacks in ``__get__`` return — a row loaded
+        with the source field deferred, or one loaded with no keyset, still
+        reports the index the database holds. While the source *is* loaded the
+        derived value wins, so the index can never be talked out of agreeing
+        with the value it indexes."""
+        instance.__dict__[self.field.attname] = value
+
+
+#: Sentinel: "this instance cannot produce an index right now, use the stored one."
+_NO_INDEX = object()
+
+
+class SnapBlindIndexField(models.CharField):
+    """The ``<field>_bi`` sibling column an encrypted field adds for equality lookups.
+
+    Never declared by hand — a ``SnapEncrypted*Field(blind_index=True)`` adds it,
+    and ``deconstruct()`` round-trips the pair so a migration rebuilds exactly
+    what the model declared. It is its own class rather than a plain
+    ``CharField`` for two reasons: it knows which field it indexes (so it can
+    re-derive its value instead of trusting the last write), and its
+    :meth:`contribute_to_class` is idempotent, which is what lets a historical
+    model render from a migration that lists both the encrypted field and this
+    one without ending up with the column twice.
+    """
+
+    descriptor_class = _BlindIndexAttribute
+
+    #: Marker other layers detect the sibling by. An attribute rather than an
+    #: ``isinstance`` check for the same reason ``is_snap_encrypted`` is one:
+    #: a project's own subclass is recognised, and a module that must not
+    #: import ``snapadmin.fields`` (the API filter builder runs while apps are
+    #: still loading) can still tell. Emphatically *not* a ``hasattr`` test on
+    #: ``source_field`` — third-party fields use that name too, and silently
+    #: dropping their filters would be a bug nobody would think to look for.
+    is_snap_blind_index: bool = True
+
+    def __init__(self, *args, source_field: str = "", **kwargs):
+        from snapadmin.encryption import blind_index
+
+        self.source_field = source_field
+        kwargs.setdefault("max_length", blind_index.INDEX_CHARS)
+        kwargs.setdefault("null", True)
+        kwargs.setdefault("blank", True)
+        kwargs.setdefault("editable", False)
+        super().__init__(*args, **kwargs)
+
+    def deconstruct(self):
+        name, path, args, kwargs = super().deconstruct()
+        if self.source_field:
+            kwargs["source_field"] = self.source_field
+        return name, path, args, kwargs
+
+    def contribute_to_class(self, cls, name, **kwargs) -> None:
+        """Attach, unless a field of this name is already on the class.
+
+        Django renders a historical model from a migration's full field list,
+        which contains both the encrypted field and this sibling. The encrypted
+        field contributes first and adds its own sibling; without this guard the
+        explicit one would be added on top of it and the model would try to
+        create the column twice.
+        """
+        if any(existing.name == name for existing in cls._meta.local_fields):
+            return
+        super().contribute_to_class(cls, name, **kwargs)
+
+    def derive_from_instance(self, instance) -> object:
+        """This row's index, derived from the source field's current value.
+
+        Returns the ``_NO_INDEX`` sentinel when it cannot be derived, which
+        makes the descriptor fall back to whatever the database holds.
+        """
+        if not self.source_field:
+            return _NO_INDEX
+        try:
+            source = self.model._meta.get_field(self.source_field)
+        except FieldDoesNotExist:
+            # A hand-written sibling naming a field that is not there. Fall
+            # back to the stored value rather than breaking attribute access;
+            # #CRYPT1e's system check is what tells the developer about it.
+            return _NO_INDEX
+        if not getattr(source, "is_snap_encrypted", False):
+            # A hand-written sibling pointed at an ordinary field. It has no
+            # blind_index_of(), and raising AttributeError on every attribute
+            # read would be a far worse answer than the stored value.
+            # snapadmin.W020 is what tells the developer about it.
+            return _NO_INDEX
+        if source.attname not in instance.__dict__:
+            return _NO_INDEX  # deferred — the stored value is the best answer
+        return source.blind_index_of(instance.__dict__[source.attname])
+
+
+class _BlindIndexLookup(Lookup):
+    """Base for the lookups an encrypted field answers through its sibling column.
+
+    Both rewrite the query completely: the left-hand side becomes the ``_bi``
+    column and the right-hand side becomes one HMAC per key in the keyset. The
+    SQL that reaches the database therefore contains no plaintext at all — not
+    in a parameter, not in the query log, not in a slow-query report.
+
+    Matching against *every* key, rather than only the active one, is what makes
+    a rotation seamless: until ``snapadmin_encrypt_fields --rotate`` has
+    converged the table, rows carry indexes under whichever key was active when
+    they were last written, and a query that only tried the newest one would
+    quietly stop finding them.
+    """
+
+    def get_prep_lookup(self):
+        # Keep the caller's value untouched; each one is prepared individually
+        # in as_sql() so `exact` and `in` share one code path.
+        return self.rhs
+
+    def _rhs_values(self) -> list:
+        raise NotImplementedError  # pragma: no cover - both subclasses define it
+
+    def as_sql(self, compiler, connection):
+        from django.core.exceptions import EmptyResultSet
+
+        field = self.lhs.output_field
+        alias = getattr(self.lhs, "alias", None)
+        if alias is None:
+            raise FieldError(
+                f"{field.name!r} is encrypted and can only be compared as a plain column "
+                "reference, not through this expression."
+            )
+
+        sibling = field.model._meta.get_field(field.blind_index_name)
+        lhs_sql, lhs_params = compiler.compile(Col(alias, sibling))
+
+        candidates: list[str] = []
+        for value in self._rhs_values():
+            prepared = field.get_prep_value(value)
+            if prepared is None:
+                continue
+            candidates.extend(field.blind_index_candidates(prepared))
+        if not candidates:
+            raise EmptyResultSet
+
+        placeholders = ", ".join(["%s"] * len(candidates))
+        return f"{lhs_sql} IN ({placeholders})", list(lhs_params) + candidates
+
+
+class _BlindIndexExact(_BlindIndexLookup):
+    lookup_name = "exact"
+
+    def _rhs_values(self) -> list:
+        return [self.rhs]
+
+
+class _BlindIndexIn(_BlindIndexLookup):
+    lookup_name = "in"
+
+    def _rhs_values(self) -> list:
+        # A subquery RHS (`field__in=Other.objects.values("x")`) cannot be
+        # rewritten: the index has to be computed from the values themselves,
+        # in Python, and a Query has none to offer. Without this guard it
+        # surfaces as `TypeError: 'Query' object is not iterable` from inside
+        # SQL compilation, which says nothing about encryption.
+        if hasattr(self.rhs, "resolve_expression") or hasattr(self.rhs, "query"):
+            raise FieldError(
+                f"{self.lhs.output_field.name!r} is encrypted, so `__in` has to hash each "
+                "value before it reaches the database — which means the values have to be "
+                "in Python, not in a subquery. Evaluate the inner queryset first "
+                "(`list(...)` or `.values_list(..., flat=True)`) and pass the result."
+            )
+        return list(self.rhs)
+
+
+class SnapEncryptedField:
+    """Mixin turning any Snap field into one that stores ciphertext.
+
+    The deal it makes is narrow: **the column holds a ``snap1.`` envelope, the
+    instance holds the field's ordinary Python value.** Nothing above the field
+    changes — a ``SnapEncryptedDateField`` still renders a date picker, still
+    validates a date, still hands your code a :class:`datetime.date`. Only the
+    two ends of the database round trip are rewritten::
+
+        class Patient(snap_models.SnapModel):
+            name = snap.SnapCharField(max_length=200)
+            ssn  = snap.SnapEncryptedCharField(max_length=32, show_in_list=False)
+
+        Patient.objects.create(name="A. Wiese", ssn="123-45-6789")
+        # the column now holds: snap1.2026-09.<nonce>.<ciphertext>
+
+    **The column becomes text.** :meth:`db_type` returns the backend's text type
+    regardless of the wrapped field, because a ciphertext is not a number, a
+    date or a JSON document — it is 100-odd characters of base64url. The
+    declared type still drives validation, the form widget and the Python value
+    you get back, which is the whole point of subclassing the real field rather
+    than making everything a ``TextField`` and leaving conversion to the caller.
+    :meth:`db_check` is suppressed for the same reason: a numeric ``CHECK``
+    constraint would reject every value the column will ever hold.
+
+    **Encryption happens at the last possible moment** — :meth:`get_db_prep_save`,
+    the single choke point every write goes through (``save()``,
+    ``bulk_create()``, ``bulk_update()`` and ``QuerySet.update()`` all land
+    here), and decryption in :meth:`from_db_value`, which every read goes
+    through including ``values()``, ``values_list()`` and ``refresh_from_db()``.
+
+    **Never twice.** A value that already parses as an envelope is written
+    verbatim instead of being encrypted again. Double encryption is the one
+    failure in this feature that is both silent and permanent: nothing raises,
+    the row simply stops being readable, and by the time anyone notices, the
+    backup holding the single-encrypted version has aged out. The guard is
+    deliberately strict — a string merely *starting* with ``snap1.`` is not
+    enough, it has to parse — so a user typing something envelope-shaped into a
+    text box is still treated as the plaintext it is.
+
+    **NULL stays NULL.** ``None`` is written as SQL ``NULL`` and read back as
+    ``None``; it is never encrypted, because a nullable column whose NULLs were
+    ciphertext could not be queried with ``__isnull`` at all. The empty string
+    *is* encrypted like any other value, so ``""`` and ``None`` stay distinct
+    after a round trip.
+
+    **What you give up.** The database can no longer see the value, so it cannot
+    compare, order or index it: ``icontains``, ``gt``, ``startswith`` and
+    ``ORDER BY`` are impossible rather than merely unsupported, and a plain
+    ``exact`` compares against a ciphertext that carries a fresh random nonce —
+    it would match nothing, every time. Those lookups raise instead of silently
+    returning an empty queryset (#CRYPT1d), and ``blind_index=True`` is the
+    opt-in route back to equality matching.
+
+    **Fixtures keep the ciphertext.** :meth:`value_to_string` emits the envelope
+    rather than the plaintext, so ``dumpdata`` output is no more sensitive than
+    the database it came from, and ``loaddata`` stores it back unchanged through
+    the never-twice guard. A dump is therefore only readable where the keyset
+    is — which is the correct answer, and the same one ``pg_dump`` already
+    gives.
+    """
+
+    #: Encrypted fields stay off the changelist unless asked for. Two reasons,
+    #: and the second is the one that bites: a column of secrets is a poor
+    #: default in a screen people leave open, and a changelist column is
+    #: *sortable*, which on ciphertext orders rows by their base64url envelope
+    #: — silently, since ordering never passes through the lookup guard.
+    #: :meth:`snapadmin.admin_gen` also drops encrypted fields from
+    #: ``sortable_by`` so an explicit ``show_in_list=True`` cannot reintroduce
+    #: the sorting half.
+    _SNAP_DEFAULT_SHOW_IN_LIST = False
+
+    #: Marker every other layer detects an encrypted field by
+    #: (``snapadmin.encryption.keys.has_encrypted_fields``, the system checks,
+    #: the leak guards). An attribute rather than an ``isinstance`` test, so a
+    #: project's own subclass is recognised and so ``checks.py`` never has to
+    #: import the cipher — and with it the ``[encryption]`` extra — merely to
+    #: run ``manage.py check``.
+    is_snap_encrypted: bool = True
+
+    def _initializeSnapLogic(self, **kwargs) -> dict:
+        """Flip the ``show_in_list`` default before the shared logic reads it.
+
+        It has to happen here rather than in ``__init__``: every concrete field
+        calls ``_initializeSnapLogic()`` and then ``handleDjangoKwargs()``,
+        which strips the Snap-only kwargs — by the time ``__init__`` further up
+        the MRO runs, ``show_in_list`` is long gone. An explicit
+        ``show_in_list=True`` still wins; this only changes what an *unset*
+        field resolves to.
+        """
+        kwargs.setdefault(
+            SnapFieldAttributeEnum.SHOW_IN_LIST.value, self._SNAP_DEFAULT_SHOW_IN_LIST
+        )
+        return super()._initializeSnapLogic(**kwargs)
+
+    def __init__(self, *args, blind_index: bool = False, **kwargs):
+        self.blind_index = blind_index
+        super().__init__(*args, **kwargs)
+        # Captured before contribute_to_class moves it: with a blind index the
+        # uniqueness belongs on the sibling column (the ciphertext column is
+        # unique by construction — every row has its own nonce), but
+        # deconstruct() must still report what the model declared so the
+        # migration rebuilds the same pair.
+        self._declared_unique = self._unique
+
+    #: Set by :meth:`contribute_to_class` to the sibling column's name, or left
+    #: ``None`` when ``blind_index`` is off. Public: the lookups and the
+    #: management commands both ask the field for it rather than re-deriving
+    #: the naming convention.
+    blind_index_name: str | None = None
+
+    def deconstruct(self):
+        name, path, args, kwargs = super().deconstruct()
+        if self.blind_index:
+            kwargs["blind_index"] = True
+            if getattr(self, "_declared_unique", False):
+                # Restored because contribute_to_class cleared the live flag.
+                kwargs["unique"] = True
+        return name, path, args, kwargs
+
+    def contribute_to_class(self, cls, name, **kwargs) -> None:
+        """Attach to the model, adding the ``<name>_bi`` sibling when asked."""
+        super().contribute_to_class(cls, name, **kwargs)
+        if not self.blind_index or cls._meta.abstract:
+            return
+        self.blind_index_name = f"{name}_bi"
+        declared_unique = getattr(self, "_declared_unique", False)
+        # A unique constraint on the ciphertext column would be satisfied by
+        # every row — the nonce guarantees it — so it moves to the index, where
+        # it means what the model said it meant.
+        self._unique = False
+        sibling = SnapBlindIndexField(
+            source_field=name,
+            unique=declared_unique,
+            db_index=not declared_unique,
+        )
+        cls.add_to_class(self.blind_index_name, sibling)
+
+    def blind_index_of(self, value) -> str | None:
+        """This value's stored index, or ``None`` when one cannot be derived.
+
+        ``None`` in, ``None`` out — a NULL row has no index, which keeps
+        ``__isnull`` honest. Everything else that can go wrong here (no keyset
+        yet, a value the field cannot encode) also yields ``None`` rather than
+        raising: this runs on attribute *reads*, where raising would turn a
+        misconfiguration into an error in a place nobody can act on it. The
+        write path refuses loudly in its own right, so no wrong index can reach
+        the column.
+        """
+        from snapadmin.encryption import blind_index
+
+        if value is None or not self.blind_index:
+            return None
+        try:
+            return blind_index.index_for_write(
+                self.encode_plaintext(value), aad=self.encryption_aad()
+            )
+        except (ImproperlyConfigured, TypeError, ValueError, decimal.InvalidOperation):
+            return None
+
+    def blind_index_candidates(self, value) -> list[str]:
+        """Every index *value* could be stored under — one per key in the keyset."""
+        from snapadmin.encryption import blind_index
+
+        return blind_index.index_candidates(
+            self.encode_plaintext(value), aad=self.encryption_aad()
+        )
+
+    # ── Lookups ─────────────────────────────────────────────────────────────
+
+    #: The only lookups an encrypted column can answer honestly. ``isnull``
+    #: always works because NULL is never encrypted; ``exact`` and ``in`` work
+    #: only through a blind index, and are refused without one rather than
+    #: compared against a ciphertext that carries a fresh nonce and would match
+    #: nothing.
+    _INDEXED_LOOKUPS = {"exact": "_BlindIndexExact", "in": "_BlindIndexIn"}
+
+    def _refuse(self, name: str) -> None:
+        supported = "`__isnull`" + (
+            ", `__exact` and `__in`" if self.blind_index
+            else " (add blind_index=True for `__exact` and `__in`)"
+        )
+        raise FieldError(
+            f"{self.name!r} is an encrypted field, so the database cannot evaluate "
+            f"`__{name}` on it — the column holds ciphertext, and comparing, ordering or "
+            "pattern-matching it would either error or, far worse, match nothing at all "
+            f"and look like an empty table. Supported here: {supported}. Substring search, "
+            "ordering and range queries are not possible on an encrypted column; keep a "
+            "separate unencrypted column for what you need to query on."
+        )
+
+    def get_lookup(self, lookup_name: str):
+        """Answer, or refuse with an explanation.
+
+        Refusing here rather than returning ``None`` is deliberate: ``None``
+        sends Django on to ``try_transform()``, whose own error talks about
+        unsupported lookups in general and says nothing about why *this* field
+        cannot answer.
+        """
+        if lookup_name == "isnull":
+            return super().get_lookup(lookup_name)
+        if self.blind_index and lookup_name in self._INDEXED_LOOKUPS:
+            return globals()[self._INDEXED_LOOKUPS[lookup_name]]
+        self._refuse(lookup_name)
+
+    def get_transform(self, lookup_name: str):
+        """Refuse transforms too — and this is not covered by :meth:`get_lookup`.
+
+        Django only consults ``get_lookup()`` for the *final* name in a chain.
+        ``joined__year__gt`` goes straight to ``try_transform('year')``, and the
+        ``gt`` that follows is then applied to the transform's own output field
+        — an ``IntegerField`` that knows nothing about encryption. Without this,
+        that filter would compile happily and compare a year against base64url
+        ciphertext, which is the silent-empty-result failure this whole guard
+        exists to prevent. The same applies to a key transform on an encrypted
+        ``JSONField``.
+        """
+        self._refuse(lookup_name)
+
+    def get_internal_type(self) -> str:
+        """``TextField`` — what the *column* is, not what the field means.
+
+        This is not cosmetic. Every backend picks its read converters off the
+        internal type (``sqlite3`` alone installs one for ``DateTimeField``,
+        ``DateField``, ``TimeField``, ``DecimalField``, ``BooleanField`` and
+        ``UUIDField``), and each of those converters would be handed a base64url
+        envelope and would fail on it before :meth:`from_db_value` ever ran.
+        Declaring the column for what it is keeps the read path clean; the
+        declared field class still supplies validation, the widget and the
+        Python type.
+        """
+        return "TextField"
+
+    def db_type(self, connection) -> str:
+        """The backend's text type — a ciphertext is text, whatever the field is."""
+        return connection.data_types["TextField"]
+
+    def db_check(self, connection) -> None:
+        """No column constraint: every check would be about the plaintext."""
+        return None
+
+    def rel_db_type(self, connection) -> str:
+        """A relation pointing here would still point at a text column."""
+        return self.db_type(connection)
+
+    def encryption_aad(self) -> str:
+        """This field's additional authenticated data — ``app.model.field``.
+
+        Binding the ciphertext to the column it lives in is what stops a value
+        being lifted out of one column and pasted into another. The cost, stated
+        here because it is invisible until it bites: **renaming the app, the
+        model or the field changes this string**, and rows written under the old
+        name stop decrypting until they are re-encrypted with
+        ``manage.py snapadmin_encrypt_fields``. Plan a rename accordingly.
+        """
+        from snapadmin.encryption.cipher import aad_for
+
+        model = getattr(self, "model", None)
+        if model is None:
+            raise ImproperlyConfigured(
+                f"{type(self).__name__} is not attached to a model yet, so it has no "
+                "app/model/field identity to bind its ciphertext to. Encrypted fields "
+                "can only encrypt once they are declared on a model."
+            )
+        return aad_for(model._meta.app_label, model._meta.model_name, self.name)
+
+    # ── plaintext ⇄ text ────────────────────────────────────────────────────
+    #
+    # Every member of the family stores text, so each one says how its natural
+    # Python value becomes a string and how it comes back. The default is the
+    # identity pair used by the character-based fields; the numeric, date and
+    # JSON members override it.
+
+    def encode_plaintext(self, value) -> str:
+        """The field's Python value as the string that gets encrypted."""
+        return str(value)
+
+    def decode_plaintext(self, text: str):
+        """The decrypted string back as the field's Python value."""
+        return text
+
+    def _already_encrypted(self, value) -> bool:
+        """Whether *value* is a stored envelope that must not be re-encrypted.
+
+        Strict on purpose: ``looks_encrypted()`` alone accepts anything shaped
+        like ``snapN.a.b.c``, which a user could type into a text box. Requiring
+        a successful parse means only something genuinely produced by the cipher
+        takes the pass-through path.
+        """
+        from snapadmin.encryption.cipher import DecryptionError, Envelope, looks_encrypted
+
+        if not looks_encrypted(value):
+            return False
+        try:
+            Envelope.parse(value)
+        except DecryptionError:
+            return False
+        return True
+
+    def get_db_prep_save(self, value, connection):
+        """Encrypt on the way to the column — the write choke point.
+
+        Mirrors :meth:`django.db.models.Field.get_db_prep_save`, including its
+        expression guard: ``bulk_update`` hands the whole ``CASE`` expression
+        through here, and an expression compiles itself. Without the guard its
+        ``str()`` would be encrypted and stored as if it were the value — which
+        is exactly as bad as it sounds, and entirely silent.
+        """
+        if hasattr(value, "as_sql"):
+            return value
+        return self.get_db_prep_value(value, connection, prepared=False)
+
+    def get_db_prep_value(self, value, connection, prepared=False):
+        """Turn one Python value into the ciphertext the column stores.
+
+        ``prepared=True`` marks the **lookup** right-hand side, which is left
+        alone: encrypting it would produce a fresh random nonce that matches no
+        row, turning every query into a silently empty result. Encrypted fields
+        refuse those lookups outright instead (see ``blind_index``), which is a
+        far better answer than an empty queryset.
+        """
+        from snapadmin.encryption.cipher import encrypt
+
+        if value is None or prepared or hasattr(value, "as_sql"):
+            return value
+        if self._already_encrypted(value):
+            return value
+        return encrypt(self.encode_plaintext(value), aad=self.encryption_aad())
+
+    def from_db_value(self, value, expression, connection):
+        """Decrypt on the way out — every read path funnels through here."""
+        from snapadmin.encryption.cipher import decrypt
+
+        if value is None:
+            return None
+        return self.decode_plaintext(decrypt(value, aad=self.encryption_aad()))
+
+    def value_to_string(self, obj) -> str | None:
+        """Serialise for ``dumpdata`` as ciphertext, never as the plaintext."""
+        from snapadmin.encryption.cipher import encrypt
+
+        value = self.value_from_object(obj)
+        if value is None:
+            return None
+        if self._already_encrypted(value):
+            return value
+        return encrypt(self.encode_plaintext(value), aad=self.encryption_aad())
+
+    def to_python(self, value):
+        """Leave a stored envelope opaque; convert anything else as usual.
+
+        This is what makes ``loaddata`` work without a keyset: the deserialiser
+        hands the envelope straight back to :meth:`get_db_prep_save`, which
+        recognises it and stores it verbatim. Nothing is decrypted on the way
+        in, so a fixture can be restored into an environment that cannot read
+        it yet.
+        """
+        if self._already_encrypted(value):
+            return value
+        return super().to_python(value)
+
+
+class SnapEncryptedCharField(SnapEncryptedField, models.CharField, SnapField):
+    """Encrypted single-line text. ``max_length`` bounds the *plaintext*.
+
+    The column is text, so ``max_length`` is optional here (unlike Django's
+    ``CharField``) and constrains only what the application may store.
+    """
+
+    def __init__(self, **kwargs):
+        kwargs = self._initializeSnapLogic(**kwargs)
+        super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+    def check(self, **kwargs):
+        # fields.E120 ("CharFields must define a max_length") is about the
+        # column width, and this field's column is text — there is nothing to
+        # size. Everything else CharField checks still applies.
+        return [
+            error for error in super().check(**kwargs)
+            if not (error.id == "fields.E120" and self.max_length is None)
+        ]
+
+
+class SnapEncryptedTextField(SnapEncryptedField, models.TextField, SnapField):
+    """Encrypted multi-line text."""
+
+    def __init__(self, **kwargs):
+        kwargs = self._initializeSnapLogic(**kwargs)
+        super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+
+class SnapEncryptedEmailField(SnapEncryptedField, models.EmailField, SnapField):
+    """Encrypted email address — still validated as an address on the way in.
+
+    The usual reason to encrypt an email address is that it identifies a person.
+    Note that ``filter(email="...")`` cannot work on ciphertext; pair it with
+    ``blind_index=True`` if you need to look rows up by address.
+    """
+
+    def __init__(self, **kwargs):
+        kwargs = self._initializeSnapLogic(**kwargs)
+        super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+
+class SnapEncryptedJSONField(SnapEncryptedField, models.JSONField, SnapField):
+    """Encrypted JSON document — encrypted whole, so no key lookups.
+
+    The entire document is one ciphertext, which means the database cannot
+    reach inside it: ``data__key`` transforms and containment lookups are
+    impossible, not merely slow. Encrypt a JSON field when the *document* is the
+    secret; keep the queryable keys in their own columns.
+    """
+
+    def __init__(self, **kwargs):
+        kwargs = self._initializeSnapLogic(**kwargs)
+        super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+    def encode_plaintext(self, value) -> str:
+        return json.dumps(value, cls=self.encoder)
+
+    def decode_plaintext(self, text: str):
+        return json.loads(text, cls=self.decoder)
+
+
+class SnapEncryptedIntegerField(SnapEncryptedField, models.IntegerField, SnapField):
+    """Encrypted integer. Sums, ordering and range filters are not available."""
+
+    def __init__(self, **kwargs):
+        kwargs = self._initializeSnapLogic(**kwargs)
+        super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+    @cached_property
+    def validators(self) -> list:
+        """Django's ``IntegerField`` range validators do not apply here.
+
+        ``IntegerField.validators`` derives its min/max from the *column's*
+        integer range (``connection.ops.integer_field_range``). This column is
+        text and has no such range, so the derived limits would be a fiction —
+        and looking them up under the ``TextField`` internal type raises
+        ``KeyError`` outright. Everything a caller declared (``validators=[...]``,
+        ``MinValueValidator``, …) still applies.
+        """
+        return [*self.default_validators, *self._validators]
+
+    def encode_plaintext(self, value) -> str:
+        return str(int(value))
+
+    def decode_plaintext(self, text: str) -> int:
+        return int(text)
+
+
+class SnapEncryptedDecimalField(SnapEncryptedField, models.DecimalField, SnapField):
+    """Encrypted decimal — quantised to ``decimal_places`` exactly as the
+    unencrypted field would be, so switching a column to this type does not
+    silently start keeping extra digits."""
+
+    def __init__(self, **kwargs):
+        kwargs = self._initializeSnapLogic(**kwargs)
+        super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+    def encode_plaintext(self, value) -> str:
+        return format_number(self.to_python(value), self.max_digits, self.decimal_places)
+
+    def decode_plaintext(self, text: str) -> decimal.Decimal:
+        return decimal.Decimal(text)
+
+
+class SnapEncryptedDateField(SnapEncryptedField, models.DateField, SnapField):
+    """Encrypted date. Stored ISO-8601; ``__year``/``__gte`` are not available."""
+
+    def __init__(self, **kwargs):
+        kwargs = self._initializeSnapLogic(**kwargs)
+        super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+    def encode_plaintext(self, value) -> str:
+        return self.to_python(value).isoformat()
+
+    def decode_plaintext(self, text: str) -> datetime.date:
+        return datetime.date.fromisoformat(text)
+
+
+class SnapEncryptedDateTimeField(SnapEncryptedField, models.DateTimeField, SnapField):
+    """Encrypted timestamp, stored ISO-8601 with its offset.
+
+    ``auto_now`` / ``auto_now_add`` still work, but think twice: a timestamp is
+    usually something you want to filter and order by, and neither is possible
+    once the column is ciphertext.
+    """
+
+    def __init__(self, **kwargs):
+        kwargs = self._initializeSnapLogic(**kwargs)
+        super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+    def encode_plaintext(self, value) -> str:
+        return self.get_prep_value(value).isoformat()
+
+    def decode_plaintext(self, text: str) -> datetime.datetime:
+        return datetime.datetime.fromisoformat(text)
+
 
 class SnapFunctionField(SnapNotDatabaseField):
     """A computed, display-only column — no database column, no migration.

@@ -569,7 +569,9 @@ class SnapSaveMixin:
             # Audit trail: snapshot the created field values.
             from snapadmin import audit
             created = {
-                name: {"old": None, "new": audit.format_value(form.cleaned_data.get(name))}
+                name: audit.change_entry(
+                    type(obj), name, None, form.cleaned_data.get(name)
+                )
                 for name in form.cleaned_data
             }
             audit.record_audit(request, audit.CREATE, obj, created or None)
@@ -581,12 +583,17 @@ class SnapSaveMixin:
             new_val = form.cleaned_data.get(field_name)
             if old_val != new_val:
                 verbose = _(self.model._meta.get_field(field_name).verbose_name)
-                change_lines.append(f"{verbose}: '{old_val}' -> '{new_val}'")
                 from snapadmin import audit
-                changes[field_name] = {
-                    "old": audit.format_value(old_val),
-                    "new": audit.format_value(new_val),
-                }
+                # Django's own LogEntry message is a second copy of the diff and
+                # is shown in the admin's history view, so it gets the same
+                # redaction as the SnapAdmin trail rather than only one of them.
+                if audit.field_is_encrypted(self.model, field_name):
+                    change_lines.append(f"{verbose}: {audit.REDACTED} -> {audit.REDACTED}")
+                else:
+                    change_lines.append(f"{verbose}: '{old_val}' -> '{new_val}'")
+                changes[field_name] = audit.change_entry(
+                    self.model, field_name, old_val, new_val
+                )
         super().save_model(request, obj, form, change)
         if change_lines:
             LogEntry.objects.log_actions(
@@ -967,7 +974,17 @@ class SnapModel(AdminGenMixin, models.Model):
 
     @staticmethod
     def _derive_es_field_mapping(field) -> dict | None:
-        """Best-fit ES mapping for one Django model field (es_auto_mapping)."""
+        """Best-fit ES mapping for one Django model field (es_auto_mapping).
+
+        An encrypted field is never mapped. Indexing it would ship the
+        plaintext to a second datastore — usually a different host, commonly
+        with weaker access control and no encryption at rest — which is the
+        opposite of what declaring the column encrypted asked for. Excluding it
+        here is the default; ``snapadmin.E020`` catches an explicit
+        ``es_mapping`` that names one anyway.
+        """
+        if getattr(field, "is_snap_encrypted", False):
+            return None
         # Most-specific classes first — Email/Slug/URL subclass CharField,
         # DateTimeField subclasses DateField, ImageField subclasses FileField.
         if isinstance(field, (
@@ -1024,9 +1041,17 @@ class SnapModel(AdminGenMixin, models.Model):
 
     def get_es_document(self) -> dict:
         doc = {"id": self.pk}
-        mapping = type(self).get_es_mapping()
+        model = type(self)
+        mapping = model.get_es_mapping()
         if mapping:
             for field_name in mapping.keys():
+                # Defence in depth behind snapadmin.E020: a check is a message,
+                # and a message can be silenced. An encrypted value never leaves
+                # for Elasticsearch regardless of what the mapping says.
+                from snapadmin import audit
+
+                if audit.field_is_encrypted(model, field_name):
+                    continue
                 val = getattr(self, field_name, None)
                 if hasattr(val, "pk"):
                     val = val.pk
@@ -1163,6 +1188,7 @@ class SnapModel(AdminGenMixin, models.Model):
         return candidate
 
     def save(self, *args, **kwargs):
+        kwargs = self._include_blind_index_columns(**kwargs)
         if self.es_storage_mode == EsStorageMode.ES_ONLY:
             # Skip DB save for ES_ONLY models
             if not self.pk:
@@ -1174,6 +1200,35 @@ class SnapModel(AdminGenMixin, models.Model):
         super().save(*args, **kwargs)
         if self.es_storage_mode == EsStorageMode.DUAL:
             self.index_in_es()
+
+    def _include_blind_index_columns(self, **kwargs) -> dict:
+        """Add each encrypted field's ``<field>_bi`` sibling to ``update_fields``.
+
+        ``save(update_fields=["ssn"])`` writes exactly the columns it was given,
+        so without this the ciphertext moves and its blind index does not — and
+        the row silently stops being findable by its own value, which is the
+        invisible-data failure the whole lookup guard exists to prevent. The
+        index is derived from the field it indexes, so a caller updating the
+        field always means the index too; there is no case where they diverge
+        on purpose.
+
+        Only touches the call when ``update_fields`` was actually passed: a
+        plain ``save()`` already writes every column.
+        """
+        update_fields = kwargs.get("update_fields")
+        if not update_fields:
+            return kwargs
+        named = set(update_fields)
+        siblings = {
+            field.blind_index_name
+            for field in self._meta.get_fields()
+            if getattr(field, "is_snap_encrypted", False)
+            and getattr(field, "blind_index_name", None)
+            and field.name in named
+        }
+        if siblings:
+            kwargs["update_fields"] = [*update_fields, *sorted(siblings - named)]
+        return kwargs
 
     def delete(self, *args, **kwargs):
         if self.es_storage_mode == EsStorageMode.ES_ONLY:

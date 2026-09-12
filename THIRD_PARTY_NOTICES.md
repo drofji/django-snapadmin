@@ -51,6 +51,7 @@ Nothing here is installed by a base `pip install`. Install via, e.g., `pip insta
 | `backup` | paramiko | **LGPL-2.1** | 🟡 | SFTP transport for offsite backups |
 | `age` | pyrage | MIT | 🟢 | AGE-encrypted backups (`SNAPADMIN_BACKUP_AGE_RECIPIENTS`) |
 | `s3` | boto3 | Apache-2.0 | 🟢 | S3-compatible offsite backup transport (`SNAPADMIN_BACKUP_S3_*`) — AWS, MinIO, Backblaze B2, Hetzner Object Storage, Wasabi |
+| `encryption` | cryptography | Apache-2.0 **or** BSD-3 | 🟢 | Field-level encryption — the AES-256-GCM primitive behind `SnapEncrypted*Field` / `SNAPADMIN_ENCRYPTION` |
 | `wysiwyg` | django-ckeditor-5 (BSD wrapper) **bundling CKEditor 5** | **GPL-2.0+ or commercial** | 🔴 | Rich-text fields (`SnapRichTextField` / `wysiwyg=True`) |
 
 > **`api` and `graphql` are opt-out, not opt-in, in today's beta line.** Both
@@ -69,6 +70,12 @@ Nothing here is installed by a base `pip install`. Install via, e.g., `pip insta
 > **`backup` (paramiko)** and **`autocomplete-filter` (django-admin-autocomplete-filter)** are LGPL
 > — weak copyleft, fine for proprietary use as unmodified dynamically-imported dependencies, and both
 > are optional so the base tree stays strictly permissive.
+>
+> **`encryption` (cryptography) is optional for weight, not for its licence.** `cryptography` is
+> dual-licensed **Apache-2.0 or BSD-3-Clause** — permissive under either, and safe for proprietary
+> use. It is opt-in because it ships compiled wheels (a Rust/OpenSSL core) that a project encrypting
+> no column has no reason to carry. Declaring a `SnapEncrypted*Field` without the extra raises a
+> clear `ImproperlyConfigured` naming it, never a bare `ModuleNotFoundError` from inside a save.
 >
 > **`xlsx` (openpyxl) is optional for size, not for its licence.** openpyxl is MIT and would be
 > perfectly at home in the base install; it is opt-in because most deployments export CSV or JSON

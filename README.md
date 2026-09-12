@@ -95,7 +95,7 @@ rather than take on trust.
 
 | Question | Evidence |
 |---|---|
-| **Is it tested?** | **4,300+ tests** and **100% line coverage** on the shipped package (10,400+ statements), enforced in CI — the build fails below 100% |
+| **Is it tested?** | **4,600+ tests** and **100% line coverage** on the shipped package (11,000+ statements), enforced in CI — the build fails below 100% |
 | **On our Python and Django?** | Every push runs the full matrix: **Python 3.10–3.13 × Django 5.2 / 6.0** |
 | **Will an upgrade break us?** | **270+ tests exist only to fail** if a public name, signature or default changes — a breaking change cannot ship by accident |
 | **Are the docs actually true?** | **95+ tests** assert that the README, the docs site and the in-package module map describe the code that really ships |
@@ -122,7 +122,7 @@ The questions a tech lead or a manager asks before approving a dependency:
 | **Personal data in the API?** | [PII masking](https://drofji.github.io/django-snapadmin/#pii-masking) — declare a field sensitive once and it is masked in the admin, REST, GraphQL, exports **and** the audit diff. Per-field rules can unlock one field for one permission |
 | **Only HR should see salary?** | [`api_field_permissions`](https://drofji.github.io/django-snapadmin/#field-permissions) gates a field's very presence, per Django permission — absent from a response for anyone lacking it, an explicit `400` naming the field on a denied write, orthogonal to masking (which only controls display) |
 | **Multi-tenant SaaS?** | [Row-level tenant isolation](https://drofji.github.io/django-snapadmin/#multi-tenancy) — opt a model in with `tenant_scoped = True` plus a tenant column, and every generated surface (admin, REST, GraphQL, Elasticsearch routing, exports, imports, the offline cache) becomes unreachable without a bound tenant: default-deny, not opt-out. Logical isolation, not physical — the limitation is documented as plainly as the feature |
-| **Is it tested?** | **100% line coverage** on the shipped package, enforced in CI, across 4,300+ tests. The matrix runs Python 3.10–3.13 × Django 5.2/6.0 on every push. [What those tests cover](#quality--compatibility) |
+| **Is it tested?** | **100% line coverage** on the shipped package, enforced in CI, across 4,600+ tests. The matrix runs Python 3.10–3.13 × Django 5.2/6.0 on every push. [What those tests cover](#quality--compatibility) |
 | **Will it break on upgrade?** | A written [API-stability policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md), covered by semantic versioning as of `1.0`: deprecations warn before removal and name their replacement — and a [contract suite](#backward-compatibility-is-a-test-not-a-promise) fails the build if a public name changes |
 | **Will it survive our load?** | Read-replica routing, estimated counts, paging caps, streaming exports, and a reusable [quota primitive](https://drofji.github.io/django-snapadmin/#quotas) (`snapadmin.limits.reserve()`) for per-tenant windows, concurrency caps and outbound-call cooldowns. [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) |
 | **Single sign-on?** | [SSO / OAuth2 login helper](https://drofji.github.io/django-snapadmin/#enterprise-config); auth is pluggable — JWT, session, or your own |
@@ -192,6 +192,50 @@ neither command ever touches a replica. `HA_SETTINGS` controls failover (promote
 serve writes when the primary is down) and fallback (read from the primary once every replica is
 down, or refuse outright if you'd rather protect the primary from that traffic). Full reference:
 [Database sharding](https://drofji.github.io/django-snapadmin/#sharding).
+
+## Encrypted model fields
+
+PII masking hides a value at render time and encrypted backups protect the whole artefact. Neither
+protects the **column**: a stolen dump, a rogue read-replica or an over-broad `SELECT` still sees
+everything. `SnapEncrypted*Field` closes that — **ciphertext at rest, the ordinary Python value in
+your code**, and nothing above the field changes:
+
+```python
+from snapadmin import fields as snap, models as snap_models
+
+class Patient(snap_models.SnapModel):
+    name  = snap.SnapCharField(max_length=200, searchable=True)
+    ssn   = snap.SnapEncryptedCharField(max_length=32, show_in_list=False)
+    email = snap.SnapEncryptedEmailField(blind_index=True)   # still findable by value
+
+Patient.objects.create(name="A. Wiese", ssn="123-45-6789")
+# the ssn column now holds: snap1.2026-09.<nonce>.<ciphertext>
+Patient.objects.get(email="a@example.org").ssn      # → "123-45-6789"
+```
+
+Eight types — `Char`, `Text`, `Email`, `JSON`, `Integer`, `Decimal`, `Date`, `DateTime` — each its
+plain counterpart plus encryption, keeping its own form widget, validation and Python type.
+AES-256-GCM behind the optional `[encryption]` extra, a fresh random nonce on every write, and each
+value bound to its own `app.model.field` so a ciphertext copied into another column fails to
+decrypt instead of quietly relocating a secret. Keys come from a KMS/Vault provider, a mounted
+secret, the environment or settings — never `SECRET_KEY`, which a startup check refuses outright —
+and rotation is prepending one key: every ciphertext records the id that opens it.
+
+**What it costs, stated up front.** The database cannot compare, order or index a column it cannot
+read. `icontains`, `gt`, `startswith` and `ORDER BY` are impossible, and each raises a `FieldError`
+naming the field rather than returning an empty queryset — encrypted data silently becoming
+invisible data is the failure that matters here. `blind_index=True` buys back `__exact` / `__in`
+and `unique=True` through an HMAC sibling column, at the documented cost that equality becomes
+observable to anyone who can read that column: fine for an email address, wrong for a national ID.
+
+Encrypted values are excluded from Elasticsearch, redacted in the audit trail, masked by default in
+REST/GraphQL/exports/the changelist through the existing PII permission model, and emitted as
+ciphertext by `dumpdata`. `manage.py snapadmin_encrypt_fields` adopts an existing plaintext column,
+rotates rows onto a new key and rebuilds blind indexes — batched, resumable, and writing nothing
+without `--apply`. Full reference:
+[Field encryption](https://drofji.github.io/django-snapadmin/#field-encryption).
+
+---
 
 ---
 
@@ -400,8 +444,10 @@ Every spelling works — `snapadmin-info` ≡ `python manage.py snapadmin_info`.
 Opt-in background commands, none of which run on their own: `snapadmin_reindex`,
 `snapadmin_import`, `snapadmin_health_alert`, `snapadmin_db_backup`, `snapadmin_send_error_digest`,
 `snapadmin_purge_expired_data`, `snapadmin_audit_export`, `snapadmin_encryption_key`
-(generates a field-encryption key and prints it once — see
-[Field encryption](https://drofji.github.io/django-snapadmin/#field-encryption)).
+(generates a field-encryption key and prints it once) and `snapadmin_encrypt_fields`
+(`--adopt` an existing plaintext column, `--rotate` rows onto a new key, `--reindex` blind-index
+columns — reports only unless given `--apply`); see
+[Field encryption](https://drofji.github.io/django-snapadmin/#field-encryption).
 
 > ⏱ **Nothing runs on a schedule by itself.** SnapAdmin ships no daemon — backups, digests and the
 > data purge need a Celery Beat entry or a cron line.
@@ -470,8 +516,8 @@ the legal question in one command
 This is a package other people's products depend on, so the test suite is treated as part of the
 product rather than as developer hygiene. Concretely, on the current release:
 
-- **4,300+ tests**, run on every push.
-- **100% line coverage** on the shipped `snapadmin/` package — 10,400+ statements, no exclusions, no
+- **4,600+ tests**, run on every push.
+- **100% line coverage** on the shipped `snapadmin/` package — 11,000+ statements, no exclusions, no
   `# pragma: no cover` to hide untested code. CI runs
   `pytest --cov=snapadmin --cov-fail-under=100`, so a pull request that adds an untested line fails.
 - **The full compatibility matrix on every push** — Python 3.10 / 3.11 / 3.12 / 3.13 × Django 5.2
@@ -532,11 +578,14 @@ second copy of the deep suites.
 <summary>Where the rest of the coverage goes</summary>
 
 Beyond the contract and docs suites, the heaviest areas are the ones with the most ways to go
-wrong: the REST surface (194), field behaviour (149), export (131), backups (129) and restore (68),
-PII masking (120), settings resolution (96), bulk import (79), alert channels (75), API tokens (97
-across issuing, hashing and validation), the audit trail (63), internationalisation (93 across the
-package and the demo), offline mode (61), data retention (56) and multi-tenancy (63 across the
-model, admin, audit and Elasticsearch layers). Accessibility (WCAG 2.1 AA) and GraphQL permission
+wrong — each figure below is a **floor**, checked against a collection run rather than kept up to
+date by arithmetic: field behaviour and encrypted fields (300+), the REST surface (190+), field-level
+encryption end to end (370+ across the cipher, the keyset, the blind index, every leak surface and
+the conversion command), export (130+), backups (120+) and restore (60+), PII masking (120+),
+settings resolution (90+), API tokens (90+ across issuing, hashing and validation),
+internationalisation (90+ across the package and the demo), bulk import (70+), alert channels (70+),
+the audit trail (60+), offline mode (60+), multi-tenancy (60+ across the model, admin, audit and
+Elasticsearch layers) and data retention (50+). Accessibility (WCAG 2.1 AA) and GraphQL permission
 enforcement have their own suites.
 
 **`tests/` is not shipped in the wheel or sdist** — only `snapadmin/` (the published package),
@@ -551,41 +600,14 @@ behind inside every install.
 
 # Roadmap — what's landing next
 
-Encrypted model fields are on the near-term roadmap, listed here so you can plan around them —
-**it has not shipped yet**. It follows the same rule as everything else in the package: **additive,
-opt-in, and completely inert until you configure it** — an existing install that ignores it is
-byte-for-byte unaffected, with no new setting required and no migration from the package itself.
+Nothing is listed here at the moment. Everything this section previously announced has landed:
+**encrypted model fields** — see [Encrypted model fields](#encrypted-model-fields) above — and
+**declarative sharding with read-replica routing**, see
+[Database sharding and replica routing](#database-sharding-and-replica-routing).
 
-Declarative sharding and read-replica routing, previously listed here as in development, **has
-shipped** — see [Database sharding and replica routing](#database-sharding-and-replica-routing)
-below.
-
-### Encrypted model fields · designed, next in the queue
-
-Ciphertext in the database, plaintext in Python — a `SnapEncryptedCharField` family that encrypts
-transparently on write and decrypts on read, closing the gap that PII masking (render-time) and
-encrypted backups (whole-artefact) leave open: the column itself.
-
-The design is already fixed, and it is deliberately conservative:
-
-- **AES-256-GCM only** — one AEAD, a fresh random nonce per write, and the ciphertext bound to its
-  own column so a value copied into another field fails to decrypt rather than silently moving a
-  secret. Backed by `cryptography` (Apache-2.0/BSD) behind an optional `[encryption]` extra, so the
-  base install stays permissive and dependency-free for projects that don't encrypt anything.
-- **A dedicated keyset, never `SECRET_KEY`** — resolved from a KMS/Vault provider callable, a
-  mounted secret file, an environment variable, or settings, in that order of preference, with
-  startup checks that refuse the dangerous combinations.
-- **Fail closed** — a missing key is a startup error, not a silent write of plaintext into a column
-  that is supposed to be encrypted. An unreadable row raises, naming the missing key id and never
-  the key.
-- **Zero-downtime key rotation**, plus a management command to adopt existing plaintext columns and
-  re-encrypt under a new key, batched, resumable and dry-run by default.
-- **No accidental plaintext downstream** — encrypted fields are excluded from the Elasticsearch
-  document by default, the audit log records that a value *changed* rather than what it changed to,
-  and exports and API responses go through the existing per-field permission gate.
-- **Searchability, honestly** — encryption makes `icontains`, ranges and `ORDER BY` impossible, so
-  those raise a clear error rather than silently matching nothing. For exact match there is an
-  opt-in blind index, with the equality leak it implies documented as plainly as the feature.
+Both followed the rule everything in this package follows: **additive, opt-in, and completely inert
+until you configure it** — an existing install that ignores either is byte-for-byte unaffected,
+with no new setting required and no migration from the package itself.
 
 Follow the [changelog](https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md) for what
 has actually shipped.
@@ -757,6 +779,7 @@ is safe for commercial and proprietary use. Everything with a licence caveat is 
 | `wysiwyg` | `django-ckeditor-5` | Rich-text fields — **bundles CKEditor 5 (GPL-or-commercial)** |
 | `autocomplete-filter` | `django-admin-autocomplete-filter` | `AutocompleteFilter` list filters (LGPL) |
 | `xlsx` | `openpyxl` | XLSX output for the async export API (MIT — optional for size, not licence) |
+| `encryption` | `cryptography` | Field-level encryption — `SnapEncrypted*Field` columns (Apache-2.0/BSD — optional for weight, not licence) |
 | `all` | everything above | — |
 
 Run `snapadmin-license-check` after installing to see exactly what you ended up with and whether it

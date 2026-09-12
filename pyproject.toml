@@ -141,6 +141,13 @@ pyrage = {version = ">=1.4.0", optional = true}
 # (SFTP/SCP/WebDAV) and uses the [backup] extra instead. Imported lazily in snapadmin/backup.py.
 boto3 = {version = ">=1.34.0", optional = true}
 
+# Optional: field-level encryption (SnapEncrypted*Field / SNAPADMIN_ENCRYPTION). `cryptography`
+# is dual-licensed Apache-2.0 OR BSD-3-Clause — permissive either way — and supplies the
+# AES-256-GCM primitive snapadmin/encryption/cipher.py wraps. Kept out of core because it ships
+# compiled wheels: a project that encrypts no column has no reason to carry them. Imported
+# lazily, so a missing install fails closed with an ImproperlyConfigured naming this extra.
+cryptography = {version = ">=42.0.0", optional = true}
+
 [tool.poetry.extras]
 theme = ["django-unfold"]
 elasticsearch = ["elasticsearch"]
@@ -152,9 +159,10 @@ extra-settings = ["django-extra-settings"]
 wysiwyg = ["django-ckeditor-5"]
 autocomplete-filter = ["django-admin-autocomplete-filter"]
 xlsx = ["openpyxl"]
+encryption = ["cryptography"]
 api = ["djangorestframework", "drf-spectacular", "django-filter"]
 graphql = ["graphene-django"]
-all = ["django-unfold", "elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "pyrage", "boto3", "django-extra-settings", "django-ckeditor-5", "django-admin-autocomplete-filter", "openpyxl", "djangorestframework", "drf-spectacular", "django-filter", "graphene-django"]
+all = ["django-unfold", "elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "pyrage", "boto3", "django-extra-settings", "django-ckeditor-5", "django-admin-autocomplete-filter", "openpyxl", "djangorestframework", "drf-spectacular", "django-filter", "graphene-django", "cryptography"]
 
 [tool.poetry.group.dev.dependencies]
 black = "^24.0.0"
@@ -184,6 +192,9 @@ django-ckeditor-5 = ">=0.0.12"
 django-admin-autocomplete-filter = ">=0.7.1"
 # The suite covers XLSX export end to end; the package core imports it lazily.
 openpyxl = ">=3.1.0"
+# The suite covers encrypted fields end to end; the package core imports it lazily
+# behind the [encryption] extra.
+cryptography = ">=42.0.0"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

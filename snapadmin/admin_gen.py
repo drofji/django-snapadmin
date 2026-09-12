@@ -332,6 +332,18 @@ class AdminGenMixin:
         }
         list_select_related = [fn for fn in list_display if fn in fk_field_names]
 
+        # An encrypted column is never sortable. Clicking a changelist header
+        # issues ORDER BY on the column, which holds base64url ciphertext — the
+        # rows come back in an order unrelated to their values, with nothing to
+        # show anything went wrong. Ordering is the one operation that never
+        # passes through the field's own lookup guard, so it has to be taken
+        # away here. snapadmin.E023 covers the Meta.ordering half.
+        encrypted_names = {
+            f.name for f in cls._meta.get_fields()
+            if getattr(f, "is_snap_encrypted", False)
+        }
+        sortable_by = [fn for fn in list_display if fn not in encrypted_names]
+
         A = DjangoAdminClassAttributeEnum
         admin_attrs = {
             A.LIST_DISPLAY.value: list_display,
@@ -343,6 +355,7 @@ class AdminGenMixin:
             # base manager) so it never leaks into GROUP BY on aggregations; a
             # model's explicit Meta.ordering is honoured when set.
             "ordering": list(cls._meta.ordering) or ["-pk"],
+            "sortable_by": sortable_by,
             "list_select_related": list_select_related or False,
             "list_per_page": cls.list_per_page,
             "list_max_show_all": cls.list_max_show_all,

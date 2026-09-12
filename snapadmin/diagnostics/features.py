@@ -212,7 +212,26 @@ def _encryption() -> tuple[bool, str]:
         return False, ""
     return True, (
         f"{keyset.source.value}, {_count(len(keyset), 'key')}, "
-        f"fingerprint {keyset.fingerprint}"
+        f"fingerprint {keyset.fingerprint}, {_count(_encrypted_field_count(), 'field')} encrypted"
+    )
+
+
+def _encrypted_field_count() -> int:
+    """How many model fields actually hold ciphertext.
+
+    A configured keyset with nothing encrypted is a real state and a common one
+    — key management shipped a release before the field types did — so the
+    adoption audit has to tell "the key is set up" apart from "the key is in
+    use". Counted by marker attribute, the same way every other
+    encryption-aware surface detects a field.
+    """
+    from django.apps import apps
+
+    return sum(
+        1
+        for model in apps.get_models()
+        for field in model._meta.get_fields()
+        if getattr(field, "is_snap_encrypted", False)
     )
 
 

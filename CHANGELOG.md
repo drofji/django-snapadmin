@@ -12,6 +12,43 @@ the `0.x` beta series.
 
 ## Unreleased
 
+### Added
+- Field-level encryption now has a cipher: AES-256-GCM behind the new optional `[encryption]`
+  extra (`cryptography`), storing each value as a self-describing, rotation-ready
+  `snap1.<key id>.<nonce>.<ciphertext>` envelope bound to its own `app_label.model.field`. A
+  dropped key, a tampered payload or a ciphertext moved between columns fails loudly instead of
+  returning a wrong value; no key material or plaintext reaches an error message or a log.
+- Eight encrypted field types — `SnapEncryptedCharField`, `…TextField`, `…EmailField`,
+  `…JSONField`, `…IntegerField`, `…DecimalField`, `…DateField`, `…DateTimeField` — storing
+  ciphertext in a text column while the form, the validation and the Python value stay those of
+  the plain field. `None` stays SQL `NULL`; re-saving, `bulk_update()`, `QuerySet.update()` and a
+  fixture reload never encrypt a value twice; `dumpdata` emits ciphertext, not plaintext.
+- Encrypted fields refuse every lookup they cannot answer honestly with a `FieldError` naming the
+  field — the alternative being a query that silently matches nothing. `blind_index=True` adds an
+  HMAC sibling column that restores `__exact` and `__in` (and `unique=True`), matching under every
+  key in the keyset so a rotation needs no rebuild. It makes equality observable by design; see the
+  release notes before turning it on for a low-entropy column.
+- Encrypted values no longer reach the surfaces that would re-emit them: excluded from
+  Elasticsearch documents, redacted in the audit trail and the admin history, and masked by default
+  in exports, REST, GraphQL, the changelist and imports through the existing PII permission model.
+  Declarations the column cannot honour (`searchable`/`unique` without a blind index, `Meta.ordering`
+  on ciphertext, a field named in `es_mapping`) are startup errors `snapadmin.E020`–`E023`, with
+  `W019`/`W020` for a dead index and an orphaned blind-index column.
+- The demo now encrypts `CustomerProfile.tax_id` with a blind index, so the feature is visible in a
+  project you can actually run.
+- New `manage.py snapadmin_encrypt_fields`: `--adopt` encrypts rows that predate the switch to an
+  encrypted column, `--rotate` moves rows off an old key so it can be dropped, `--reindex` rebuilds
+  blind-index columns after a `bulk_update()`/`QuerySet.update()`. Reports only unless `--apply`,
+  resumable by primary key, and a row it cannot convert is counted and skipped rather than aborting
+  the run.
+
+### Changed
+- `snapadmin_info --section features` reports the number of fields actually encrypted alongside the
+  keyset source and fingerprint — a configured key with nothing encrypted is a real state, and the
+  adoption audit has to tell the two apart.
+- The field-encryption documentation is split into the field types (`#field-encryption`) and the
+  keyset (`#encryption-keys`); `SECURITY.md` gains the field layer's threat model.
+
 ## 0.1.0b8 — 2026-09-06
 
 ### Breaking

@@ -216,6 +216,19 @@ def _build_filters_for_model(model_class: type[django_models.Model]) -> dict[str
         if not hasattr(field, "column"):
             continue
 
+        # An encrypted column cannot answer any of the lookups generated below.
+        # `icontains` / `gte` / `startswith` over ciphertext are refused by the
+        # field itself, so a generated filter is a documented query parameter
+        # that turns into a 500 the moment anyone uses it — and `exact` would
+        # need the blind index, which the field rewrites internally rather than
+        # exposing as a second filter name. Its `<field>_bi` sibling is skipped
+        # for the opposite reason: filtering on it would work, and would be an
+        # equality oracle over a value the caller is not allowed to read.
+        if getattr(field, "is_snap_encrypted", False) or getattr(
+            field, "is_snap_blind_index", False
+        ):
+            continue
+
         name = field.name
 
         if isinstance(field, _TEXT_FIELD_TYPES):

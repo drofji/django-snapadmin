@@ -126,17 +126,69 @@ def get_masking_rules(app_label: str, model_name: str) -> dict[str, dict]:
     return {str(field): rule for field, rule in rules.items() if isinstance(rule, dict)}
 
 
+def _encrypted_fields(app_label: str, model_name: str) -> list[str]:
+    """Every encrypted field on a model — masked without being configured.
+
+    An encrypted field decrypts transparently, so by the time a serializer, an
+    exporter or a changelist column sees it, it is an ordinary string. Treating
+    it as masked by default means all six masking surfaces get the right
+    behaviour from one place, using the permission concept the project already
+    has, rather than each growing its own encryption-aware branch.
+
+    Each field's ``<field>_bi`` blind-index sibling is included too — it is a
+    deterministic function of the value, so serving it to a caller who is
+    denied the column itself hands them an offline equality oracle over it.
+
+    A project that genuinely wants a role to read one of these fields writes
+    the same per-field rule it would write for any other sensitive column::
+
+        SNAPADMIN_MASKING_RULES = {
+            "clinic.Patient": {"ssn": {"permission": "clinic.view_ssn"}},
+        }
+
+    Resolution failures are silent by design: masking settings are free-text
+    and may name a model that does not exist, and this helper must not turn a
+    typo in an unrelated setting into an exception on every request. The
+    settings-resolution checks (``snapadmin.E001``/``E002``) report those.
+    """
+    from django.apps import apps
+    from django.core.exceptions import AppRegistryNotReady
+
+    try:
+        model = apps.get_model(app_label, model_name)
+    except (LookupError, ValueError, AppRegistryNotReady):
+        return []
+    names: list[str] = []
+    for field in model._meta.get_fields():
+        if getattr(field, "is_snap_encrypted", False):
+            names.append(field.name)
+            # The <field>_bi sibling is exactly as sensitive as the column it
+            # indexes: it is deterministic, so anyone holding it can test a
+            # guess offline and can tell which rows share a value. Serving it
+            # to a caller who is denied the column itself would hand them an
+            # equality oracle over the very thing being protected.
+            sibling = getattr(field, "blind_index_name", None)
+            if sibling:
+                names.append(sibling)
+    return names
+
+
 def get_masked_fields(app_label: str, model_name: str) -> list[str]:
     """Return the masked field names configured for ``app_label.model_name``.
 
-    The union of ``SNAPADMIN_MASKED_FIELDS`` (in its declared order) and any
+    The union of ``SNAPADMIN_MASKED_FIELDS`` (in its declared order), any
     field carrying a rule in ``SNAPADMIN_MASKING_RULES`` — declaring a rule is
-    itself a declaration that the field is sensitive. Keys in both settings are
-    matched case-insensitively on both the app label and the model name, so
+    itself a declaration that the field is sensitive — and every
+    ``SnapEncrypted*Field`` on the model, which is sensitive by construction
+    (see :func:`_encrypted_fields`). Keys in both settings are matched
+    case-insensitively on both the app label and the model name, so
     ``"demo.Customer"`` and ``"demo.customer"`` resolve identically.
     """
     fields = list(_model_entry("SNAPADMIN_MASKED_FIELDS", app_label, model_name) or [])
     for field in get_masking_rules(app_label, model_name):
+        if field not in fields:
+            fields.append(field)
+    for field in _encrypted_fields(app_label, model_name):
         if field not in fields:
             fields.append(field)
     return fields

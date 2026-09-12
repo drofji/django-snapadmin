@@ -19,7 +19,7 @@ from urllib.parse import urlparse
 from django.apps import apps
 from django.conf import settings
 from django.core.checks import Error, Info, Warning
-from django.core.exceptions import ImproperlyConfigured
+from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured
 from django.utils.module_loading import import_string
 
 from snapadmin import conf
@@ -1317,6 +1317,187 @@ def check_encryption_required(app_configs, **kwargs):
     )]
 
 
+def _blind_index_field_class():
+    """The blind-index sibling class, imported late.
+
+    ``snapadmin.fields`` pulls in Django's model machinery, and this module is
+    imported while apps are still loading — the same reason every other
+    model-touching import in this file is function-local.
+    """
+    from snapadmin.fields import SnapBlindIndexField
+
+    return SnapBlindIndexField
+
+
+def _encrypted_fields_of(model):
+    """Every field on *model* carrying the encryption marker."""
+    return [f for f in model._meta.get_fields() if getattr(f, "is_snap_encrypted", False)]
+
+
+def check_encrypted_field_usage(app_configs, **kwargs):
+    """Catch declarations an encrypted column cannot honour.
+
+    Every case here is one where the code *looks* right and does something
+    quietly wrong, which is why they are startup messages rather than
+    documentation:
+
+    ``E021`` ``searchable=True`` without ``blind_index=True``. SnapAdmin builds
+    an ``icontains`` over the column for the admin search box and the REST
+    ``?search=`` filter; against ciphertext that matches nothing, so the search
+    silently reports the row does not exist.
+
+    ``E022`` ``unique=True`` without ``blind_index=True``. Every ciphertext
+    carries its own random nonce, so the constraint is satisfied by definition
+    and enforces nothing at all — two rows holding the same value pass it.
+
+    ``E023`` ``Meta.ordering`` naming an encrypted field. The database sorts the
+    base64url envelope, which is uncorrelated with the value. Unlike a lookup,
+    ordering never passes through the field's own guard, so this check is the
+    only thing standing between a project and a changelist sorted at random.
+
+    ``E024`` ``filterable=True``. A sidebar filter reads the column's distinct
+    values *through the ORM*, which decrypts them — so the admin would print
+    every distinct plaintext into the sidebar for anyone who can open the
+    changelist, and then fail when the filter is applied. Unlike the others
+    this one is not fixable with a blind index: what the filter offers is
+    exactly what the encryption is hiding.
+
+    ``W019`` ``db_index=True`` without ``blind_index=True``. Not wrong, just
+    dead weight: an index on a column no lookup can use costs writes and disk
+    and can never be read.
+
+    ``W020`` a ``SnapBlindIndexField`` whose ``source_field`` names nothing. Its
+    value can no longer be derived, so it keeps whatever was last written to it
+    while the field it is supposed to track moves on.
+    """
+    errors = []
+    for model in apps.get_models():
+        encrypted = _encrypted_fields_of(model)
+        for field in encrypted:
+            label = f"{model._meta.label}.{field.name}"
+            if getattr(field, "searchable", False) and not getattr(field, "blind_index", False):
+                errors.append(Error(
+                    f"{label} is encrypted and searchable=True, but has no blind index. "
+                    "The admin search box and the REST ?search= filter build an icontains "
+                    "over the column, which holds ciphertext — the search would match "
+                    "nothing and report the row does not exist.",
+                    hint="Add blind_index=True for exact-match lookups, or drop "
+                         "searchable=True. Substring search on an encrypted column is not "
+                         "possible at all.",
+                    obj=field,
+                    id="snapadmin.E021",
+                ))
+            if getattr(field, "filterable", False):
+                errors.append(Error(
+                    f"{label} is encrypted and filterable=True. A sidebar filter reads the "
+                    "column's distinct values through the ORM, which decrypts them — so the "
+                    "admin would list every distinct plaintext in the sidebar, to every user "
+                    "who can open the changelist. Applying the filter then fails outright, "
+                    "because the lookup behind it is refused.",
+                    hint="Drop filterable=True. A filter over an encrypted column cannot be "
+                         "made safe: the values it offers are the values being protected.",
+                    obj=field,
+                    id="snapadmin.E024",
+                ))
+            if field.unique and not getattr(field, "blind_index", False):
+                errors.append(Error(
+                    f"{label} is encrypted and unique=True, but has no blind index. Every "
+                    "ciphertext carries its own random nonce, so the constraint is "
+                    "satisfied by every row and enforces nothing — two rows with the same "
+                    "value would both be accepted.",
+                    hint="Add blind_index=True; the constraint then moves to the "
+                         f"{field.name}_bi column, where it means what you meant.",
+                    obj=field,
+                    id="snapadmin.E022",
+                ))
+            if field.db_index and not getattr(field, "blind_index", False):
+                errors.append(Warning(
+                    f"{label} is encrypted and db_index=True, but no lookup can use that "
+                    "index — the column holds ciphertext and every comparison on it is "
+                    "refused.",
+                    hint="Drop db_index=True, or add blind_index=True, which creates an "
+                         "index on the sibling column that lookups actually use.",
+                    obj=field,
+                    id="snapadmin.W019",
+                ))
+
+        encrypted_names = {f.name for f in encrypted}
+        for entry in (model._meta.ordering or []):
+            name = str(entry).lstrip("-")
+            if name in encrypted_names:
+                errors.append(Error(
+                    f"{model._meta.label}.Meta.ordering sorts by {name!r}, which is "
+                    "encrypted. The database would order rows by the base64url envelope, "
+                    "which bears no relation to the value — a changelist sorted this way "
+                    "looks sorted and is not.",
+                    hint="Order by a different column. Ordering an encrypted column is "
+                         "not possible, and unlike a filter it cannot be refused at query "
+                         "time, which is why this is caught here.",
+                    obj=model,
+                    id="snapadmin.E023",
+                ))
+
+        for field in model._meta.get_fields():
+            source = getattr(field, "source_field", None)
+            if not source or not isinstance(field, _blind_index_field_class()):
+                continue
+            try:
+                indexed = model._meta.get_field(source)
+            except FieldDoesNotExist:
+                indexed = None
+            if indexed is None or not getattr(indexed, "is_snap_encrypted", False):
+                missing = "is not a field on this model" if indexed is None else (
+                    "is not an encrypted field"
+                )
+                errors.append(Warning(
+                    f"{model._meta.label}.{field.name} indexes {source!r}, which {missing}. "
+                    "Its value can no longer be derived, so it keeps whatever was last "
+                    "written to it.",
+                    hint="Point source_field at the encrypted field it indexes, or remove "
+                         "the column. It is normally created for you by "
+                         "blind_index=True and needs no hand editing.",
+                    obj=field,
+                    id="snapadmin.W020",
+                ))
+    return errors
+
+
+def check_encrypted_fields_not_indexed(app_configs, **kwargs):
+    """Refuse to ship an encrypted value to Elasticsearch (``E020``).
+
+    Elasticsearch is a second datastore with an entirely different threat
+    model — usually a different host, commonly no authentication inside the
+    cluster, frequently no encryption at rest, and it keeps the analysed text
+    in its own inverted index. Mirroring a value there undoes the reason the
+    column was encrypted in the first place.
+
+    Auto-mapping already skips encrypted fields and ``get_es_document()``
+    refuses to emit one regardless, so this cannot leak silently; the check
+    exists because an explicit ``es_mapping`` entry is a statement of intent
+    that will never be honoured, and failing at startup is friendlier than
+    leaving someone to wonder why the field is missing from every document.
+    """
+    errors = []
+    for model in apps.get_models():
+        mapping = getattr(model, "es_mapping", None)
+        if not mapping:
+            continue
+        encrypted = {f.name for f in _encrypted_fields_of(model)}
+        for name in mapping:
+            if name in encrypted:
+                errors.append(Error(
+                    f"{model._meta.label}.es_mapping maps {name!r}, which is an encrypted "
+                    "field. Indexing it would ship the plaintext to Elasticsearch — a "
+                    "second datastore with a different threat model, which also keeps the "
+                    "value in its own inverted index.",
+                    hint=f"Remove {name!r} from es_mapping. SnapAdmin excludes encrypted "
+                         "fields from the document anyway, so the entry has no effect "
+                         "beyond this error.",
+                    obj=model,
+                    id="snapadmin.E020",
+                ))
+    return errors
+
 ALL_CHECKS = [
     check_analytics_db_alias,
     check_masked_fields,
@@ -1346,6 +1527,8 @@ ALL_CHECKS = [
     check_encryption_keys,
     check_encryption_key_file,
     check_encryption_required,
+    check_encrypted_field_usage,
+    check_encrypted_fields_not_indexed,
 ]
 
 

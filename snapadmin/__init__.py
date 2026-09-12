@@ -317,8 +317,13 @@ Operations
         ``repr`` or an exception (only its id and fingerprint). Keys are
         generated with ``manage.py snapadmin_encryption_key``; the keyset is
         ordered, so the first key encrypts and every key decrypts, which is what
-        makes rotation possible without downtime. Nothing here runs, and no
-        dependency is imported, until a model declares an encrypted field.
+        makes rotation possible without downtime. ``snapadmin.encryption.cipher``
+        is the cipher itself: AES-256-GCM over the versioned
+        ``snap1.<key id>.<nonce>.<payload>`` envelope, with the
+        ``app.model.field`` AAD that stops a ciphertext being moved between
+        columns, behind the lazily-imported ``[encryption]`` extra
+        (``cryptography``). Nothing here runs, and no dependency is imported,
+        until a model declares an encrypted field.
     ``snapadmin.theme_i18n``
         Catalog entries for the Unfold theme's own interface strings, which
         ``django-unfold`` ships untranslated — without them a themed admin renders
@@ -349,7 +354,8 @@ Management commands
     ``snapadmin_import``, ``snapadmin_audit_export``, ``snapadmin_health_alert``,
     ``snapadmin_db_backup``, ``snapadmin_purge_expired_data``, ``snapadmin_send_error_digest``,
     ``snapadmin_restore``, ``snapadmin_rollback``, ``snapadmin_subject_request``,
-    ``snapadmin_encryption_key``, ``snap_migrate``, ``snapadmin_age_keygen``.
+    ``snapadmin_encryption_key``, ``snapadmin_encrypt_fields``, ``snap_migrate``,
+    ``snapadmin_age_keygen``.
     ``snapadmin_restore``/``snapadmin_rollback`` are dry-run by
     default — pass ``--confirm`` to actually restore or roll back.
     ``snap_migrate`` runs ``migrate`` against every ``SNAPADMIN_SHARDING`` shard's
@@ -361,6 +367,14 @@ Management commands
     once, as the environment line to paste into a secret store — never into a
     settings module. ``--rotate`` prints a key to prepend to the existing keyset
     and the ids already in it, never their material.
+    ``snapadmin_encrypt_fields`` converts stored data: ``--adopt`` encrypts rows
+    that were already in a column when it was switched to an encrypted field,
+    ``--rotate`` moves rows off an older key so it can be dropped from the
+    keyset, and ``--reindex`` rebuilds ``<field>_bi`` blind-index columns (the
+    repair after a ``bulk_update()`` or ``QuerySet.update()``, neither of which
+    refreshes them). It reports only unless given ``--apply``, walks by primary
+    key so a killed run resumes with ``--start-pk``, and counts a row it cannot
+    convert instead of stopping on it.
     ``snapadmin_subject_request export|delete --model app.Model --identifier VALUE
     --user USERNAME`` is the GDPR subject-access command — export (unmasked,
     reusing the existing ``SnapExportJob`` machinery) or delete (dry-run by
@@ -409,7 +423,8 @@ also off by default, independent of ``api``),
 ``age`` (pyrage, for encrypted backups — ``SNAPADMIN_BACKUP_AGE_RECIPIENTS``),
 ``s3`` (boto3, for S3-compatible offsite backups — ``SNAPADMIN_BACKUP_S3_*``),
 ``extra-settings``, ``wysiwyg`` (CKEditor 5 — GPL/commercial, hence optional),
-``autocomplete-filter``, ``xlsx`` (openpyxl, for ``export_format="xlsx"``), or
+``autocomplete-filter``, ``xlsx`` (openpyxl, for ``export_format="xlsx"``),
+``encryption`` (cryptography, for ``SnapEncrypted*Field`` columns), or
 ``all`` (reproduces today's full dependency graph — a no-op upgrade for an
 existing install). Each is imported lazily and raises a pointed
 ``ImproperlyConfigured`` only when its feature is actually used.
@@ -472,6 +487,15 @@ _LAZY_EXPORTS: dict[str, str] = {
     "SnapRichTextField": "snapadmin.fields",
     "SnapPhoneField": "snapadmin.fields",
     "SnapColorField": "snapadmin.fields",
+    "SnapEncryptedCharField": "snapadmin.fields",
+    "SnapEncryptedTextField": "snapadmin.fields",
+    "SnapEncryptedEmailField": "snapadmin.fields",
+    "SnapEncryptedJSONField": "snapadmin.fields",
+    "SnapEncryptedIntegerField": "snapadmin.fields",
+    "SnapEncryptedDecimalField": "snapadmin.fields",
+    "SnapEncryptedDateField": "snapadmin.fields",
+    "SnapEncryptedDateTimeField": "snapadmin.fields",
+    "SnapBlindIndexField": "snapadmin.fields",
     "SnapFunctionField": "snapadmin.fields",
     "SnapStatusBadgeField": "snapadmin.fields",
     "SnapStatusBadgeFieldChoice": "snapadmin.fields",
