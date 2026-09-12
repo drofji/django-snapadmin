@@ -175,3 +175,24 @@ Fixed
   ``sourceMappingURL`` in either comment form — is resolved against the package, and any shipped
   asset advertising a source map at all is rejected. The next vendored bundle is covered before it
   reaches a deployment.
+
+* **The upgrade guides no longer contradict the code about the API defaults.** ``0.1.0b8`` flipped
+  ``SNAPADMIN_REST_API_ENABLED`` and ``SNAPADMIN_GRAPHQL_ENABLED`` to default to ``False``, and the
+  flip reached ``README.md`` and the documentation site but not ``docs/migrations/``. Section 1 of
+  the b7 -> b8 guide still told the reader both switches "still default to ``True`` in this
+  release", three paragraphs above a section 2 titled "…now default to ``False`` (BREAKING)". A
+  reader who stopped at section 1 installed the ``[api]``/``[graphql]`` extras, believed their API
+  would survive the upgrade, and found it gone on the next boot.
+
+  Two older guides carried the same stale claim in a settings block — ``# default True`` beside each
+  switch in the v0.0.x -> v0.1.x guide, and ``# settings.py — all default True`` heading the block
+  in the package-rename guide. All three now state the real default and say plainly that restoring
+  a surface takes **both** the extra and the setting; the ``SNAPADMIN_SWAGGER_ENABLED`` line says
+  that it has no default of its own and follows whatever REST resolved to.
+
+  ``tests/test_api_surface_defaults.py`` — the file that already forbids a read site in
+  ``snapadmin/`` from spelling this default out as a literal — now asks the same question of the
+  prose. Every upgrade guide, ``README.md``, ``llms.txt`` and the documentation site is scanned for
+  a claim that either switch defaults to on, with each claim attributed to the setting it is
+  actually about so a neighbouring setting's correct ``# default True`` is not swept up. Release
+  notes are deliberately out of scope: describing a past default is their job.

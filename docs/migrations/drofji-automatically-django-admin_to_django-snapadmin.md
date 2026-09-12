@@ -115,10 +115,11 @@ urlpatterns = [
     path("", include("snapadmin.urls")),   # /api/, /api/docs/, /graphql/
 ]
 
-# settings.py — all default True
+# settings.py — REST and GraphQL are off unless you set them, and each needs its extra:
+#   pip install django-snapadmin[api,graphql]
 SNAPADMIN_REST_API_ENABLED = True
 SNAPADMIN_GRAPHQL_ENABLED  = True
-SNAPADMIN_SWAGGER_ENABLED  = True
+SNAPADMIN_SWAGGER_ENABLED  = True      # follows SNAPADMIN_REST_API_ENABLED unless set
 ELASTICSEARCH_ENABLED      = False   # opt-in; needs the [elasticsearch] extra
 SNAPADMIN_ES_QUERY_ROUTING = True    # route ?search= on DUAL models to ES
 SNAPADMIN_ES_SEARCH_LIMIT  = 1000    # max ES hits per routed search

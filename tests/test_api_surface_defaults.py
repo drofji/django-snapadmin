@@ -22,6 +22,11 @@ So this file does two things:
   fails if any read site writes the default as a literal next to the setting name, which is what
   let eleven call sites disagree in the first place. Adding a twelfth read site with a hardcoded
   ``True`` fails here, not in production.
+* :class:`TestNoGuideClaimsTheOldDefault` is the same guard aimed at prose. The flip reached
+  ``README.md`` and ``docs/index.html`` but not ``docs/migrations/`` (#EXT1b): the b7->b8 guide
+  told the reader in section 1 that both switches "still default to ``True``" and in section 2
+  that they now default to ``False``, and two older guides still shipped ``# default True`` next
+  to the setting. A reader upgrading follows the guide, not the source.
 * the behavioural classes pin what a project that never configured SnapAdmin's API actually gets.
 """
 
@@ -31,6 +36,7 @@ import ast
 import importlib
 import importlib.util
 import pathlib
+import re
 from contextlib import contextmanager
 
 import pytest
@@ -47,6 +53,76 @@ SNAPADMIN_ROOT = pathlib.Path(checks.__file__).parent
 #: neither has a default of its own — each follows its parent surface's *resolved* value, which is
 #: why passing a name rather than a literal is correct for them.
 SWITCHES = ("SNAPADMIN_REST_API_ENABLED", "SNAPADMIN_GRAPHQL_ENABLED")
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
+#: Docs that tell a reader what to *do*. Release notes (``docs/releases/``) and the changelog are
+#: deliberately absent: their job is to describe a past release, so "used to default to ``True``"
+#: is correct there and must stay writable.
+PRESCRIPTIVE_DOCS = ("README.md", "llms.txt", "docs/llms.txt", "docs/index.html")
+
+#: A claim that something *defaults* to on — "default True", "defaults to `True`", "default is
+#: True", "True by default", "on by default". Not a plain ``SETTING = True``, which is an
+#: instruction to switch the surface on and stays correct, and not "off by default", which is.
+_DEFAULT_TRUE_RE = re.compile(
+    r'''(?ix)
+    defaults? \s+ (?: to\s+ | is\s+ | are\s+ )? [`'"*]* (?: True | on ) \b
+    | \b (?: True | on ) [`'"*]* \s+ by \s+ default \b
+    '''
+)
+
+#: Any ``SNAPADMIN_*`` name, so a claim can be attributed to the setting it is actually about.
+_SETTING_RE = re.compile(r"SNAPADMIN_[A-Z0-9_]+")
+
+#: How far from the claim a setting name still counts as its subject. Wide enough to span the
+#: comment above a settings block and the line-wrap in a prose sentence, narrow enough that an
+#: unrelated paragraph further down the page is not dragged in.
+_CLAIM_WINDOW = 300
+
+
+def _prescriptive_doc_paths() -> list[pathlib.Path]:
+    paths = [REPO_ROOT / name for name in PRESCRIPTIVE_DOCS]
+    paths += sorted((REPO_ROOT / "docs" / "migrations").glob("*.md"))
+    return [path for path in paths if path.is_file()]
+
+
+def _subject_of(text: str, start: int, end: int) -> str | None:
+    """The ``SNAPADMIN_*`` setting a claim spanning ``start:end`` is about.
+
+    Attribution matters as much as detection: a settings block lists several names a few
+    characters apart, and "any switch within the window" would read
+    ``SNAPADMIN_ES_QUERY_ROUTING = True  # default True`` — correct, that one really does
+    default to ``True`` — as a claim about the REST switch two lines above it.
+
+    A name on the claim's own line owns it, which is how ``SETTING = value  # default X`` reads.
+    Failing that (a comment heading a block, a sentence naming the setting on the line before)
+    the nearest name within the window wins.
+    """
+    line_start = text.rfind("\n", 0, start) + 1
+    line_end = text.find("\n", end)
+    line_end = len(text) if line_end == -1 else line_end
+    on_this_line = _SETTING_RE.search(text, line_start, line_end)
+    if on_this_line is not None:
+        return on_this_line.group(0)
+    candidates = [
+        (min(abs(match.start() - end), abs(start - match.end())), match.group(0))
+        for match in _SETTING_RE.finditer(text)
+        if match.start() < end + _CLAIM_WINDOW and match.end() > start - _CLAIM_WINDOW
+    ]
+    return min(candidates)[1] if candidates else None
+
+
+def _stale_default_claims_in(path: pathlib.Path) -> list[str]:
+    """Every place ``path`` claims one of the switches defaults to ``True``."""
+    text = path.read_text(encoding="utf-8")
+    offenders: list[str] = []
+    for match in _DEFAULT_TRUE_RE.finditer(text):
+        subject = _subject_of(text, match.start(), match.end())
+        if subject not in SWITCHES:
+            continue
+        line = text.count("\n", 0, match.start()) + 1
+        offenders.append(f"{path.name}:{line} — {subject}: {match.group(0)!r}")
+    return offenders
 
 
 @contextmanager
@@ -150,6 +226,65 @@ class TestNoReadSiteHardcodesTheDefault:
         probe.write_text(source + "\n", encoding="utf-8")
         offenders = _literal_defaults_in(probe)
         assert len(offenders) == 1 and "SNAPADMIN_REST_API_ENABLED" in offenders[0]
+
+
+class TestNoGuideClaimsTheOldDefault:
+    """#EXT1b — the docs are a read site too, and the guides were the one that drifted."""
+
+    def test_the_doc_scan_sees_the_guides(self):
+        """A typo in a path would make every assertion below pass on an empty list."""
+        names = {path.name for path in _prescriptive_doc_paths()}
+        assert "README.md" in names
+        assert "0.1.0b7_to_0.1.0b8.md" in names
+
+    @pytest.mark.parametrize(
+        "path", _prescriptive_doc_paths(), ids=lambda p: p.name
+    )
+    def test_no_prescriptive_doc_says_the_switches_default_to_true(self, path):
+        offenders = _stale_default_claims_in(path)
+        assert not offenders, (
+            "these lines tell a reader an API surface switch defaults to True, which it has not "
+            "since 1.0 (D4/#DEF2a) — a guide is followed instead of the source, so a stale "
+            "default here is acted on:\n  " + "\n  ".join(offenders)
+        )
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "`SNAPADMIN_REST_API_ENABLED` and\n`SNAPADMIN_GRAPHQL_ENABLED` both still default to `True`.",
+            "# settings.py -- all default True\nSNAPADMIN_REST_API_ENABLED = True",
+            "SNAPADMIN_GRAPHQL_ENABLED  = True    # default True",
+            "The REST API (`SNAPADMIN_REST_API_ENABLED`) is on by default.\n",
+        ],
+        ids=["prose", "comment-above-block", "inline-comment", "true-by-default"],
+    )
+    def test_the_guard_would_catch_a_regression(self, text, tmp_path):
+        probe = tmp_path / "guide.md"
+        probe.write_text(text + "\n", encoding="utf-8")
+        assert _stale_default_claims_in(probe)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Set `SNAPADMIN_REST_API_ENABLED = True` to mount the REST surface.",
+            "`SNAPADMIN_GRAPHQL_ENABLED` now defaults to `False` (BREAKING).",
+            "Set it to `True` (default `False`) once the `[api]` extra is installed.",
+            "`SNAPADMIN_ES_QUERY_ROUTING = True    # default True` is a different setting.",
+            "SNAPADMIN_REST_API_ENABLED = True\nSNAPADMIN_ES_QUERY_ROUTING = True  # default True",
+        ],
+        ids=[
+            "instruction",
+            "correct-default",
+            "true-with-false-default",
+            "other-setting",
+            "nearest-setting-wins",
+        ],
+    )
+    def test_the_guard_leaves_correct_prose_alone(self, text, tmp_path):
+        """A guard that fires on the fix is worse than no guard — it teaches people to delete it."""
+        probe = tmp_path / "guide.md"
+        probe.write_text(text + "\n", encoding="utf-8")
+        assert not _stale_default_claims_in(probe)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

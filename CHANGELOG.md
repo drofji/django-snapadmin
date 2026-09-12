@@ -57,6 +57,13 @@ the `0.x` beta series.
   build or deploy down with it. Neither `WHITENOISE_MANIFEST_STRICT = False` nor a
   `manifest_strict = False` subclass worked around it, because the file really was absent. The
   comment is gone from the shipped bundle.
+- The upgrade guides no longer claim the REST and GraphQL surfaces are on by default. The b7→b8
+  guide told the reader in section 1 that `SNAPADMIN_REST_API_ENABLED` and
+  `SNAPADMIN_GRAPHQL_ENABLED` "both still default to `True`" and in section 2 that they now default
+  to `False`; two older guides shipped `# default True` next to the same settings. Anyone following
+  section 1 installed the extras, expected their API to survive the upgrade, and lost it on the next
+  boot. All three are corrected, and the guides now spell out that restoring a surface takes both
+  the extra and the setting.
 
 ## 0.1.0b8 — 2026-09-06
 
