@@ -141,6 +141,9 @@ msgstr "Actie"
 msgid "User Email"
 msgstr "E-mail van gebruiker"
 
+msgid "Delete At"
+msgstr "Verwijderdatum"
+
 msgid "Audit Log"
 msgstr "Auditlogboek"
 

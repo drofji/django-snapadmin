@@ -694,8 +694,8 @@ class SnapModel(AdminGenMixin, models.Model):
       ``api_default_text_lookups`` / ``api_json_filters`` (generated query filters).
     * **Elasticsearch** — ``es_index_enabled``, ``es_storage_mode``,
       ``es_index_name``, ``es_mapping``.
-    * **Compliance** — ``data_retention_days``/``data_retention_files`` for the
-      GDPR purge.
+    * **Compliance** — ``data_retention_days``/``data_retention_date_field``/
+      ``data_retention_files`` for the GDPR purge.
 
     Each attribute is documented inline where it is declared below, and in full at
     https://drofji.github.io/django-snapadmin/#snap-model.
@@ -836,6 +836,22 @@ class SnapModel(AdminGenMixin, models.Model):
     # Records older than this many days (measured on data_retention_field) will be removed.
     data_retention_days: int | None = None
     data_retention_field: str = "created_at"
+    # Per-row retention (#EXT1o). Name a Date/DateTimeField holding *this row's
+    # own* expiry instant — a delete_at an upstream supplier sets per record —
+    # and the purge deletes a row once that moment has passed, instead of
+    # measuring an age off one model-wide window. The two combine, with the
+    # more specific rule winning:
+    #
+    #   date set, in the past    -> purged, whatever data_retention_days says
+    #   date set, in the future  -> kept, even if older than data_retention_days
+    #   date NULL                -> falls back to data_retention_days measured on
+    #                               data_retention_field; never purged when that
+    #                               is unset, so "no expiry declared" means "keep"
+    #
+    # Set it alone (data_retention_days left None) for a table where every row
+    # carries its own deadline and there is no house rule at all. None (the
+    # default) leaves retention exactly as it was.
+    data_retention_date_field: str | None = None
     # Storage-backed field names (SnapFileField / SnapImageField) whose files are
     # deleted alongside an expiring row, so a purged row never leaves an orphaned
     # file behind on disk — see purge_expired()'s "files before rows" ordering
@@ -2183,18 +2199,98 @@ class SnapModel(AdminGenMixin, models.Model):
         return cls.delete_pks_from_es(pks)
 
     @classmethod
-    def _purge_expired_es_only(cls, cutoff, retention_field, dry_run: bool) -> int:
-        """Purge expired ES_ONLY documents via a range query on the retention field.
+    def _retention_rules(cls) -> tuple[int | None, str, str | None]:
+        """``(retention_days, retention_field, retention_date_field)`` for this model.
+
+        Read through :func:`~snapadmin.registry.get_model_meta`, the single
+        accessor every model-level option goes through (#RFC1b), so a value can
+        come from the class, a ``@snap_model`` registry entry or a project-wide
+        setting without this method knowing the difference.
+        """
+        return (
+            get_model_meta(cls, "data_retention_days", None),
+            get_model_meta(cls, "data_retention_field", "created_at"),
+            get_model_meta(cls, "data_retention_date_field", None),
+        )
+
+    @classmethod
+    def _retention_filter(cls, now, retention_days, retention_field, date_field):
+        """The rows this model considers expired, as one ``Q``.
+
+        With no ``data_retention_date_field`` this is the historical rule and
+        nothing else: everything older than ``now - data_retention_days``
+        measured on ``data_retention_field``.
+
+        With one, that column is a deadline rather than an age. A row past its
+        own deadline goes; a row with a deadline still ahead of it stays, even
+        when it is older than the model-wide window — an expiry set per record
+        is the more specific instruction and overrides the house rule rather
+        than racing it. Only a row that declares no deadline at all (``NULL``)
+        falls back to the window, and when there is no window either it is
+        simply never purged: "no expiry declared" has to mean "keep", never
+        "delete now".
+        """
+        if not date_field:
+            cutoff = now - timedelta(days=retention_days)
+            return models.Q(**{f"{retention_field}__lt": cutoff})
+
+        expired = models.Q(**{f"{date_field}__lt": now})
+        if retention_days and retention_days > 0:
+            cutoff = now - timedelta(days=retention_days)
+            expired |= models.Q(**{
+                f"{date_field}__isnull": True,
+                f"{retention_field}__lt": cutoff,
+            })
+        return expired
+
+    @staticmethod
+    def _retention_es_query(now, retention_days, retention_field, date_field) -> dict:
+        """:meth:`_retention_filter` expressed as an Elasticsearch query.
+
+        The same three-way rule, since an ``ES_ONLY`` model has no table to run
+        the ``Q`` against: a ``range`` on the deadline, OR — when a model-wide
+        window is also configured — an age range restricted to documents that
+        carry no deadline at all (``must_not exists``, which is how a ``NULL``
+        reaches an index).
+        """
+        if not date_field:
+            cutoff = now - timedelta(days=retention_days)
+            return {"range": {retention_field: {"lt": cutoff.isoformat()}}}
+
+        past_deadline = {"range": {date_field: {"lt": now.isoformat()}}}
+        if not (retention_days and retention_days > 0):
+            return past_deadline
+
+        cutoff = now - timedelta(days=retention_days)
+        return {"bool": {
+            "should": [
+                past_deadline,
+                {"bool": {
+                    "must_not": [{"exists": {"field": date_field}}],
+                    "filter": [{"range": {retention_field: {"lt": cutoff.isoformat()}}}],
+                }},
+            ],
+            "minimum_should_match": 1,
+        }}
+
+    @classmethod
+    def _purge_expired_es_only(
+        cls, now, retention_days, retention_field, date_field, dry_run: bool
+    ) -> int:
+        """Purge expired ES_ONLY documents via a query on the retention fields.
 
         ES_ONLY models have no DB table, so retention must run against the index
-        directly. Requires the retention field to be mapped as a date in ES.
+        directly. Requires the retention field (and the per-row
+        ``data_retention_date_field``, when set) to be mapped as a date in ES.
         """
         if not getattr(settings, "ELASTICSEARCH_ENABLED", False):
             return 0
         try:
             es = cls.get_es_client()
             index_name = cls.get_es_index_name()
-            body = {"query": {"range": {retention_field: {"lt": cutoff.isoformat()}}}}
+            body = {"query": cls._retention_es_query(
+                now, retention_days, retention_field, date_field
+            )}
             if dry_run:
                 resp = es.count(index=index_name, body=body)
                 return resp.get("count", 0)
@@ -2275,10 +2371,14 @@ class SnapModel(AdminGenMixin, models.Model):
 
     @classmethod
     def purge_expired(cls, *, now=None, dry_run: bool = False) -> int:
-        """Delete records past this model's ``data_retention_days`` (GDPR).
+        """Delete records past this model's retention rules (GDPR).
 
-        Removes rows older than the retention window — measured on
-        ``data_retention_field`` — from **every** storage layer the model uses:
+        Two rules, either or both configured — see :meth:`_retention_filter`
+        for how they combine. ``data_retention_days`` is the model-wide window,
+        an age measured on ``data_retention_field``;
+        :attr:`data_retention_date_field` is a per-row deadline, a column each
+        row carries its own expiry in. Expired rows go from **every** storage
+        layer the model uses:
 
         * ``DB_ONLY`` — bulk delete from the database.
         * ``DUAL``    — bulk delete from the database **and** the ES mirror.
@@ -2304,16 +2404,16 @@ class SnapModel(AdminGenMixin, models.Model):
         happened by the time this is raised, which is a known limitation of
         purging across heterogeneous stores.
         """
-        retention_days = getattr(cls, "data_retention_days", None)
-        if not retention_days or retention_days <= 0:
+        retention_days, retention_field, date_field = cls._retention_rules()
+        if not date_field and not (retention_days and retention_days > 0):
             return 0
 
-        retention_field = getattr(cls, "data_retention_field", "created_at")
         now = now or timezone.now()
-        cutoff = now - timedelta(days=retention_days)
 
         if cls.es_storage_mode == EsStorageMode.ES_ONLY:
-            return cls._purge_expired_es_only(cutoff, retention_field, dry_run)
+            return cls._purge_expired_es_only(
+                now, retention_days, retention_field, date_field, dry_run
+            )
 
         # Retention is time-based, not tenant-based: an expired row is purged
         # regardless of which tenant it belongs to, so this sweep is one of
@@ -2323,7 +2423,9 @@ class SnapModel(AdminGenMixin, models.Model):
         from snapadmin.tenancy import use_all_tenants
 
         with use_all_tenants():
-            qs = cls.objects.filter(**{f"{retention_field}__lt": cutoff})
+            qs = cls.objects.filter(
+                cls._retention_filter(now, retention_days, retention_field, date_field)
+            )
             if dry_run:
                 return qs.count()
 
@@ -2367,6 +2469,23 @@ class SnapModel(AdminGenMixin, models.Model):
     # (#SIMPL1f) — SnapModel inherits it below, so every one of these stays
     # reachable exactly as before (SnapModel.get_admin_fields, an instance's
     # .register_admin(), etc.).
+
+
+def _retention_configured(model: type) -> bool:
+    """Whether ``model`` declares any retention rule at all.
+
+    One definition for every caller that has to decide "does this model get
+    swept?" — the Celery task, the management command and ``snapadmin.W012``
+    all ask exactly this, and answering it in three places is how a second rule
+    ends up honoured by two of them. A per-row ``data_retention_date_field``
+    counts on its own: a table where every row carries its own deadline needs
+    no model-wide window, and skipping it for lack of one would leave it
+    growing forever.
+    """
+    days = get_model_meta(model, "data_retention_days", None)
+    return bool(get_model_meta(model, "data_retention_date_field", None)) or bool(
+        days and days > 0
+    )
 
 
 # ===========================================================================
@@ -2520,6 +2639,7 @@ _SNAP_MODEL_UNEXPOSED_ATTRIBUTES: frozenset[str] = frozenset({
     "es_index_settings", "es_auto_mapping", "es_query_routing",
     # GDPR retention — needs a shared purge_expired attachment (#RFC1g row 2).
     "data_retention_days", "data_retention_field", "data_retention_files",
+    "data_retention_date_field",
     # Generated admin — needs register_admin()/get_admin_fields() refactored
     # onto get_model_meta() before these mean anything for a plain model
     # (#RFC1g row 3).

@@ -121,8 +121,8 @@ def purge_expired_data(self):
     """
     from django.apps import apps
     from snapadmin.exporting import purge_expired_export_jobs
-    from snapadmin.models import SnapadminAuditLog, SnapPurgeError
-    from snapadmin.registry import get_model_meta, is_registered
+    from snapadmin.models import SnapadminAuditLog, SnapPurgeError, _retention_configured
+    from snapadmin.registry import is_registered
 
     summary: dict[str, int] = {}
     errors: dict[str, str] = {}
@@ -135,8 +135,7 @@ def purge_expired_data(self):
         if not (is_registered(model) and hasattr(model, "purge_expired")):
             continue
 
-        retention_days = get_model_meta(model, "data_retention_days", None)
-        if not retention_days or retention_days <= 0:
+        if not _retention_configured(model):
             continue
 
         considered += 1

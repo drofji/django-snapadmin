@@ -348,10 +348,21 @@ class AuditLog(snap_models.SnapModel):
     action = snap_fields.SnapCharField(max_length=100, verbose_name=_("Action"), searchable=True, show_in_list=True, show_in_form=True)
     user_email = snap_fields.SnapEmailField(verbose_name=_("User Email"), show_in_list=True, show_in_form=True)
     created_at = snap_fields.SnapDateTimeField(auto_now_add=True, verbose_name=_("Created At"), filterable=True)
+    # A per-row deletion date, the way an upstream supplier delivers one: some
+    # records arrive with an agreed expiry, most do not. Nullable on purpose —
+    # a row that declares no deadline falls back to the 90-day window below,
+    # which is exactly how every row behaved before this column existed.
+    delete_at = snap_fields.SnapDateTimeField(
+        null=True, blank=True, verbose_name=_("Delete At"), filterable=True, show_in_form=True,
+    )
 
-    # Auto-delete records older than 90 days via the purge_expired_data Celery task
+    # Auto-delete records via the purge_expired_data Celery task. Two rules, and
+    # the more specific one wins: a row past its own delete_at goes whatever the
+    # window says, a row whose delete_at is still ahead of it stays even when it
+    # is older than 90 days, and a row with no delete_at falls back to the window.
     data_retention_days = 90
     data_retention_field = "created_at"  # the DateTimeField used to calculate record age
+    data_retention_date_field = "delete_at"  # this row's own expiry, when it has one
 
     # api_exclude_fields → user_email (PII) never appears in the REST API,
     # GraphQL or /api/models/schema/ — the admin still shows it.
@@ -361,7 +372,9 @@ class AuditLog(snap_models.SnapModel):
     # create/update through the API; created_at is already read-only
     # (auto_now_add) and user_email is excluded above, so this is the
     # mass-assignment allowlist for whatever's left as the model grows.
-    api_write_fields = ["action"]
+    # delete_at is on the list because the per-row expiry is exactly the kind of
+    # value an upstream system sets through the API when it delivers a record.
+    api_write_fields = ["action", "delete_at"]
 
     # GDPR subject-access declaration (#FUT4a): a value-match, not a relation —
     # user_email is a copy of the subject's identifier stored directly on this

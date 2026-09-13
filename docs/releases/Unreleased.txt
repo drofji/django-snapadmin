@@ -10,6 +10,35 @@ Each notable change should be a paragraph or bullet, explaining what changed and
 Added
 -----
 
+* **``data_retention_date_field`` — a per-row deletion date.** ``data_retention_days`` is one
+  constant for a whole table, measured off one timestamp column, so it can express "delete 90 days
+  after this row was created" and nothing else. A table whose records each arrive with their own
+  agreed expiry — a ``delete_at`` an upstream supplier sets per row — had no way in. The closest
+  approximation was to point ``data_retention_field`` at the expiry column and accept a whole-day
+  offset of at least one day (``data_retention_days`` is disabled at ``0``), which also reads the
+  column as an age rather than as a deadline.
+
+  ``data_retention_date_field`` names that column, and it resolves through ``get_model_meta()``
+  like every other model-level option, so a ``@snap_model``-decorated plain model and a
+  ``SnapModel`` subclass declare it the same way. The two rules combine, with the more specific one
+  winning: a row past its own date is purged whatever the window says; a row whose date is still
+  ahead of it is **kept even when it is older than ``data_retention_days``**, because an expiry set
+  per record overrides the house rule rather than racing it; and a row whose date is ``NULL`` falls
+  back to ``data_retention_days`` measured on ``data_retention_field``. When no window is configured
+  at all, a ``NULL`` row is never purged — "no expiry declared" has to mean "keep", never "delete
+  now".
+
+  Set it alone for a table where every row carries its own deadline and there is no house rule: the
+  Celery task, ``manage.py snapadmin_purge_expired_data`` and ``snapadmin.W012`` all treat a model
+  configured that way as a model with retention, rather than skipping it for lack of a
+  ``data_retention_days``. The command's report line names the rule that applied instead of printing
+  a window nobody set. ``ES_ONLY`` models get the identical three-way rule expressed as a query — a
+  ``range`` on the deadline, OR an age range restricted to documents carrying no deadline
+  (``must_not exists``) — so the behaviour does not quietly differ by storage layer; the deadline
+  column has to be mapped as a ``date`` in the index, exactly like ``data_retention_field``. The
+  demo's ``AuditLog`` now dogfoods it with a nullable ``delete_at`` alongside its existing 90-day
+  window, and ``snapadmin_info --section features`` counts the models using one.
+
 * **``api_full_clean`` — the model's own rules now hold on the API write path.** A
   ``Model.clean()`` rule is enforced wherever a ``ModelForm`` runs, which in practice means the
   admin and nothing else. The generated serializer validated every field, so the API looked

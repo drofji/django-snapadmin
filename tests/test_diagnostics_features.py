@@ -384,10 +384,13 @@ class TestModelBasedCapabilities:
 
     def _neutralise_model_retention(self, monkeypatch):
         """demo.AuditLog and demo.Showcase both carry a permanent
-        data_retention_days (#RET2a dogfood / #RET2c dogfood) — clear both so
-        a test can exercise the "nothing model-level configured" branch."""
+        data_retention_days (#RET2a dogfood / #RET2c dogfood), and AuditLog
+        also carries a data_retention_date_field (#EXT1o dogfood) — clear all
+        three so a test can exercise the "nothing model-level configured"
+        branch."""
         from demo.apps.shop.models import AuditLog, Showcase
         monkeypatch.setattr(AuditLog, "data_retention_days", None, raising=False)
+        monkeypatch.setattr(AuditLog, "data_retention_date_field", None, raising=False)
         monkeypatch.setattr(Showcase, "data_retention_days", None, raising=False)
 
     def test_retention_on_via_audit_log_default_alone(self, monkeypatch):
@@ -414,6 +417,27 @@ class TestModelBasedCapabilities:
         # demo.Showcase declares data_retention_files (#RET2c).
         data = _collect(verbose=True)
         assert "data_retention_files" in data["details"]["retention_purge"]
+
+    def test_retention_date_field_counted_in_detail(self):
+        # demo.AuditLog declares data_retention_date_field (#EXT1o).
+        data = _collect(verbose=True)
+        assert "1 with data_retention_date_field" in data["details"]["retention_purge"]
+
+    @override_settings(SNAPADMIN_AUDIT_RETENTION_DAYS=0)
+    def test_retention_on_via_a_date_field_alone(self, monkeypatch):
+        """A model whose only rule is a per-row deadline is still being purged."""
+        from demo.apps.shop.models import AuditLog, Showcase
+        monkeypatch.setattr(AuditLog, "data_retention_days", None, raising=False)
+        monkeypatch.setattr(Showcase, "data_retention_days", None, raising=False)
+        data = _collect(verbose=True)
+        assert data["retention_purge"] is True
+        assert "data_retention_date_field" in data["details"]["retention_purge"]
+
+    def test_retention_date_field_silent_when_no_model_uses_one(self, monkeypatch):
+        from demo.apps.shop.models import AuditLog
+        monkeypatch.setattr(AuditLog, "data_retention_date_field", None, raising=False)
+        data = _collect(verbose=True)
+        assert "data_retention_date_field" not in data["details"]["retention_purge"]
 
     def test_gdpr_subject_access_on_via_demo_customer(self):
         # demo.Customer declares is_data_subject=True (#FUT4a/#FUT4b).

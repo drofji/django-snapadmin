@@ -413,7 +413,8 @@ Key protections:
   export storage location is dedicated to SnapAdmin exports — do not point it at a bucket holding
   unrelated files.
 - **`snapadmin.W012`** warns at startup when retention is configured anywhere (a model's
-  `data_retention_days`, the audit log's on-by-default window, or `SNAPADMIN_EXPORT_RETENTION_DAYS`)
+  `data_retention_days` or `data_retention_date_field`, the audit log's on-by-default window, or
+  `SNAPADMIN_EXPORT_RETENTION_DAYS`)
   but no `CELERY_BEAT_SCHEDULE` entry runs `snapadmin.purge_expired_data` — the exact state every
   retention-scattered report this batch of checks addresses turned out to be in: retention configured,
   nothing scheduled to enforce it.

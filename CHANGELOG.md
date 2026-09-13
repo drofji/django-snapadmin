@@ -13,6 +13,13 @@ the `0.x` beta series.
 ## Unreleased
 
 ### Added
+- `data_retention_date_field` gives a model a per-row deletion date instead of one model-wide age:
+  name a `Date`/`DateTimeField` and each row expires on the date it carries. It combines with
+  `data_retention_days` — a row past its own date goes whatever the window says, a row whose date
+  is still ahead of it is kept even when it is older than the window, and a `NULL` date falls back
+  to the window (never purged when no window is set). Set it alone for a table where every row
+  carries its own deadline: the purge task, the management command and `snapadmin.W012` all count
+  that as configured retention. `ES_ONLY` models get the same rule as a query.
 - `api_full_clean` runs a model's own `full_clean()` on the API write path, so a
   `Model.clean()` cross-field rule holds for API clients as it already did in the admin.
   Off by default; `SNAPADMIN_API_FULL_CLEAN` turns it on project-wide and a model's own

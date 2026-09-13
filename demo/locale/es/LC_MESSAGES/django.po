@@ -141,6 +141,9 @@ msgstr "Acción"
 msgid "User Email"
 msgstr "Correo del usuario"
 
+msgid "Delete At"
+msgstr "Fecha de eliminación"
+
 msgid "Audit Log"
 msgstr "Registro de auditoría"
 

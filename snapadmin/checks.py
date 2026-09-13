@@ -635,13 +635,13 @@ def check_retention_purge_scheduled(app_configs, **kwargs):
     define it; a cron entry calling the management command directly is
     invisible here and does not need to trip this warning.
     """
-    from snapadmin.models import SnapadminAuditLog
+    from snapadmin.models import SnapadminAuditLog, _retention_configured
 
     configured = (
         SnapadminAuditLog.data_retention_days() > 0
         or bool(get_setting("SNAPADMIN_EXPORT_RETENTION_DAYS", None))
         or any(
-            (get_model_meta(model, "data_retention_days", None) or 0) > 0
+            _retention_configured(model)
             for model in apps.get_models()
             if is_registered(model)
         )
@@ -657,8 +657,9 @@ def check_retention_purge_scheduled(app_configs, **kwargs):
         return []
 
     return [Warning(
-        "Retention is configured (a model's data_retention_days, "
-        "SNAPADMIN_AUDIT_RETENTION_DAYS or SNAPADMIN_EXPORT_RETENTION_DAYS), "
+        "Retention is configured (a model's data_retention_days or "
+        "data_retention_date_field, SNAPADMIN_AUDIT_RETENTION_DAYS or "
+        "SNAPADMIN_EXPORT_RETENTION_DAYS), "
         "but no CELERY_BEAT_SCHEDULE entry runs snapadmin.purge_expired_data — "
         "the tables it names will keep growing until something calls it.",
         hint="Add a CELERY_BEAT_SCHEDULE entry for the 'snapadmin.purge_expired_data' "

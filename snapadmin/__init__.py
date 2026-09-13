@@ -26,6 +26,7 @@ Three steps take a model from nothing to a full admin + API::
 
         # Optional: mirror rows to Elasticsearch, auto-purge after a year
         # es_storage_mode = snap_models.EsStorageMode.DUAL
+        # es_auto_mapping = True    # a mirror with no mapping indexes ids only
         # data_retention_days = 365
 
     # 2. settings.py — every surface is a toggle

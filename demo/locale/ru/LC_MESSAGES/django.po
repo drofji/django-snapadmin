@@ -143,6 +143,9 @@ msgstr "Действие"
 msgid "User Email"
 msgstr "Эл. почта пользователя"
 
+msgid "Delete At"
+msgstr "Дата удаления"
+
 msgid "Audit Log"
 msgstr "Журнал аудита"
 

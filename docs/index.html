@@ -3115,7 +3115,7 @@ logger.error("payment_failed", reason="card_declined")</code></pre>
   <!-- ── GDPR / Data Retention ───────────────────────────────────────────── -->
   <h2 id="gdpr">🔒 GDPR Data Retention</h2>
   <p>SnapAdmin gives you a one-line retention window on any <code>SnapModel</code> to help comply with
-  EU data retention laws (GDPR). The two attributes below declare <em>what counts as expired</em>; a
+  EU data retention laws (GDPR) — a model-wide age, a per-row deadline, or both. The attributes below declare <em>what counts as expired</em>; a
   scheduled task you wire up is what actually deletes it. The same <code>snapadmin.purge_expired_data</code>
   task also covers two things that are not <code>SnapModel</code>s at all — the audit log and, if you opt
   in, finished export/reindex job rows and their files — see
@@ -3143,8 +3143,33 @@ logger.error("payment_failed", reason="card_declined")</code></pre>
     <tr><th>Attribute</th><th>Type</th><th>Default</th><th>Description</th></tr>
     <tr><td><code>data_retention_days</code></td><td><code>int | None</code></td><td><code>None</code></td><td>Max age of records in days. Set to a positive integer to enable auto-deletion.</td></tr>
     <tr><td><code>data_retention_field</code></td><td><code>str</code></td><td><code>"created_at"</code></td><td>Name of the <code>DateTimeField</code> to measure record age against.</td></tr>
+    <tr><td><code>data_retention_date_field</code></td><td><code>str | None</code></td><td><code>None</code></td><td>Name of a <code>Date</code>/<code>DateTimeField</code> holding <em>this row's own</em> expiry instant — a per-row deadline rather than a model-wide age. See <a href="#retention-per-row">Per-row deletion dates</a>.</td></tr>
     <tr><td><code>data_retention_files</code></td><td><code>list[str] | None</code></td><td><code>None</code></td><td><code>SnapFileField</code>/<code>SnapImageField</code> names whose files are deleted along with an expiring row. <code>None</code> (the default) purges rows only, exactly as before this existed.</td></tr>
   </table>
+
+  <h3 id="retention-per-row">Per-row deletion dates — <code>data_retention_date_field</code></h3>
+  <p><code>data_retention_days</code> is one constant for the whole table, which can express
+  "delete 90 days after this row was created" and nothing else. When each record arrives with its
+  own agreed expiry — a <code>delete_at</code> an upstream supplier sets per row — name that column
+  instead:</p>
+  <pre><code>class SuppliedRecord(SnapModel):
+    created_at = SnapDateTimeField(auto_now_add=True)
+    delete_at  = SnapDateTimeField(null=True, blank=True)   # set per row by the supplier
+
+    data_retention_date_field = "delete_at"   # this row's own deadline
+    data_retention_days       = 90            # the house rule for rows without one</code></pre>
+  <p>The two combine, and the more specific rule wins:</p>
+  <table>
+    <tr><th>The row's date</th><th>What happens</th></tr>
+    <tr><td>Set, in the past</td><td>Purged — whatever <code>data_retention_days</code> says.</td></tr>
+    <tr><td>Set, in the future</td><td>Kept, <strong>even if it is older than <code>data_retention_days</code></strong>. An expiry set per record overrides the house rule rather than racing it.</td></tr>
+    <tr><td><code>NULL</code></td><td>Falls back to <code>data_retention_days</code> measured on <code>data_retention_field</code> — and is <strong>never</strong> purged when no window is configured, because "no expiry declared" has to mean "keep".</td></tr>
+  </table>
+  <p>Set it alone, with no <code>data_retention_days</code> at all, for a table where every row
+  carries its own deadline and there is no house rule. The scheduled purge, the management command
+  and <code>snapadmin.W012</code> all treat a model configured this way as a model with retention —
+  a per-row deadline is a retention rule on its own. On an <code>ES_ONLY</code> model the deadline
+  column must be mapped as a <code>date</code> in the index, like <code>data_retention_field</code>.</p>
 
   <h3>Running the cleanup</h3>
   <pre><code># Via Celery Beat (recommended — add to CELERY_BEAT_SCHEDULE):
@@ -3167,7 +3192,7 @@ AuditLog.purge_expired(dry_run=True)  # count what *would* be deleted, delete no
     <tr><th>Mode</th><th>What gets purged</th></tr>
     <tr><td><code>DB_ONLY</code></td><td>Bulk delete from the database (plus <code>data_retention_files</code>, if declared).</td></tr>
     <tr><td><code>DUAL</code></td><td>Bulk delete from the database <strong>and</strong> the mirrored Elasticsearch documents (the pks are collected before the DB delete, then cleared from the index), plus <code>data_retention_files</code>.</td></tr>
-    <tr><td><code>ES_ONLY</code></td><td>A range <code>delete_by_query</code> against the index on <code>data_retention_field</code> (which must be mapped as a <code>date</code> in <code>es_mapping</code>). No DB table means no field to read a file path from, so <code>data_retention_files</code> does not apply here.</td></tr>
+    <tr><td><code>ES_ONLY</code></td><td>A <code>delete_by_query</code> against the index on <code>data_retention_field</code> (which must be mapped as a <code>date</code> in <code>es_mapping</code>), and on <code>data_retention_date_field</code> when one is declared — a document with no deadline is matched by the age range only, via <code>must_not exists</code>. No DB table means no field to read a file path from, so <code>data_retention_files</code> does not apply here.</td></tr>
   </table>
   <div class="callout callout-success">
     <strong>Why this matters for GDPR</strong>
@@ -3230,7 +3255,7 @@ AuditLog.purge_expired(dry_run=True)  # count what *would* be deleted, delete no
   single answer to "what gets cleaned up, by what, and how often should I schedule it":</p>
   <table>
     <tr><th>Table</th><th>Setting</th><th>What removes it</th><th>Recommended schedule</th></tr>
-    <tr><td>Any <code>SnapModel</code>'s rows (+ <code>data_retention_files</code>)</td><td><code>data_retention_days</code> / <code>data_retention_field</code> / <code>data_retention_files</code> (per model)</td><td><code>snapadmin.purge_expired_data</code></td><td>Daily</td></tr>
+    <tr><td>Any <code>SnapModel</code>'s rows (+ <code>data_retention_files</code>)</td><td><code>data_retention_days</code> / <code>data_retention_field</code> / <code>data_retention_date_field</code> / <code>data_retention_files</code> (per model)</td><td><code>snapadmin.purge_expired_data</code></td><td>Daily</td></tr>
     <tr><td><code>SnapadminAuditLog</code></td><td><code>SNAPADMIN_AUDIT_RETENTION_DAYS</code> (default 365)</td><td><code>snapadmin.purge_expired_data</code> (or <code>snapadmin_audit_export --purge</code> for a SIEM-export-then-prune pass)</td><td>Daily</td></tr>
     <tr><td><code>ErrorEvent</code></td><td><code>SNAPADMIN_ERROR_RETENTION_DAYS</code> (default 30)</td><td><code>snapadmin.send_error_digest</code> (purges as a side effect of sending the digest)</td><td>Daily (with the digest)</td></tr>
     <tr><td><code>SnapExportJob</code> / <code>SnapReindexJob</code> + their files</td><td><code>SNAPADMIN_EXPORT_RETENTION_DAYS</code> (default off — opt in)</td><td><code>snapadmin.purge_expired_data</code></td><td>Daily, once opted in</td></tr>

@@ -173,11 +173,19 @@ def _field_permissions(models: list[type[Model]]) -> tuple[bool, str]:
     return True, f"{_count(fields, 'field')} on {_count(field_models, 'model')}"
 
 
-def _retention_detail(model_count: int, file_model_count: int, audit_on: bool, export_days) -> str:
+def _retention_detail(
+    model_count: int,
+    file_model_count: int,
+    audit_on: bool,
+    export_days,
+    date_model_count: int = 0,
+) -> str:
     """Detail string for the ``retention_purge`` capability's several facets."""
     parts = []
     if model_count:
         parts.append(_count(model_count, "model"))
+    if date_model_count:
+        parts.append(f"{date_model_count} with data_retention_date_field")
     if file_model_count:
         parts.append(f"{file_model_count} with data_retention_files")
     if audit_on:
@@ -289,6 +297,12 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     models = _concrete_snap_models()
 
     retention = sum(1 for m in models if (get_model_meta(m, "data_retention_days", None) or 0) > 0)
+    # A per-row deadline column (#EXT1o) is a retention rule on its own — a
+    # model carrying only that one is swept, so the audit has to count it or it
+    # reports "off" for a table that is actively being purged.
+    retention_dates = sum(
+        1 for m in models if get_model_meta(m, "data_retention_date_field", None)
+    )
     # data_retention_files (#RET2c) and the always-on audit-log purge (#RET2a)
     # and opt-in export-job purge (#RET2b) all feed the same retention_purge
     # capability below — one entry for "is anything being auto-deleted here",
@@ -348,8 +362,10 @@ def _capabilities() -> list[tuple[str, bool, str]]:
         ("audit_trail", bool(get_setting("SNAPADMIN_AUDIT_LOG_ENABLED", True)), ""),
         ("error_monitoring", bool(get_setting("SNAPADMIN_ERROR_MONITOR_ENABLED", True)), ""),
         ("backups", bool(get_setting("SNAPADMIN_BACKUP_ENABLED", False)), _backup_detail()),
-        ("retention_purge", retention > 0 or audit_retention_on or bool(export_retention_days),
-         _retention_detail(retention, retention_files, audit_retention_on, export_retention_days)),
+        ("retention_purge",
+         retention > 0 or retention_dates > 0 or audit_retention_on or bool(export_retention_days),
+         _retention_detail(retention, retention_files, audit_retention_on, export_retention_days,
+                           retention_dates)),
         ("pii_masking", masked_fields > 0, _masking_detail(masked_fields, ruled_fields)),
         ("field_encryption", *_encryption()),
         ("sharding", *_sharding()),
