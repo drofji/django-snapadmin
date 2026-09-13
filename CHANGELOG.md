@@ -106,6 +106,19 @@ the `0.x` beta series.
   report — replaced a cleanly logged storage failure with an unrelated crash out of
   `pathlib.Path.write_text`. The write failure is now logged as `backup_state_save_failed` and the
   run's real outcome stands.
+- **A bulk `QuerySet.delete()` no longer leaves the Elasticsearch document behind.** `SnapModel.delete()`
+  always cleared the mirror, but a bulk delete is one SQL `DELETE` that never calls it — and neither is
+  a row removed by an `on_delete=CASCADE` sweep — so the index kept returning rows that no longer
+  existed. A `post_delete` receiver is now connected at startup for exactly the registered models that
+  mirror to ES (`es_storage_mode` other than `DB_ONLY`, or `es_index_enabled`); a `DB_ONLY` model gets
+  no receiver and is unaffected. On a mirrored model this costs one `es.delete()` per deleted row and
+  opts the model out of Django's fast-delete path. For a large delete use the bulk path instead:
+  `SnapModel.delete_pks_from_es(pks)` is now public (the private `_delete_pks_from_es` still works) and
+  clears any number of documents with one `delete_by_query` — run the delete inside the new
+  `snapadmin.models.suppress_es_delete_receiver()` context manager so the per-row receiver does not
+  repeat the work, as the retention purge and `snapadmin.etl.stale_sync()` now do. An ES outage logs `es_delete_document_failed` and never breaks the
+  database delete.
+
 
 ## 0.1.0b8 — 2026-09-06
 

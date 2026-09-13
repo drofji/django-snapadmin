@@ -232,7 +232,7 @@ class TestStaleSync:
         self._seed(5)
         deleted_pks = {}
         monkeypatch.setattr(
-            ExchangeRate, "_delete_pks_from_es",
+            ExchangeRate, "delete_pks_from_es",
             classmethod(lambda cls, pks: deleted_pks.setdefault("pks", list(pks)) or True),
         )
         stale = list(ExchangeRate.objects.exclude(code__in=["USD", "GBP", "JPY"])
@@ -243,7 +243,7 @@ class TestStaleSync:
     def test_es_mirror_failure_raises_after_db_delete(self, monkeypatch):
         self._seed(5)
         monkeypatch.setattr(
-            ExchangeRate, "_delete_pks_from_es",
+            ExchangeRate, "delete_pks_from_es",
             classmethod(lambda cls, pks: False),      # ES mirror clear fails
         )
         with pytest.raises(SnapPurgeError):

@@ -6,7 +6,9 @@ Core module for SnapAdmin — an auto-registration layer on top of Django's buil
 import hashlib
 import secrets
 import string
+import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
 from typing import Any, NamedTuple, NoReturn
@@ -1237,6 +1239,11 @@ class SnapModel(AdminGenMixin, models.Model):
             return
 
         self.delete_from_es()  # For DUAL mode, ensure ES sync
+        # The DB delete below fires post_delete, whose receiver clears the ES
+        # mirror for rows that never pass through here (QuerySet.delete(), a
+        # cascade). This row already went through it, so mark it done — the
+        # receiver must not spend a second round trip re-deleting the document.
+        self._snap_es_mirror_cleared = True
         super().delete(*args, **kwargs)
 
     @classmethod
@@ -2114,19 +2121,36 @@ class SnapModel(AdminGenMixin, models.Model):
     # ------------------------------------------------------------------
 
     @classmethod
-    def _delete_pks_from_es(cls, pks: list) -> bool:
+    def delete_pks_from_es(cls, pks: list) -> bool:
         """Remove the given primary keys from the ES index via a single bulk call.
 
-        Used by the DUAL-mode purge: ``QuerySet.delete()`` is a bulk SQL DELETE
-        that never calls ``Model.delete()``, so the ES mirror would otherwise be
-        left behind. We collect the pks before the DB delete and clear them here
-        with one bulk ``delete_by_query`` (an ``ids`` filter) rather than one
-        ``es.delete()`` call per pk.
+        The bulk counterpart of the per-row ``post_delete`` receiver
+        (:func:`connect_es_delete_receivers`). ``QuerySet.delete()`` is a bulk
+        SQL DELETE that never calls ``Model.delete()``, so the receiver is what
+        keeps the mirror honest for code that does not know ES is involved — at
+        one ``es.delete()`` round trip per row. Code that *does* know, and that
+        deletes more rows than that is worth, collects the pks before the DB
+        delete and clears them here instead with one bulk ``delete_by_query``
+        (an ``ids`` filter). That is what :meth:`purge_expired` and
+        :func:`snapadmin.etl.stale_sync` do, and it is the documented path for
+        a project doing its own large bulk delete::
+
+            pks = list(qs.values_list("pk", flat=True))
+            with suppress_es_delete_receiver():
+                qs.delete()
+            Product.delete_pks_from_es(pks)
+
+        :func:`suppress_es_delete_receiver` is what keeps the per-row receiver
+        from doing the same work again on the way through; both built-in callers
+        wrap their delete in it. Leaving it out is safe, just wasteful — removing
+        an already-removed document is a no-op (``ignore=[404]``).
 
         Returns ``True`` when the ES mirror was cleared (or there was nothing to
-        do), ``False`` when the ES delete failed. Callers must treat ``False``
-        as a purge failure for this model's secondary store, not as success —
-        the personal data may still be live and searchable via ES.
+        do), ``False`` when the ES delete failed. Unlike the receiver — which
+        follows the package-wide "an ES outage never breaks the write" policy
+        and only logs — this reports the outcome, so callers can treat ``False``
+        as a purge failure for this model's secondary store rather than as
+        success: the data may still be live and searchable via ES.
         """
         if not pks or not getattr(settings, "ELASTICSEARCH_ENABLED", False):
             return True
@@ -2147,6 +2171,16 @@ class SnapModel(AdminGenMixin, models.Model):
                 error=str(exc),
             )
             return False
+
+    @classmethod
+    def _delete_pks_from_es(cls, pks: list) -> bool:
+        """Deprecated private spelling of :meth:`delete_pks_from_es`.
+
+        The helper was private while the retention purge was its only caller;
+        it is the documented bulk path now, so the public name is the one to
+        use. Kept working for code written against the old spelling.
+        """
+        return cls.delete_pks_from_es(pks)
 
     @classmethod
     def _purge_expired_es_only(cls, cutoff, retention_field, dry_run: bool) -> int:
@@ -2298,8 +2332,12 @@ class SnapModel(AdminGenMixin, models.Model):
 
             if cls.es_storage_mode == EsStorageMode.DUAL:
                 cls._purge_expired_files(qs, purging_pks)
-                qs.delete()
-                if not cls._delete_pks_from_es(list(purging_pks)):
+                # One bulk ES call below, not one per purged row: the purge
+                # already holds every pk, and it needs the return value the
+                # per-row receiver cannot give it.
+                with suppress_es_delete_receiver():
+                    qs.delete()
+                if not cls.delete_pks_from_es(list(purging_pks)):
                     raise SnapPurgeError(
                         f"{cls.__name__}: {count} row(s) deleted from the database, "
                         "but the Elasticsearch mirror could not be cleared; personal "
@@ -2329,6 +2367,111 @@ class SnapModel(AdminGenMixin, models.Model):
     # (#SIMPL1f) — SnapModel inherits it below, so every one of these stays
     # reachable exactly as before (SnapModel.get_admin_fields, an instance's
     # .register_admin(), etc.).
+
+
+# ===========================================================================
+# Keeping the Elasticsearch mirror in step with deletes that bypass delete()
+# ===========================================================================
+
+#: Identifies the ``post_delete`` connection below, so re-running
+#: :func:`connect_es_delete_receivers` (a second ``AppConfig.ready()`` under
+#: autoreload, a project wiring a model declared after startup) updates the one
+#: connection instead of stacking a second copy of it.
+_ES_DELETE_DISPATCH_UID = "snapadmin.es_mirror_delete"
+
+#: Per-thread "the caller is clearing the mirror itself" flag — see
+#: :func:`suppress_es_delete_receiver`. Thread-local because a request/worker
+#: thread running a bulk purge must not silence the receiver for every other
+#: thread deleting rows at the same time.
+_es_delete_state = threading.local()
+
+
+@contextmanager
+def suppress_es_delete_receiver() -> Iterator[None]:
+    """Stand the per-row ``post_delete`` mirror cleanup down inside this block.
+
+    For a caller that clears the mirror itself in one bulk call
+    (:meth:`SnapModel.delete_pks_from_es`) and would otherwise pay for the same
+    documents twice — once per row through the receiver, once in bulk::
+
+        pks = list(qs.values_list("pk", flat=True))
+        with suppress_es_delete_receiver():
+            qs.delete()
+        Product.delete_pks_from_es(pks)
+
+    Nothing is lost by skipping it: the block's deletes are cleared by the bulk
+    call instead. Leaving it out is safe too — the two overlap harmlessly, since
+    removing an already-removed document is a no-op — it is only wasted work.
+
+    Suppression is per thread and restored on exit (including on an exception),
+    so a worker running a bulk purge never silences the mirror for another
+    thread deleting rows at the same time. It does not reach a delete performed
+    in *another* thread, process or Celery worker, which is the point.
+    """
+    previous = getattr(_es_delete_state, "suppressed", False)
+    _es_delete_state.suppressed = True
+    try:
+        yield
+    finally:
+        _es_delete_state.suppressed = previous
+
+
+def _clear_es_mirror_on_delete(sender, instance, **kwargs) -> None:
+    """``post_delete`` receiver: drop the deleted row's Elasticsearch document.
+
+    ``SnapModel.delete()`` syncs ES itself, but nothing that bypasses it does:
+    a ``QuerySet.delete()`` is one bulk SQL DELETE, and a row removed by an
+    ``on_delete=CASCADE`` sweep is never handed to ``Model.delete()`` either.
+    Both used to leave the document behind, so the index kept returning rows
+    that no longer existed. This closes that hole for code that does not know
+    ES is in the picture — which is the point: the alternative (remember to
+    call :meth:`SnapModel.delete_pks_from_es` at every bulk-delete site) only
+    protects the sites someone remembered.
+
+    It costs one ``es.delete()`` round trip per deleted row, and connecting it
+    also opts the model out of Django's fast-delete optimisation (the collector
+    must materialise the rows to send the signal). That is why it is connected
+    only for models that actually mirror to ES, and why a caller deleting a
+    large number of rows should prefer the bulk helper inside
+    :func:`suppress_es_delete_receiver`.
+    """
+    if getattr(_es_delete_state, "suppressed", False):
+        return
+    if getattr(instance, "_snap_es_mirror_cleared", False):
+        return  # SnapModel.delete() already cleared it for this row
+    instance.delete_from_es()
+
+
+def connect_es_delete_receivers() -> None:
+    """Wire :func:`_clear_es_mirror_on_delete` up for every mirrored model.
+
+    Called from ``SnapAdminConfig.ready()``. Connects per model rather than
+    globally (``sender=None``) on purpose: a signal receiver registered for
+    *every* model would disable Django's fast-delete path project-wide, making
+    every bulk delete in the project — including of models SnapAdmin has never
+    heard of — materialise its rows. So the receiver is attached only to models
+    that are both registered with SnapAdmin and actually mirror to
+    Elasticsearch (``es_storage_mode`` other than ``DB_ONLY``, or
+    ``es_index_enabled``); a ``DB_ONLY`` model keeps the fast path untouched.
+
+    Idempotent, so it is safe to call again — which a project declaring models
+    after startup (rare outside tests) can do to pick them up.
+    """
+    for model in apps.get_models():
+        if not is_registered(model) or not hasattr(model, "delete_from_es"):
+            continue
+        mirrors_to_es = (
+            get_model_meta(model, "es_index_enabled", False)
+            or get_model_meta(model, "es_storage_mode", EsStorageMode.DB_ONLY)
+            != EsStorageMode.DB_ONLY
+        )
+        if not mirrors_to_es:
+            continue
+        post_delete.connect(
+            _clear_es_mirror_on_delete,
+            sender=model,
+            dispatch_uid=_ES_DELETE_DISPATCH_UID,
+        )
 
 
 # ===========================================================================

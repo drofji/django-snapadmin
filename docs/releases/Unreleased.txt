@@ -324,3 +324,28 @@ Fixed
   stands. Swallowing it is safe in the direction that matters: with nothing recorded on disk every
   destination reads as never having run, so the next check repeats work rather than skipping it.
   That is a real consequence, which is why this is an ``error`` log line and not a silent pass.
+
+* **A bulk ``QuerySet.delete()`` no longer leaves the Elasticsearch document behind.**
+  ``SnapModel.delete()`` has always cleared the mirror, but a bulk ``QuerySet.delete()`` is a single
+  SQL ``DELETE`` that never calls it — and neither does a row removed by an ``on_delete=CASCADE``
+  sweep. Both used to leave the document in the index, so a search kept returning rows that no
+  longer existed anywhere. SnapAdmin now connects a ``post_delete`` receiver at startup for exactly
+  the registered models that mirror to Elasticsearch (``es_storage_mode`` other than ``DB_ONLY``, or
+  ``es_index_enabled``), so the mirror stays honest without every call site having to know ES is
+  involved. A ``DB_ONLY`` model gets no receiver at all and is completely unaffected.
+
+  Two things to be aware of on a mirrored model. The receiver costs one ``es.delete()`` round trip
+  per deleted row, and connecting it opts that model out of Django's fast-delete optimisation — the
+  deletion collector now has to materialise the rows in order to send the signal. For a large
+  delete, prefer the bulk path instead: ``SnapModel.delete_pks_from_es(pks)`` is now public
+  (previously the private ``_delete_pks_from_es``, which still works) and clears any number of
+  documents with one ``delete_by_query``. Collect the primary keys before the delete and call it
+  afterwards; the retention purge and ``snapadmin.etl.stale_sync()`` already do exactly that, and
+  they wrap their delete in the new ``snapadmin.models.suppress_es_delete_receiver()`` context
+  manager (per thread, restored on exit) so the same documents are not cleared twice.
+
+  An Elasticsearch outage never breaks the database delete: the receiver logs
+  ``es_delete_document_failed`` and the delete stands, matching every other ES write path.
+  ``delete_pks_from_es()`` keeps reporting its outcome as a return value instead, which is what lets
+  the retention purge raise ``SnapPurgeError`` rather than report a partial purge as a clean one.
+
