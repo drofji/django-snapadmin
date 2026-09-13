@@ -314,6 +314,11 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     throttled = bool(get_setting("SNAPADMIN_THROTTLE_ANON", None) or
                      get_setting("SNAPADMIN_THROTTLE_USER", None))
     read_only = sum(1 for m in models if get_model_meta(m, "api_read_only", False))
+    # api_full_clean (#EXT1k) — "on" means at least one registered model runs its
+    # own clean() on the API write path. Worth surfacing because the alternative
+    # is silent: a cross-field rule the admin enforces and the API ignores looks
+    # like nothing at all until a bad row is already in the database.
+    full_clean_models = sum(1 for m in models if get_model_meta(m, "api_full_clean", False))
     write_allowlist = sum(1 for m in models if get_model_meta(m, "api_write_fields", None) is not None)
     # Registered plain models (@snap_model) carry none of SnapModel's machinery:
     # ``register_admin`` is the marker for it. Worth surfacing, because these are
@@ -353,6 +358,7 @@ def _capabilities() -> list[tuple[str, bool, str]]:
         ("background_tasks", bool(getattr(settings, "CELERY_BROKER_URL", None)), ""),
         ("health_alerts", bool(recipients), _count(len(recipients), "recipient")),
         ("rate_limiting", throttled, ""),
+        ("model_validation", full_clean_models > 0, _count(full_clean_models, "model")),
         ("read_only_models", read_only > 0, _count(read_only, "model")),
         ("write_allowlist", write_allowlist > 0, _count(write_allowlist, "model")),
         ("delete_guard", bool(get_setting("SNAPADMIN_API_DELETE_GUARD", None)), ""),

@@ -2,6 +2,7 @@
 
 from decimal import Decimal
 
+from django.core import exceptions as django_exceptions
 from django.utils.translation import gettext_lazy as _
 from django.db import models as django_models
 from snapadmin import fields as snap_fields, models as snap_models
@@ -158,6 +159,26 @@ class Product(snap_models.SnapModel):
 
     api_write_fields = ["category", "tags", "name", "price", "available", "description"]
     subject_path = None  # catalogue data — nothing subject-scoped
+
+    # api_full_clean (#EXT1k) → the rule in clean() below is enforced on the API
+    # write path as well as in the admin, instead of only where a ModelForm runs.
+    # Opt-in per model (or project-wide via SNAPADMIN_API_FULL_CLEAN): turning it
+    # on starts rejecting writes the API used to accept, which is the right answer
+    # but not one to inflict on an existing deployment without it saying so.
+    api_full_clean = True
+
+    def clean(self) -> None:
+        """A cross-field rule — exactly the kind a field validator cannot state.
+
+        Neither ``price`` nor ``available`` is wrong on its own; the combination
+        is. Without api_full_clean this holds in the admin and is silently
+        skipped by ``POST /api/models/demo/Product/``.
+        """
+        super().clean()
+        if self.available and self.price is not None and self.price <= 0:
+            raise django_exceptions.ValidationError(
+                {"price": _("An available product needs a price above zero.")}
+            )
 
     class Meta:
         verbose_name = _("Product")

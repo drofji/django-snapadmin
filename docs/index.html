@@ -1758,6 +1758,41 @@ REST_FRAMEWORK = {
   SnapAdmin offers the untouched exception to it first and only steps in where the alternative is
   the 500 DRF was about to raise, so an existing handler behaves exactly as it did before.</p>
 
+  <h3 id="api-full-clean">Model rules on the API write path — <code>api_full_clean</code></h3>
+  <p>A <code>Model.clean()</code> rule is enforced wherever a <code>ModelForm</code> runs — the
+  admin — and nowhere else. The generated serializer validates each field, so the API
+  <em>looks</em> validated, but the cross-field rules are the ones a field validator cannot
+  state ("a completed record needs a file"), and those were silently skipped. The admin and the
+  API then disagreed about what a valid row is.</p>
+  <p><code>api_full_clean</code> runs the model's own <code>full_clean()</code> —
+  <code>clean_fields()</code>, <code>clean()</code>, then the model's constraints — inside the
+  serializer's <code>validate()</code>, so the rule answers <code>400</code> naming the field:</p>
+  <pre><code>class Order(SnapModel):
+    status  = snap_fields.SnapCharField(max_length=20)
+    invoice = snap_fields.SnapFileField(blank=True, null=True)
+
+    api_full_clean = True          # per model…
+
+    def clean(self):
+        if self.status == "completed" and not self.invoice:
+            raise ValidationError({"invoice": "A completed order needs an invoice."})
+
+# settings.py — …or project-wide, for every registered model at once
+SNAPADMIN_API_FULL_CLEAN = True    # a model's own api_full_clean still wins</code></pre>
+  <p><strong>Off by default, on purpose.</strong> Switching it on starts rejecting writes the API
+  previously accepted. That is the correct answer — the admin was already refusing them — but it is
+  a behaviour change, and one that should be a deliberate line in your settings rather than a
+  surprise on upgrade. <code>snapadmin-info</code> reports it under
+  <code>model_validation</code> so an operator can see whether it is actually in use.</p>
+  <p>Two deliberate limits. Validation is scoped to the fields the serializer can
+  <em>write</em>: an <code>auto_now_add</code> column is empty on an unsaved row and validating it
+  would reject every create with an error no client could act on — the same exclusion a
+  <code>ModelForm</code> makes. And uniqueness is left to DRF's own
+  <code>UniqueValidator</code>/<code>UniqueTogetherValidator</code>, which are already on the
+  generated serializer; a second pass would report the same clash twice. On a
+  <code>PATCH</code> the rule sees the <em>merged</em> row — the stored values with the submitted
+  fields applied — not just the handful of fields the request carried.</p>
+
   <!-- ── API GraphQL ───────────────────────────────────────────────────────── -->
   <h2 id="api-graphql">⚛️ GraphQL API</h2>
   <p>SnapAdmin provides a dynamic GraphQL interface powered by Graphene-Django.</p>

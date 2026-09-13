@@ -149,6 +149,7 @@ PUBLIC_IMPORTS = [
     "snapadmin.api.exceptions.snap_exception_handler",
     "snapadmin.api.exceptions.as_drf_validation_error",
     "snapadmin.api.exceptions.DjangoValidationErrorMixin",
+    "snapadmin.api.serializers.ModelCleanSerializerMixin",
     "snapadmin.api.authentication.token_has_scope",
     "snapadmin.etl.upsert_from_source",
     "snapadmin.etl.stale_sync",

@@ -492,7 +492,8 @@ read and written · [`@snap_action`](https://drofji.github.io/django-snapadmin/#
 a business operation — approve, refund, recalculate — as a permission-checked endpoint, not just CRUD ·
 a model rule that rejects a write answers
 [`400` naming the field](https://drofji.github.io/django-snapadmin/#api-validation-errors), never an
-HTML `500`
+HTML `500`, and [`api_full_clean`](https://drofji.github.io/django-snapadmin/#api-full-clean) makes
+your `Model.clean()` cross-field rules hold for API clients, not just in the admin
 
 **🔍 Search** *(optional)* — [Elasticsearch](https://drofji.github.io/django-snapadmin/#elasticsearch)
 with the index mapping derived from your fields · `?search=`

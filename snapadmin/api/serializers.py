@@ -4,9 +4,16 @@ snapadmin/api/serializers.py
 DRF serializers for the SnapAdmin auto-generated REST API.
 """
 
-from django.apps import apps
-from rest_framework import serializers
+import copy
+from typing import Any
 
+from django.apps import apps
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Model
+from rest_framework import serializers
+from rest_framework.utils import model_meta
+
+from snapadmin.api.exceptions import as_drf_validation_error
 from snapadmin.masking import get_masked_fields, mask_field, user_can_access_field, user_can_view_pii
 from snapadmin.models import APIToken
 from snapadmin.registry import get_model_meta
@@ -120,6 +127,94 @@ class WriteFieldAllowlistSerializerMixin:
         return fields
 
 
+class ModelCleanSerializerMixin:
+    """Runs the model's own ``full_clean()`` on the API write path (#EXT1k).
+
+    Off by default, opted into per model with ``api_full_clean = True`` or
+    project-wide with ``SNAPADMIN_API_FULL_CLEAN`` — both resolved by
+    :func:`~snapadmin.registry.get_model_meta`, read per request rather than
+    when the serializer class is built, so a settings override applies to the
+    cached class too.
+
+    **Why it is off by default.** A project upgrading into this would see writes
+    the API used to accept start answering 400. That is the *correct* answer —
+    the admin was already refusing them — but it is a behaviour change, and a
+    behaviour change that lands silently on someone else's production API is not
+    a bug fix. Turning it on is one line; discovering it turned itself on is an
+    outage.
+
+    **What it validates.** ``clean_fields()``, then ``clean()``, then the
+    model's constraints — scoped with ``exclude`` to the fields this serializer
+    can actually write. That scoping is not a nicety: an ``auto_now_add``
+    column is ``None`` on an unsaved row, and validating it would reject every
+    single create with an error no client could act on. It mirrors what a
+    ``ModelForm`` excludes for exactly the same reason.
+
+    **What it leaves alone.** Uniqueness — ``validate_unique=False``, because
+    DRF's ``UniqueValidator`` and ``UniqueTogetherValidator`` are already on the
+    generated serializer and a second pass would report the same clash twice.
+
+    A ``ValidationError`` raised here is translated by
+    :func:`~snapadmin.api.exceptions.as_drf_validation_error`, so field names
+    survive into the 400 and a bare message lands under ``non_field_errors``.
+    """
+
+    _snap_model: type[Model] | None = None
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        attrs = super().validate(attrs)
+        model = self._snap_model
+        if model is None or not get_model_meta(model, "api_full_clean", False):
+            return attrs
+        instance = self._snap_instance_for_validation(model, attrs)
+        try:
+            instance.full_clean(
+                exclude=self._snap_validation_exclusions(model),
+                validate_unique=False,
+            )
+        except DjangoValidationError as exc:
+            raise as_drf_validation_error(exc) from exc
+        return attrs
+
+    def _snap_instance_for_validation(
+        self, model: type[Model], attrs: dict[str, Any]
+    ) -> Model:
+        """The row the rule is checked against: the merged result of the write.
+
+        On a create that is a fresh unsaved instance; on a PATCH it is a copy of
+        the stored row with the submitted fields applied, so a cross-field rule
+        sees the whole row rather than the handful of fields the request
+        happened to carry. The copy is what keeps a rejected write from leaving
+        the in-memory instance half-updated.
+
+        To-many relations are dropped: they cannot be assigned before the row
+        has a primary key, and Django's own ``full_clean()`` does not look at
+        them either.
+        """
+        info = model_meta.get_field_info(model)
+        assignable = {
+            name: value
+            for name, value in attrs.items()
+            if (name in info.fields_and_pk or name in info.relations)
+            and not (name in info.relations and info.relations[name].to_many)
+        }
+        if self.instance is None:
+            return model(**assignable)
+        instance = copy.copy(self.instance)
+        for name, value in assignable.items():
+            setattr(instance, name, value)
+        return instance
+
+    def _snap_validation_exclusions(self, model: type[Model]) -> list[str]:
+        """Model fields this serializer cannot write, and so must not judge."""
+        writable = {
+            field.source or name
+            for name, field in self.fields.items()
+            if not field.read_only
+        }
+        return [f.name for f in model._meta.fields if f.name not in writable]
+
+
 class APITokenSerializer(serializers.ModelSerializer):
     owner_username = serializers.CharField(source="user.get_username", read_only=True)
     is_expired = serializers.BooleanField(read_only=True)
@@ -188,6 +283,7 @@ def build_model_serializer(model_class):
             WriteFieldAllowlistSerializerMixin,
             PIIMaskingSerializerMixin,
             FieldPermissionSerializerMixin,
+            ModelCleanSerializerMixin,
             serializers.ModelSerializer,
         ),
         {

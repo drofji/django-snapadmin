@@ -361,6 +361,20 @@ class TestModelBasedCapabilities:
         assert data["read_only_models"] is True
         assert "model" in data["details"]["read_only_models"]
 
+    def test_model_validation_detected(self):
+        # demo.Product ships api_full_clean=True (#EXT1k).
+        data = _collect(verbose=True)
+        assert data["model_validation"] is True
+        assert "model" in data["details"]["model_validation"]
+
+    def test_model_validation_silent_when_no_model_opts_in(self, monkeypatch):
+        from demo.apps.shop.models import Product
+
+        monkeypatch.setattr(Product, "api_full_clean", False, raising=False)
+        data = _collect(verbose=True)
+        assert data["model_validation"] is False
+        assert "model_validation" not in data["details"]
+
     def test_retention_counts_models(self, monkeypatch):
         from demo.apps.shop.models import Product
         monkeypatch.setattr(Product, "data_retention_days", 30, raising=False)

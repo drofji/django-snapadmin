@@ -51,10 +51,24 @@ def as_drf_validation_error(exc: DjangoValidationError) -> drf_exceptions.Valida
     the same helper its serializers use for a field validator that raises
     Django's flavour of the exception — so a model-level rule is reported in
     exactly the shape a client already parses for a field-level one.
-    """
-    from rest_framework.serializers import as_serializer_error
 
-    return drf_exceptions.ValidationError(as_serializer_error(exc))
+    The one place the two disagree is the key for an error that belongs to no
+    field: Django calls it ``__all__``, DRF calls it ``non_field_errors``, and
+    ``as_serializer_error`` passes Django's spelling straight through. That only
+    shows up once an error dict has been through ``Model.full_clean()``, which
+    files a bare ``clean()`` message under ``__all__`` — so it is renamed here
+    rather than leaking Django's internal key into a JSON response.
+    """
+    from django.core.exceptions import NON_FIELD_ERRORS
+    from rest_framework.serializers import as_serializer_error
+    from rest_framework.settings import api_settings
+
+    detail = as_serializer_error(exc)
+    if NON_FIELD_ERRORS in detail:
+        detail.setdefault(api_settings.NON_FIELD_ERRORS_KEY, []).extend(
+            detail.pop(NON_FIELD_ERRORS)
+        )
+    return drf_exceptions.ValidationError(detail)
 
 
 def snap_exception_handler(exc: Exception, context: dict[str, Any]) -> "Response | None":

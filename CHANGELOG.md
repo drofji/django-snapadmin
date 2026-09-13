@@ -13,6 +13,11 @@ the `0.x` beta series.
 ## Unreleased
 
 ### Added
+- `api_full_clean` runs a model's own `full_clean()` on the API write path, so a
+  `Model.clean()` cross-field rule holds for API clients as it already did in the admin.
+  Off by default; `SNAPADMIN_API_FULL_CLEAN` turns it on project-wide and a model's own
+  attribute still wins. Validation is scoped to writable fields, uniqueness is left to
+  DRF's own validators, and a `PATCH` is checked against the merged row.
 - Field-level encryption now has a cipher: AES-256-GCM behind the new optional `[encryption]`
   extra (`cryptography`), storing each value as a self-describing, rotation-ready
   `snap1.<key id>.<nonce>.<ciphertext>` envelope bound to its own `app_label.model.field`. A

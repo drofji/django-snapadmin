@@ -10,6 +10,37 @@ Each notable change should be a paragraph or bullet, explaining what changed and
 Added
 -----
 
+* **``api_full_clean`` — the model's own rules now hold on the API write path.** A
+  ``Model.clean()`` rule is enforced wherever a ``ModelForm`` runs, which in practice means the
+  admin and nothing else. The generated serializer validated every field, so the API looked
+  validated; what it skipped were exactly the rules a field validator cannot state — the cross-field
+  ones, "a completed record needs a file". The admin refused such a row and the API accepted it, and
+  the two surfaces disagreed about what a valid row was until a bad one turned up downstream.
+
+  Setting ``api_full_clean = True`` on a model runs its ``full_clean()`` — ``clean_fields()``,
+  ``clean()``, then the model's constraints — inside the generated serializer's ``validate()``, so
+  the rule answers ``400`` naming the field instead of writing the row.
+  ``SNAPADMIN_API_FULL_CLEAN`` turns it on for every registered model at once; a model's own
+  attribute still wins over the setting, so a single model can opt out of a project-wide default.
+
+  **It is off by default and that is deliberate.** Turning it on starts rejecting writes the API
+  used to accept. That is the correct answer — the admin was already refusing them — but a
+  behaviour change that arrives by itself on someone's production API is not a bug fix, so it is a
+  line you write rather than one you discover.
+
+  Two limits are worth knowing. Validation is scoped to the fields the serializer can actually
+  write: an ``auto_now_add`` column is empty on an unsaved row, and judging it would reject every
+  create with an error no client could act on — the same exclusion a ``ModelForm`` makes for the
+  same reason. Uniqueness is left alone (``validate_unique=False``) because DRF's
+  ``UniqueValidator`` and ``UniqueTogetherValidator`` are already installed on the generated
+  serializer and a second pass would report one clash twice. On a ``PATCH`` the rule is checked
+  against the **merged** row — the stored values with the submitted fields applied — so a
+  cross-field rule sees the whole record rather than the fields that happened to be sent.
+
+  ``snapadmin-info`` reports adoption under ``model_validation``, and the demo dogfoods it:
+  ``demo.Product`` declares ``api_full_clean`` with a rule that an available product needs a price
+  above zero.
+
 * **The cipher behind field-level encryption.** ``0.1.0b8`` shipped key management —
   ``SNAPADMIN_ENCRYPTION``, the four key sources, rotation-ready ordered keysets and
   ``manage.py snapadmin_encryption_key`` — with nothing yet to encrypt. This release adds the

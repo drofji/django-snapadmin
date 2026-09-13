@@ -378,6 +378,12 @@ SNAPADMIN_QUERY_BACKEND_HEADER = env_bool('SNAPADMIN_QUERY_BACKEND_HEADER', True
 # Unset (default) → deletes are governed solely by model permissions + hooks.
 SNAPADMIN_API_DELETE_GUARD = os.getenv('SNAPADMIN_API_DELETE_GUARD') or None
 
+# Run each model's own full_clean() (clean_fields + clean + constraints) on the
+# API write path, so a cross-field rule holds in the API as it does in the admin.
+# Off by default: turning it on starts rejecting writes the API used to accept.
+# Per-model override: api_full_clean = True/False on the model wins over this.
+SNAPADMIN_API_FULL_CLEAN = env_bool('SNAPADMIN_API_FULL_CLEAN', False)
+
 # Admin-only HTTP endpoint to bulk-reindex ES-enabled SnapModels
 # (POST /api/es/reindex/, IsAdminUser). Off by default; the endpoint 404s while
 # disabled. When async is on, the reindex is offloaded to the
