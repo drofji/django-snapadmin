@@ -448,7 +448,9 @@ a business operation — approve, refund, recalculate — as a permission-checke
 **🔍 Search** *(optional)* — [Elasticsearch](https://drofji.github.io/django-snapadmin/#elasticsearch)
 with the index mapping derived from your fields · `?search=`
 [routed to ES automatically](https://drofji.github.io/django-snapadmin/#es-routing), falling back to
-the database when ES is down · [resumable bulk reindex](https://drofji.github.io/django-snapadmin/#bulk-reindex-command)
+the database when ES is down · [resumable bulk reindex](https://drofji.github.io/django-snapadmin/#bulk-reindex-command) ·
+[deletes keep the index in step](https://drofji.github.io/django-snapadmin/#es-delete-sync), including a bulk
+`QuerySet.delete()` and rows removed by a cascade
 
 **⚙️ Operations** — [audit trail](https://drofji.github.io/django-snapadmin/#audit-trail) ·
 [GDPR retention](https://drofji.github.io/django-snapadmin/#gdpr) ·

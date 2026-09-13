@@ -48,6 +48,10 @@ PUBLIC_IMPORTS = [
     "snapadmin.models.DjangoAdminClassAttributeEnum",
     "snapadmin.models.PIIMaskingAdminMixin",
     "snapadmin.models.formatted_id",
+    # The post_delete → Elasticsearch cleanup wiring, and the escape hatch a
+    # caller clearing the mirror in bulk uses instead (#EXT1h)
+    "snapadmin.models.connect_es_delete_receivers",
+    "snapadmin.models.suppress_es_delete_receiver",
     "snapadmin.models.reindexable_snapmodels",
     "snapadmin.models.run_reindex",
     "snapadmin.models.validate_allowed_models",
@@ -278,6 +282,9 @@ def test_search_method_signatures():
     assert _params(SnapModel.es_reindex_all) == ["chunk_size"]
     assert _params(SnapModel.es_reindex_only_fields) == []
     assert _params(SnapModel.purge_expired) == ["now", "dry_run"]
+    # The documented bulk path for clearing the mirror after a large delete
+    # that skipped Model.delete() (#EXT1h)
+    assert _params(SnapModel.delete_pks_from_es) == ["pks"]
 
 
 def test_snap_model_decorator_signature():

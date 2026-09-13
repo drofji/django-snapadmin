@@ -333,7 +333,12 @@ class TestOtherSurfacesReadTheMetadata:
         warnings = checks.check_api_write_fields(None)
         assert [w.id for w in warnings] == ["snapadmin.W004"]
 
-        monkeypatch.setattr(global_apps, "get_models", lambda: [_make_plain_model(api_write_fields=["name"])])
+        # Build the model *before* patching: _make_plain_model() enters
+        # isolate_apps(), which re-runs every AppConfig.ready() — and
+        # SnapAdminConfig.ready() walks apps.get_models(), so a factory called
+        # from inside the patched lambda would call itself for ever.
+        guarded = _make_plain_model(api_write_fields=["name"])
+        monkeypatch.setattr(global_apps, "get_models", lambda: [guarded])
         assert checks.check_api_write_fields(None) == []
 
     def test_the_diagnostics_inventory_lists_a_decorated_model(self, monkeypatch):

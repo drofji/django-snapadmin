@@ -43,7 +43,12 @@ from django.db import connections, router
 from django.db.models import QuerySet
 
 from snapadmin.logging_config import get_logger
-from snapadmin.models import EsStorageMode, SnapModel, SnapPurgeError
+from snapadmin.models import (
+    EsStorageMode,
+    SnapModel,
+    SnapPurgeError,
+    suppress_es_delete_receiver,
+)
 
 logger = get_logger(__name__)
 
@@ -355,11 +360,12 @@ def stale_sync(
     )
     pks = list(stale_qs.values_list("pk", flat=True)) if mirrors_to_es else []
 
-    _, per_model = stale_qs.delete()
+    with suppress_es_delete_receiver():
+        _, per_model = stale_qs.delete()
     deleted = per_model.get(model._meta.label, stale)
     result["deleted"] = deleted
 
-    if mirrors_to_es and not model._delete_pks_from_es(pks):
+    if mirrors_to_es and not model.delete_pks_from_es(pks):
         raise SnapPurgeError(
             f"{model._meta.label}: {deleted} row(s) deleted from the database, "
             "but the Elasticsearch mirror could not be cleared; stale documents "

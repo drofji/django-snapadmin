@@ -1947,6 +1947,36 @@ class SearchLog(SnapModel):
     class Meta:
         managed = False  # required for ES_ONLY — no DB table is created</code></pre>
 
+  <h3 id="es-delete-sync">Deletes keep the mirror in step</h3>
+  <p>A mirrored model's document leaves the index when its row leaves the database — including
+  through the deletes that never call <code>Model.delete()</code>: a bulk
+  <code>QuerySet.delete()</code> (one SQL <code>DELETE</code>, no per-row Python) and any row swept up
+  by an <code>on_delete=CASCADE</code>. SnapAdmin connects a <code>post_delete</code> receiver at
+  startup for exactly the registered models that mirror to Elasticsearch, so no call site has to
+  remember to clean up after itself:</p>
+  <pre><code>Product.objects.filter(discontinued=True).delete()   # rows gone — and their documents with them</code></pre>
+  <p>Two consequences are worth knowing about:</p>
+  <ul>
+    <li><strong>One Elasticsearch round trip per deleted row.</strong> For a large delete, clear the
+    mirror in bulk instead: collect the primary keys first, then hand them to
+    <code>delete_pks_from_es()</code>, which issues a single <code>delete_by_query</code>. That is what
+    the retention purge and <code>stale_sync()</code> do.</li>
+    <li><strong>A mirrored model opts out of Django's fast-delete path</strong> — the collector has to
+    materialise the rows to send the signal at all. Only mirrored models are affected; a
+    <code>DB_ONLY</code> model has no receiver attached and keeps the fast path untouched.</li>
+  </ul>
+  <pre><code>from snapadmin.models import suppress_es_delete_receiver
+
+pks = list(qs.values_list("pk", flat=True))
+with suppress_es_delete_receiver():      # per-thread; the receiver stands down here
+    qs.delete()
+Product.delete_pks_from_es(pks)          # one bulk delete_by_query, not one call per row</code></pre>
+  <p>An Elasticsearch outage never breaks the database delete: the receiver logs
+  <code>es_delete_document_failed</code> and the delete stands, the same fail-soft policy as every
+  other ES write path. <code>delete_pks_from_es()</code> is the exception on purpose — it
+  <em>returns</em> whether the mirror was cleared, which is how the retention purge can raise
+  <code>SnapPurgeError</code> instead of reporting a partial purge as a clean one.</p>
+
   <h3>Custom analyzers &amp; index settings — <code>es_index_settings</code></h3>
   <p>Index-level settings (custom analyzers under <code>analysis</code>, <code>number_of_shards</code>,
   <code>number_of_replicas</code>, …) are declared in <code>es_index_settings</code> and applied when the

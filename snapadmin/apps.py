@@ -2,7 +2,9 @@
 Django ``AppConfig`` for SnapAdmin.
 
 ``SnapAdminConfig.ready()`` wires the package's startup work: connecting the
-``post_migrate`` hook that ensures Elasticsearch indices/mappings, installing the
+``post_migrate`` hook that ensures Elasticsearch indices/mappings, connecting the
+``post_delete`` receiver that keeps those indices in step with deletes that never
+call ``Model.delete()`` (``QuerySet.delete()``, cascades), installing the
 nested-app shim, configuring optional multi-shard/read-replica database routing
 (``snapadmin.sharding``), registering the ``snapadmin.*`` system checks, and
 applying the optional Unfold re-styling of the extra_settings admin and of
@@ -67,6 +69,10 @@ class SnapAdminConfig(AppConfig):
 
     def ready(self):
         post_migrate.connect(sync_es_mappings, sender=self)
+
+        from snapadmin.models import connect_es_delete_receivers
+        connect_es_delete_receivers()
+
         install_nested_apps()
 
         from snapadmin.sharding.registration import configure_sharding
