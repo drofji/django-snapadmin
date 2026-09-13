@@ -158,6 +158,13 @@ the `0.x` beta series.
   built a malformed location string, `sftp://host:22backups/dump.gz`, with the separator eaten by
   the `rstrip('/')` that exists for the default — the path is now built once and used for both the
   reported location and the failure message.
+- The upgrade guides now cover `show_in_form` and the arity of `SnapModel.get_admin_fields()`. Neither
+  the package-rename guide nor the b7→b8 guide mentioned that `show_in_form` decides what appears on
+  the generated change form and defaults to `False`, so a finished migration produced a normal
+  changelist and an empty form with nothing to explain it; both now name the flag, the project-wide
+  `SNAPADMIN_SHOW_IN_FORM_DEFAULT` default, and `snapadmin.W015` as the way to find affected models
+  before anyone opens the admin. Both also state that `get_admin_fields()` returns five values —
+  unpacking four fails admin autodiscovery outright.
 
 
 ## 0.1.0b8 — 2026-09-06

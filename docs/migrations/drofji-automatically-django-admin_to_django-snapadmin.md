@@ -98,6 +98,11 @@ from snapadmin.models import SnapModel
 SnapModel.register_all_admins()
 ```
 
+Registering is necessary but not sufficient: the generated change form is built from the fields that
+set `show_in_form=True`, and that flag defaults to `False`. See
+[step 12](#12-set-show_in_formtrue-or-every-change-form-comes-up-empty) before concluding
+the admin is broken.
+
 ## 6. Replace color fields
 
 If you used `ColorField` from `django-colorfield`, switch to `snap_fields.SnapColorField` (validates
@@ -243,3 +248,59 @@ python manage.py sqlmigrate yourapp 0001              # eyeball the DDL vs your 
 If `sqlmigrate` shows a column your database doesn't already have (e.g. you also changed a field's
 `max_length` or nullability during the move), don't `--fake` — apply that one change for real, or run
 a normal `migrate` on a scratch copy first.
+
+## 12. Set `show_in_form=True` or every change form comes up empty
+
+This is the single most common way a finished rename still looks broken. `show_in_form` decides
+whether a field appears on the add/change form, and it defaults to **`False`**. `show_in_list`
+defaults to `True`, so the changelist fills up normally and only the form is empty — which reads
+like a template or permissions problem rather than a field flag.
+
+`register_admin()` builds the form from exactly the fields that carry the flag. With none of them
+set it generates `fields = []`, and Django renders an add/change page with no editable fields, no
+error and no traceback.
+
+**Action — pick one:**
+
+```python
+# Per field: name the fields that belong on the form.
+class Product(snap_models.SnapModel):
+    name  = snap_fields.SnapCharField(max_length=200, searchable=True, show_in_form=True)
+    price = snap_fields.SnapDecimalField(max_digits=10, decimal_places=2, show_in_form=True)
+    slug  = snap_fields.SnapCharField(max_length=200)          # list only, stays off the form
+```
+
+```python
+# Project-wide, for a codebase being adopted onto models that never set the flag:
+SNAPADMIN_SHOW_IN_FORM_DEFAULT = True    # only changes what an *unset* field resolves to
+```
+
+An explicit per-field `show_in_form=` always wins over the project-wide setting, so the two combine:
+raise the default, then switch off the handful of fields that should not be editable.
+
+`python manage.py check` catches this before anyone opens the admin — **`snapadmin.W015`** lists
+every registered model whose generated form would render empty. Run it as the last step of the
+migration; a model hooked up by hand with your own `ModelAdmin` is not reported, because that form
+does not depend on `show_in_form` at all.
+
+## 13. `get_admin_fields()` returns five values, not four
+
+Only relevant if your project calls `SnapModel.get_admin_fields()` itself — a custom `register_admin()`
+override, or an admin that reuses the generated field lists. The classmethod returns **five**
+members:
+
+```python
+form_fields, list_display, search_fields, list_filter, autocomplete_fields = MyModel.get_admin_fields()
+```
+
+Unpacking four names raises `ValueError: too many values to unpack (expected 4)` during admin
+autodiscovery, which surfaces as a failure to boot rather than as an admin glitch.
+
+The return value is a named tuple, `snapadmin.models.AdminFieldSets`, so positional unpacking,
+indexing and `len()` behave exactly like the plain tuple they replaced — and the members can be read
+by name instead, which is what makes the next change to this shape a rename rather than a silent
+re-ordering:
+
+```python
+autocomplete = MyModel.get_admin_fields().autocomplete_fields
+```

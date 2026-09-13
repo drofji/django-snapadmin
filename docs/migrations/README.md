@@ -12,7 +12,7 @@ docs/migrations/<from>_to_<to>.md
 ```
 
 - `<from>` / `<to>` are version numbers (`0.1.0a10_to_0.1.0a11.md`) or, for a cross-package migration,
-  the PyPI distribution names (`drofji-automatically-django-admin_to_django-snapadmin.md`).
+  the PyPI distribution names (`old-distribution_to_django-snapadmin.md`).
 - Use the exact identifier that changed — a version range for same-package upgrades, a package name for
   package renames. Sorts naturally either way since both start with the "from" side.
 

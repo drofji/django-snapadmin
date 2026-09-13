@@ -25,7 +25,7 @@ index — automatically.**
 |---|---|---|
 | **Deciding whether to adopt it** — CTO, tech lead, architect | [Why this exists](#why-this-exists) → [Proof it holds up](#proof-it-holds-up) → [Enterprise checklist](#for-teams-and-enterprise) | ~3 min |
 | **Shipping something today** — developer, intern, new joiner | [60-second try](#try-it--60-seconds-no-setup) → [Your first model](#your-first-model--3-steps) → [Cheat sheet](#the-cheat-sheet--the-kwargs-youll-actually-use) | ~5 min |
-| **Already using it** | [Roadmap](#roadmap--whats-landing-next) · [Changelog](https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md) · [All settings](https://drofji.github.io/django-snapadmin/#env-vars) | — |
+| **Already using it** | [Changelog](https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md) · [Upgrade guides](https://github.com/drofji/django-snapadmin/tree/main/docs/migrations) · [All settings](https://drofji.github.io/django-snapadmin/#env-vars) | — |
 
 ---
 
@@ -130,7 +130,7 @@ The questions a tech lead or a manager asks before approving a dependency:
 | **Backups?** | [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, offsite over FTPS/SFTP/S3-compatible (AWS, MinIO, Backblaze B2, Hetzner Object Storage, Wasabi — [Storage Box is SFTP, not S3](https://drofji.github.io/django-snapadmin/#storage-box)), optionally **AGE-encrypted** in-stream so a compromised destination never sees plaintext — and `manage.py check` warns (`snapadmin.W021`) if you ship off-host without it. SFTP takes an explicit `SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS` so host-key verification does not depend on which user's `HOME` the process happens to have. `SNAPADMIN_BACKUP_INCLUDE` optionally bundles media and an encrypted `.env` alongside the database, with a checksummed manifest and a [restore command](https://drofji.github.io/django-snapadmin/#restore) — dry-run by default, with an automatic pre-restore snapshot and a matching [rollback command](https://drofji.github.io/django-snapadmin/#restore-rollback) |
 | **Are we locked in?** | No. It is ordinary Django underneath — models, `ModelAdmin`, DRF viewsets. Override any piece, or stop using the generated ones. Your models need not even inherit from ours: [`@snap_model`](https://drofji.github.io/django-snapadmin/#snap-model-decorator) opts a plain `models.Model` in from the outside |
 | **Outgrowing one database?** | [Declarative sharding and read-replica routing](#database-sharding-and-replica-routing) — any number of shards/replicas from one settings dict, opt-in per model, with automatic failover. [Details](https://drofji.github.io/django-snapadmin/#sharding) |
-| **What is coming next?** | Encrypted model fields — additive and inert until configured. [Roadmap](#roadmap--whats-landing-next) |
+| **What is coming next?** | Whatever lands next follows the rule everything here follows: **additive, opt-in and completely inert until you configure it** — an install that ignores a new feature is byte-for-byte unaffected, with no new setting required and no migration from the package itself. [Changelog](https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md) for what has actually shipped |
 
 <details>
 <summary>How fast is it?</summary>
@@ -601,22 +601,6 @@ that suite already verified, on a clone of this repository — not a second, wea
 behind inside every install.
 
 </details>
-
----
-
-# Roadmap — what's landing next
-
-Nothing is listed here at the moment. Everything this section previously announced has landed:
-**encrypted model fields** — see [Encrypted model fields](#encrypted-model-fields) above — and
-**declarative sharding with read-replica routing**, see
-[Database sharding and replica routing](#database-sharding-and-replica-routing).
-
-Both followed the rule everything in this package follows: **additive, opt-in, and completely inert
-until you configure it** — an existing install that ignores either is byte-for-byte unaffected,
-with no new setting required and no migration from the package itself.
-
-Follow the [changelog](https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md) for what
-has actually shipped.
 
 ---
 

@@ -480,3 +480,18 @@ Fixed
   so a future destination cannot reintroduce it, and ``s3``'s own interval is finally counted when
   deciding whether Beat runs often enough.
 
+* **The upgrade guides now cover the two steps that cost adopters the most time.** Neither the
+  package-rename guide nor the b7 -> b8 guide mentioned ``show_in_form``, which decides whether a
+  field appears on the generated add/change form and defaults to ``False``. ``show_in_list``
+  defaults to ``True``, so a project that finished the rename got a perfectly normal changelist and
+  a completely empty form, with no error to explain it. Both guides now name the flag, show the
+  per-field and the project-wide (``SNAPADMIN_SHOW_IN_FORM_DEFAULT``) fix, and point at
+  ``snapadmin.W015`` as the way to find the affected models before anyone opens the admin. The
+  package-rename guide previously promised that every field flag "keeps the same names and
+  behaviour" a few steps earlier, which is what made the empty form read as a bug in the library.
+
+  The same guides now also state that ``SnapModel.get_admin_fields()`` returns **five** values.
+  Unpacking four raises ``ValueError`` during admin autodiscovery — a failure to boot rather than an
+  admin glitch — and the b8 ``AdminFieldSets`` named tuple, which changed nothing about the arity,
+  is described where a reader upgrading from b7 will look for it rather than only in the release
+  notes.
