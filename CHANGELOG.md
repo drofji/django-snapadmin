@@ -129,6 +129,13 @@ the `0.x` beta series.
   `snapadmin.models.suppress_es_delete_receiver()` context manager so the per-row receiver does not
   repeat the work, as the retention purge and `snapadmin.etl.stale_sync()` now do. An ES outage logs `es_delete_document_failed` and never breaks the
   database delete.
+- The upgrade guides now cover `show_in_form` and the arity of `SnapModel.get_admin_fields()`. Neither
+  the package-rename guide nor the b7→b8 guide mentioned that `show_in_form` decides what appears on
+  the generated change form and defaults to `False`, so a finished migration produced a normal
+  changelist and an empty form with nothing to explain it; both now name the flag, the project-wide
+  `SNAPADMIN_SHOW_IN_FORM_DEFAULT` default, and `snapadmin.W015` as the way to find affected models
+  before anyone opens the admin. Both also state that `get_admin_fields()` returns five values —
+  unpacking four fails admin autodiscovery outright.
 
 
 ## 0.1.0b8 — 2026-09-06
