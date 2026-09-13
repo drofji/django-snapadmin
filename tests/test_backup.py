@@ -1755,6 +1755,34 @@ class TestAlignToSchedule:
 # Entry points
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _fail_state_write(monkeypatch):
+    """Make only the state file unwritable, as a mis-owned volume would not.
+
+    Patching ``Path.write_text`` wholesale would also break the dump the run is
+    supposed to produce, and then the test would pass for the wrong reason.
+    """
+    original = backup_module.Path.write_text
+
+    def write_text(self, *args, **kwargs):
+        if self.name == STATE_FILENAME:
+            raise PermissionError("read-only volume")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(backup_module.Path, "write_text", write_text)
+
+
+def _fail_state_mkdir(monkeypatch):
+    original = backup_module.Path.mkdir
+    state_dir = get_backup_config().local_dir
+
+    def mkdir(self, *args, **kwargs):
+        if self == state_dir:
+            raise PermissionError("read-only volume")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(backup_module.Path, "mkdir", mkdir)
+
+
 class TestRunBackups:
     def test_run_due_backups_disabled(self, sqlite_db):
         assert run_due_backups() == {
@@ -1775,6 +1803,57 @@ class TestRunBackups:
         assert run_due_backups() == {
             "ran": False, "reason": "not_due", "results": {}, "status": "noop", "failed": [],
         }
+
+    def test_an_unwritable_state_file_does_not_mask_the_real_outcome(self, backup_env, monkeypatch):
+        """#EXT1l — the state write is bookkeeping, not the job.
+
+        ``_load_state`` has always swallowed its own IO errors; ``_save_state``
+        did not, so a state directory the process cannot write (a mis-owned
+        Docker volume, in the report) ended a run that had already logged every
+        destination cleanly with a ``PermissionError`` traceback out of
+        ``pathlib.Path.write_text``. In monitoring that reads as a crash in the
+        backup system rather than the storage failure it actually was.
+        """
+        _fail_state_write(monkeypatch)
+        summary = run_backup(["local"])
+        assert summary["ran"] is True
+        assert summary["status"] == "ok"
+
+    def test_an_unwritable_state_file_is_logged(self, backup_env, monkeypatch):
+        """Swallowed is not the same as hidden: every later run reads "never ran"
+        and repeats work, so the operator has to be told why."""
+        _fail_state_write(monkeypatch)
+        logged = []
+        monkeypatch.setattr(
+            backup_module.logger, "error",
+            lambda event, **fields: logged.append((event, fields)),
+        )
+        run_backup(["local"])
+        assert [event for event, _ in logged] == ["backup_state_save_failed"]
+        assert "read-only volume" in logged[0][1]["error"]
+
+    def test_the_real_failure_still_wins_when_the_state_write_also_fails(self, backup_env, monkeypatch):
+        """The reporter's actual situation: a wrong SFTP password *and* a
+        mis-owned volume. The destination failure is the outcome that must
+        surface — the state write must not overwrite it with its own."""
+        monkeypatch.setitem(
+            backup_module._STORE_FUNCTIONS, "local",
+            lambda dump, config: (_ for _ in ()).throw(OSError("bad password")),
+        )
+        _fail_state_write(monkeypatch)
+        with pytest.raises(BackupError, match="All backup destinations failed"):
+            run_backup(["local"])
+
+    def test_an_uncreatable_state_directory_is_also_survived(self, backup_env, monkeypatch):
+        """``mkdir`` is the other half of the same write and fails for the same
+        reasons, so it belongs inside the same guard.
+
+        Driven through ``_save_state`` directly rather than a whole run: a
+        ``local_dir`` that cannot be created also defeats the local *store*, and
+        a test that let that happen would pass on the wrong failure.
+        """
+        _fail_state_mkdir(monkeypatch)
+        backup_module._save_state(get_backup_config(), {"local": "2026-01-01T00:00:00+00:00"})
 
     def test_run_backup_reports_dump_failure(self, backup_env, monkeypatch):
         """A dump/bundle that cannot be built is a total failure (D1) — it

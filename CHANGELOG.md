@@ -93,6 +93,12 @@ the `0.x` beta series.
   degraded `/api/health/`. `demo/requirements.txt` is capped to match, and a test now reads the pin
   and both compose images from their own files so they cannot drift apart again.
 
+- A backup run no longer ends on a `PermissionError` traceback when it cannot write its own state
+  file. `_load_state()` had always treated an unreadable state file as "no state"; the save side had
+  no such guard, so a state directory the process cannot write — a mis-owned Docker volume, in the
+  report — replaced a cleanly logged storage failure with an unrelated crash out of
+  `pathlib.Path.write_text`. The write failure is now logged as `backup_state_save_failed` and the
+  run's real outcome stands.
 
 ## 0.1.0b8 — 2026-09-06
 

@@ -286,3 +286,19 @@ Fixed
   of ``pyproject.toml`` and the server majors out of the two compose files and fails if they ever
   disagree again.
 
+
+* **A backup run no longer crashes over its own state file.** ``_load_state()`` has always treated
+  an unreadable state file as "no state" — a missing or corrupt file is not a reason to refuse to
+  back anything up. The save side had no equivalent guard, and the asymmetry showed under exactly
+  the conditions that make a backup interesting: a state directory the process cannot write. The
+  reporter's root cause was a mis-owned Docker volume alongside a wrong SFTP password. Every
+  destination had already failed and been logged cleanly, and then ``_save_state()`` raised
+  ``PermissionError`` out of ``pathlib.Path.write_text``, so the command ended on a traceback about
+  a JSON file instead of on the credential failure that was the actual problem — which in monitoring
+  reads as the backup system itself being broken.
+
+  The state write, including the ``mkdir`` that precedes it, is now wrapped and logged as
+  ``backup_state_save_failed`` with the path and the underlying error, and the run's real outcome
+  stands. Swallowing it is safe in the direction that matters: with nothing recorded on disk every
+  destination reads as never having run, so the next check repeats work rather than skipping it.
+  That is a real consequence, which is why this is an ``error`` log line and not a silent pass.

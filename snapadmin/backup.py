@@ -1182,8 +1182,28 @@ def _load_state(config: BackupConfig) -> dict:
 
 
 def _save_state(config: BackupConfig, state: dict) -> None:
-    config.local_dir.mkdir(parents=True, exist_ok=True)
-    _state_path(config).write_text(json.dumps(state))
+    """Record when each destination last ran, tolerating a directory it cannot write.
+
+    Symmetrical with :func:`_load_state`, which has always treated an unreadable
+    state file as "no state". The state file is bookkeeping about the run, not
+    the run: by the time it is written every destination has already succeeded or
+    failed and been logged. Letting an ``OSError`` out of here ended a run whose
+    real outcome was a wrong SFTP password with a ``PermissionError`` traceback
+    about a mis-owned Docker volume instead — the same failure the operator was
+    already told about, replaced by one they were not (#EXT1l).
+
+    The cost of swallowing it is visible and safe: with no state on disk every
+    destination reads as never run, so the next check repeats work rather than
+    skipping it. That is worth an ``error`` log line, which is why this is not a
+    silent pass.
+    """
+    try:
+        config.local_dir.mkdir(parents=True, exist_ok=True)
+        _state_path(config).write_text(json.dumps(state))
+    except OSError as exc:
+        logger.error(
+            "backup_state_save_failed", path=str(_state_path(config)), error=str(exc),
+        )
 
 
 #: Fraction of a destination's own interval treated as tolerance before the
