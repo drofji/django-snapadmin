@@ -742,7 +742,10 @@ INSTALLED_APPS = [
 
     # ── Admin-editable settings — pip install django-snapadmin[extra-settings]
     # SnapAdmin does not use it; add it if you want a runtime key/value Setting
-    # model in the admin (the demo shows the pattern).
+    # model in the admin (the demo shows the pattern). If you re-home that admin
+    # with EXTRA_SETTINGS_ADMIN_APP, the value is matched against INSTALLED_APPS
+    # verbatim: pass the entry ("myapps.shop"), never the app label ("shop") —
+    # snapadmin.E025 names the entry to use when the two differ.
     "extra_settings",
 
     # ── Autocomplete list filters — [autocomplete-filter] (LGPL) ────────────

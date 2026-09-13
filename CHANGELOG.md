@@ -48,6 +48,13 @@ the `0.x` beta series.
   the clock time of the first run, and slots missed while the process was down collapse into a single
   catch-up run instead of a burst. The existing drift-tolerant behaviour stays the default, the state
   file needs no surgery to turn it on, and turning it back off is equally safe.
+- New system check `snapadmin.E025`: `EXTRA_SETTINGS_ADMIN_APP` (the `[extra-settings]` extra) set
+  to an app *label* when django-extra-settings matches it against `INSTALLED_APPS` verbatim. The
+  upstream error quotes the label back at you, so a package-nested app (`"myapps.shop"`, label
+  `shop`) looks like a missing app instead of a wrong identifier; the check names the
+  `INSTALLED_APPS` entry to write instead. It is reached wherever admin autodiscovery is deferred
+  (`SimpleAdminConfig`, a custom `AdminSite`, no `django.contrib.admin`) — with Django's default
+  `AdminConfig` the upstream error still aborts `django.setup()` before any check runs.
 
 ### Changed
 - `snapadmin_info --section features` reports the number of fields actually encrypted alongside the

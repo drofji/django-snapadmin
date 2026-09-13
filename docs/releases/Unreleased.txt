@@ -159,6 +159,28 @@ Added
   project that never enables it sees the state file it always had. ``snapadmin_info --section
   features`` reports ``schedule-aligned`` when the mode is on, and stays silent when it is not.
 
+* **A new system check for ``EXTRA_SETTINGS_ADMIN_APP`` (``snapadmin.E025``).** The setting
+  re-homes django-extra-settings' ``Setting`` admin into one of your own apps (the
+  ``[extra-settings]`` extra). django-extra-settings matches its value against
+  ``settings.INSTALLED_APPS`` verbatim and, on a miss, raises ``'<value>' application not listed in
+  settings.INSTALLED_APPS.`` — quoting the value you passed rather than the entry it wanted. For a
+  project whose apps live inside a package (``INSTALLED_APPS`` entry ``"myapps.shop"``, app label
+  ``shop``) the natural-looking bare label is exactly what comes back, so the message reads as "that
+  app is missing" when the app is installed and only the identifier is wrong.
+
+  ``snapadmin.E025`` resolves the value against the app registry and prints the ``INSTALLED_APPS``
+  entry to write instead — the module path, or the ``AppConfig`` dotted path when that is how the
+  app is listed. A value whose first dotted segment is itself an ``INSTALLED_APPS`` entry is left
+  alone, because django-extra-settings accepts it.
+
+  One caveat on reach, and it is why the documentation line matters as much as the check: with
+  Django's default ``AdminConfig``, admin autodiscovery imports ``extra_settings.admin`` during
+  ``django.setup()``, so the upstream ``ImproperlyConfigured`` aborts startup before any system
+  check runs. ``snapadmin.E025`` is what you get wherever that import is deferred instead —
+  ``SimpleAdminConfig`` with an explicit ``admin.autodiscover()``, a custom ``AdminSite``, or no
+  ``django.contrib.admin`` at all — where the misconfiguration is otherwise ignored in silence or
+  only surfaces on the first request. The check is a no-op unless ``extra_settings`` is installed.
+
 Changed
 -------
 

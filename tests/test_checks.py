@@ -6,10 +6,12 @@ actionable hint, and stay quiet when a feature is unconfigured or correct.
 """
 
 import re
+import sys
 from datetime import timedelta
 from unittest.mock import patch
 
 import pytest
+from django.conf import settings
 from django.core.management import call_command
 from django.test import override_settings
 
@@ -1395,6 +1397,111 @@ class TestShardingRanges:
         # opposed to a resolvable shape with a bad DSN) must not also raise
         # here or double-report — that is check_sharding_config's job.
         assert checks.check_sharding_ranges(None) == []
+
+
+# ── EXTRA_SETTINGS_ADMIN_APP (E025) ──────────────────────────────────────────
+#
+# django-extra-settings resolves EXTRA_SETTINGS_ADMIN_APP by plain membership in
+# settings.INSTALLED_APPS, then raises "'<value>' application not listed in
+# settings.INSTALLED_APPS" — quoting the value it was given, never the entry it
+# actually wanted. For a project whose apps are nested in a package
+# ("demo.apps.shop", app label "demo") the natural-looking bare label is exactly
+# what that message echoes back, so it reads as "the app is missing" rather than
+# "the identifier is the wrong one". These tests pin the check that names the
+# INSTALLED_APPS entry the project should have used instead.
+
+
+class TestExtraSettingsAdminApp:
+    def test_default_value_is_clean(self):
+        # extra_settings' own default keeps the Setting admin where it is.
+        with override_settings(EXTRA_SETTINGS_ADMIN_APP="extra_settings"):
+            assert checks.check_extra_settings_admin_app(None) == []
+
+    def test_unset_value_is_clean(self):
+        with override_settings(EXTRA_SETTINGS_ADMIN_APP=""):
+            assert checks.check_extra_settings_admin_app(None) == []
+
+    def test_installed_apps_entry_is_clean(self):
+        # What the demo project actually configures, and what works.
+        with override_settings(EXTRA_SETTINGS_ADMIN_APP="demo.apps.shop"):
+            assert checks.check_extra_settings_admin_app(None) == []
+
+    def test_bare_label_names_the_module_path_to_use(self):
+        with override_settings(EXTRA_SETTINGS_ADMIN_APP="demo"):
+            result = checks.check_extra_settings_admin_app(None)
+        assert [e.id for e in result] == ["snapadmin.E025"]
+        assert "'demo'" in result[0].msg
+        # The whole point: the fix is spelled out as the INSTALLED_APPS entry.
+        assert "'demo.apps.shop'" in result[0].hint
+
+    def test_bare_label_message_quotes_the_upstream_error(self):
+        with override_settings(EXTRA_SETTINGS_ADMIN_APP="demo"):
+            result = checks.check_extra_settings_admin_app(None)
+        assert "not listed in settings.INSTALLED_APPS" in result[0].msg
+
+    def test_value_matching_nothing_is_reported_without_a_suggestion(self):
+        with override_settings(EXTRA_SETTINGS_ADMIN_APP="ghost.app"):
+            result = checks.check_extra_settings_admin_app(None)
+        assert [e.id for e in result] == ["snapadmin.E025"]
+        assert "'ghost.app'" in result[0].msg
+        assert "no installed app" in result[0].msg
+        assert "INSTALLED_APPS" in result[0].hint
+
+    def test_dotted_value_accepted_by_the_upstream_prefix_fallback_is_clean(self):
+        # extra_settings retries with the first dotted segment, so a value whose
+        # head *is* an INSTALLED_APPS entry boots — flagging it would be a false
+        # positive. "snapadmin" is listed, so "snapadmin.whatever" survives.
+        with override_settings(EXTRA_SETTINGS_ADMIN_APP="snapadmin.whatever"):
+            assert checks.check_extra_settings_admin_app(None) == []
+
+    def test_no_op_when_extra_settings_is_not_in_installed_apps(self, monkeypatch):
+        from django.apps import apps as django_apps
+
+        real_is_installed = django_apps.is_installed
+        monkeypatch.setattr(
+            django_apps,
+            "is_installed",
+            lambda label: False if label == "extra_settings" else real_is_installed(label),
+        )
+        with override_settings(EXTRA_SETTINGS_ADMIN_APP="demo"):
+            assert checks.check_extra_settings_admin_app(None) == []
+
+    def test_no_op_when_extra_settings_cannot_be_imported(self, monkeypatch):
+        # A None entry in sys.modules makes `import extra_settings` raise
+        # ImportError without touching the real installed package.
+        monkeypatch.setitem(sys.modules, "extra_settings", None)
+        with override_settings(EXTRA_SETTINGS_ADMIN_APP="demo"):
+            assert checks.check_extra_settings_admin_app(None) == []
+
+
+class TestInstalledAppsEntry:
+    """``_installed_apps_entry`` maps a resolved app back to the literal string
+    the project wrote in INSTALLED_APPS — which is what the setting compares
+    against, and therefore the only value worth suggesting."""
+
+    class DemoConfig:
+        name = "demo.apps.shop"
+
+    def test_plain_module_path_entry(self):
+        with patch.object(settings, "INSTALLED_APPS", ["snapadmin", "demo.apps.shop"]):
+            entry = checks._installed_apps_entry(self.DemoConfig())
+        assert entry == "demo.apps.shop"
+
+    def test_appconfig_path_entry_is_preferred_over_the_module_path(self):
+        # A project listing the AppConfig must pass *that* string: the module
+        # path alone is not in INSTALLED_APPS and would fail the same way.
+        with patch.object(
+            settings, "INSTALLED_APPS", ["snapadmin", "demo.apps.shop.apps.DemoConfig"]
+        ):
+            entry = checks._installed_apps_entry(self.DemoConfig())
+        assert entry == "demo.apps.shop.apps.DemoConfig"
+
+    def test_falls_back_to_the_app_name_when_no_entry_matches(self):
+        # An AppConfig subclass imported from somewhere unrelated to its own
+        # `name` — rare, but the suggestion must stay a real module path.
+        with patch.object(settings, "INSTALLED_APPS", ["myproject.configs.DemoConfig"]):
+            entry = checks._installed_apps_entry(self.DemoConfig())
+        assert entry == "demo.apps.shop"
 
 
 # ── integration ──────────────────────────────────────────────────────────────
