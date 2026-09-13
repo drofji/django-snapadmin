@@ -226,3 +226,24 @@ Fixed
   but only when ``editable=`` was passed to ``snap_field()`` itself. A caller who wrote
   ``snap_field(models.CharField(..., editable=False), searchable=True)`` meant Django's kwarg,
   migration included, and it is left exactly where they put it.
+
+* **``snapadmin.W015`` stops warning about admins SnapAdmin never generated.** The check exists for
+  one failure: ``show_in_form`` defaults to ``False``, so a model that never sets it anywhere gets a
+  generated change form with nothing in it, silently. It decided that from three facts — the model
+  is registered with SnapAdmin, it has ``register_admin``, and ``admin_enabled`` is not off — none
+  of which say SnapAdmin built the admin actually serving the model.
+
+  It often did not. ``register_admin()`` swallows ``AlreadyRegistered``, so a project that registers
+  a model itself with ``@admin.register`` and its own ``ModelAdmin`` keeps its class and SnapAdmin's
+  generated one is thrown away. The form those users see is hand-written and complete, and owes
+  nothing to ``show_in_form`` — the report that prompted this was an append-only log model whose
+  fields are all deliberately read-only. ``SILENCED_SYSTEM_CHECKS`` was no answer, since silencing
+  ``W015`` also hides the real cases it exists for.
+
+  The check now asks the live registry which admin won, across every ``AdminSite`` a project has
+  instantiated rather than only ``django.contrib.admin.site``, and skips a model whose registered
+  ``ModelAdmin`` SnapAdmin did not generate. Generated classes carry a
+  ``snapadmin_generated_admin`` marker, so this is an attribute check rather than an ``isinstance``
+  guess against mixins a hand-written admin may perfectly well reuse. A model registered on no site
+  at all still warns: an ``AdminSite`` that never autodiscovers has an empty registry, and reading
+  that as "nothing to warn about" would drop every genuine case at once.

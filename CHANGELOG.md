@@ -73,6 +73,13 @@ the `0.x` beta series.
   generated such a migration needs no action: nothing further is detected. `snap_field()` had the
   same leak and is fixed the same way, while an `editable=` passed to the wrapped Django field's own
   constructor is still reported, because there it really is the Django kwarg.
+- `snapadmin.W015` no longer warns about a model whose admin you wrote yourself. It decided a model
+  would render an empty change form from the SnapAdmin registration alone, never asking whether
+  SnapAdmin built the admin actually serving it — so a model registered with `@admin.register` and a
+  hand-written `ModelAdmin` (its own `fields`, its own `readonly_fields`) was warned about even
+  though its form is complete. It now consults the live admin registry, across every `AdminSite`
+  rather than only the default one, and skips a model whose registered `ModelAdmin` SnapAdmin did
+  not generate. A model registered nowhere still warns, so no genuine case is lost.
 
 ## 0.1.0b8 — 2026-09-06
 

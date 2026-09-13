@@ -904,7 +904,10 @@ class Product(models.Model):
   per-field: <code>SNAPADMIN_SHOW_IN_FORM_DEFAULT</code> raises it for every field that never sets
   it explicitly — useful when adopting SnapAdmin onto models that predate it, where nothing setting
   it anywhere used to mean every generated change form rendered empty
-  (<code>snapadmin.W015</code> now catches that whatever the cause). An explicit per-field
+  (<code>snapadmin.W015</code> now catches that whatever the cause — but only for a model whose
+  admin SnapAdmin actually generated: register one yourself with <code>@admin.register</code> and
+  your own <code>ModelAdmin</code>, and the warning stays quiet, because the form you wrote owes
+  nothing to <code>show_in_form</code>). An explicit per-field
   <code>show_in_form=</code> always wins over the project-wide setting.</p>
 
   <p><strong>Wysiwyg HTML is sanitized on write and on render.</strong> Rich-text fields

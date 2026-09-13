@@ -1194,6 +1194,92 @@ class TestEmptyAdminForms:
         assert "demo.ExchangeRate" not in _w015_message()
 
 
+class TestEmptyAdminFormsIgnoresHandWrittenAdmins:
+    """#EXT1a — W015 is a claim about *SnapAdmin's generated* change form.
+
+    ``is_registered(model)`` says the model is a SnapAdmin model; it does not say
+    SnapAdmin built the admin that actually serves it. A project that registers a
+    model itself with ``@admin.register`` and its own ``ModelAdmin`` wins the race
+    — ``register_admin()`` swallows ``AlreadyRegistered`` and throws its generated
+    class away — so the form the reporter's users see is complete, hand-written,
+    and nothing to do with ``show_in_form``. Warning about it is noise that
+    ``SILENCED_SYSTEM_CHECKS`` can only silence by also hiding the real cases.
+    """
+
+    @pytest.fixture
+    def blanked(self, monkeypatch):
+        """A demo model with no ``show_in_form`` field left — W015's trigger."""
+        from demo.apps.shop.models import ExchangeRate
+
+        for name in ("code", "base", "rate"):
+            monkeypatch.setattr(
+                ExchangeRate._meta.get_field(name), "show_in_form", False, raising=False
+            )
+        return ExchangeRate
+
+    def test_the_generated_admin_is_marked(self, blanked):
+        """The skip is an attribute check, so the attribute has to be there."""
+        from django.contrib import admin as dj_admin
+
+        registered = dj_admin.site._registry[blanked]
+        assert getattr(registered, "snapadmin_generated_admin", False) is True
+
+    def test_a_generated_admin_still_warns(self, blanked):
+        assert "demo.ExchangeRate" in _w015_message()
+
+    def test_a_hand_written_admin_is_skipped(self, blanked, monkeypatch):
+        """The reporter's case: an append-only log model whose fields are all
+        deliberately read-only, registered by hand."""
+        from django.contrib import admin as dj_admin
+
+        class HandWrittenAdmin(dj_admin.ModelAdmin):
+            readonly_fields = ("code", "base", "rate")
+
+        monkeypatch.setitem(
+            dj_admin.site._registry, blanked, HandWrittenAdmin(blanked, dj_admin.site)
+        )
+        assert "demo.ExchangeRate" not in _w015_message()
+
+    def test_a_hand_written_admin_on_a_custom_site_is_skipped(self, blanked, monkeypatch):
+        """Same blind spot the nesting check already had to close: a project's
+        models may live on an ``AdminSite`` that is not the default singleton."""
+        from django.contrib import admin as dj_admin
+
+        class HandWrittenAdmin(dj_admin.ModelAdmin):
+            pass
+
+        site = dj_admin.AdminSite(name="ext1a")
+        site.register(blanked, HandWrittenAdmin)
+        monkeypatch.delitem(dj_admin.site._registry, blanked, raising=False)
+        try:
+            assert "demo.ExchangeRate" not in _w015_message()
+        finally:
+            site.unregister(blanked)
+
+    def test_a_model_registered_nowhere_still_warns(self, blanked, monkeypatch):
+        """No registered admin means the generated one is still what would render —
+        and a project whose AdminSite never autodiscovers must not lose the warning
+        wholesale."""
+        from django.contrib import admin as dj_admin
+
+        monkeypatch.delitem(dj_admin.site._registry, blanked, raising=False)
+        assert "demo.ExchangeRate" in _w015_message()
+
+    def test_a_generated_admin_wins_over_a_hand_written_one_elsewhere(self, blanked, monkeypatch):
+        """Registered on two sites, one generated: that generated empty form is real."""
+        from django.contrib import admin as dj_admin
+
+        class HandWrittenAdmin(dj_admin.ModelAdmin):
+            pass
+
+        site = dj_admin.AdminSite(name="ext1a-second")
+        site.register(blanked, HandWrittenAdmin)
+        try:
+            assert "demo.ExchangeRate" in _w015_message()
+        finally:
+            site.unregister(blanked)
+
+
 # ── sharding config (E013-E016) ───────────────────────────────────────────────
 
 class TestShardingConfig:

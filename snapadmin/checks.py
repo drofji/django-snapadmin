@@ -1155,6 +1155,35 @@ def check_api_extras_installed(app_configs, **kwargs):
     return errors
 
 
+def _generated_admin_would_render(model) -> bool:
+    """Whether SnapAdmin's own generated ``ModelAdmin`` is what actually serves ``model``.
+
+    ``register_admin()`` swallows ``AlreadyRegistered``, so a project that got there
+    first with ``@admin.register`` and a hand-written ``ModelAdmin`` keeps its own
+    class and SnapAdmin's is discarded. ``is_registered(model)`` cannot tell the two
+    apart — it only says the model opted into SnapAdmin — so a warning about the
+    *generated* form has to consult the live registry instead (#EXT1a).
+
+    A model registered nowhere counts as generated: at ``manage.py check`` time an
+    ``AdminSite`` that never autodiscovers has an empty registry, and a check that
+    read that as "nothing to warn about" would drop every real case at once.
+    ``all_sites`` rather than the default singleton, for the same reason
+    :func:`check_nesting_requires_default_site` needs it — a project's models may
+    live on an ``AdminSite`` of its own.
+    """
+    from django.contrib.admin.sites import all_sites
+
+    registered_anywhere = False
+    for site in all_sites:
+        model_admin = getattr(site, "_registry", {}).get(model)
+        if model_admin is None:
+            continue
+        registered_anywhere = True
+        if getattr(model_admin, "snapadmin_generated_admin", False):
+            return True
+    return not registered_anywhere
+
+
 def check_empty_admin_forms(app_configs, **kwargs):
     """Warn: a registered model's generated admin would render an empty change form.
 
@@ -1169,6 +1198,12 @@ def check_empty_admin_forms(app_configs, **kwargs):
     classmethod also mutates ``admin_overrides`` as a side effect (building
     the generated display callables), which a read-only system check must
     not trigger.
+
+    Only models whose admin SnapAdmin actually generated are considered — see
+    :func:`_generated_admin_would_render`. A hand-written ``ModelAdmin`` with its
+    own ``fields``/``readonly_fields`` renders a complete form that owes nothing
+    to ``show_in_form``, and warning about it is noise a project can only silence
+    by hiding the genuine cases along with it.
     """
     empty = sorted(
         model._meta.label
@@ -1176,6 +1211,7 @@ def check_empty_admin_forms(app_configs, **kwargs):
         if is_registered(model)
         and hasattr(model, "register_admin")
         and getattr(model, "admin_enabled", True)
+        and _generated_admin_would_render(model)
         and not any(
             getattr(f, "show_in_form", None)
             for f in model._meta.get_fields()

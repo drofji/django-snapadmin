@@ -432,6 +432,14 @@ class AdminGenMixin:
         # SnapAdmin's, which in turn wraps Django/Unfold's ModelAdmin.
         extra_mixins = tuple(getattr(cls, "admin_mixins", []) or [])
         parent_classes = extra_mixins + (PIIMaskingAdminMixin, SnapSaveMixin, ModelAdmin)
+        # Set last, after admin_overrides, so a project cannot unset it by accident.
+        # snapadmin.W015 reasons about the form *this* class would render, and the
+        # registration below quietly loses to a project's own @admin.register — so
+        # the check has to be able to ask the live registry which admin actually won
+        # (#EXT1a). An attribute, not an isinstance test: a project may subclass the
+        # generated class, and the mixins above are public and reused by hand-written
+        # admins that SnapAdmin did not build.
+        admin_attrs["snapadmin_generated_admin"] = True
         admin_class = type(f"{cls.__name__}Admin", parent_classes, admin_attrs)
         try: admin.site.register(cls, admin_class)
         except admin.sites.AlreadyRegistered: pass
