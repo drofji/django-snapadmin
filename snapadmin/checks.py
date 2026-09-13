@@ -16,9 +16,9 @@ import stat
 from datetime import timedelta
 from urllib.parse import urlparse
 
-from django.apps import apps
+from django.apps import AppConfig, apps
 from django.conf import settings
-from django.core.checks import Error, Info, Warning
+from django.core.checks import CheckMessage, Error, Info, Warning
 from django.core.exceptions import ImproperlyConfigured
 from django.utils.module_loading import import_string
 
@@ -1317,6 +1317,128 @@ def check_encryption_required(app_configs, **kwargs):
     )]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# django-extra-settings' EXTRA_SETTINGS_ADMIN_APP (#EXT1e)
+#
+# ``EXTRA_SETTINGS_ADMIN_APP`` re-homes the ``Setting`` admin into another app.
+# django-extra-settings resolves it by plain string membership in
+# ``settings.INSTALLED_APPS`` (retrying once with the first dotted segment), and
+# on a miss raises ``ImproperlyConfigured("'<value>' application not listed in
+# settings.INSTALLED_APPS.")`` — echoing back the value it was handed instead of
+# naming the entry it actually wanted. A project whose apps live in a package
+# ("myapps.shop", app label "shop") therefore reads "'shop' application not
+# listed" and goes looking for a missing app, when the app is installed and only
+# the *identifier* is wrong. This check answers the question the upstream
+# message dodges: which INSTALLED_APPS entry to write instead.
+#
+# Reach, stated honestly: with Django's default ``AdminConfig``, admin
+# autodiscovery imports ``extra_settings.admin`` during ``django.setup()``, so
+# the upstream ``ImproperlyConfigured`` aborts startup *before* any system check
+# runs. This check is what a project sees whenever the import is deferred
+# instead — ``SimpleAdminConfig`` with an explicit ``admin.autodiscover()`` in
+# the URLconf, a custom ``AdminSite``, or ``django.contrib.admin`` left out —
+# where ``manage.py check`` is reached and the misconfiguration is otherwise
+# silent (the setting is simply ignored) or only fails on the first request.
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: What django-extra-settings itself defaults the setting to (its own app).
+EXTRA_SETTINGS_DEFAULT_ADMIN_APP = "extra_settings"
+
+
+def _extra_settings_in_play() -> bool:
+    """Whether the optional ``[extra-settings]`` extra is actually installed.
+
+    Mirrors the gate in ``extra_settings_admin.apply_unfold_styling()``: the app
+    registry first (an importable but uninstalled django-extra-settings — a
+    transitive or leftover install — configures nothing and must not be
+    reported on), then the import itself, which still catches a listed-but-
+    broken install. Unlike the raising loaders this package uses at call sites
+    (``exporting._load_openpyxl()``, ``sanitize._load_nh3()``), absence here
+    resolves to a quiet ``False``: ``manage.py check`` exists to report
+    problems, never to become one.
+    """
+    if not apps.is_installed("extra_settings"):
+        return False
+    try:
+        import extra_settings  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def _app_config_for(value: str) -> AppConfig | None:
+    """The installed app *value* names, by app label or by module path."""
+    for app_config in apps.get_app_configs():
+        if value in (app_config.label, app_config.name):
+            return app_config
+    return None
+
+
+def _installed_apps_entry(app_config: AppConfig) -> str:
+    """The literal ``INSTALLED_APPS`` string that brought *app_config* in.
+
+    That string — not the app's label and not necessarily its module path — is
+    what ``EXTRA_SETTINGS_ADMIN_APP`` is compared against, so it is the only
+    value worth suggesting. A project may list the module path
+    (``"myapps.shop"``) or the ``AppConfig`` dotted path
+    (``"myapps.shop.apps.ShopConfig"``); both are matched here.
+    """
+    name = app_config.name
+    config_suffix = f".{type(app_config).__name__}"
+    return next(
+        (
+            entry
+            for entry in settings.INSTALLED_APPS
+            if entry == name
+            or (entry.startswith(f"{name}.") and entry.endswith(config_suffix))
+        ),
+        name,
+    )
+
+
+def check_extra_settings_admin_app(app_configs, **kwargs) -> list[CheckMessage]:
+    """Error: ``EXTRA_SETTINGS_ADMIN_APP`` is not an ``INSTALLED_APPS`` entry."""
+    if not _extra_settings_in_play():
+        return []
+
+    value = getattr(settings, "EXTRA_SETTINGS_ADMIN_APP", "") or ""
+    if not value or value == EXTRA_SETTINGS_DEFAULT_ADMIN_APP:
+        return []
+
+    installed = list(settings.INSTALLED_APPS)
+    if value in installed:
+        return []
+    # django-extra-settings retries with the first dotted segment, so a value
+    # whose head is itself an INSTALLED_APPS entry boots. Reporting it would be
+    # a false positive on a working project.
+    if "." in value and value.split(".")[0] in installed:
+        return []
+
+    upstream = f"{value!r} application not listed in settings.INSTALLED_APPS."
+    app_config = _app_config_for(value)
+    if app_config is None:
+        return [Error(
+            f"EXTRA_SETTINGS_ADMIN_APP = {value!r} matches no installed app — "
+            f"django-extra-settings will refuse to start with \"{upstream}\"",
+            hint="The value is compared against settings.INSTALLED_APPS verbatim. Use the "
+                 "INSTALLED_APPS entry of the app that should host the Setting admin, or "
+                 "drop the setting to leave that admin in 'extra_settings'.",
+            id="snapadmin.E020",
+        )]
+
+    entry = _installed_apps_entry(app_config)
+    return [Error(
+        f"EXTRA_SETTINGS_ADMIN_APP = {value!r} is the {app_config.label!r} app's "
+        f"identifier but not its INSTALLED_APPS entry — django-extra-settings will "
+        f"refuse to start with \"{upstream}\", naming the value you passed rather than "
+        f"the one it wants.",
+        hint=f"Set EXTRA_SETTINGS_ADMIN_APP = {entry!r} — the INSTALLED_APPS entry for that "
+             f"app. The value is matched against settings.INSTALLED_APPS verbatim, so an app "
+             f"nested in a package needs its full dotted path, never the bare label.",
+        id="snapadmin.E020",
+    )]
+
+
 ALL_CHECKS = [
     check_analytics_db_alias,
     check_masked_fields,
@@ -1346,6 +1468,7 @@ ALL_CHECKS = [
     check_encryption_keys,
     check_encryption_key_file,
     check_encryption_required,
+    check_extra_settings_admin_app,
 ]
 
 

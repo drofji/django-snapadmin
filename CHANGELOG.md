@@ -12,6 +12,15 @@ the `0.x` beta series.
 
 ## Unreleased
 
+### Added
+- New system check `snapadmin.E020`: `EXTRA_SETTINGS_ADMIN_APP` (the `[extra-settings]` extra) set
+  to an app *label* when django-extra-settings matches it against `INSTALLED_APPS` verbatim. The
+  upstream error quotes the label back at you, so a package-nested app (`"myapps.shop"`, label
+  `shop`) looks like a missing app instead of a wrong identifier; the check names the
+  `INSTALLED_APPS` entry to write instead. It is reached wherever admin autodiscovery is deferred
+  (`SimpleAdminConfig`, a custom `AdminSite`, no `django.contrib.admin`) — with Django's default
+  `AdminConfig` the upstream error still aborts `django.setup()` before any check runs.
+
 ## 0.1.0b8 — 2026-09-06
 
 ### Breaking

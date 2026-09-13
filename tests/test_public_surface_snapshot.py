@@ -187,6 +187,7 @@ SNAPSHOT: dict[str, list[str]] = {
         "check_encryption_key_file",
         "check_encryption_keys",
         "check_encryption_required",
+        "check_extra_settings_admin_app",
         "check_fetch_by_max_values",
         "check_masked_fields",
         "check_masking_rules",
