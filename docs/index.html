@@ -2619,7 +2619,8 @@ SNAPADMIN_BACKUP_SFTP_HOST = "offsite.example.com"
 SNAPADMIN_BACKUP_SFTP_PORT = 22
 SNAPADMIN_BACKUP_SFTP_USER = "backup"
 SNAPADMIN_BACKUP_SFTP_KEY_FILE = "/etc/snapadmin/id_ed25519"  # key auth; or set _PASSWORD
-SNAPADMIN_BACKUP_SFTP_DIR = "/snapadmin"
+SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS = "/etc/snapadmin/known_hosts"  # unset = ~/.ssh/known_hosts
+SNAPADMIN_BACKUP_SFTP_DIR = "snapadmin"       # relative to the SSH login directory
 SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = 168       # weekly
 
 # Copy 3 (alternative) — any S3-compatible object store; pip install django-snapadmin[s3]
@@ -2651,6 +2652,30 @@ SNAPADMIN_BACKUP_S3_EVERY_HOURS = 168               # weekly</code></pre>
     after N days), which runs server-side with no dependency on a backup task ever completing.
   </div>
 
+  <div class="callout callout-warn">
+    <strong>Two SFTP settings that cost people a day each.</strong>
+    <p><code>SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS</code> — unset, paramiko reads
+    <code>~/.ssh/known_hosts</code>, expanded against the <code>HOME</code> of <em>whoever runs the
+    process</em>, and says nothing if the file is not there. In a container that is a trap: a
+    <code>docker exec</code> without a <code>USER</code> line runs as <strong>root</strong> with
+    <code>HOME=/root</code>, so a <code>known_hosts</code> correctly baked into the image at
+    <code>/home/&lt;svc&gt;/.ssh/known_hosts</code> is invisible — and the error you get,
+    <code>Server '[host]:23' not found in known_hosts</code>, sends you hunting for a host key that
+    is right there. Naming the file outright takes <code>HOME</code> out of the picture. An
+    explicitly configured file <strong>replaces</strong> the <code>~/.ssh</code> lookup rather than
+    adding to it, the way OpenSSH's own <code>UserKnownHostsFile</code> does, and an unreadable one
+    fails loudly naming the setting instead of being silently skipped.</p>
+    <p><code>SNAPADMIN_BACKUP_SFTP_DIR</code> is <strong>relative to the SSH login directory</strong>,
+    not to the filesystem root: it is handed to <code>chdir()</code> and the upload then targets the
+    working directory. An absolute value is <code>snapadmin.W022</code> at
+    <code>manage.py check</code> (the default <code>/</code>, which means the login directory
+    itself, is not flagged). This matters on a jailed account — a storage sub-account, a chrooted
+    user — where the directory change <em>appears</em> to succeed and it is the upload that is
+    refused, with paramiko's bare <code>Failure</code> and no path at all. SnapAdmin now names the
+    full intended path in that failure, so a wrong directory no longer reads as a credentials
+    problem.</p>
+  </div>
+
   <h3 id="storage-box">Hetzner Storage Box — a worked SFTP recipe</h3>
   <div class="callout callout-warn">
     <strong>Storage Box is not S3.</strong> It speaks SFTP/SCP/WebDAV — use the <code>sftp</code>
@@ -2676,8 +2701,17 @@ SNAPADMIN_BACKUP_SFTP_KEY_FILE = "/etc/snapadmin/id_ed25519"  # key-based auth</
       <pre><code>ssh-keyscan -p 23 -H u123456.your-storagebox.de &gt;&gt; ~/.ssh/known_hosts</code></pre>
       Run this once as the same user the backup process runs as (e.g. during deployment), or make one
       manual <code>sftp -P 23 u123456-sub1@u123456.your-storagebox.de</code> connection and accept the
-      prompt.</li>
+      prompt. <strong>In a container, write the file to a fixed path and name it</strong> — the
+      <code>~</code> above is resolved at run time, and a <code>docker exec</code> without a
+      <code>USER</code> line is root, not your service user:
+      <pre><code>ssh-keyscan -p 23 -H u123456.your-storagebox.de &gt; /etc/snapadmin/known_hosts
+SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS = "/etc/snapadmin/known_hosts"</code></pre></li>
   </ol>
+  <p>A Storage Box sub-account is scoped to its own subdirectory, which makes it exactly the case
+  <code>snapadmin.W022</code> exists for: leave <code>SNAPADMIN_BACKUP_SFTP_DIR</code> at its default
+  <code>/</code> (the sub-account's own root) or give it a <em>relative</em> path such as
+  <code>"db"</code>. An absolute <code>/backups</code> is a path the sub-account cannot see, and the
+  upload — not the directory change — is what fails.</p>
 
   <h3>Running the backups</h3>
   <p>Backups run as a <strong>separate process</strong> from your web workers — via Celery Beat or cron.
@@ -4520,7 +4554,8 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset — no p
     <tr><td><code>SNAPADMIN_BACKUP_REMOTE_EVERY_HOURS</code></td><td><code>168</code></td><td>How often the offsite copy becomes due (weekly)</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_SFTP_HOST</code> / <code>_PORT</code></td><td>— / <code>22</code></td><td>Copy 3 (alt): offsite SFTP server (empty host = off) — <a href="#storage-box">port 23 for Hetzner Storage Box</a></td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_SFTP_USER</code> / <code>_PASSWORD</code> / <code>_KEY_FILE</code></td><td>—</td><td>SFTP credentials — key file wins over password when both are set</td></tr>
-    <tr><td><code>SNAPADMIN_BACKUP_SFTP_DIR</code></td><td><code>/</code></td><td>Target directory on the SFTP server</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS</code></td><td>—</td><td>Host-key file to trust. Empty = <code>~/.ssh/known_hosts</code> of whoever runs the process — which in a container is usually root. Set outright, it replaces that lookup rather than adding to it</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_SFTP_DIR</code></td><td><code>/</code></td><td>Target directory, <strong>relative to the SSH login directory</strong> — an absolute value is <code>snapadmin.W022</code></td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_SFTP_EVERY_HOURS</code></td><td><code>168</code></td><td>How often the SFTP copy becomes due (weekly)</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_S3_BUCKET</code></td><td>—</td><td>Copy 3 (alt): S3-compatible bucket name (empty = off)</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_S3_PREFIX</code></td><td>—</td><td>Optional key prefix inside the bucket</td></tr>

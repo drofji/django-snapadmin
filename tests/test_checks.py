@@ -488,6 +488,79 @@ class TestBackupOffsiteRequiresEncryption:
         assert checks.check_backup_offsite_requires_encryption in checks.ALL_CHECKS
 
 
+# ── absolute SNAPADMIN_BACKUP_SFTP_DIR (W022) ────────────────────────────────
+
+class TestBackupSftpDirIsLoginRelative:
+    """#EXT1m — the value is handed to ``sftp.chdir()`` and the upload then
+    goes to the working directory. An absolute path only lands where the
+    operator expects if the account's own filesystem view really has it at
+    the root, which on a jailed storage sub-account it does not."""
+
+    def test_backups_disabled_is_clean(self):
+        with override_settings(
+            SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+            SNAPADMIN_BACKUP_SFTP_DIR="/srv/backups",
+        ):
+            assert checks.check_backup_sftp_dir(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_SFTP_DIR="/srv/backups",
+    )
+    def test_no_sftp_host_is_clean(self):
+        """The destination is inactive, so the value is never used."""
+        assert checks.check_backup_sftp_dir(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_DIR="backups/db",
+    )
+    def test_relative_path_is_clean(self):
+        assert checks.check_backup_sftp_dir(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+    )
+    def test_the_shipped_default_is_clean(self):
+        """The default is ``"/"``, which on an ordinary account means the login
+        directory's own root and works. A check that fires on the value every
+        project gets out of the box teaches people to ignore it."""
+        from snapadmin.backup import get_backup_config
+
+        assert get_backup_config().sftp_dir == "/"
+        assert checks.check_backup_sftp_dir(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_DIR="/srv/backups",
+    )
+    def test_absolute_path_warns(self):
+        result = checks.check_backup_sftp_dir(None)
+        assert [w.id for w in result] == ["snapadmin.W022"]
+        assert "/srv/backups" in result[0].msg
+        assert "SNAPADMIN_BACKUP_SFTP_DIR" in result[0].msg
+        # the hint must show the relative spelling, not just describe it
+        assert "srv/backups" in result[0].hint
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_DIR="/srv/backups",
+    )
+    def test_is_a_warning_not_an_error(self):
+        """An absolute path is right whenever the SSH account really is not
+        jailed, so this can only ever be advisory."""
+        from django.core.checks import WARNING
+
+        assert checks.check_backup_sftp_dir(None)[0].level == WARNING
+
+    def test_is_registered(self):
+        assert checks.check_backup_sftp_dir in checks.ALL_CHECKS
+
+
 # ── backup beat cadence vs. shortest destination interval (W010) ────────────
 
 class TestBackupScheduleCadence:

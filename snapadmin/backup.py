@@ -132,6 +132,7 @@ class BackupConfig:
     sftp_user: str
     sftp_password: str
     sftp_key_file: str
+    sftp_known_hosts: str
     sftp_dir: str
     sftp_every_hours: int
     s3_bucket: str
@@ -173,6 +174,7 @@ def get_backup_config() -> BackupConfig:
         sftp_user=str(get_setting("SNAPADMIN_BACKUP_SFTP_USER", "")),
         sftp_password=str(get_setting("SNAPADMIN_BACKUP_SFTP_PASSWORD", "")),
         sftp_key_file=str(get_setting("SNAPADMIN_BACKUP_SFTP_KEY_FILE", "")),
+        sftp_known_hosts=str(get_setting("SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS", "")),
         sftp_dir=str(get_setting("SNAPADMIN_BACKUP_SFTP_DIR", "/")),
         sftp_every_hours=int(get_setting("SNAPADMIN_BACKUP_SFTP_EVERY_HOURS", 168)),
         s3_bucket=str(get_setting("SNAPADMIN_BACKUP_S3_BUCKET", "")),
@@ -782,6 +784,56 @@ def store_remote_ftp(dump: Path, config: BackupConfig) -> str:
     return f"ftp://{config.ftp_host}:{config.ftp_port}{config.ftp_dir.rstrip('/')}/{dump.name}"
 
 
+def _load_sftp_host_keys(client, config: BackupConfig) -> None:
+    """Populate ``client``'s trusted host keys for the SFTP destination.
+
+    Unset (the default), this is ``load_system_host_keys()`` — byte-for-byte
+    the behaviour every earlier release had. paramiko then expands
+    ``~/.ssh/known_hosts`` against the **running process's** ``HOME`` and
+    swallows the error if it is not there, which is a trap in a container: a
+    ``docker exec`` without a ``USER`` line runs as root with ``HOME=/root``,
+    so a ``known_hosts`` correctly baked into the image at
+    ``/home/<svc>/.ssh/known_hosts`` is simply not seen. The failure that
+    follows — ``Server '[host]:23' not found in known_hosts`` — sends the
+    operator looking for a missing host key that is in fact right there.
+
+    ``SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS`` names the file outright and takes the
+    ``HOME`` lookup out of the picture. It **replaces** the default rather than
+    adding to it, the way OpenSSH's own ``UserKnownHostsFile`` does: pinning a
+    path must not silently widen trust to whatever the running user's home
+    directory happens to contain. An unreadable file is a hard failure naming
+    the setting — unlike the no-argument form, paramiko does raise for a
+    filename it was handed, and a bare ``FileNotFoundError`` out of a backup
+    run says nothing about which setting produced the path.
+    """
+    if not config.sftp_known_hosts:
+        client.load_system_host_keys()  # honour ~/.ssh/known_hosts if present
+        return
+    try:
+        client.load_host_keys(config.sftp_known_hosts)
+    except OSError as exc:
+        raise BackupError(
+            f"SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS points at "
+            f"{config.sftp_known_hosts!r}, which could not be read: {exc}"
+        ) from exc
+
+
+def _sftp_remote_path(config: BackupConfig, name: str) -> str:
+    """The full path a part is intended to land at on the SFTP server.
+
+    ``SNAPADMIN_BACKUP_SFTP_DIR`` is **relative to the SSH login directory**:
+    it is handed to ``sftp.chdir()`` and the upload then targets the working
+    directory by bare filename. A relative value therefore renders as
+    ``<dir>/<name>`` and only an absolute one keeps its leading slash; the
+    default ``"/"`` collapses to ``/<name>``.
+
+    Used both for the returned location and for the failure message, so the
+    two can never describe different places.
+    """
+    directory = config.sftp_dir.rstrip("/")
+    return f"{directory}/{name}" if directory else f"/{name}"
+
+
 def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
     """Upload the dump to an offsite server over SSH/SFTP (encrypted transport).
 
@@ -789,13 +841,19 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
     otherwise with ``SNAPADMIN_BACKUP_SFTP_PASSWORD``. Requires the optional
     ``paramiko`` dependency — install ``django-snapadmin[backup]``.
 
-    Host keys are verified against ``~/.ssh/known_hosts`` (loaded via
-    ``load_system_host_keys()``): a host whose key is not already known is
-    rejected rather than silently trusted, so an operator must pre-populate
-    ``known_hosts`` for the SFTP target before offsite backups will work — e.g.
-    ``ssh-keyscan -H offsite.example.com >> ~/.ssh/known_hosts`` during deployment,
-    or a one-off ``ssh`` connection as the service user. This closes the
-    man-in-the-middle window that a trust-on-first-use policy would leave open.
+    A host whose key is not already known is rejected rather than silently
+    trusted, so an operator must pre-populate ``known_hosts`` for the SFTP
+    target before offsite backups will work — e.g. ``ssh-keyscan -H
+    offsite.example.com >> ~/.ssh/known_hosts`` during deployment, or a one-off
+    ``ssh`` connection as the service user. This closes the man-in-the-middle
+    window that a trust-on-first-use policy would leave open. **In a container,
+    point ``SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS`` at the file instead** — the
+    ``~`` in that recipe is resolved at run time, not at build time, and the two
+    are often different users; see :func:`_load_sftp_host_keys`.
+
+    ``SNAPADMIN_BACKUP_SFTP_DIR`` is relative to the SSH login directory — see
+    :func:`_sftp_remote_path`, which is also what names the full target path in
+    the failure message when an upload is refused.
     """
     if not config.sftp_host:
         raise BackupError("SNAPADMIN_BACKUP_SFTP_HOST is not configured.")
@@ -807,7 +865,7 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
         ) from exc
 
     client = paramiko.SSHClient()
-    client.load_system_host_keys()  # honour ~/.ssh/known_hosts if present
+    _load_sftp_host_keys(client, config)
     # Reject unknown host keys instead of trust-on-first-use: silently accepting
     # any key on first connect would hand a man-in-the-middle a permanent foothold
     # on the offsite copy. The operator must pre-populate known_hosts.
@@ -824,6 +882,7 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
     else:
         connect_kwargs["password"] = config.sftp_password
     client.connect(**connect_kwargs)
+    remote_path = _sftp_remote_path(config, dump.name)
     try:
         sftp = client.open_sftp()
         try:
@@ -831,7 +890,19 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
         except IOError:
             sftp.mkdir(config.sftp_dir)
             sftp.chdir(config.sftp_dir)
-        sftp.put(str(dump), dump.name)
+        try:
+            sftp.put(str(dump), dump.name)
+        except OSError as exc:
+            # paramiko renders a refused upload as a bare IOError carrying only
+            # the server's word for it ("Failure"), with no path — which reads
+            # as an account-permissions problem rather than a wrong target
+            # directory. Name where the dump was actually going.
+            raise BackupError(
+                f"Could not upload the backup to {remote_path!r} on "
+                f"{config.sftp_host}: {exc}. SNAPADMIN_BACKUP_SFTP_DIR is "
+                f"relative to the SSH login directory, so an absolute value "
+                f"only works if the account is not restricted to a subtree."
+            ) from exc
         # Retention on the remote end: timestamped names sort chronologically,
         # pruned per part prefix so media/env/manifest don't share db's budget.
         prefix = _part_prefix_for(dump.name)
@@ -841,7 +912,7 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
         sftp.close()
     finally:
         client.close()
-    return f"sftp://{config.sftp_host}:{config.sftp_port}{config.sftp_dir.rstrip('/')}/{dump.name}"
+    return f"sftp://{config.sftp_host}:{config.sftp_port}/{remote_path.lstrip('/')}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1101,7 +1172,10 @@ def fetch_remote_sftp(name: str, target_dir: Path, config: BackupConfig) -> Path
 
 def _connect_sftp(config: BackupConfig):
     """Shared connect step for the SFTP list/fetch pair above — same host-key
-    verification policy as :func:`store_remote_sftp` (reject unknown keys)."""
+    verification policy as :func:`store_remote_sftp` (reject unknown keys) and
+    the same ``SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS`` resolution. Restores read
+    from the destination the backup wrote to, so the two halves have to agree
+    about which ``known_hosts`` file is authoritative."""
     try:
         import paramiko
     except ImportError as exc:  # pragma: no cover - optional dependency guard
@@ -1110,7 +1184,7 @@ def _connect_sftp(config: BackupConfig):
         ) from exc
 
     client = paramiko.SSHClient()
-    client.load_system_host_keys()
+    _load_sftp_host_keys(client, config)
     client.set_missing_host_key_policy(paramiko.RejectPolicy())
     connect_kwargs = {
         "hostname": config.sftp_host,

@@ -718,6 +718,14 @@ SNAPADMIN_BACKUP_SFTP_PORT = int(os.getenv('SNAPADMIN_BACKUP_SFTP_PORT', '22'))
 SNAPADMIN_BACKUP_SFTP_USER = os.getenv('SNAPADMIN_BACKUP_SFTP_USER', '')
 SNAPADMIN_BACKUP_SFTP_PASSWORD = os.getenv('SNAPADMIN_BACKUP_SFTP_PASSWORD', '')
 SNAPADMIN_BACKUP_SFTP_KEY_FILE = os.getenv('SNAPADMIN_BACKUP_SFTP_KEY_FILE', '')
+# Where to read the server's host key from. Empty = paramiko's default,
+# ~/.ssh/known_hosts expanded against the HOME of whoever runs the process —
+# which in a container is usually root, not the image's service user. Set this
+# to the file's real path and the lookup stops depending on HOME.
+SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS = os.getenv('SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS', '')
+# Relative to the SSH *login* directory, not the filesystem root — an absolute
+# value raises snapadmin.W022 (except the default '/', which means the login
+# directory itself).
 SNAPADMIN_BACKUP_SFTP_DIR = os.getenv('SNAPADMIN_BACKUP_SFTP_DIR', '/')
 SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = int(os.getenv('SNAPADMIN_BACKUP_SFTP_EVERY_HOURS', '168'))
 

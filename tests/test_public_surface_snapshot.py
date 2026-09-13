@@ -186,6 +186,7 @@ SNAPSHOT: dict[str, list[str]] = {
         "check_backup_offsite_requires_encryption",
         "check_backup_s3_configuration",
         "check_backup_schedule_cadence",
+        "check_backup_sftp_dir",
         "check_empty_admin_forms",
         "check_encrypted_field_usage",
         "check_encrypted_fields_not_indexed",

@@ -202,6 +202,9 @@ class FakeSFTP:
 
     shared_existing: list[str] = [f"{BACKUP_PREFIX}00000000-000000.sql.gz"]
     shared_contents: dict = {}
+    #: Set to an exception a test wants ``put()`` to raise — a real server
+    #: answers a refused upload with paramiko's bare ``IOError("Failure")``.
+    put_error: Exception | None = None
 
     def __init__(self, fail_chdir_once):
         self.fail_chdir_once = fail_chdir_once
@@ -224,6 +227,8 @@ class FakeSFTP:
         self.mkdir_calls.append(path)
 
     def put(self, local, remote):
+        if FakeSFTP.put_error is not None:
+            raise FakeSFTP.put_error
         self.put_calls.append((local, remote))
         self.contents[remote] = Path(local).read_bytes()
 
@@ -249,10 +254,15 @@ class FakeSSHClient:
     instances: list["FakeSSHClient"] = []
     fail_chdir_once = False  # class-level toggle a test flips before the call
     connect_error: Exception | None = None  # set to raise from connect()
+    #: Set to an exception ``load_host_keys()`` should raise — paramiko raises
+    #: ``IOError`` for a filename it was given and could not read, unlike the
+    #: no-argument ``load_system_host_keys()``, which swallows it.
+    host_keys_error: Exception | None = None
 
     def __init__(self):
         self.connect_kwargs = None
         self.host_keys_loaded = False
+        self.host_keys_files = []
         self.policy = None
         self.sftp = None
         self.closed = False
@@ -260,6 +270,11 @@ class FakeSSHClient:
 
     def load_system_host_keys(self):
         self.host_keys_loaded = True
+
+    def load_host_keys(self, filename):
+        if FakeSSHClient.host_keys_error is not None:
+            raise FakeSSHClient.host_keys_error
+        self.host_keys_files.append(filename)
 
     def set_missing_host_key_policy(self, policy):
         self.policy = policy
@@ -284,8 +299,10 @@ def fake_sftp(monkeypatch):
     FakeSSHClient.instances = []
     FakeSSHClient.fail_chdir_once = False
     FakeSSHClient.connect_error = None
+    FakeSSHClient.host_keys_error = None
     FakeSFTP.shared_existing = [f"{BACKUP_PREFIX}00000000-000000.sql.gz"]
     FakeSFTP.shared_contents = {}
+    FakeSFTP.put_error = None
     monkeypatch.setattr(paramiko, "SSHClient", FakeSSHClient)
     monkeypatch.setattr(paramiko, "RejectPolicy", lambda: "reject-policy")
     return FakeSSHClient
@@ -1182,6 +1199,135 @@ class TestDestinations:
             store_remote_sftp(source, get_backup_config())
         # nothing was uploaded to the untrusted host
         assert fake_sftp.instances[0].sftp is None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SFTP known_hosts location and target-path reporting — #EXT1m
+# ─────────────────────────────────────────────────────────────────────────────
+
+class TestSftpKnownHosts:
+    """``load_system_host_keys()`` resolves ``~/.ssh/known_hosts`` against the
+    *running* user's ``HOME``, and swallows the error when it is not there. A
+    ``docker exec`` without a ``USER`` line runs as root with ``HOME=/root``,
+    so a ``known_hosts`` baked into the image at ``/home/<svc>/.ssh/`` is
+    invisible and the failure blames the missing host key rather than the
+    lookup path."""
+
+    def test_default_is_empty(self, sqlite_db):
+        assert get_backup_config().sftp_known_hosts == ""
+
+    @override_settings(SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com")
+    def test_unset_keeps_the_home_relative_default(self, tmp_path, fake_sftp):
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+        store_remote_sftp(source, get_backup_config())
+        client = fake_sftp.instances[0]
+        assert client.host_keys_loaded is True
+        assert client.host_keys_files == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS="/etc/snapadmin/known_hosts",
+    )
+    def test_configured_file_replaces_the_home_relative_lookup(self, tmp_path, fake_sftp):
+        """An explicitly configured file is authoritative, the way OpenSSH's
+        own ``UserKnownHostsFile`` is: pinning a path must not silently widen
+        trust to whatever the running user's ``HOME`` happens to contain."""
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+        store_remote_sftp(source, get_backup_config())
+        client = fake_sftp.instances[0]
+        assert client.host_keys_files == ["/etc/snapadmin/known_hosts"]
+        assert client.host_keys_loaded is False
+        # still reject-on-unknown — the setting moves the file, never the policy
+        assert client.policy == "reject-policy"
+
+    @override_settings(
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS="/etc/snapadmin/nope",
+    )
+    def test_unreadable_file_names_the_setting_and_the_path(self, tmp_path, fake_sftp):
+        """Unlike the no-argument form, paramiko raises for a filename it was
+        handed and could not read. A bare ``FileNotFoundError`` out of a
+        backup run does not say which setting produced the path."""
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+        FakeSSHClient.host_keys_error = OSError("No such file or directory")
+        with pytest.raises(BackupError) as excinfo:
+            store_remote_sftp(source, get_backup_config())
+        assert "SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS" in str(excinfo.value)
+        assert "/etc/snapadmin/nope" in str(excinfo.value)
+
+    @override_settings(
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS="/etc/snapadmin/known_hosts",
+    )
+    def test_the_restore_path_honours_it_too(self, tmp_path, fake_sftp):
+        """``snapadmin_restore sftp:<name>`` builds its own client. Fixing only
+        the backup half would leave a restore failing with exactly the
+        misleading error this setting exists to remove."""
+        FakeSFTP.shared_contents = {f"{BACKUP_PREFIX}20260101-000000.sql.gz": b"data"}
+        backup_module.fetch_remote_sftp(
+            f"{BACKUP_PREFIX}20260101-000000.sql.gz", tmp_path, get_backup_config()
+        )
+        assert fake_sftp.instances[0].host_keys_files == ["/etc/snapadmin/known_hosts"]
+
+    @override_settings(
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS="/etc/snapadmin/known_hosts",
+    )
+    def test_listing_honours_it_too(self, fake_sftp):
+        backup_module.list_remote_sftp(get_backup_config())
+        assert fake_sftp.instances[0].host_keys_files == ["/etc/snapadmin/known_hosts"]
+
+
+class TestSftpUploadFailureNamesThePath:
+    """``sftp.chdir(dir)`` then ``sftp.put(dump, dump.name)`` meant a refused
+    upload surfaced as paramiko's bare ``IOError("Failure")`` with no path at
+    all — which reads as an account-permissions problem rather than a wrong
+    target directory."""
+
+    @override_settings(
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_DIR="/dumps",
+    )
+    def test_put_failure_reports_the_full_intended_path(self, tmp_path, fake_sftp):
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+        FakeSFTP.put_error = IOError("Failure")
+        with pytest.raises(BackupError) as excinfo:
+            store_remote_sftp(source, get_backup_config())
+        message = str(excinfo.value)
+        assert f"/dumps/{source.name}" in message
+        assert "Failure" in message  # the server's own word is not thrown away
+        assert "SNAPADMIN_BACKUP_SFTP_DIR" in message
+
+    @override_settings(SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com")
+    def test_default_dir_failure_still_reports_a_path(self, tmp_path, fake_sftp):
+        """The default is ``"/"`` — the reported case. ``rstrip('/')`` must not
+        turn the path into a bare filename with no leading slash."""
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+        FakeSFTP.put_error = IOError("Failure")
+        with pytest.raises(BackupError) as excinfo:
+            store_remote_sftp(source, get_backup_config())
+        assert f"/{source.name}" in str(excinfo.value)
+
+    @override_settings(
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_DIR="backups",
+        SNAPADMIN_BACKUP_KEEP=1,
+    )
+    def test_a_successful_upload_is_unchanged(self, tmp_path, fake_sftp):
+        """The wrapper must not alter the working path — same chdir, same
+        relative put, same returned location."""
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+        location = store_remote_sftp(source, get_backup_config())
+        sftp = fake_sftp.instances[0].sftp
+        assert sftp.chdir_calls == ["backups"]
+        assert sftp.put_calls == [(str(source), source.name)]
+        assert location == f"sftp://offsite.example.com:22/backups/{source.name}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

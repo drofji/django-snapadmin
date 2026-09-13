@@ -448,6 +448,50 @@ def check_backup_offsite_requires_encryption(app_configs, **kwargs):
     )]
 
 
+def check_backup_sftp_dir(app_configs, **kwargs):
+    """Warn: an absolute ``SNAPADMIN_BACKUP_SFTP_DIR`` on an active destination.
+
+    The value is handed to ``sftp.chdir()`` and the upload then targets the
+    working directory by bare filename, so it is **relative to the SSH login
+    directory**. An absolute path only lands where it reads like it should if
+    the account's own filesystem view really has it at the root — which on a
+    jailed storage sub-account it does not. The failure mode is the reason this
+    is worth a check at all: ``chdir`` succeeds (the server resolves the path
+    somewhere), and it is the ``put`` that is refused, with paramiko's bare
+    ``Failure`` and no path — which reads as a credentials or permissions
+    problem rather than a wrong directory.
+
+    ``"/"`` — the shipped default — is deliberately **not** flagged. On an
+    ordinary account it means the login directory's own root and works; a check
+    that fires on the value every project gets out of the box teaches people to
+    ignore it. Where ``"/"`` itself is not writable, :func:`~snapadmin.backup.
+    store_remote_sftp`'s failure message is what explains it.
+
+    A warning, never an error: an absolute path is exactly right whenever the
+    SSH account is not restricted to a subtree, and nothing in ``settings.py``
+    says which kind of account this is.
+    """
+    from snapadmin.backup import get_backup_config
+
+    config = get_backup_config()
+    if not config.enabled or not config.sftp_host:
+        return []
+    directory = config.sftp_dir
+    if not directory.startswith("/") or not directory.strip("/"):
+        return []
+    relative = directory.lstrip("/")
+    return [Warning(
+        f"SNAPADMIN_BACKUP_SFTP_DIR = {directory!r} is an absolute path, but the "
+        "value is relative to the SSH login directory.",
+        hint=f"Write it as {relative!r} unless the SSH account really can reach "
+             f"{directory!r} from the filesystem root. On a jailed account (a "
+             "storage sub-account, a chrooted user) the directory change appears "
+             "to succeed and the upload is refused instead, with no path in the "
+             "error.",
+        id="snapadmin.W022",
+    )]
+
+
 #: Days simulated forward when timing a crontab's period — far enough for any
 #: schedule saner than "once a year" (the worst realistic beat entry), bounded
 #: so a pathological one degrades to "cannot determine" rather than a slow
@@ -1714,6 +1758,7 @@ ALL_CHECKS = [
     check_backup_env_requires_encryption,
     check_backup_offsite_requires_encryption,
     check_backup_s3_configuration,
+    check_backup_sftp_dir,
     check_backup_schedule_cadence,
     check_retention_purge_scheduled,
     check_snap_action_read_only_conflict,

@@ -66,6 +66,14 @@ the `0.x` beta series.
   The warning names the offending destinations and the setting that fixes them; `local` is excluded
   because the dump never leaves the machine. A warning rather than an error on purpose — the
   transport or the destination may already encrypt, and neither is visible from `settings.py`.
+- New `SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS` names the host-key file for the `sftp` destination
+  outright. Unset, paramiko reads `~/.ssh/known_hosts` expanded against the `HOME` of whoever runs
+  the process and ignores its absence — so in a container, where `docker exec` without a `USER` line
+  is root, a `known_hosts` baked into the image at `/home/<svc>/.ssh/` is never read and the
+  rejection blames a missing host key instead of the lookup path. Set, it replaces that lookup
+  rather than adding to it (as OpenSSH's `UserKnownHostsFile` does), and an unreadable file fails
+  loudly naming the setting. Backup and restore resolve it the same way; unset keeps the old
+  behaviour exactly.
 
 ### Changed
 - `snapadmin_info --section features` reports the number of fields actually encrypted alongside the
@@ -141,6 +149,15 @@ the `0.x` beta series.
   entry for `snapadmin.run_db_backups` lost `check`, `migrate` and `runserver` to a traceback that
   named no setting. The intervals now come from the same table the backup run itself uses, and
   `s3`'s interval is finally counted when judging whether Beat runs often enough.
+- A refused SFTP upload now names the path it was writing to. `SNAPADMIN_BACKUP_SFTP_DIR` is
+  relative to the SSH login directory, which was documented nowhere; on an account restricted to a
+  subtree the directory change appears to succeed and the upload is what fails, with paramiko's bare
+  `Failure` and no path — so it reads as a credentials problem rather than a wrong directory. The
+  failure now carries the full intended path and the login-relative rule, and an absolute value is
+  `snapadmin.W022` at `manage.py check` (the default `/` is not flagged). A relative directory also
+  built a malformed location string, `sftp://host:22backups/dump.gz`, with the separator eaten by
+  the `rstrip('/')` that exists for the default — the path is now built once and used for both the
+  reported location and the failure message.
 
 
 ## 0.1.0b8 — 2026-09-06

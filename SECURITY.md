@@ -454,6 +454,21 @@ Key protections:
   offsite copy instead. Hetzner Storage Box is an SFTP/SCP/WebDAV service — it uses the `sftp`
   destination, never `s3`; the S3 destination is for genuinely S3-compatible services (AWS, MinIO,
   Backblaze B2, Hetzner **Object Storage**, Wasabi).
+- **SFTP host-key verification, and where the file lives** — the `sftp` destination rejects a host
+  whose key is not already known (`paramiko.RejectPolicy`) rather than trusting it on first use, so
+  a man-in-the-middle cannot take a permanent foothold on the offsite copy by answering the first
+  connection. That guarantee is unchanged; what changed is **which file** answers the question.
+  Left unset, paramiko expands `~/.ssh/known_hosts` against the `HOME` of whoever runs the process
+  and silently ignores the file's absence — so in a container, where a `docker exec` without a
+  `USER` line runs as root with `HOME=/root`, a `known_hosts` correctly baked into the image at
+  `/home/<svc>/.ssh/known_hosts` is never read, and the rejection that follows blames a missing
+  host key rather than the lookup path. `SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS` names the file outright.
+  It **replaces** the `~/.ssh` lookup rather than adding to it, the way OpenSSH's own
+  `UserKnownHostsFile` does — pinning a path must not silently widen trust to whatever the running
+  user's home directory happens to hold — and an unreadable file is a hard failure naming the
+  setting, not a silent fall-through to trusting nothing (or, worse, to a weaker policy). Both the
+  backup and the restore path resolve it the same way. Leaving it unset keeps the previous
+  behaviour exactly.
 - **Backup encryption (AGE)** — set `SNAPADMIN_BACKUP_AGE_RECIPIENTS` (one or more age/SSH public
   keys) and every dump is encrypted **in-stream** — `pg_dump`/`mysqldump`/SQLite → gzip → age → the
   `.age`-suffixed file — before a single byte reaches disk; no plaintext or plain-gzip artefact is ever written, not

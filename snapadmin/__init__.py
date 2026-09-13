@@ -286,7 +286,13 @@ Operations
         overlapping ranges.
         ``E007`` is the backup ``.env``-without-encryption refusal: ``env`` in
         ``SNAPADMIN_BACKUP_INCLUDE`` with no ``SNAPADMIN_BACKUP_AGE_RECIPIENTS``
-        configured fails closed rather than shipping plaintext secrets. ``E008``
+        configured fails closed rather than shipping plaintext secrets. ``W021``
+        is its advisory counterpart for the dump itself — a destination that
+        leaves the host (``network``/``remote``/``sftp``/``s3``) active with no
+        recipients configured; a warning, not an error, because the transport or
+        the destination may encrypt where settings cannot see. ``W022`` flags an
+        absolute ``SNAPADMIN_BACKUP_SFTP_DIR``, which is read relative to the SSH
+        login directory. ``E008``
         catches a ``@snap_action`` whose declared HTTP methods conflict with its
         own model's ``api_read_only``/``api_http_method_names`` policy — dead
         configuration that would otherwise always answer ``403``. ``E011``/``E012``

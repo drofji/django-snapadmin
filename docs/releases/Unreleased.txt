@@ -234,6 +234,48 @@ Added
   Once you have confirmed your destination really does encrypt, ``SILENCED_SYSTEM_CHECKS`` puts it
   away for good.
 
+* **``SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS`` — host-key verification that does not depend on ``HOME``.**
+  The ``sftp`` destination has always rejected a host whose key is not already known, rather than
+  trusting it on first connect, and that guarantee is unchanged. What changed is *which file*
+  answers the question. Left unset, paramiko expands ``~/.ssh/known_hosts`` against the ``HOME`` of
+  whoever runs the process and says nothing when the file is absent — which is a trap in a
+  container: a ``docker exec`` without a ``USER`` line runs as root with ``HOME=/root``, so a
+  ``known_hosts`` correctly baked into the image at ``/home/<svc>/.ssh/known_hosts`` is never read.
+  The rejection that follows, ``Server '[host]:23' not found in known_hosts``, then sends you
+  hunting for a host key that is sitting right there. The documented ``ssh-keyscan … >>
+  ~/.ssh/known_hosts`` recipe made this worse by not mentioning that ``~`` at build time and ``~``
+  at run time are often different users.
+
+  Set the new setting to the file's real path and the lookup stops depending on ``HOME``. It
+  **replaces** the ``~/.ssh`` lookup rather than adding to it, the way OpenSSH's own
+  ``UserKnownHostsFile`` does — pinning a path must not silently widen trust to whatever the running
+  user's home directory happens to contain — and a file that cannot be read is a hard failure naming
+  the setting, rather than the silent skip the no-argument form performs. Both the backup and the
+  restore path resolve it the same way, since a restore reads from the destination the backup wrote
+  to. Leaving it unset keeps the previous behaviour byte for byte.
+
+* **``SNAPADMIN_BACKUP_SFTP_DIR`` is login-relative, and now says so in three places.** The value is
+  handed to ``sftp.chdir()`` and the upload then targets the working directory by bare filename, so
+  it has always been relative to the SSH login directory rather than the filesystem root. That was
+  documented nowhere, and the failure it produces is actively misleading: on an account restricted
+  to a subtree — a storage sub-account, a chrooted user — the directory change *appears* to succeed
+  and it is the upload that is refused, with paramiko's bare ``Failure`` and no path at all. That
+  reads as an account-permissions problem, so the time goes into credentials rather than into the
+  one setting that is wrong.
+
+  A refused upload now names the full intended path and states the login-relative rule in the same
+  message. An absolute value is ``snapadmin.W022`` at ``manage.py check``, which names the relative
+  spelling to use instead. The default ``"/"`` is deliberately **not** flagged — on an ordinary
+  account it means the login directory's own root and works, and a check that fires on the value
+  every project gets out of the box teaches people to ignore it.
+
+  One genuine bug surfaced while pinning this down: a *relative* directory built a malformed
+  location string, ``sftp://host:22backups/dump.gz``, because the ``rstrip('/')`` that exists for
+  the default ``"/"`` ate the separator. That string is what the run summary reports and what gets
+  logged, so it was the one place an operator would look to confirm where a dump went. The path is
+  now built once and used for both the location and the failure message, so the two can never
+  describe different places.
+
 Changed
 -------
 
