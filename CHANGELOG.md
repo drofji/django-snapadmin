@@ -12,6 +12,13 @@ the `0.x` beta series.
 
 ## Unreleased
 
+### Fixed
+- The `[elasticsearch]` extra is capped to the 8.x client (`>=8,<9`); it was unbounded, so a fresh
+  install pulled the 9.x client against the 8.x server the scaffold and demo compose files start —
+  which answers `BadRequestError(400)` to every call, leaving no indices, no search results and a
+  degraded `/api/health/`. `demo/requirements.txt` is capped to match, and a test now reads the pin
+  and both compose images from their own files so they cannot drift apart again.
+
 ## 0.1.0b8 — 2026-09-06
 
 ### Breaking

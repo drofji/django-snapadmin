@@ -14,10 +14,17 @@ not repo state, and are checked by hand at release time rather than here.
 
 Sites are located by their surrounding markup, not by line number — several
 sections of ``docs/index.html`` grow independently of this file.
+
+The last section widens the same idea past the project's own version: the
+Elasticsearch *client* constraint in ``pyproject.toml`` and the ES *server*
+image our compose files start are two numbers that must agree, and drifted
+apart once already (#EXT1j).
 """
 
 import re
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DOCS_INDEX = REPO_ROOT / "docs" / "index.html"
@@ -221,3 +228,119 @@ class TestLlmsTxtCarriesTheAdoptionDecisions:
         """The prose list is the conversation; the checklist is how each answer gets proven."""
         section = self._text().split("## Decisions to settle with the developer", 1)[1]
         assert "#integration-checklist" in section.split("\n## ", 1)[0]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The Elasticsearch client constraint and the ES server every stack we ship starts
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: The image line in a compose file: `docker.elastic.co/elasticsearch/elasticsearch:8.15.0`.
+_ES_IMAGE = re.compile(r"docker\.elastic\.co/elasticsearch/elasticsearch:(\d+)\.(\d+)\.(\d+)")
+
+#: One clause of a Poetry/PEP 440 constraint string: `>=8.0.0`, `<9`, `==8.13.1`.
+_CONSTRAINT_CLAUSE = re.compile(r"(>=|<=|==|>|<)\s*(\d+)(?:\.(\d+))?(?:\.(\d+))?")
+
+
+def _client_major_range(constraint: str, site: str) -> tuple[int, int | None]:
+    """The lowest and highest ES client **major** a constraint string admits.
+
+    The upper bound is ``None`` when the constraint has no upper clause at all — which is
+    the bug this section exists to catch, so it is reported rather than guessed at.
+    """
+    clauses = _CONSTRAINT_CLAUSE.findall(constraint)
+    assert clauses, f"{site}: {constraint!r} contains no parsable version clause"
+    lowest: int | None = None
+    highest: int | None = None
+    for operator, major_text, minor_text, patch_text in clauses:
+        major = int(major_text)
+        if operator in (">=", ">", "=="):
+            lowest = major if lowest is None else min(lowest, major)
+        if operator == "<":
+            # `<9.0.0` stops at major 8; `<9.1.0` still admits 9.x releases below it.
+            below = major if (int(minor_text or 0) or int(patch_text or 0)) else major - 1
+            highest = below if highest is None else min(highest, below)
+        if operator in ("<=", "=="):
+            highest = major if highest is None else min(highest, major)
+    assert lowest is not None, f"{site}: {constraint!r} has no lower bound to read"
+    return lowest, highest
+
+
+def _declared_client_constraint() -> str:
+    """The `[elasticsearch]` extra's constraint, straight out of pyproject.toml."""
+    # `tomllib` is stdlib only on 3.11+ and the suite still runs on 3.10. Skipping there is
+    # right: this asserts a property of the repo's own files, so one interpreter settles it.
+    tomllib = pytest.importorskip("tomllib")
+
+    with open(REPO_ROOT / "pyproject.toml", "rb") as fh:
+        data = tomllib.load(fh)
+    dependency = data["tool"]["poetry"]["dependencies"]["elasticsearch"]
+    constraint = dependency["version"] if isinstance(dependency, dict) else dependency
+    assert isinstance(constraint, str), (
+        "pyproject.toml's elasticsearch dependency no longer carries a version string"
+    )
+    return constraint
+
+
+def _server_major(path: str) -> int:
+    """The ES server major a compose file (or compose template) starts."""
+    text = (REPO_ROOT / path).read_text(encoding="utf-8")
+    match = _ES_IMAGE.search(text)
+    assert match, f"{path}: no `docker.elastic.co/elasticsearch/elasticsearch:X.Y.Z` image found"
+    return int(match.group(1))
+
+
+class TestElasticsearchClientAndServerAgree:
+    """#EXT1j: the `[elasticsearch]` extra was `>=8.0.0` while every stack we ship runs 8.x.
+
+    A fresh install therefore resolved the 9.x client, and elasticsearch-py 9 dropped the `body=`
+    and `ignore=` compatibility shims that `snapadmin/models.py` and `snapadmin/reindexing.py`
+    still pass, on top of refusing an 8.x server outright. The failure surfaced as
+    `BadRequestError(400)` on every call — no indices, no search, `/api/health/` degraded — which
+    reads as "Elasticsearch is broken" rather than "the client is a major ahead of the server".
+
+    Both numbers are read from the files that actually decide them, so the pin and the image
+    cannot drift apart again.
+    """
+
+    #: Everything that starts an ES server for a SnapAdmin stack. The scaffold template is what a
+    #: `snapadmin-new --full` user gets; the demo compose is what a clone runs.
+    SERVER_SITES = (
+        "snapadmin/scaffold/templates/full/docker-compose.yml.tmpl",
+        "demo/docker-compose.yml",
+    )
+
+    def test_the_client_constraint_is_capped_to_a_major(self):
+        constraint = _declared_client_constraint()
+        _, highest = _client_major_range(constraint, "pyproject.toml [elasticsearch] extra")
+        assert highest is not None, (
+            f"pyproject.toml pins elasticsearch as {constraint!r}, which has no upper bound — a "
+            f"fresh install resolves the newest major, while the compose files we ship start "
+            f"{[_server_major(site) for site in self.SERVER_SITES]}.x"
+        )
+
+    @pytest.mark.parametrize("site", SERVER_SITES)
+    def test_the_server_we_ship_is_a_major_the_client_supports(self, site):
+        constraint = _declared_client_constraint()
+        lowest, highest = _client_major_range(constraint, "pyproject.toml [elasticsearch] extra")
+        server = _server_major(site)
+        assert highest is not None and lowest <= server <= highest, (
+            f"{site} starts Elasticsearch {server}.x but pyproject.toml's [elasticsearch] extra "
+            f"resolves a {constraint!r} client (majors "
+            f"{lowest}–{highest if highest is not None else 'unbounded'}) — a client a major "
+            f"ahead of the server answers 400 to everything"
+        )
+
+    def test_the_demo_requirements_pin_the_same_client_majors(self):
+        """`demo/requirements.txt` installs the client directly, bypassing the extra."""
+        constraint = _declared_client_constraint()
+        lowest, highest = _client_major_range(constraint, "pyproject.toml [elasticsearch] extra")
+        requirements = (REPO_ROOT / "demo" / "requirements.txt").read_text(encoding="utf-8")
+        line = _find(r"^(elasticsearch[<>=!,. \d]+)$", requirements, "demo/requirements.txt")
+        demo_lowest, demo_highest = _client_major_range(
+            line[len("elasticsearch"):], "demo/requirements.txt"
+        )
+        assert (demo_lowest, demo_highest) == (lowest, highest), (
+            f"demo/requirements.txt pins the elasticsearch client to majors "
+            f"{demo_lowest}–{demo_highest} while pyproject.toml's extra allows {lowest}–{highest} "
+            f"— the demo and a real install would not run the same client major"
+        )

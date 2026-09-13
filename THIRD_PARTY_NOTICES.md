@@ -43,7 +43,7 @@ Nothing here is installed by a base `pip install`. Install via, e.g., `pip insta
 | `api` | djangorestframework, drf-spectacular, django-filter | BSD-3 / BSD-3 / BSD-3 | 🟢 | The REST API (`SNAPADMIN_REST_API_ENABLED`) and its OpenAPI schema/Swagger/ReDoc (`SNAPADMIN_SWAGGER_ENABLED`) — **both default to `True`**, so most installs want this extra |
 | `graphql` | graphene-django | MIT | 🟢 | The generated GraphQL schema (`SNAPADMIN_GRAPHQL_ENABLED`, default `True`) — independent of `api`; graphene-django pulls Django + graphene + graphql-core, none of the REST packages |
 | `theme` | django-unfold | MIT | 🟢 | Unfold admin theme / UI (falls back to Django's built-in admin without it) |
-| `elasticsearch` | elasticsearch | Apache-2.0 | 🟢 | Full-text search (`ES_ONLY` / `DUAL` models) |
+| `elasticsearch` | elasticsearch (`>=8,<9`) | Apache-2.0 | 🟢 | Full-text search (`ES_ONLY` / `DUAL` models) — capped to the 8.x client, which is the server major SnapAdmin supports |
 | `celery` | celery, django-celery-beat, django-celery-results | BSD-3 / BSD / BSD | 🟢 | Background tasks (async export, GDPR purge, digests, backups) |
 | `extra-settings` | django-extra-settings | MIT | 🟢 | In-admin dynamic key/value `Setting` model |
 | `xlsx` | openpyxl | MIT | 🟢 | XLSX output for the async export API (`export_format="xlsx"`) |
