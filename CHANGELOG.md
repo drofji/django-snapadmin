@@ -13,6 +13,13 @@ the `0.x` beta series.
 ## Unreleased
 
 ### Added
+- `data_retention_date_field` gives a model a per-row deletion date instead of one model-wide age:
+  name a `Date`/`DateTimeField` and each row expires on the date it carries. It combines with
+  `data_retention_days` — a row past its own date goes whatever the window says, a row whose date
+  is still ahead of it is kept even when it is older than the window, and a `NULL` date falls back
+  to the window (never purged when no window is set). Set it alone for a table where every row
+  carries its own deadline: the purge task, the management command and `snapadmin.W012` all count
+  that as configured retention. `ES_ONLY` models get the same rule as a query.
 - `api_full_clean` runs a model's own `full_clean()` on the API write path, so a
   `Model.clean()` cross-field rule holds for API clients as it already did in the admin.
   Off by default; `SNAPADMIN_API_FULL_CLEAN` turns it on project-wide and a model's own
@@ -81,6 +88,16 @@ the `0.x` beta series.
   adoption audit has to tell the two apart.
 - The field-encryption documentation is split into the field types (`#field-encryption`) and the
   keyset (`#encryption-keys`); `SECURITY.md` gains the field layer's threat model.
+- New check `snapadmin.E026`: a model indexed in Elasticsearch (`DUAL`, `ES_ONLY`, or
+  `es_index_enabled = True`) with neither `es_mapping` nor `es_auto_mapping = True` now fails
+  `manage.py check`. Such a model indexed its primary key and nothing else while the index
+  creation, every save and `es_reindex_all()` all reported success — only the search came back
+  empty, with nothing in a log to explain it. `searchable=True` never built the mapping, though
+  the documentation said it did; that wording and the mapping-less `DUAL` examples are corrected.
+  `es_auto_mapping` stays off by default on purpose: flipping it would start shipping every
+  concrete column of every mirrored model to a second datastore on upgrade. Existing projects in
+  this state will now fail at startup with two one-line fixes in the hint, or can silence
+  `snapadmin.E026` if an id-only index is deliberate.
 
 ### Fixed
 - A model-level validation rule that rejects an API write now answers `400` naming the

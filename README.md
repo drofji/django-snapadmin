@@ -117,7 +117,7 @@ The questions a tech lead or a manager asks before approving a dependency:
 | **Can we use it commercially?** | Yes. MIT, and the base install carries **only** permissive licences (MIT/BSD/Apache). Anything copyleft is an opt-in extra, never installed by default |
 | **How do we prove that?** | `snapadmin-license-check` audits what you actually installed and returns a verdict. Full inventory in [THIRD_PARTY_NOTICES.md](https://github.com/drofji/django-snapadmin/blob/main/THIRD_PARTY_NOTICES.md) |
 | **Who changed that record?** | An [immutable audit trail](https://drofji.github.io/django-snapadmin/#audit-trail) with per-field `old → new` diffs and a per-object timeline |
-| **GDPR / data retention?** | Declare `data_retention_days` (+ `data_retention_files` to take uploaded files with the row) per model; the same purge also covers the audit log and, if you opt in, finished export/reindex job files. [Full purge table](https://drofji.github.io/django-snapadmin/#retention-table) |
+| **GDPR / data retention?** | Declare `data_retention_days` per model — or [`data_retention_date_field`](https://drofji.github.io/django-snapadmin/#retention-per-row) when each row carries its own expiry date (+ `data_retention_files` to take uploaded files with the row); the same purge also covers the audit log and, if you opt in, finished export/reindex job files. [Full purge table](https://drofji.github.io/django-snapadmin/#retention-table) |
 | **A subject requests everything about them?** | `manage.py snapadmin_subject_request export\|delete` walks every model's declared `subject_path` — unmasked export (optionally AGE-encrypted), or a dry-run-by-default deletion that refuses up front if a protected relation would block it. [Details](https://drofji.github.io/django-snapadmin/#gdpr-subject-request) |
 | **Personal data in the API?** | [PII masking](https://drofji.github.io/django-snapadmin/#pii-masking) — declare a field sensitive once and it is masked in the admin, REST, GraphQL, exports **and** the audit diff. Per-field rules can unlock one field for one permission |
 | **Only HR should see salary?** | [`api_field_permissions`](https://drofji.github.io/django-snapadmin/#field-permissions) gates a field's very presence, per Django permission — absent from a response for anyone lacking it, an explicit `400` naming the field on a denied write, orthogonal to masking (which only controls display) |
@@ -332,7 +332,7 @@ database, so you can change your mind without a migration.
 |---|---|---|
 | `show_in_list=True` | `True` | Field appears as a column on the admin list |
 | `show_in_form=True` | `False` | Field appears on the add/edit form. **Set it** — an unset model gets an empty form (`snapadmin.W015` warns you at startup) |
-| `searchable=True` | `False` | Adds the field to the admin search box, the REST `?search=` filter and the Elasticsearch mapping |
+| `searchable=True` | `False` | Adds the field to the admin search box and the REST `?search=` filter. It does *not* build the Elasticsearch mapping — that is `es_mapping` / `es_auto_mapping` on the model |
 | `filterable=True` | `False` | Adds a sidebar filter in the admin and a `?field=…` query filter in the API |
 | `required=True` | `False` | `null=False, blank=False`. The one kwarg that *does* change the column — set it instead of Django's two, so the database and the search index agree |
 | `updatable=False` | `True` | Write-once: the value can be set on create but never changed |
@@ -344,7 +344,8 @@ On the model itself:
 | `api_write_fields = [...]` | The allowlist of fields an API client may set |
 | `api_exclude_fields = [...]` | Fields that never leave the server, on any surface |
 | `data_retention_days = 365` | The GDPR purge deletes rows older than this |
-| `es_storage_mode = EsStorageMode.DUAL` | Mirror rows to Elasticsearch |
+| `data_retention_date_field = "delete_at"` | A per-row deadline instead of a model-wide age: each row expires on the date it carries. Combines with `data_retention_days`, which becomes the fallback for rows whose date is `NULL` |
+| `es_storage_mode = EsStorageMode.DUAL` | Mirror rows to Elasticsearch. Pair it with `es_mapping` or `es_auto_mapping = True` — a mirror with neither would index ids only, so `snapadmin.E026` refuses it |
 | `tenant_scoped = True` | Row-level isolation: unreachable without a bound tenant |
 
 More kwargs — `tab` / `row` layout, `autocomplete`, `wysiwyg`, upload validation — in

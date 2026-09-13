@@ -10,6 +10,35 @@ Each notable change should be a paragraph or bullet, explaining what changed and
 Added
 -----
 
+* **``data_retention_date_field`` — a per-row deletion date.** ``data_retention_days`` is one
+  constant for a whole table, measured off one timestamp column, so it can express "delete 90 days
+  after this row was created" and nothing else. A table whose records each arrive with their own
+  agreed expiry — a ``delete_at`` an upstream supplier sets per row — had no way in. The closest
+  approximation was to point ``data_retention_field`` at the expiry column and accept a whole-day
+  offset of at least one day (``data_retention_days`` is disabled at ``0``), which also reads the
+  column as an age rather than as a deadline.
+
+  ``data_retention_date_field`` names that column, and it resolves through ``get_model_meta()``
+  like every other model-level option, so a ``@snap_model``-decorated plain model and a
+  ``SnapModel`` subclass declare it the same way. The two rules combine, with the more specific one
+  winning: a row past its own date is purged whatever the window says; a row whose date is still
+  ahead of it is **kept even when it is older than ``data_retention_days``**, because an expiry set
+  per record overrides the house rule rather than racing it; and a row whose date is ``NULL`` falls
+  back to ``data_retention_days`` measured on ``data_retention_field``. When no window is configured
+  at all, a ``NULL`` row is never purged — "no expiry declared" has to mean "keep", never "delete
+  now".
+
+  Set it alone for a table where every row carries its own deadline and there is no house rule: the
+  Celery task, ``manage.py snapadmin_purge_expired_data`` and ``snapadmin.W012`` all treat a model
+  configured that way as a model with retention, rather than skipping it for lack of a
+  ``data_retention_days``. The command's report line names the rule that applied instead of printing
+  a window nobody set. ``ES_ONLY`` models get the identical three-way rule expressed as a query — a
+  ``range`` on the deadline, OR an age range restricted to documents carrying no deadline
+  (``must_not exists``) — so the behaviour does not quietly differ by storage layer; the deadline
+  column has to be mapped as a ``date`` in the index, exactly like ``data_retention_field``. The
+  demo's ``AuditLog`` now dogfoods it with a nullable ``delete_at`` alongside its existing 90-day
+  window, and ``snapadmin_info --section features`` counts the models using one.
+
 * **``api_full_clean`` — the model's own rules now hold on the API write path.** A
   ``Model.clean()`` rule is enforced wherever a ``ModelForm`` runs, which in practice means the
   admin and nothing else. The generated serializer validated every field, so the API looked
@@ -289,6 +318,39 @@ Changed
   ``SECURITY.md`` gains the threat model for the field layer — the AEAD and nonce guarantees, the
   rename caveat, every leak surface and its default, the blind-index equality leak, and the
   restore-across-keysets failure that looks like data corruption and is not.
+
+* **An Elasticsearch mirror with no mapping is now a startup error, ``snapadmin.E026``.** The
+  document SnapAdmin writes is ``{"id": pk}`` plus one key per entry in the model's effective
+  mapping, and both sources of that mapping are off by default — ``es_mapping`` is ``None`` and
+  ``es_auto_mapping`` is ``False``. A model that sets ``es_storage_mode = DUAL`` (or ``ES_ONLY``,
+  or ``es_index_enabled = True``) and declares neither therefore indexes its primary key and
+  nothing else, while every signal around it reports success: the index is created, each save is
+  mirrored, ``es_reindex_all()`` returns the full row count, and there is no log line to find.
+  Only the searching fails, silently and for as long as nobody notices. In ``ES_ONLY`` it is worse
+  than a dead search — Elasticsearch *is* the storage layer there, so a field value that never
+  reaches a document is not written anywhere at all.
+
+  The trap was documented into existence. ``searchable=True`` was described as adding a field to
+  "the Elasticsearch mapping", which it has never done — it feeds the admin search box and the
+  REST ``?search=`` filter — and the ``DUAL`` examples on the documentation site declared no
+  mapping, so following them produced exactly the broken configuration. Both are corrected, and
+  the suite now scans every shipped example for an ES model without a mapping, so the check can
+  never fire on the project's own documentation.
+
+  ``es_auto_mapping`` deliberately stays ``False``. Flipping the default would have fixed the
+  reported case by making every mirrored model index every concrete column — including columns a
+  project had deliberately kept out of a second datastore with a different threat model — which
+  trades a dead search for a silent widening of what leaves the database on upgrade. The check,
+  not the default, is what makes the silent case impossible. Encrypted fields keep their existing
+  exemption: they are never auto-mapped (``snapadmin.E020``), so a model whose other fields are
+  mapped is never reported, and a model whose fields are *all* encrypted gets a hint that says so
+  rather than suggesting an option it already set.
+
+  This will fail ``manage.py check`` on an existing project that is in this state, which is the
+  point — that project's Elasticsearch search has never returned a result. Two one-line fixes are
+  offered in the hint (declare ``es_mapping``, or set ``es_auto_mapping = True``), and if an
+  id-only index is genuinely wanted, ``'snapadmin.E026'`` in ``SILENCED_SYSTEM_CHECKS`` is the
+  documented way out.
 
 Fixed
 -----

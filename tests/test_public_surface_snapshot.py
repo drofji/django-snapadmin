@@ -190,6 +190,7 @@ SNAPSHOT: dict[str, list[str]] = {
         "check_empty_admin_forms",
         "check_encrypted_field_usage",
         "check_encrypted_fields_not_indexed",
+        "check_es_mapping_present",
         "check_encryption_key_file",
         "check_encryption_keys",
         "check_encryption_required",

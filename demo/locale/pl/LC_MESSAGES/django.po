@@ -143,6 +143,9 @@ msgstr "Akcja"
 msgid "User Email"
 msgstr "E-mail użytkownika"
 
+msgid "Delete At"
+msgstr "Data usunięcia"
+
 msgid "Audit Log"
 msgstr "Dziennik audytu"
 

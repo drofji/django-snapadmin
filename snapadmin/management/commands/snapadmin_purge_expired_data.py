@@ -6,8 +6,9 @@ deployments with no worker:
 
     python manage.py snapadmin_purge_expired_data [--dry-run]
 
-Purges, in order: every registered SnapModel's ``data_retention_days`` (and any
-``data_retention_files`` storage objects), the ``SnapadminAuditLog`` table
+Purges, in order: every registered SnapModel's ``data_retention_days`` /
+``data_retention_date_field`` (and any ``data_retention_files`` storage
+objects), the ``SnapadminAuditLog`` table
 against ``SNAPADMIN_AUDIT_RETENTION_DAYS``, and — when
 ``SNAPADMIN_EXPORT_RETENTION_DAYS`` is set — finished export/reindex job rows
 and their published files.
@@ -16,8 +17,27 @@ and their published files.
 from django.core.management.base import BaseCommand
 
 
+def _retention_rule_description(model, get_model_meta) -> str:
+    """Why each of this model's rows is up for deletion, for the report line.
+
+    A model can be swept by a model-wide age window, by a per-row deadline
+    column, or by both; printing "older than None days" for the second of those
+    would describe a rule nobody configured.
+    """
+    days = get_model_meta(model, "data_retention_days", None)
+    date_field = get_model_meta(model, "data_retention_date_field", None)
+    clauses = []
+    if date_field:
+        clauses.append(f"past their {date_field}")
+    if days and days > 0:
+        field = get_model_meta(model, "data_retention_field", "created_at")
+        older = f"older than {days} days"
+        clauses.append(f"{older} by {field}" if date_field else older)
+    return ", or ".join(clauses)
+
+
 class Command(BaseCommand):
-    help = "Delete records that exceed their model's data_retention_days limit (GDPR)"
+    help = "Delete records past their model's retention rules (GDPR)"
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -30,7 +50,7 @@ class Command(BaseCommand):
         from django.apps import apps
         from django.utils import timezone
         from snapadmin.exporting import purge_expired_export_jobs
-        from snapadmin.models import SnapadminAuditLog
+        from snapadmin.models import SnapadminAuditLog, _retention_configured
         from snapadmin.registry import get_model_meta, is_registered
 
         dry_run: bool = options["dry_run"]
@@ -43,18 +63,18 @@ class Command(BaseCommand):
             if not (is_registered(model) and hasattr(model, "purge_expired")):
                 continue
 
-            retention_days = get_model_meta(model, "data_retention_days", None)
-            if not retention_days or retention_days <= 0:
+            if not _retention_configured(model):
                 continue
 
             label = f"{model._meta.app_label}.{model.__name__}"
+            rule = _retention_rule_description(model, get_model_meta)
 
             try:
                 count = model.purge_expired(now=now, dry_run=dry_run)
                 if dry_run:
-                    self.stdout.write(f"  DRY RUN {label}: {count} records would be deleted (older than {retention_days} days)")
+                    self.stdout.write(f"  DRY RUN {label}: {count} records would be deleted ({rule})")
                 else:
-                    self.stdout.write(self.style.SUCCESS(f"  DELETED {label}: {count} records (older than {retention_days} days)"))
+                    self.stdout.write(self.style.SUCCESS(f"  DELETED {label}: {count} records ({rule})"))
                     total += count
             except Exception as exc:
                 self.stdout.write(self.style.ERROR(f"  ERROR {label}: {exc}"))

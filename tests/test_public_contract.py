@@ -208,6 +208,7 @@ def test_snapmodel_attribute_defaults():
         "api_http_method_names": None,
         "data_retention_days": None,
         "data_retention_field": "created_at",
+        "data_retention_date_field": None,
         "offline_mode": False,
         "offline_cache_limit": 100,
         "list_per_page": 100,
