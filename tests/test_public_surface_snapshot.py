@@ -183,6 +183,7 @@ SNAPSHOT: dict[str, list[str]] = {
         "check_api_write_fields",
         "check_backup_age_recipients",
         "check_backup_env_requires_encryption",
+        "check_backup_offsite_requires_encryption",
         "check_backup_s3_configuration",
         "check_backup_schedule_cadence",
         "check_empty_admin_forms",

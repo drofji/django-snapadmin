@@ -403,6 +403,51 @@ def check_backup_env_requires_encryption(app_configs, **kwargs):
     )]
 
 
+def check_backup_offsite_requires_encryption(app_configs, **kwargs):
+    """Warn: an active destination that leaves this host, with no AGE recipients.
+
+    :func:`check_backup_env_requires_encryption` guards the ``env`` part of the
+    bundle and nothing else — so a project that never bundles ``.env`` could
+    ship the *database dump itself*, in plain gzip, to an FTP host, an SFTP
+    Storage Box, an S3 bucket or a mounted NFS share without a word at startup.
+    That dump is the same data the ``.env`` file merely unlocks.
+
+    A **warning**, not an error, deliberately: unlike the ``env`` case this
+    check cannot see the whole picture. The transport may already be encrypted
+    (SFTP, FTPS, HTTPS to S3), the destination may encrypt at rest
+    (SSE-KMS on a bucket, LUKS on the share), and either is a legitimate answer
+    — none of which is visible from ``settings.py``. Blocking boot over a
+    control SnapAdmin cannot observe would be wrong; staying silent about the
+    common case, where nobody thought about it at all, is worse.
+
+    ``local`` is excluded: it never leaves the machine that produced the dump —
+    it is the staging directory the bundle is built in — so an unencrypted
+    local-only setup is a defensible choice rather than an oversight. Every
+    other destination in :data:`snapadmin.backup.DESTINATIONS` is off-host,
+    and the active set is read through
+    :func:`snapadmin.backup._active_destinations` so this check and the code
+    that actually ships the dump can never disagree about which are live.
+    """
+    from snapadmin.backup import _active_destinations, get_backup_config
+
+    config = get_backup_config()
+    if not config.enabled or config.age_recipients:
+        return []
+    offsite = [dest for dest in _active_destinations(config) if dest != "local"]
+    if not offsite:
+        return []
+    return [Warning(
+        f"Backups are shipped off this host ({_format_labels(offsite)}) but "
+        "SNAPADMIN_BACKUP_AGE_RECIPIENTS is empty — every database dump leaves "
+        "the server unencrypted.",
+        hint="Set SNAPADMIN_BACKUP_AGE_RECIPIENTS to at least one age or SSH public "
+             "key ('manage.py snapadmin_age_keygen' makes one) and every dump is "
+             "encrypted in-stream before it reaches disk. Ignore this if the "
+             "destination already encrypts at rest and you trust its transport.",
+        id="snapadmin.W021",
+    )]
+
+
 #: Days simulated forward when timing a crontab's period — far enough for any
 #: schedule saner than "once a year" (the worst realistic beat entry), bounded
 #: so a pathological one degrades to "cannot determine" rather than a slow
@@ -486,7 +531,7 @@ def check_backup_schedule_cadence(app_configs, **kwargs):
     that combination is caught at ``manage.py check`` instead of discovered
     the day someone needs a backup that was never taken.
     """
-    from snapadmin.backup import _active_destinations, get_backup_config
+    from snapadmin.backup import _active_destinations, _INTERVAL_ATTRS, get_backup_config
 
     config = get_backup_config()
     if not config.enabled:
@@ -504,13 +549,13 @@ def check_backup_schedule_cadence(app_configs, **kwargs):
     if beat_hours is None:
         return []
 
-    intervals = {
-        "local": config.local_every_hours,
-        "network": config.network_every_hours,
-        "remote": config.remote_every_hours,
-        "sftp": config.sftp_every_hours,
-    }
-    shortest = min(intervals[dest] for dest in _active_destinations(config))
+    # Read through backup's own destination→interval-attribute table rather
+    # than a second copy of it here: the s3 destination was added without this
+    # check being updated, and an active bucket then made `manage.py check`
+    # die with KeyError('s3') instead of reporting anything at all.
+    shortest = min(
+        getattr(config, _INTERVAL_ATTRS[dest]) for dest in _active_destinations(config)
+    )
     if beat_hours <= shortest:
         return []
     return [Warning(
@@ -1667,6 +1712,7 @@ ALL_CHECKS = [
     check_api_read_only,
     check_backup_age_recipients,
     check_backup_env_requires_encryption,
+    check_backup_offsite_requires_encryption,
     check_backup_s3_configuration,
     check_backup_schedule_cadence,
     check_retention_purge_scheduled,

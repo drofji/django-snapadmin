@@ -468,7 +468,7 @@ never a false green):
 | App boots, models registered | `manage.py check` · `snapadmin_info --section inventory` |
 | Migrations applied | `manage.py migrate --check` |
 | Auth on the API, PII masked where it matters | `snapadmin_info --section features` |
-| Backups on, **2+ destinations**, encryption (**strongly recommended**) | `snapadmin_info --section features` |
+| Backups on, **2+ destinations**, encryption (**strongly recommended**) | `snapadmin_info --section features` · `manage.py check` warns (`snapadmin.W021`) when a destination that leaves the host has no `SNAPADMIN_BACKUP_AGE_RECIPIENTS` |
 | Have you actually run a restore? | `snapadmin_restore <bundle> --confirm` against a recent dump — an untested backup is the most common form of not having one |
 
 → [Full checklist](https://drofji.github.io/django-snapadmin/#integration-checklist) — Must work /

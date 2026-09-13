@@ -60,6 +60,12 @@ the `0.x` beta series.
   `INSTALLED_APPS` entry to write instead. It is reached wherever admin autodiscovery is deferred
   (`SimpleAdminConfig`, a custom `AdminSite`, no `django.contrib.admin`) — with Django's default
   `AdminConfig` the upstream error still aborts `django.setup()` before any check runs.
+- New system check `snapadmin.W021`: a backup destination that leaves the host (`network`, `remote`,
+  `sftp`, `s3`) is active while `SNAPADMIN_BACKUP_AGE_RECIPIENTS` is empty, so the database dump
+  itself travels in plain gzip. `snapadmin.E007` only ever covered the `.env` part of the bundle.
+  The warning names the offending destinations and the setting that fixes them; `local` is excluded
+  because the dump never leaves the machine. A warning rather than an error on purpose — the
+  transport or the destination may already encrypt, and neither is visible from `settings.py`.
 
 ### Changed
 - `snapadmin_info --section features` reports the number of fields actually encrypted alongside the
@@ -129,6 +135,12 @@ the `0.x` beta series.
   `snapadmin.models.suppress_es_delete_receiver()` context manager so the per-row receiver does not
   repeat the work, as the retention purge and `snapadmin.etl.stale_sync()` now do. An ES outage logs `es_delete_document_failed` and never breaks the
   database delete.
+- `manage.py check` no longer dies with `KeyError: 's3'` when an S3 backup destination is
+  configured. The `snapadmin.W010` cadence check kept its own copy of the destination-to-interval
+  table and never learned about `s3`, so a project with `SNAPADMIN_BACKUP_S3_BUCKET` set and a Beat
+  entry for `snapadmin.run_db_backups` lost `check`, `migrate` and `runserver` to a traceback that
+  named no setting. The intervals now come from the same table the backup run itself uses, and
+  `s3`'s interval is finally counted when judging whether Beat runs often enough.
 
 
 ## 0.1.0b8 — 2026-09-06

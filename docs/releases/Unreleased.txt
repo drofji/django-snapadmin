@@ -212,6 +212,28 @@ Added
   ``django.contrib.admin`` at all — where the misconfiguration is otherwise ignored in silence or
   only surfaces on the first request. The check is a no-op unless ``extra_settings`` is installed.
 
+* **A startup warning for an unencrypted off-host backup (``snapadmin.W021``).** The ``.env``
+  fail-closed rule (``snapadmin.E007``) guards one part of the bundle and nothing else, so a project
+  that never bundles ``.env`` could ship the *database dump itself*, in plain gzip, to an FTP host,
+  an SFTP Storage Box, an S3 bucket or a mounted NFS share without a word at startup. That dump is
+  the same data the ``.env`` file merely unlocks.
+
+  ``manage.py check`` now warns when any destination that leaves the machine — ``network``,
+  ``remote``, ``sftp``, ``s3`` — is active while ``SNAPADMIN_BACKUP_AGE_RECIPIENTS`` is empty. The
+  message names the offending destinations and the setting that fixes them, in one line rather than
+  one per destination. ``local`` is excluded: it is the staging directory on the same host, so an
+  unencrypted local-only setup is a choice rather than an oversight. The active set is read through
+  the same function the backup run itself uses, so the check and the code that ships the dump can
+  never disagree about which destinations are live.
+
+  It is a **warning**, not an error, and deliberately so. Unlike the ``env`` case this check cannot
+  see the whole picture: the transport may already be encrypted (SFTP, FTPS, HTTPS to S3), the
+  destination may encrypt at rest (SSE-KMS on a bucket, LUKS on the share), and both are legitimate
+  answers that are invisible from ``settings.py``. Blocking boot over a control SnapAdmin cannot
+  observe would be wrong; staying silent in the common case, where nobody chose at all, is worse.
+  Once you have confirmed your destination really does encrypt, ``SILENCED_SYSTEM_CHECKS`` puts it
+  away for good.
+
 Changed
 -------
 
@@ -404,4 +426,15 @@ Fixed
   ``es_delete_document_failed`` and the delete stands, matching every other ES write path.
   ``delete_pks_from_es()`` keeps reporting its outcome as a return value instead, which is what lets
   the retention purge raise ``SnapPurgeError`` rather than report a partial purge as a clean one.
+
+* **``manage.py check`` no longer dies when an S3 backup destination is configured.** The
+  ``snapadmin.W010`` cadence check compares the Celery Beat interval against the shortest
+  ``SNAPADMIN_BACKUP_*_EVERY_HOURS`` among the *active* destinations, and it carried its own copy of
+  the destination-to-interval table. The ``s3`` destination was added to the backup module without
+  that second copy being updated, so a project with ``SNAPADMIN_BACKUP_S3_BUCKET`` set and a Beat
+  entry for ``snapadmin.run_db_backups`` got ``KeyError: 's3'`` out of the system-check framework —
+  taking down ``check``, ``migrate`` and ``runserver`` together, with a traceback that named no
+  setting. The check now reads the intervals from the same table ``backup.due_destinations()`` uses,
+  so a future destination cannot reintroduce it, and ``s3``'s own interval is finally counted when
+  deciding whether Beat runs often enough.
 

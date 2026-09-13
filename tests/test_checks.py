@@ -387,6 +387,107 @@ class TestBackupEnvRequiresEncryption:
         assert [e.id for e in result] == ["snapadmin.E007"]
 
 
+# ── off-host backup destination without encryption (W021) ────────────────────
+
+class TestBackupOffsiteRequiresEncryption:
+    """#EXT1d — ``snapadmin.E007`` only guards the ``env`` part. The database
+    dump itself could be shipped to an off-host destination in plain gzip
+    without a word at startup."""
+
+    def test_backups_disabled_is_clean(self):
+        with override_settings(SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com"):
+            assert checks.check_backup_offsite_requires_encryption(None) == []
+
+    @override_settings(SNAPADMIN_BACKUP_ENABLED=True)
+    def test_local_only_is_clean(self):
+        """``local`` never leaves the machine that produced the dump, so an
+        unencrypted local-only setup is a deliberate, defensible choice."""
+        assert checks.check_backup_offsite_requires_encryption(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_AGE_RECIPIENTS=[
+            "age1scr8rpq5lxtaqqskkawrft82at865e4j3gvs30cjv79q5qq3gc7qwj8um3"
+        ],
+    )
+    def test_offsite_with_recipients_is_clean(self):
+        assert checks.check_backup_offsite_requires_encryption(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+    )
+    def test_sftp_without_recipients_warns(self):
+        result = checks.check_backup_offsite_requires_encryption(None)
+        assert [w.id for w in result] == ["snapadmin.W021"]
+        assert "sftp" in result[0].msg
+        # It must name the setting that fixes it, not just the problem.
+        assert "SNAPADMIN_BACKUP_AGE_RECIPIENTS" in result[0].msg
+        assert "SNAPADMIN_BACKUP_AGE_RECIPIENTS" in result[0].hint
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_NETWORK_DIR="/mnt/nas/backups",
+        SNAPADMIN_BACKUP_AGE_RECIPIENTS=[],
+    )
+    def test_network_share_counts_as_off_host(self):
+        """A mounted NFS/SMB share is another machine's disk — the dump leaves
+        this host even though the code path is a plain file copy."""
+        result = checks.check_backup_offsite_requires_encryption(None)
+        assert [w.id for w in result] == ["snapadmin.W021"]
+        assert "network" in result[0].msg
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_FTP_HOST="ftp.example.com",
+    )
+    def test_ftp_without_recipients_warns(self):
+        result = checks.check_backup_offsite_requires_encryption(None)
+        assert [w.id for w in result] == ["snapadmin.W021"]
+        assert "remote" in result[0].msg
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_S3_BUCKET="my-bucket",
+    )
+    def test_s3_without_recipients_warns(self):
+        result = checks.check_backup_offsite_requires_encryption(None)
+        assert [w.id for w in result] == ["snapadmin.W021"]
+        assert "s3" in result[0].msg
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_NETWORK_DIR="/mnt/nas/backups",
+        SNAPADMIN_BACKUP_FTP_HOST="ftp.example.com",
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_S3_BUCKET="my-bucket",
+    )
+    def test_every_off_host_destination_is_named_in_one_warning(self):
+        """One message listing them all, not four copies of the same advice —
+        the same reasoning as :func:`checks._format_labels`."""
+        result = checks.check_backup_offsite_requires_encryption(None)
+        assert [w.id for w in result] == ["snapadmin.W021"]
+        for dest in ("network", "remote", "sftp", "s3"):
+            assert dest in result[0].msg
+        assert "local" not in result[0].msg
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+    )
+    def test_is_a_warning_not_an_error(self):
+        """Advisory on purpose: an operator may encrypt at the transport or
+        storage layer, and that is not something this check can see."""
+        from django.core.checks import WARNING
+
+        result = checks.check_backup_offsite_requires_encryption(None)
+        assert result[0].level == WARNING
+
+    def test_is_registered(self):
+        assert checks.check_backup_offsite_requires_encryption in checks.ALL_CHECKS
+
+
 # ── backup beat cadence vs. shortest destination interval (W010) ────────────
 
 class TestBackupScheduleCadence:
@@ -516,6 +617,31 @@ class TestBackupScheduleCadence:
         destination. Only 'local' (48h) counts, and 24h comfortably covers
         that: this must stay clean, not warn on an interval nothing uses."""
         assert checks.check_backup_schedule_cadence(None) == []
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS=24,
+        SNAPADMIN_BACKUP_S3_BUCKET="my-bucket",
+        SNAPADMIN_BACKUP_S3_EVERY_HOURS=1,
+        CELERY_BEAT_SCHEDULE={
+            "run-db-backups": {
+                "task": "snapadmin.run_db_backups",
+                "schedule": timedelta(hours=12),
+            },
+        },
+    )
+    def test_active_s3_destination_is_covered_not_a_crash(self):
+        """The s3 destination arrived after this check was written and its
+        interval was never added to the lookup, so an active s3 bucket made
+        ``manage.py check`` die with ``KeyError: 's3'`` instead of reporting
+        anything. The intervals now come from the same table
+        ``backup.due_destinations`` uses, so a new destination cannot
+        reintroduce this."""
+        result = checks.check_backup_schedule_cadence(None)
+        assert [w.id for w in result] == ["snapadmin.W010"]
+        # s3's 1h interval is the shortest active one — it must be the number
+        # the warning quotes, not local's 24h.
+        assert "(1h)" in result[0].msg
 
 
 # ── S3 destination configuration (W011) ──────────────────────────────────────

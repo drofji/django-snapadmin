@@ -2744,6 +2744,22 @@ SNAPADMIN_BACKUP_AGE_BACKEND = "auto"</code></pre>
   <code>snapadmin.W008</code> at <code>manage.py check</code> — advisory, since the other recipients
   still work; the malformed one only fails when a backup actually runs.</p>
 
+  <div class="callout callout-warn">
+    <strong>Leaving this unset while shipping off-host is <code>snapadmin.W021</code>.</strong>
+    If any destination that leaves this machine is active — <code>network</code>,
+    <code>remote</code>, <code>sftp</code> or <code>s3</code> — and
+    <code>SNAPADMIN_BACKUP_AGE_RECIPIENTS</code> is empty, <code>manage.py check</code> names the
+    offending destinations and the setting that fixes them. <code>local</code> is excluded: it is
+    the staging directory on the same host, so an unencrypted local-only setup is a choice rather
+    than an oversight.
+    <br><br>
+    It is a <em>warning</em>, not an error, unlike the <code>.env</code> rule below. The transport
+    may already be encrypted (SFTP, FTPS, HTTPS to S3) and the destination may encrypt at rest
+    (SSE-KMS on a bucket, LUKS on the share) — both are legitimate answers, and neither is visible
+    from <code>settings.py</code>. If that is your setup, the warning is safe to ignore or to add to
+    <code>SILENCED_SYSTEM_CHECKS</code>.
+  </div>
+
   <table>
     <tr><th>Backend</th><th>Needs</th><th>Best for</th></tr>
     <tr><td><code>pyrage</code></td><td><code>pip install django-snapadmin[age]</code> (MIT, prebuilt wheels — no Rust toolchain to install)</td><td>Portability — identical on macOS/Windows dev machines and CI, no OS package</td></tr>

@@ -508,6 +508,19 @@ Key protections:
   destination unencrypted. The always-unencrypted `manifest.json` sidecar that accompanies every
   bundle (by design — it must be readable without an identity) carries no secrets: only part names,
   per-part **ciphertext** checksums, versions and the public recipient list.
+- **An off-host destination with no encryption is flagged, not blocked (`snapadmin.W021`)** — the
+  `.env` rule above guards the `env` part and nothing else, so a project that never bundles `.env`
+  could still ship the *database dump itself* in plain gzip to an FTP host, an SFTP Storage Box, an
+  S3 bucket or a mounted NFS share without a word at startup. That dump is the same data the `.env`
+  file merely unlocks. `manage.py check` now warns when any destination that leaves this machine
+  (`network`, `remote`, `sftp`, `s3`) is active while `SNAPADMIN_BACKUP_AGE_RECIPIENTS` is empty,
+  naming the offending destinations and the setting that fixes them. `local` is excluded — it is the
+  staging directory on the same host. Deliberately a **warning**, unlike the `env` case: the
+  transport may already be encrypted (SFTP, FTPS, HTTPS to S3) and the destination may encrypt at
+  rest (SSE-KMS, LUKS), and neither is visible from `settings.py` — failing boot over a control
+  SnapAdmin cannot observe would be wrong, while silence in the common case, where nobody chose at
+  all, is worse. Silence it via `SILENCED_SYSTEM_CHECKS` once you have confirmed the destination
+  really does encrypt.
 - **Restoring a backup** (`manage.py snapadmin_restore`) — dry-run by default; `--confirm` performs
   it. Every part's checksum is verified against the manifest before any byte reaches the live
   database/media/`.env`, so a truncated or corrupted upload is refused rather than half-restored. An
