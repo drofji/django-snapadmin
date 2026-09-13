@@ -97,8 +97,13 @@ graphene-django = {version = ">=3.2.0", optional = true}
 # for the full themed UI; the core admin works without it.
 django-unfold = {version = ">=0.40.0", optional = true}
 
-# Optional: Elasticsearch integration (required when ELASTICSEARCH_ENABLED=True)
-elasticsearch = {version = ">=8.0.0", optional = true}
+# Optional: Elasticsearch integration (required when ELASTICSEARCH_ENABLED=True). Capped to the
+# 8.x client on purpose: snapadmin/models.py and snapadmin/reindexing.py call the client with the
+# `body=` and `ignore=` arguments, which are 8.x compatibility shims that elasticsearch-py 9
+# removed — and 8.x is the server major every stack we ship starts (the `snapadmin-new --full`
+# compose template and demo/docker-compose.yml). tests/test_version_sync.py reads this constraint
+# and those images and fails if they ever disagree again.
+elasticsearch = {version = ">=8.0.0,<9.0.0", optional = true}
 
 # Optional: Celery background tasks (required for Celery Beat schedules)
 celery = {version = ">=5.3.0", optional = true}

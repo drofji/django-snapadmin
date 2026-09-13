@@ -754,7 +754,8 @@ INSTALLED_APPS = [
 ```
 
 > **Elasticsearch needs no app entry** — `pip install django-snapadmin[elasticsearch]` and set
-> `ELASTICSEARCH_ENABLED = True`. Same for `[backup]` (SFTP offsite backups) and `[age]`
+> `ELASTICSEARCH_ENABLED = True`. The supported server is **Elasticsearch 8.x**, and the extra
+> pins the client to match (`>=8,<9`). Same for `[backup]` (SFTP offsite backups) and `[age]`
 > (encrypted backups): a dependency, not an app.
 
 </details>
@@ -770,7 +771,7 @@ is safe for commercial and proprietary use. Everything with a licence caveat is 
 | `api` | `djangorestframework`, `drf-spectacular`, `django-filter` | The REST API + OpenAPI schema/Swagger/ReDoc — needed once you set `SNAPADMIN_REST_API_ENABLED`/`SNAPADMIN_SWAGGER_ENABLED` to `True` (default `False`) |
 | `graphql` | `graphene-django` | The generated GraphQL schema — needed once you set `SNAPADMIN_GRAPHQL_ENABLED` to `True` (default `False`), independent of `api` |
 | `theme` | `django-unfold` | The themed admin UI (stock Django admin without it) |
-| `elasticsearch` | `elasticsearch` | Full-text search, `DUAL` / `ES_ONLY` models |
+| `elasticsearch` | `elasticsearch` (`>=8,<9`) | Full-text search, `DUAL` / `ES_ONLY` models — against an **Elasticsearch 8.x** server |
 | `celery` | `celery`, `django-celery-beat`, `django-celery-results` | Background tasks: async export, GDPR purge, digests, backups |
 | `backup` | `paramiko` | SFTP offsite database backups |
 | `age` | `pyrage` | AGE-encrypted backups (MIT — or skip this extra and use the `age` CLI instead) |

@@ -28,7 +28,7 @@ django-celery-results>=2.5.0
 psycopg2-binary>=2.9.9
 
 # Elasticsearch (Demo only)
-elasticsearch>=8.12.0
+elasticsearch>=8.0.0,<9.0.0
 
 # SSH/SFTP offsite backups (SNAPADMIN_BACKUP_SFTP_*)
 paramiko>=3.0.0

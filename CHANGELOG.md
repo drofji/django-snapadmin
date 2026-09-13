@@ -41,8 +41,6 @@ the `0.x` beta series.
   blind-index columns after a `bulk_update()`/`QuerySet.update()`. Reports only unless `--apply`,
   resumable by primary key, and a row it cannot convert is counted and skipped rather than aborting
   the run.
-
-### Added
 - `SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE` (default `False`) measures each backup destination's due
   window from its *planned* slot rather than its last actual run. Off, every run books the next one
   a full interval after it finished, so a daily backup creeps forward by however long each run takes
@@ -89,6 +87,12 @@ the `0.x` beta series.
   though its form is complete. It now consults the live admin registry, across every `AdminSite`
   rather than only the default one, and skips a model whose registered `ModelAdmin` SnapAdmin did
   not generate. A model registered nowhere still warns, so no genuine case is lost.
+- The `[elasticsearch]` extra is capped to the 8.x client (`>=8,<9`); it was unbounded, so a fresh
+  install pulled the 9.x client against the 8.x server the scaffold and demo compose files start —
+  which answers `BadRequestError(400)` to every call, leaving no indices, no search results and a
+  degraded `/api/health/`. `demo/requirements.txt` is capped to match, and a test now reads the pin
+  and both compose images from their own files so they cannot drift apart again.
+
 
 ## 0.1.0b8 — 2026-09-06
 

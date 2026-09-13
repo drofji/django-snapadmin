@@ -473,7 +473,7 @@
     <tr><td><code>api</code></td><td><code>django-snapadmin[api]</code></td><td><code>djangorestframework</code>, <code>drf-spectacular</code>, <code>django-filter</code></td><td>The REST API + OpenAPI schema/Swagger/ReDoc — <strong>off by default</strong>, needed once you set <code>SNAPADMIN_REST_API_ENABLED</code> / <code>SNAPADMIN_SWAGGER_ENABLED</code> to <code>True</code></td></tr>
     <tr><td><code>graphql</code></td><td><code>django-snapadmin[graphql]</code></td><td><code>graphene-django</code></td><td>The generated GraphQL schema — <strong>off by default</strong>, needed once you set <code>SNAPADMIN_GRAPHQL_ENABLED</code> to <code>True</code>, independent of <code>api</code></td></tr>
     <tr><td><code>theme</code></td><td><code>django-snapadmin[theme]</code></td><td><code>django-unfold</code></td><td>Unfold-themed admin UI (falls back to Django's built-in admin without it)</td></tr>
-    <tr><td><code>elasticsearch</code></td><td><code>django-snapadmin[elasticsearch]</code></td><td><code>elasticsearch</code></td><td>Full-text search / <code>ES_ONLY</code> / <code>DUAL</code> models</td></tr>
+    <tr><td><code>elasticsearch</code></td><td><code>django-snapadmin[elasticsearch]</code></td><td><code>elasticsearch</code> (<code>&gt;=8,&lt;9</code>)</td><td>Full-text search / <code>ES_ONLY</code> / <code>DUAL</code> models — against an <strong>Elasticsearch 8.x</strong> server</td></tr>
     <tr><td><code>celery</code></td><td><code>django-snapadmin[celery]</code></td><td><code>celery</code>, <code>django-celery-beat</code>, <code>django-celery-results</code></td><td>Background tasks (async export, GDPR purge, digests, backups)</td></tr>
     <tr><td><code>backup</code></td><td><code>django-snapadmin[backup]</code></td><td><code>paramiko</code></td><td>SFTP offsite database backups (LGPL)</td></tr>
     <tr><td><code>age</code></td><td><code>django-snapadmin[age]</code></td><td><code>pyrage</code></td><td>AGE-encrypted backups (MIT — <code>SNAPADMIN_BACKUP_AGE_RECIPIENTS</code>; or skip this extra and use the <code>age</code> CLI instead)</td></tr>
@@ -1878,6 +1878,17 @@ ELASTICSEARCH_URL = "http://localhost:9200"  # local dev or external cluster</co
   <div class="callout callout-info">
     <strong>Local dev without Docker</strong>
     Leave <code>ELASTICSEARCH_ENABLED=False</code>. All models fall back to <code>DB_ONLY</code> automatically — no ES process required.
+  </div>
+
+  <div class="callout callout-warn">
+    <strong>Supported server: Elasticsearch 8.x</strong>
+    The <code>[elasticsearch]</code> extra pins the client to <code>&gt;=8,&lt;9</code> to match, and both
+    compose files SnapAdmin ships (the <code>snapadmin-new --full</code> template and
+    <code>demo/docker-compose.yml</code>) start an 8.x server. Pointing a 9.x client at an 8.x
+    cluster is not a soft degradation: every call comes back <code>BadRequestError(400)</code>, so
+    there are no indices, no search results and a degraded <code>/api/health/</code> — with nothing
+    but the logs to say why. A test reads the pin and the images from their own files and fails if
+    they drift apart.
   </div>
 
   <h3>Running with Docker</h3>

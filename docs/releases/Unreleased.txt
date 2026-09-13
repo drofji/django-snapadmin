@@ -269,3 +269,20 @@ Fixed
   guess against mixins a hand-written admin may perfectly well reuse. A model registered on no site
   at all still warns: an ``AdminSite`` that never autodiscovers has an empty registry, and reading
   that as "nothing to warn about" would drop every genuine case at once.
+
+* **The ``[elasticsearch]`` extra now pins the client to the 8.x line (``>=8,<9``).** It was
+  ``>=8.0.0`` with no upper bound, so a fresh ``pip install "django-snapadmin[elasticsearch]"``
+  resolved the 9.x client — while every Elasticsearch server SnapAdmin ships is 8.x: the
+  ``snapadmin-new --full`` compose template and ``demo/docker-compose.yml`` both start an 8.x
+  image. A 9.x client talking to an 8.x cluster does not degrade gracefully; it answers
+  ``BadRequestError(400)`` to every request, so index creation, ``es_search()`` and friends all
+  fail, ``/api/health/`` reports Elasticsearch offline, and the only clue is in the logs — it
+  reads as "Elasticsearch is broken", not "the client is a major ahead of the server". The 9.x
+  client also removed the ``body=`` and ``ignore=`` compatibility arguments that SnapAdmin's
+  indexing and reindexing paths still use, so it would not have worked against a 9.x server
+  either. ``demo/requirements.txt`` carried the same unbounded pin and is capped to match. If you
+  already have a 9.x client installed, ``pip install "elasticsearch<9"``; nothing else changes,
+  and no 8.x install is affected. A new test in ``tests/test_version_sync.py`` reads the pin out
+  of ``pyproject.toml`` and the server majors out of the two compose files and fails if they ever
+  disagree again.
+
