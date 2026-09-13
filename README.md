@@ -332,7 +332,7 @@ database, so you can change your mind without a migration.
 |---|---|---|
 | `show_in_list=True` | `True` | Field appears as a column on the admin list |
 | `show_in_form=True` | `False` | Field appears on the add/edit form. **Set it** — an unset model gets an empty form (`snapadmin.W015` warns you at startup) |
-| `searchable=True` | `False` | Adds the field to the admin search box, the REST `?search=` filter and the Elasticsearch mapping |
+| `searchable=True` | `False` | Adds the field to the admin search box and the REST `?search=` filter. It does *not* build the Elasticsearch mapping — that is `es_mapping` / `es_auto_mapping` on the model |
 | `filterable=True` | `False` | Adds a sidebar filter in the admin and a `?field=…` query filter in the API |
 | `required=True` | `False` | `null=False, blank=False`. The one kwarg that *does* change the column — set it instead of Django's two, so the database and the search index agree |
 | `updatable=False` | `True` | Write-once: the value can be set on create but never changed |
@@ -344,7 +344,7 @@ On the model itself:
 | `api_write_fields = [...]` | The allowlist of fields an API client may set |
 | `api_exclude_fields = [...]` | Fields that never leave the server, on any surface |
 | `data_retention_days = 365` | The GDPR purge deletes rows older than this |
-| `es_storage_mode = EsStorageMode.DUAL` | Mirror rows to Elasticsearch |
+| `es_storage_mode = EsStorageMode.DUAL` | Mirror rows to Elasticsearch. Pair it with `es_mapping` or `es_auto_mapping = True` — a mirror with neither would index ids only, so `snapadmin.E026` refuses it |
 | `tenant_scoped = True` | Row-level isolation: unreachable without a bound tenant |
 
 More kwargs — `tab` / `row` layout, `autocomplete`, `wysiwyg`, upload validation — in

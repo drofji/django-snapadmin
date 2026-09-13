@@ -1534,6 +1534,98 @@ def check_encrypted_fields_not_indexed(app_configs, **kwargs):
                 ))
     return errors
 
+
+#: Appended to every ``E026`` hint. An id-only mirror is never useful, but a
+#: system check that has no way out turns an upgrade into a dead end, so the
+#: escape hatch is named in the message rather than left to be discovered.
+_E026_ESCAPE = (
+    " If an id-only index is genuinely what you want, add 'snapadmin.E026' to "
+    "SILENCED_SYSTEM_CHECKS."
+)
+
+
+def check_es_mapping_present(app_configs, **kwargs) -> list[CheckMessage]:
+    """Refuse an Elasticsearch mirror that would index nothing but the id (``E026``).
+
+    ``get_es_document()`` starts from ``{"id": pk}`` and adds one key per entry
+    in the effective mapping (:meth:`~snapadmin.models.SnapModel.get_es_mapping`).
+    With no ``es_mapping`` and ``es_auto_mapping`` left at its default ``False``,
+    that mapping is empty and every document is the id alone — while everything
+    around it reports success: the index is created, each save is mirrored,
+    ``es_reindex_all()`` returns the full row count, and every search matches
+    nothing. There is no log line to find, because nothing went wrong.
+
+    The failure is worst in ``ES_ONLY``, where Elasticsearch *is* the storage
+    layer: the model has no database table, so a field value that never reaches
+    a document is not written anywhere at all.
+
+    ``es_auto_mapping`` stays ``False`` by default on purpose — flipping it
+    would start shipping every concrete column of every mirrored model to a
+    second datastore on upgrade, including columns a project deliberately kept
+    out of it — so this check, not the default, is what makes the silent case
+    impossible.
+
+    An encrypted field is excluded from auto-derivation by design (``E020``),
+    and that is respected here: a model whose *other* fields are mapped is
+    never reported, and a model whose fields are *all* encrypted gets a hint
+    that names encryption instead of suggesting an option it already set.
+    """
+    from snapadmin.models import EsStorageMode
+
+    errors: list[CheckMessage] = []
+    for model in apps.get_models():
+        # ES mirroring is SnapModel's own (it needs get_es_mapping/get_es_document);
+        # a plain model registered with @snap_model carries none of it.
+        if not (is_registered(model) and hasattr(model, "get_es_mapping")):
+            continue
+
+        mode = get_model_meta(model, "es_storage_mode", EsStorageMode.DB_ONLY)
+        indexes = mode != EsStorageMode.DB_ONLY or get_model_meta(
+            model, "es_index_enabled", False
+        )
+        if not indexes or model.get_es_mapping():
+            continue
+
+        mode_name = getattr(mode, "name", str(mode))
+        message = (
+            f"{model._meta.label} is indexed in Elasticsearch ({mode_name}) but its "
+            "effective mapping is empty, so every document written for it contains "
+            "nothing but its id. Indexing and reindexing both report success and no "
+            "search ever matches."
+        )
+        if mode == EsStorageMode.ES_ONLY:
+            message += (
+                " ES_ONLY means there is no database table behind it either, so the "
+                "field values are not stored anywhere."
+            )
+
+        if not get_model_meta(model, "es_auto_mapping", False):
+            hint = (
+                "Declare es_mapping = {\"<field>\": {\"type\": \"text\"}, …} for the "
+                "fields that must be searchable, or set es_auto_mapping = True to "
+                "derive the mapping from the model's concrete fields. Note that "
+                "searchable=True feeds the admin search box and the REST ?search= "
+                "filter only — it does not build the Elasticsearch mapping."
+            )
+        elif _encrypted_fields_of(model):
+            hint = (
+                "es_auto_mapping is on, but every candidate field on this model is "
+                "encrypted, and an encrypted value is never shipped to Elasticsearch "
+                "(see snapadmin.E020), so nothing can be derived. Index a "
+                "non-encrypted column instead, or set es_storage_mode = "
+                "EsStorageMode.DB_ONLY."
+            )
+        else:
+            hint = (
+                "es_auto_mapping is on, but the model declares no concrete field "
+                "whose type maps to Elasticsearch. Add one, declare es_mapping "
+                "explicitly, or set es_storage_mode = EsStorageMode.DB_ONLY."
+            )
+
+        errors.append(Error(message, hint=hint + _E026_ESCAPE, obj=model, id="snapadmin.E026"))
+    return errors
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # django-extra-settings' EXTRA_SETTINGS_ADMIN_APP (#EXT1e)
 #
@@ -1687,6 +1779,7 @@ ALL_CHECKS = [
     check_encryption_required,
     check_encrypted_field_usage,
     check_encrypted_fields_not_indexed,
+    check_es_mapping_present,
     check_extra_settings_admin_app,
 ]
 

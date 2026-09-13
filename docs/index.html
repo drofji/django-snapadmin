@@ -1247,6 +1247,7 @@ SNAPADMIN_QUERY_BACKEND_HEADER = True    # set False to hide the header in produ
 # models.py — per-model opt-out (e.g. when one model's ES mirror lags)
 class Product(SnapModel):
     es_storage_mode  = EsStorageMode.DUAL
+    es_auto_mapping  = True    # without a mapping the mirror indexes ids only (snapadmin.E026)
     es_query_routing = False   # this model's API searches always run on the DB</code></pre>
 
   <h3 id="es-filter">Structured ES term filters — <code>es_filter()</code></h3>
@@ -1994,6 +1995,21 @@ ELASTICSEARCH_URL=https://my-cluster.example.com:9200</code></pre>
 
   <h3>Setting the Mode on a Model</h3>
   <p>The fields you want searchable in Elasticsearch are declared in <code>es_mapping</code> — a dict of <code>{field_name: ES mapping}</code>. (There is no <code>es_index_fields</code> attribute.) For <code>DUAL</code> you may also set <code>es_index_enabled = True</code>.</p>
+
+  <div class="callout callout-warn">
+    <strong>A mirrored model needs a mapping — <code>searchable=True</code> is not one</strong>
+    The document SnapAdmin writes is <code>{"id": pk}</code> plus one key per entry in the effective
+    mapping, so <code>es_storage_mode = DUAL</code> with neither <code>es_mapping</code> nor
+    <code>es_auto_mapping = True</code> indexes the id and nothing else — while the index is created,
+    every save is mirrored and <code>es_reindex_all()</code> reports the full row count. Only the
+    searching fails, and it fails quietly. <code>searchable=True</code> is a <em>field</em> flag for the
+    admin search box and the REST <code>?search=</code> filter; it never builds the mapping.
+    <code>snapadmin.E026</code> refuses the combination at <code>manage.py check</code> so it cannot ship.
+    <code>es_auto_mapping</code> stays off by default on purpose: turning it on would start shipping
+    every concrete column of every mirrored model to a second datastore, including ones a project
+    deliberately kept out of it. If an id-only index really is what you want, add
+    <code>'snapadmin.E026'</code> to <code>SILENCED_SYSTEM_CHECKS</code>.
+  </div>
   <pre><code>from snapadmin.models import SnapModel, EsStorageMode
 from snapadmin import fields as snap_fields
 
@@ -4966,6 +4982,7 @@ contract = models.FileField(validators=[
     price = SnapMoneyField()
 
     es_storage_mode   = snap_models.EsStorageMode.DUAL
+    es_auto_mapping   = True                      # searchable=True does not map anything
     es_index_settings = {"number_of_shards": 2}   # override index creation
 
     def save(self, *args, **kwargs):

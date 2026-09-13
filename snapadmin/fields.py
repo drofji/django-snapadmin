@@ -111,8 +111,10 @@ class SnapField:
         Include the field on the add/change form. Default ``False``, or the project-wide
         ``SNAPADMIN_SHOW_IN_FORM_DEFAULT`` setting when set — an explicit value here always wins.
     ``searchable``
-        Add to the admin search box, the REST ``?search=`` filter and — on a model
-        mirrored to Elasticsearch — the search mapping. Default ``False``.
+        Add to the admin search box and the REST ``?search=`` filter. Default ``False``.
+        It does **not** build the Elasticsearch index — that comes from the model's
+        ``es_mapping`` (or ``es_auto_mapping = True``), and a mirrored model with
+        neither is refused by ``snapadmin.E026`` rather than indexing ids alone.
     ``filterable``
         Add a sidebar filter in the admin and a ``?field=`` query filter in the API.
         Default ``False``.
