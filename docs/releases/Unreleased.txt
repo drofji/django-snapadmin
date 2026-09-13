@@ -198,6 +198,31 @@ Changed
 Fixed
 -----
 
+* **A model validation rule that rejects an API write now answers 400, not 500.** A
+  ``django.core.exceptions.ValidationError`` is not part of DRF's exception hierarchy, so
+  everything that raises Django's flavour on a write path — ``Model.clean()``, ``full_clean()``, a
+  guard inside ``save()``, a ``pre_save`` receiver — escaped the view entirely and reached the
+  client as an HTML 500. A cross-field rule failing is a client mistake, not a server fault, and the
+  response has to say which field was wrong so the client can fix it and retry; a 500 says only that
+  something broke.
+
+  The failure was quiet in the worst way. Field-level validators run inside the serializer and
+  always reported correctly, so the API looked like it validated; only the rules expressed at model
+  level were skipped, and those are exactly the cross-field ones ("a completed record needs a
+  file"). The admin enforced them, the API did not, and the two surfaces disagreed about what a
+  valid row was. Working around it took a custom DRF ``EXCEPTION_HANDLER`` in every project.
+
+  Every SnapAdmin endpoint now translates the exception, keeping the field names:
+  ``ValidationError({"invoice": "..."})`` comes back as ``400 {"invoice": ["..."]}``, and a message
+  raised without a field lands under DRF's ``non_field_errors`` key — the same shape a client
+  already parses for a serializer-level error. It needs no configuration.
+  ``snapadmin.api.exceptions.snap_exception_handler`` is the same translation packaged as a drop-in
+  ``EXCEPTION_HANDLER`` for a project that wants it on views SnapAdmin never generated.
+
+  A project that already configures its own ``EXCEPTION_HANDLER`` keeps first refusal: the
+  untouched exception is offered to it first, and SnapAdmin only steps in where the alternative is
+  the 500 DRF was about to raise. An existing handler therefore behaves exactly as it did before.
+
 * **``collectstatic`` no longer fails on a manifest static-files backend.** The vendored Chart.js
   bundle ended with a ``//# sourceMappingURL=chart.umd.js.map`` comment, and that ``.map`` file is
   not shipped — a source map is a devtools convenience with no place in a released minified bundle.

@@ -55,6 +55,7 @@ MAPPED_MODULES = [
     "snapadmin.api.filters",
     "snapadmin.api.graphql",
     "snapadmin.api.authentication",
+    "snapadmin.api.exceptions",
     "snapadmin.sso",
     "snapadmin.limits",
     "snapadmin.api.exports",

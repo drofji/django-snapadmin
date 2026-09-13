@@ -1729,6 +1729,35 @@ class Account(SnapModel):
 # 2) Project-wide guard — dotted path to Callable[[request, obj], bool]:
 SNAPADMIN_API_DELETE_GUARD = "myproject.guards.protect_superusers"</code></pre>
 
+  <h3 id="api-validation-errors">Model validation errors answer <code>400</code>, not <code>500</code></h3>
+  <p>A <code>django.core.exceptions.ValidationError</code> is not part of DRF's exception hierarchy,
+  so anything raising Django's flavour on a write path — <code>Model.clean()</code>,
+  <code>Model.full_clean()</code>, a guard inside <code>save()</code>, a custom
+  <code>pre_save</code> receiver — used to escape the view and come back as an <strong>HTML 500</strong>
+  an API client cannot act on. Every SnapAdmin endpoint now translates it into a
+  <code>400</code> that keeps the field names:</p>
+  <pre><code>class Order(SnapModel):
+    status = snap_fields.SnapCharField(max_length=20)
+    invoice = snap_fields.SnapFileField(blank=True, null=True)
+
+    def clean(self):
+        if self.status == "completed" and not self.invoice:
+            raise ValidationError({"invoice": "A completed order needs an invoice."})
+
+# POST /api/models/shop/Order/  →  400
+# {"invoice": ["A completed order needs an invoice."]}</code></pre>
+  <p>A message raised without a field lands under DRF's <code>non_field_errors</code> key, exactly
+  as a serializer-level error does. This needs no configuration and no
+  <code>EXCEPTION_HANDLER</code> of your own — but if you want the same translation on views
+  <em>SnapAdmin never generated</em>, SnapAdmin ships the handler as a drop-in:</p>
+  <pre><code># settings.py — optional, only for your own DRF views
+REST_FRAMEWORK = {
+    "EXCEPTION_HANDLER": "snapadmin.api.exceptions.snap_exception_handler",
+}</code></pre>
+  <p>A project that already configures its own <code>EXCEPTION_HANDLER</code> keeps first refusal:
+  SnapAdmin offers the untouched exception to it first and only steps in where the alternative is
+  the 500 DRF was about to raise, so an existing handler behaves exactly as it did before.</p>
+
   <!-- ── API GraphQL ───────────────────────────────────────────────────────── -->
   <h2 id="api-graphql">⚛️ GraphQL API</h2>
   <p>SnapAdmin provides a dynamic GraphQL interface powered by Graphene-Django.</p>

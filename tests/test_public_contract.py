@@ -144,6 +144,11 @@ PUBLIC_IMPORTS = [
     # Integrator pass (v0.1.0a6)
     "snapadmin.api.authentication.get_api_authentication_classes",
     "snapadmin.api.authentication.SnapAPIAuthMixin",
+    # #EXT1k — a project names this in REST_FRAMEWORK["EXCEPTION_HANDLER"], so the
+    # dotted path is a configuration contract, not an internal helper.
+    "snapadmin.api.exceptions.snap_exception_handler",
+    "snapadmin.api.exceptions.as_drf_validation_error",
+    "snapadmin.api.exceptions.DjangoValidationErrorMixin",
     "snapadmin.api.authentication.token_has_scope",
     "snapadmin.etl.upsert_from_source",
     "snapadmin.etl.stale_sync",

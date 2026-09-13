@@ -10,6 +10,7 @@ from django.contrib.auth.base_user import AbstractBaseUser
 from django.utils.module_loading import import_string
 from rest_framework import authentication, exceptions
 
+from snapadmin.api.exceptions import DjangoValidationErrorMixin
 from snapadmin.conf import get_setting
 from snapadmin.models import APIToken, hash_token_key
 from snapadmin.tenancy import SnapTenantRebindMixin
@@ -42,7 +43,7 @@ def get_api_authentication_classes() -> list[type]:
     ]
 
 
-class SnapAPIAuthMixin(SnapTenantRebindMixin):
+class SnapAPIAuthMixin(DjangoValidationErrorMixin, SnapTenantRebindMixin):
     """Resolve authenticators per request from the SnapAdmin setting.
 
     DRF reads ``authentication_classes`` at class-definition time; resolving in
@@ -50,7 +51,11 @@ class SnapAPIAuthMixin(SnapTenantRebindMixin):
     (and in tests) without subclassing the views.
 
     Also rebinds the current tenant (#FUT1b) once DRF's own authentication
-    has actually run — see :class:`~snapadmin.tenancy.SnapTenantRebindMixin`.
+    has actually run — see :class:`~snapadmin.tenancy.SnapTenantRebindMixin`,
+    and turns an escaping Django ``ValidationError`` into a 400 rather than a
+    500 — see :class:`~snapadmin.api.exceptions.DjangoValidationErrorMixin`.
+    It is, in practice, the "this is a SnapAdmin API view" base: a view that
+    carries it gets every cross-cutting behaviour the surface guarantees.
     """
 
     def get_authenticators(self):

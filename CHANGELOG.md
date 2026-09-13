@@ -64,6 +64,12 @@ the `0.x` beta series.
   keyset (`#encryption-keys`); `SECURITY.md` gains the field layer's threat model.
 
 ### Fixed
+- A model-level validation rule that rejects an API write now answers `400` naming the
+  field instead of escaping as an HTML `500`. Anything raising a Django `ValidationError`
+  on a write path — `Model.clean()`, `full_clean()`, a `save()` guard — is translated on
+  every SnapAdmin endpoint with no configuration; a project's own `EXCEPTION_HANDLER`
+  still sees the exception first. `snapadmin.api.exceptions.snap_exception_handler` is the
+  same translation as a drop-in handler for a project's own views.
 - `collectstatic` no longer fails on a manifest static-files backend. The vendored Chart.js bundle
   ended with a `sourceMappingURL` comment pointing at a `.map` file the package does not ship, so
   `ManifestStaticFilesStorage` — including whitenoise's `CompressedManifestStaticFilesStorage`, the

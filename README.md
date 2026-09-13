@@ -489,7 +489,10 @@ permissions on every traversed relation ·
 [API tokens](https://drofji.github.io/django-snapadmin/#api-tokens) hashed at rest · per-model and
 [per-field](https://drofji.github.io/django-snapadmin/#field-permissions) guards for what may be
 read and written · [`@snap_action`](https://drofji.github.io/django-snapadmin/#snap-action) exposes
-a business operation — approve, refund, recalculate — as a permission-checked endpoint, not just CRUD
+a business operation — approve, refund, recalculate — as a permission-checked endpoint, not just CRUD ·
+a model rule that rejects a write answers
+[`400` naming the field](https://drofji.github.io/django-snapadmin/#api-validation-errors), never an
+HTML `500`
 
 **🔍 Search** *(optional)* — [Elasticsearch](https://drofji.github.io/django-snapadmin/#elasticsearch)
 with the index mapping derived from your fields · `?search=`

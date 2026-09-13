@@ -133,6 +133,11 @@ APIs
         The generated Graphene schema.
     ``snapadmin.api.authentication`` · ``snapadmin.sso``
         API-token auth and SSO redirect handling.
+    ``snapadmin.api.exceptions``
+        Makes a Django ``ValidationError`` raised on a write path answer ``400``
+        naming the field instead of escaping as a 500. Always on for SnapAdmin's
+        own endpoints; ``snap_exception_handler`` is the drop-in DRF
+        ``EXCEPTION_HANDLER`` for a project's own views.
     ``snapadmin.limits``
         A cache-backed quota primitive — ``reserve(key, windows, concurrency)``
         for per-tenant/per-token limits across several time windows at once
