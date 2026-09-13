@@ -9,7 +9,7 @@ import gzip
 import json
 import shutil
 import sys
-from datetime import timedelta
+from datetime import datetime, timedelta
 from io import BytesIO, StringIO
 from pathlib import Path
 from unittest import mock
@@ -1610,6 +1610,145 @@ class TestIsDueGraceMargin:
 
     def test_never_run_before_is_always_due(self):
         assert backup_module._is_due(None, 24, timezone.now()) is True
+
+
+class TestAlignToSchedule:
+    """#EXT1f — opt-in schedule anchoring, so the backup hour stops walking.
+
+    The default window is measured from the *actual* last run, and
+    ``DUE_GRACE_FRACTION`` absorbs the jitter that would otherwise skip a day
+    (#OPS2d). What it cannot do is stop the run time itself from creeping: each
+    run lands one full interval after the previous one finished, so a daily
+    backup that takes a few minutes longer than yesterday's walks forward
+    through the day and eventually into working hours.
+    ``SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE`` measures the window from the planned
+    slot instead, pinning the schedule to the clock time of the first run.
+    """
+
+    HOURS = 24
+
+    def _planned(self, when):
+        return {"local": {"last_run": when.isoformat(), "planned": when.isoformat()}}
+
+    def test_the_setting_defaults_to_off(self):
+        assert get_backup_config().align_to_schedule is False
+
+    @override_settings(SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE=True)
+    def test_the_setting_is_read(self):
+        assert get_backup_config().align_to_schedule is True
+
+    def test_the_default_mode_still_drifts(self):
+        """Pins the behaviour the opt-in exists to replace, so "aligned" is a
+        measurable difference rather than a claim."""
+        anchor = timezone.now().replace(microsecond=0)
+        run_at = anchor
+        for _ in range(5):
+            # Each run finishes two minutes later than the window opened.
+            run_at = run_at + timedelta(hours=self.HOURS) + timedelta(minutes=2)
+        assert run_at - anchor > timedelta(hours=self.HOURS * 5)
+
+    def test_aligned_runs_do_not_drift(self):
+        """The same five days, anchored: the planned slot stays on the clock
+        time it started at, however late each individual run finishes."""
+        anchor = timezone.now().replace(microsecond=0)
+        planned = anchor
+        for _ in range(5):
+            finished = planned + timedelta(hours=self.HOURS) + timedelta(minutes=2)
+            planned = backup_module._advance_slot(planned, self.HOURS, finished)
+        assert planned == anchor + timedelta(hours=self.HOURS * 5)
+
+    def test_aligned_is_due_at_the_planned_slot(self):
+        planned = timezone.now() - timedelta(hours=self.HOURS)
+        assert backup_module._is_due_aligned(planned.isoformat(), self.HOURS, timezone.now()) is True
+
+    def test_aligned_is_not_due_before_the_planned_slot(self):
+        planned = timezone.now() - timedelta(hours=12)
+        assert backup_module._is_due_aligned(planned.isoformat(), self.HOURS, timezone.now()) is False
+
+    def test_aligned_keeps_the_grace_margin(self):
+        """Anchoring removes the drift; it must not reintroduce the skipped day
+        the grace margin exists to prevent."""
+        now = timezone.now()
+        planned = now - timedelta(hours=self.HOURS) + timedelta(minutes=10)
+        assert backup_module._is_due_aligned(planned.isoformat(), self.HOURS, now) is True
+
+    def test_never_run_before_is_due(self):
+        assert backup_module._is_due_aligned(None, self.HOURS, timezone.now()) is True
+
+    def test_a_missed_window_catches_up_once_not_many_times(self):
+        """Three days of downtime must produce one run, then the normal
+        cadence — not three back-to-back runs draining the same schedule."""
+        planned = timezone.now().replace(microsecond=0) - timedelta(days=3)
+        back_up_at = planned + timedelta(days=3, hours=7)
+        assert backup_module._is_due_aligned(planned.isoformat(), self.HOURS, back_up_at) is True
+        advanced = backup_module._advance_slot(planned, self.HOURS, back_up_at)
+        assert advanced == planned + timedelta(days=3)
+        assert backup_module._is_due_aligned(advanced.isoformat(), self.HOURS, back_up_at) is False
+
+    @override_settings(SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE=True)
+    def test_due_destinations_uses_the_planned_slot(self, backup_env):
+        """The run finished 30 minutes late; the next window still opens on the
+        original slot, so the destination is due while the unaligned mode —
+        measuring from that late finish — would still be waiting."""
+        now = timezone.now()
+        planned = now - timedelta(hours=self.HOURS)
+        finished = planned + timedelta(minutes=30)
+        backup_env["local"].mkdir(parents=True, exist_ok=True)
+        (backup_env["local"] / STATE_FILENAME).write_text(json.dumps({
+            "local": {"last_run": finished.isoformat(), "planned": planned.isoformat()},
+            "network": now.isoformat(),
+        }))
+        assert due_destinations(get_backup_config()) == ["local"]
+
+    @override_settings(SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE=True)
+    def test_a_legacy_state_file_anchors_on_its_last_run(self, backup_env):
+        """Turning the setting on must not require deleting the state file: a
+        bare ISO string from an older release is read as the anchor."""
+        old = (timezone.now() - timedelta(hours=self.HOURS)).isoformat()
+        backup_env["local"].mkdir(parents=True, exist_ok=True)
+        (backup_env["local"] / STATE_FILENAME).write_text(json.dumps({"local": old, "network": old}))
+        assert due_destinations(get_backup_config()) == ["local", "network"]
+
+    @override_settings(SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE=True)
+    def test_the_first_aligned_run_anchors_the_schedule(self, backup_env):
+        """No planned slot on record yet — the run itself becomes the anchor, so
+        the schedule locks to the clock time the mode was turned on at."""
+        before = timezone.now()
+        assert run_due_backups()["ran"] is True
+        entry = json.loads((backup_env["local"] / STATE_FILENAME).read_text())["local"]
+        assert set(entry) == {"last_run", "planned"}
+        assert before <= datetime.fromisoformat(entry["planned"]) <= timezone.now()
+        assert entry["planned"] == entry["last_run"]
+
+    @override_settings(SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE=True)
+    def test_a_late_aligned_run_books_the_clean_next_slot(self, backup_env):
+        """The recorded slot advances by a whole interval from the *previous slot*,
+        not from the moment this run finished — which is the drift being removed."""
+        planned = timezone.now() - timedelta(hours=self.HOURS) - timedelta(minutes=17)
+        backup_env["local"].mkdir(parents=True, exist_ok=True)
+        (backup_env["local"] / STATE_FILENAME).write_text(json.dumps({
+            "local": {"last_run": planned.isoformat(), "planned": planned.isoformat()},
+        }))
+        assert run_due_backups()["ran"] is True
+        entry = json.loads((backup_env["local"] / STATE_FILENAME).read_text())["local"]
+        assert datetime.fromisoformat(entry["planned"]) == planned + timedelta(hours=self.HOURS)
+
+    def test_the_default_mode_still_writes_a_bare_timestamp(self, backup_env):
+        """On-disk compatibility: a project that never enables alignment sees the
+        same state file every earlier release wrote, and can downgrade freely."""
+        assert run_due_backups()["ran"] is True
+        entry = json.loads((backup_env["local"] / STATE_FILENAME).read_text())["local"]
+        assert isinstance(entry, str)
+
+    def test_an_aligned_state_file_still_reads_under_the_default_mode(self, backup_env):
+        """And turning it back off must not either — the dict entry keeps the
+        actual last run, which is what the unaligned window measures from."""
+        now = timezone.now()
+        backup_env["local"].mkdir(parents=True, exist_ok=True)
+        (backup_env["local"] / STATE_FILENAME).write_text(json.dumps({
+            "local": {"last_run": now.isoformat(), "planned": now.isoformat()},
+        }))
+        assert due_destinations(get_backup_config()) == ["network"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

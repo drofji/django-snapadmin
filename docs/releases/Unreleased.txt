@@ -137,6 +137,28 @@ Added
   been converted. Nothing it prints contains a key or a value, including when the failure came
   from a malformed legacy value.
 
+* **``SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE`` — stop the backup hour walking.** Each destination's due
+  window has always been measured from its last *actual* run. ``DUE_GRACE_FRACTION`` (#OPS2d) fixed
+  the sharp edge of that — a check landing marginally early no longer skips a whole day — but it
+  cannot stop the run time itself creeping: every run books the next one a full interval after it
+  *finished*, so a daily backup that takes four minutes moves four minutes later every day and,
+  within a month, out of the quiet window it was scheduled for and into working hours.
+
+  Set ``SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE = True`` and the window is measured from the planned slot
+  instead. The schedule is pinned to the clock time of the first run and stays there however long
+  any individual run takes. Slots missed while the process was down collapse into a **single**
+  catch-up run rather than one run per missed slot — three days of downtime produces one backup and
+  then the normal cadence, not three back-to-back dumps.
+
+  It is opt-in and the current behaviour remains the default, deliberately: measuring from the last
+  actual run is the safer answer when runs are long or irregular relative to their interval, since
+  it can never start a run while the previous one is conceptually still owed. The grace margin
+  applies in both modes. Turning the setting on needs no state-file surgery — a state file written
+  by an earlier release anchors the schedule on its last recorded run — and turning it back off is
+  equally safe, because the actual run time the unaligned window needs is recorded either way. A
+  project that never enables it sees the state file it always had. ``snapadmin_info --section
+  features`` reports ``schedule-aligned`` when the mode is on, and stays silent when it is not.
+
 Changed
 -------
 

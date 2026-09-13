@@ -119,8 +119,9 @@ def _backup_detail() -> str:
     """``"db, encrypted (2 recipients), destinations: local+sftp, restored"``.
 
     Reports what a run actually bundles (SNAPADMIN_BACKUP_INCLUDE), whether
-    AGE encryption is configured, which destinations are active and whether
-    a restore has ever completed — never the identity, only booleans, counts
+    AGE encryption is configured, which destinations are active, whether the
+    due windows are anchored to the schedule rather than to the last actual
+    run, and whether a restore has ever completed — never the identity, only booleans, counts
     and destination names, all safe to print. The destinations/restore
     clauses are added only while backups are enabled — otherwise "local"
     (always the nominal staging destination) would print as "active" for a
@@ -135,6 +136,8 @@ def _backup_detail() -> str:
         detail += f", encrypted ({_count(len(config.age_recipients), 'recipient')})"
     if config.enabled:
         detail += f", destinations: {'+'.join(_active_destinations(config))}"
+        if config.align_to_schedule:
+            detail += ", schedule-aligned"
         if last_restore_run(config):
             detail += ", restored"
     return detail

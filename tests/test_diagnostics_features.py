@@ -99,6 +99,17 @@ class TestSettingsGatedCapabilities:
         data = _collect(verbose=True)
         assert data["details"]["backups"] == "db, encrypted (2 recipients), destinations: local"
 
+    @override_settings(SNAPADMIN_BACKUP_ENABLED=True, SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE=True)
+    def test_backup_detail_reports_schedule_alignment(self):
+        data = _collect(verbose=True)
+        assert data["details"]["backups"] == "db, destinations: local, schedule-aligned"
+
+    @override_settings(SNAPADMIN_BACKUP_ENABLED=True, SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE=False)
+    def test_backup_detail_omits_alignment_when_off(self):
+        """The default must stay silent — an adoption audit reads a present clause
+        as a deliberate choice, so printing one for the default would be a lie."""
+        assert "schedule-aligned" not in _collect(verbose=True)["details"]["backups"]
+
     def test_backup_detail_never_reports_identity(self):
         """No setting or code path here ever touches the identity file's
         contents — only public recipients and a count reach the report."""

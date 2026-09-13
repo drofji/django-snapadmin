@@ -149,6 +149,7 @@ class BackupConfig:
     media_exclude: list[str]
     env_file: str
     media_size_warning_bytes: int
+    align_to_schedule: bool
 
 
 def get_backup_config() -> BackupConfig:
@@ -191,6 +192,7 @@ def get_backup_config() -> BackupConfig:
         media_size_warning_bytes=int(
             get_setting("SNAPADMIN_BACKUP_MEDIA_SIZE_WARNING_BYTES", 10 * 1024**3)
         ),
+        align_to_schedule=bool(get_setting("SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE", False)),
     )
 
 
@@ -1211,6 +1213,82 @@ def _is_due(last_run_iso: str | None, every_hours: int, now: datetime) -> bool:
     return now - last_run >= threshold
 
 
+def _is_due_aligned(planned_iso: str | None, every_hours: int, now: datetime) -> bool:
+    """The ``align_to_schedule`` window: measured from the planned slot.
+
+    ``DUE_GRACE_FRACTION`` still applies. It solves a different problem —
+    a check landing marginally early must not skip the window entirely
+    (#OPS2d) — and anchoring the slot does nothing about that.
+    """
+    if not planned_iso:
+        return True
+    planned = datetime.fromisoformat(planned_iso)
+    interval = timedelta(hours=every_hours)
+    return now >= planned + interval - interval * DUE_GRACE_FRACTION
+
+
+def _advance_slot(planned: datetime, every_hours: int, now: datetime) -> datetime:
+    """The slot a run completing at ``now`` satisfies, as a multiple of the interval.
+
+    Always the *slot*, never ``now``: that is the whole point of the mode. A run
+    that finishes two minutes late still books the next window a clean interval
+    after the slot it was for, so the backup hour stays where the operator put it
+    instead of creeping forward by whatever each run happened to cost.
+
+    Missed windows collapse into one. Three days of downtime advances straight to
+    the most recent slot, so the queue drains with a single catch-up run rather
+    than one run per day the process was gone. The floor of one step keeps the
+    schedule moving when a run completes inside the grace window, marginally
+    ahead of its own slot.
+    """
+    interval = timedelta(hours=every_hours)
+    elapsed = (now + interval * DUE_GRACE_FRACTION) - planned
+    return planned + interval * max(1, elapsed // interval)
+
+
+def _state_times(entry: str | dict | None) -> tuple[str | None, str | None]:
+    """``(last run, planned slot)`` from one destination's state entry.
+
+    Two shapes are on disk in the wild, and both keep working whichever way the
+    setting is flipped afterwards: a bare ISO string (every release before
+    ``align_to_schedule``, and still what the default mode writes) and a
+    ``{"last_run": ..., "planned": ...}`` dict. Turning the mode on against a
+    legacy file anchors the schedule on the last actual run, which is the only
+    honest answer available — there is no record of a planned slot to recover.
+    """
+    if isinstance(entry, dict):
+        return entry.get("last_run"), entry.get("planned")
+    return entry, entry
+
+
+#: Per-destination interval settings, by destination name.
+_INTERVAL_ATTRS: dict[str, str] = {
+    "local": "local_every_hours",
+    "network": "network_every_hours",
+    "remote": "remote_every_hours",
+    "sftp": "sftp_every_hours",
+    "s3": "s3_every_hours",
+}
+
+
+def _next_state_entry(previous: str | dict | None, dest: str, config: BackupConfig) -> str | dict:
+    """What to record for ``dest`` after a successful store.
+
+    The default mode writes the bare ISO string every earlier release wrote, so
+    a project that never enables alignment sees no change on disk and can move
+    back to an older SnapAdmin without its schedule resetting. Alignment writes
+    the pair, because the planned slot is exactly the thing the actual run time
+    cannot reconstruct.
+    """
+    now = timezone.now()
+    if not config.align_to_schedule:
+        return now.isoformat()
+    _, planned_iso = _state_times(previous)
+    every_hours = getattr(config, _INTERVAL_ATTRS[dest])
+    planned = _advance_slot(datetime.fromisoformat(planned_iso), every_hours, now) if planned_iso else now
+    return {"last_run": now.isoformat(), "planned": planned.isoformat()}
+
+
 def _active_destinations(config: BackupConfig) -> list[str]:
     active = ["local"]
     if config.network_dir:
@@ -1229,18 +1307,16 @@ def due_destinations(config: BackupConfig | None = None) -> list[str]:
     config = config or get_backup_config()
     state = _load_state(config)
     now = timezone.now()
-    intervals = {
-        "local": config.local_every_hours,
-        "network": config.network_every_hours,
-        "remote": config.remote_every_hours,
-        "sftp": config.sftp_every_hours,
-        "s3": config.s3_every_hours,
-    }
-    return [
-        dest
-        for dest in _active_destinations(config)
-        if _is_due(state.get(dest), intervals[dest], now)
-    ]
+    intervals = {dest: getattr(config, attr) for dest, attr in _INTERVAL_ATTRS.items()}
+    due = []
+    for dest in _active_destinations(config):
+        last_run, planned = _state_times(state.get(dest))
+        if config.align_to_schedule:
+            if _is_due_aligned(planned, intervals[dest], now):
+                due.append(dest)
+        elif _is_due(last_run, intervals[dest], now):
+            due.append(dest)
+    return due
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1319,7 +1395,7 @@ def run_backup(destinations: list[str], *, config: BackupConfig | None = None) -
                         "db_backup_stored", destination=dest, part=part_name,
                         location=locations[part_name],
                     )
-                state[dest] = timezone.now().isoformat()
+                state[dest] = _next_state_entry(state.get(dest), dest, config)
                 results[dest] = locations[primary_part]
             except Exception as exc:
                 results[dest] = f"error: {exc}"

@@ -2589,6 +2589,16 @@ SNAPADMIN_BACKUP_SFTP_KEY_FILE = "/etc/snapadmin/id_ed25519"  # key-based auth</
 python manage.py snapadmin_db_backup --force                # all configured destinations, now
 python manage.py snapadmin_db_backup --destination remote   # one destination, now</code></pre>
 
+  <p><strong>Keeping the backup hour where you put it.</strong> By default a destination's window is
+  measured from its last <em>actual</em> run, so each run books the next one a full interval after it
+  finished. A daily backup that takes a few minutes therefore creeps forward a few minutes a day, and
+  over a month walks out of the quiet hours it was scheduled for and into working ones.
+  <code>SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE = True</code> measures the window from the <em>planned</em>
+  slot instead, pinning the schedule to the clock time of the first run however long any individual
+  run takes. Slots missed while the process was down collapse into a single catch-up run rather than
+  one run per missed slot. It is opt-in and the drift-tolerant default is unchanged; turning it on
+  needs no state-file surgery, and turning it back off is equally safe.</p>
+
   <div class="callout callout-success">
     <strong>Failure isolation &amp; retention</strong>
     A failed destination (unreachable share, FTP/SFTP down) is logged (<code>db_backup_store_failed</code>)
@@ -4378,6 +4388,7 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset — no p
     <tr><td><code>SNAPADMIN_BACKUP_ENABLED</code></td><td><code>False</code></td><td>Enable scheduled 3-2-1 database backups</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_KEEP</code></td><td><code>7</code></td><td>Dumps kept per destination (oldest pruned)</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_LOCAL_DIR</code></td><td><code>./backups</code></td><td>Copy 1: directory on the same server</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE</code></td><td><code>False</code></td><td>Measure each destination's window from its <em>planned</em> slot instead of its last actual run. Off, every run books the next one a full interval after it finished, so the backup hour creeps forward by whatever each run costs and eventually lands in working hours. On, the schedule is pinned to the clock time of the first run, and slots missed during downtime collapse into a single catch-up run rather than a burst</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS</code></td><td><code>24</code></td><td>How often the local copy becomes due</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_NETWORK_DIR</code></td><td>—</td><td>Copy 2: mounted share of a server on your network (empty = off)</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_NETWORK_EVERY_HOURS</code></td><td><code>24</code></td><td>How often the network copy becomes due</td></tr>

@@ -42,6 +42,15 @@ the `0.x` beta series.
   resumable by primary key, and a row it cannot convert is counted and skipped rather than aborting
   the run.
 
+### Added
+- `SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE` (default `False`) measures each backup destination's due
+  window from its *planned* slot rather than its last actual run. Off, every run books the next one
+  a full interval after it finished, so a daily backup creeps forward by however long each run takes
+  and over a month walks out of the quiet hours it was scheduled for. On, the schedule is pinned to
+  the clock time of the first run, and slots missed while the process was down collapse into a single
+  catch-up run instead of a burst. The existing drift-tolerant behaviour stays the default, the state
+  file needs no surgery to turn it on, and turning it back off is equally safe.
+
 ### Changed
 - `snapadmin_info --section features` reports the number of fields actually encrypted alongside the
   keyset source and fingerprint — a configured key with nothing encrypted is a real state, and the

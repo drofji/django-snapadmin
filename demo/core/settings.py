@@ -686,6 +686,11 @@ SNAPADMIN_ERROR_RETENTION_DAYS = int(os.getenv('SNAPADMIN_ERROR_RETENTION_DAYS',
 # NETWORK dir (a mounted share on another server), REMOTE offsite FTP.
 SNAPADMIN_BACKUP_ENABLED = env_bool('SNAPADMIN_BACKUP_ENABLED', False)
 SNAPADMIN_BACKUP_KEEP = int(os.getenv('SNAPADMIN_BACKUP_KEEP', '7'))
+# Off: each destination's window is measured from its last *actual* run, so the
+# backup hour creeps forward by however long each run takes. On: the window is
+# measured from the planned slot, pinning the schedule to the clock time of the
+# first run. Missed slots collapse into one catch-up run, not a burst.
+SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE = env_bool('SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE', False)
 
 SNAPADMIN_BACKUP_LOCAL_DIR = os.getenv('SNAPADMIN_BACKUP_LOCAL_DIR', str(BASE_DIR / 'backups'))
 SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS = int(os.getenv('SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS', '24'))
