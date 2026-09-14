@@ -780,3 +780,43 @@ class TestPurgeExpiredFiles:
         assert not Showcase.objects.filter(pk=old.pk).exists()
         assert Showcase.objects.filter(pk=live.pk).exists()
         assert storage.exists(path)  # kept — "live" still references it
+
+
+# ── ES_ONLY models are purged too, not silently skipped ───────────────────────
+
+@pytest.mark.django_db
+class TestEsOnlyModelsAreAccountedFor:
+    """A model with no database table still has a retention window.
+
+    ``demo.SearchLog`` is ES_ONLY, so its rows live in Elasticsearch. Both the
+    task and the command have to reach it through the ES purge path and report
+    it — reporting it as skipped would tell an operator that a GDPR window is
+    being honoured when nothing had looked at it. Elasticsearch is disabled in
+    the suite, so the purge resolves to zero rows; what is under test is that
+    the model is *accounted for*. (Re-homed here in #QA1b.)
+    """
+
+    def test_the_task_reports_an_es_only_model_in_its_summary(self):
+        from demo.apps.shop.models import SearchLog
+
+        from snapadmin.tasks import purge_expired_data
+
+        with patch.object(SearchLog, "data_retention_days", 30, create=True):
+            result = purge_expired_data.apply().get()
+
+        assert result["purged"]["demo.SearchLog"] == 0
+
+    def test_the_command_lists_an_es_only_model_rather_than_skipping_it(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        from demo.apps.shop.models import SearchLog
+
+        out = StringIO()
+        with patch.object(SearchLog, "data_retention_days", 30, create=True):
+            call_command("snapadmin_purge_expired_data", "--dry-run", stdout=out)
+
+        output = out.getvalue()
+        assert "SearchLog" in output
+        assert "SKIPPED" not in output

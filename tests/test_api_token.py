@@ -452,3 +452,31 @@ class TestTokenDeactivateEndpoint:
         c.credentials(HTTP_AUTHORIZATION=f"Token {other.token_key}")
         r = c.post(f"/api/tokens/{api_token.pk}/deactivate/")
         assert r.status_code in (403, 404)
+
+
+# ── Malformed Authorization headers ───────────────────────────────────────────
+
+class TestMalformedAuthorizationHeader:
+    """A header that cannot be decoded is a 401 with a reason, never a 500.
+
+    HTTP headers travel as latin-1, so a byte like 0xFF reaches the view intact
+    and only fails when the token key is decoded as UTF-8. Left unhandled that
+    is an unhandled ``UnicodeDecodeError`` — a 500 on an unauthenticated
+    request path, which is both a worse answer and a louder one than the 401 it
+    should be. (Re-homed here from the coverage-named suite in #QA1b.)
+    """
+
+    def test_a_token_key_that_is_not_utf_8_is_rejected_as_authentication(self):
+        from rest_framework.exceptions import AuthenticationFailed
+        from rest_framework.request import Request
+        from rest_framework.test import APIRequestFactory
+
+        from snapadmin.api.authentication import APITokenAuthentication
+
+        raw = APIRequestFactory().get("/", HTTP_AUTHORIZATION="Token \xff")
+
+        with pytest.raises(AuthenticationFailed) as excinfo:
+            APITokenAuthentication().authenticate(Request(raw))
+
+        assert "invalid characters" in str(excinfo.value)
+        assert excinfo.value.status_code == 401

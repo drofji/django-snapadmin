@@ -1,7 +1,14 @@
 """
-tests/test_dashboard_extended.py
+tests/test_dashboard_service_and_environment.py
 
-Coverage for snapadmin/views.py — ES monitoring, OperationalError, environment detection.
+The dashboard's two status panels: the service list (database and
+Elasticsearch, each reachable or not) and the environment block (Docker or
+local, and what the host is).
+
+Neither panel may take the dashboard down when the thing it reports on is
+broken — an unreachable database or a raising Elasticsearch client has to come
+back as "offline" in a rendered panel, not as a traceback. (#QA1b: this file
+was previously named for the coverage metric rather than for that behaviour.)
 """
 
 from unittest.mock import MagicMock, mock_open, patch
@@ -80,12 +87,17 @@ class TestDashboardViewExtended:
         es_service = next(s for s in services if s["name"] == "Elasticsearch")
         assert es_service["status"] == "disabled"
 
-    def test_get_environment_details(self):
+    def test_get_environment_details_reports_the_running_host(self):
+        import platform
+
         view = _make_view_with_request("env_test")
         env = view._get_environment_details()
-        assert "mode" in env
-        assert "os" in env
-        assert env["mode"] in ("Docker", "Local")
+        # The host facts are stated exactly; only "mode" depends on where the
+        # suite happens to run, and it has a test per branch below.
+        assert env["os"] == f"{platform.system()} {platform.release()}"
+        assert env["hostname"] == platform.node()
+        assert env["processor"] == platform.processor()
+        assert set(env) == {"mode", "os", "hostname", "processor"}
 
     def test_get_environment_details_dockerenv_short_circuits_cgroup_open(self):
         """When /.dockerenv already proves Docker, /proc/self/cgroup must not be opened."""

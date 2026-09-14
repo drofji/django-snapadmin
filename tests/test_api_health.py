@@ -1,10 +1,14 @@
 """
-tests/test_health_extended.py
+tests/test_api_health.py
 
-Coverage for snapadmin/api/health.py — ES enabled/disabled paths.
+``GET /api/health/`` — the readiness probe an orchestrator reads.
 
-The per-service breakdown is reserved for authenticated callers; anonymous
-probes (load balancers) receive the overall status only.
+Its contract is the pair (HTTP status, overall status): a database outage must
+answer 503 so the instance is replaced, while an Elasticsearch outage must stay
+at 200 with a body of "degraded", because pulling a still-serving instance out
+of the load balancer would make the outage worse. The per-service breakdown is
+reserved for authenticated callers; anonymous probes receive the overall status
+only. (#QA1b: this file was previously named for the coverage metric.)
 """
 
 from unittest.mock import MagicMock, patch
@@ -45,7 +49,10 @@ class TestHealthCheckExtended:
                 response = client.get(url)
         data = response.json()
         assert data["services"]["elasticsearch"] == "online"
-        assert data["status"] in ("healthy", "degraded")
+        # Both subsystems reachable — exactly "healthy", not "one of the two
+        # statuses that keep the instance in rotation".
+        assert data["status"] == "healthy"
+        assert response.status_code == 200
 
     def test_health_check_es_enabled_but_offline(self, client):
         url = reverse("api-health")
@@ -142,5 +149,6 @@ class TestHealthCheckAnonymous:
         response = APIClient().get(reverse("api-health"))
         data = response.json()
         assert response.status_code == 200
-        assert "status" in data
-        assert "services" not in data
+        # The whole body, so a future field cannot leak the per-service
+        # breakdown to an unauthenticated caller unnoticed.
+        assert data == {"status": "healthy"}

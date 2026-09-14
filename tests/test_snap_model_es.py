@@ -1,3 +1,12 @@
+"""
+tests/test_snap_model_es.py
+
+``SnapModel``'s Elasticsearch surface: the index name a model resolves to, the
+document it builds for the mirror, and what happens when the cluster is not
+there to answer.
+"""
+
+from decimal import Decimal
 
 import pytest
 from unittest.mock import MagicMock, patch
@@ -55,3 +64,42 @@ class TestEsOnlyPkGeneration:
         with patch.object(SearchLog, "get_es_client", side_effect=Exception("es down")):
             pk = SearchLog._generate_es_only_pk()
         assert 1 <= pk <= 9223372036854775807
+
+
+@pytest.mark.django_db
+class TestElasticsearchFailuresAreSwallowed:
+    """An unreachable cluster must never break a save, a delete or a migration.
+
+    The Elasticsearch mirror is a secondary index: if the client cannot be
+    built, indexing a row, deleting one, or creating the mapping has to fail
+    quietly and leave the database operation intact. (Re-homed here in #QA1b
+    from a suite that called all three and asserted nothing at all — "it did not
+    raise" was the whole test.)
+    """
+
+    def _client_that_cannot_connect(self):
+        return patch.object(Product, "get_es_client", side_effect=Exception("es down"))
+
+    def test_ensuring_the_mapping_reports_failure_rather_than_raising(self):
+        with override_settings(ELASTICSEARCH_ENABLED=True), self._client_that_cannot_connect():
+            assert Product._ensure_es_index_and_mapping() is None
+
+    def test_indexing_a_row_reports_failure_rather_than_raising(self):
+        product = Product(name="ES Err", price=Decimal("1.00"))
+        product.pk = 1234
+
+        with override_settings(ELASTICSEARCH_ENABLED=True), self._client_that_cannot_connect():
+            assert product.index_in_es() is None
+
+    def test_deleting_a_row_reports_failure_rather_than_raising(self):
+        product = Product(name="ES Err", price=Decimal("1.00"))
+        product.pk = 1234
+
+        with override_settings(ELASTICSEARCH_ENABLED=True), self._client_that_cannot_connect():
+            assert product.delete_from_es() is None
+
+    def test_the_row_itself_is_still_saved_when_the_mirror_is_down(self):
+        with override_settings(ELASTICSEARCH_ENABLED=True), self._client_that_cannot_connect():
+            product = Product.objects.create(name="Saved anyway", price=Decimal("2.00"))
+
+        assert Product.objects.filter(pk=product.pk).exists()

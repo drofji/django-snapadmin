@@ -1828,3 +1828,30 @@ class TestFieldPermissionsExcludedFromApiQuerying:
         r = client.get("/api/models/demo/Product/?search=UniqueWidgetXYZ")
         assert r.status_code == 200
         assert r.json()["results"] == []
+
+
+@pytest.mark.django_db
+class TestUnknownModelInTheUrl:
+    """A URL naming a model that does not exist answers empty, not 500.
+
+    The dynamic viewset resolves its model from the URL, so any request can
+    name one that was never installed. Returning an empty queryset keeps that a
+    404 from the router's point of view instead of an ``AttributeError`` deep in
+    ``get_queryset``. (Re-homed here in #QA1b.)
+    """
+
+    def test_get_queryset_is_empty_when_the_model_cannot_be_resolved(self):
+        from unittest.mock import MagicMock
+
+        from snapadmin.api.views import DynamicModelViewSet
+
+        view = DynamicModelViewSet()
+        view.kwargs = {"app_label": "nope", "model_name": "ghost"}
+        view.request = MagicMock()
+
+        assert view.get_queryset() == []
+
+    def test_the_endpoint_itself_answers_404_for_an_unknown_model(self, auth_client):
+        response = auth_client.get("/api/models/nope/ghost/")
+
+        assert response.status_code == 404

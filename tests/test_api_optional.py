@@ -257,3 +257,42 @@ class TestMissingExtraIsExplained:
         with _HideModules(*API_PACKAGES):
             module = _exec_fresh(source, "snapadmin_urls_all_off")
         assert module.urlpatterns == []
+
+
+class TestGraphqlWiringFailureIsSurvivable:
+    """A GraphQL stack that raises while being mounted must not break the URLconf.
+
+    ``snapadmin/urls.py`` builds the GraphQL view at import time. If that raises
+    — a broken schema, an incompatible graphene version — every other route
+    would go down with it, including the admin. The failure is logged and the
+    rest of the URLconf is still built. (Re-homed here in #QA1b, next to the
+    other "an optional stack is missing or broken" cases.)
+    """
+
+    def test_the_failure_is_logged_and_the_other_routes_survive(self):
+        from unittest.mock import MagicMock, patch
+
+        from graphene_django.views import GraphQLView
+
+        import snapadmin.urls as snap_urls
+
+        # structlog.get_logger is re-called during the reload, so the factory
+        # itself is patched to hand back a mock the assertions can read.
+        logger = MagicMock()
+        try:
+            with patch.object(GraphQLView, "as_view", side_effect=Exception("boom")):
+                with patch.object(snap_urls.structlog, "get_logger", return_value=logger):
+                    importlib.reload(snap_urls)
+
+            logger.warning.assert_called_once_with("graphql_setup_failed", error="boom")
+            # The URLconf still exists and still carries its other routes.
+            assert any(
+                getattr(pattern, "name", None) == "api-health"
+                for pattern in snap_urls.urlpatterns
+            )
+            assert not any(
+                getattr(pattern, "name", None) == "graphql" for pattern in snap_urls.urlpatterns
+            )
+        finally:
+            # Restore a clean, fully wired urlconf for the rest of the suite.
+            importlib.reload(snap_urls)

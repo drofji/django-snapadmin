@@ -238,3 +238,149 @@ class TestAdminViews:
     def test_api_token_changelist_200(self, admin_client, api_token):
         url = reverse("admin:snapadmin_apitoken_changelist")
         assert admin_client.get(url).status_code == 200
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Names in a fieldset that are not model fields (re-homed in #QA1b)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestFieldsetNamesThatAreNotModelFields:
+    """A generated fieldset may name something ``_meta.get_field`` cannot find.
+
+    That is how an admin method or a ``SnapFunctionField``'s generated callable
+    reaches the form. Both grouping passes — rows and tabs — have to pass such a
+    name straight through rather than raise ``FieldDoesNotExist``, and neither
+    may drop it, which would silently remove a field from the form.
+    """
+
+    def test_an_unknown_name_is_passed_through_to_the_fieldset(self):
+        from unittest.mock import patch
+
+        from demo.apps.shop.models import Product
+        from snapadmin.models import AdminFieldSets
+
+        fieldsets_with_a_non_field = AdminFieldSets(
+            ["ghost_field", "name"], ["id"], ["id"], [], []
+        )
+
+        admin.site.unregister(Product)
+        try:
+            with patch.object(
+                Product, "get_admin_fields", return_value=fieldsets_with_a_non_field
+            ):
+                Product.register_admin()
+
+            generated = admin.site._registry[Product]
+            declared = [
+                name
+                for _title, options in generated.fieldsets
+                for entry in options["fields"]
+                for name in (entry if isinstance(entry, tuple) else (entry,))
+            ]
+            assert declared == ["ghost_field", "name"]
+        finally:
+            admin.site.unregister(Product)
+            Product.register_admin()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SnapSaveMixin — what an admin save records (re-homed in #QA1b)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestSnapSaveMixinRecordsTheSave:
+    """``SnapSaveMixin`` is what puts an admin edit into the audit trail.
+
+    A create snapshots the initial values; an edit records only the fields that
+    changed, in Django's own ``LogEntry`` as well as SnapAdmin's trail. An inline
+    form whose field cannot be introspected must not abort the whole save — the
+    other inlines still get logged.
+    """
+
+    def _generated_admin(self, model_class):
+        from django.contrib.admin import ModelAdmin
+
+        from snapadmin.models import SnapSaveMixin
+
+        class GeneratedAdmin(SnapSaveMixin, ModelAdmin):
+            pass
+
+        instance = GeneratedAdmin(model_class, admin.site)
+        instance.model = model_class
+        return instance
+
+    def _request(self, username):
+        from django.contrib.auth.models import User
+        from django.test import RequestFactory
+
+        request = RequestFactory().get("/")
+        request.user = User.objects.create_superuser(username, password="pass")
+        return request
+
+    def test_creating_an_object_saves_it_and_records_a_create_entry(self):
+        from decimal import Decimal
+
+        from demo.apps.shop.models import Product
+        from snapadmin.models import SnapadminAuditLog
+
+        request = self._request("savemixin_new")
+        product = Product(name="Fresh", price=Decimal("12.00"))
+
+        class NewObjectForm:
+            changed_data = []
+            initial = {}
+            cleaned_data = {"name": "Fresh"}
+
+        self._generated_admin(Product).save_model(
+            request, product, NewObjectForm(), change=False
+        )
+
+        assert Product.objects.filter(pk=product.pk, name="Fresh").exists()
+        entry = SnapadminAuditLog.objects.filter(
+            object_repr=str(product), action="create"
+        ).latest("timestamp")
+        assert entry.changes["name"]["new"] == "Fresh"
+        assert entry.changes["name"]["old"] is None
+
+    def test_an_inline_whose_field_cannot_be_read_does_not_stop_the_others(self):
+        from decimal import Decimal
+        from unittest.mock import MagicMock
+
+        from django.contrib.admin.models import LogEntry
+
+        from demo.apps.shop.models import Product
+
+        product = Product.objects.create(name="Parent", price=Decimal("20.00"))
+        request = self._request("saverelated")
+
+        changed_inline = MagicMock()
+        changed_inline.instance = product
+        changed_inline.has_changed.return_value = True
+        changed_inline.changed_data = ["name"]
+        changed_inline.initial = {"name": "Parent"}
+        changed_inline.cleaned_data = {"name": "Renamed"}
+
+        uninspectable_inline = MagicMock()
+        uninspectable_inline.instance.pk = 999
+        uninspectable_inline.instance._meta.get_field.side_effect = Exception("no such field")
+        uninspectable_inline.has_changed.return_value = True
+        uninspectable_inline.changed_data = ["mystery"]
+        uninspectable_inline.initial = {"mystery": "a"}
+        uninspectable_inline.cleaned_data = {"mystery": "b"}
+
+        formset = MagicMock()
+        formset.has_changed.return_value = True
+        formset.forms = [changed_inline, uninspectable_inline]
+
+        before = set(LogEntry.objects.values_list("pk", flat=True))
+        self._generated_admin(Product).save_related(
+            request, MagicMock(), [formset], change=True
+        )
+        written = LogEntry.objects.exclude(pk__in=before)
+
+        # Exactly one entry: the readable inline's. The other was skipped, not
+        # logged blank and not allowed to raise.
+        assert written.count() == 1
+        assert "Parent" in written.get().change_message
+        assert "Renamed" in written.get().change_message

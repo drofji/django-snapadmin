@@ -1331,3 +1331,41 @@ class TestSnapFieldWrapperDriftGuard:
         from snapadmin.fields import _SNAP_FIELD_WRAPPER_DOCUMENTED_EXCLUSIONS, _SNAP_FIELD_WRAPPER_KWARGS
 
         assert _SNAP_FIELD_WRAPPER_KWARGS & _SNAP_FIELD_WRAPPER_DOCUMENTED_EXCLUSIONS == set()
+
+
+class TestSnapFunctionFieldDisplayWithoutUnfold:
+    """``SnapFunctionField``'s generated display callable without the theme.
+
+    With ``django-unfold`` installed the value is wrapped for the themed admin;
+    without it the raw value is returned unchanged, so a project on the stock
+    admin sees the computed value rather than markup it cannot render.
+    (Re-homed here in #QA1b.)
+    """
+
+    def test_returns_the_computed_value_unwrapped(self):
+        from unittest.mock import patch
+
+        import snapadmin.admin_gen as admin_gen_module
+        from snapadmin import fields as snap_fields
+        from snapadmin.models import SnapModel
+
+        class ModelWithFn(SnapModel):
+            label = snap_fields.SnapFunctionField(
+                lambda obj: "computed-value",
+                verbose_name="Label",
+            )
+
+            class Meta:
+                app_label = "demo"
+                abstract = True
+
+        ModelWithFn.get_admin_fields()
+        display = ModelWithFn._admin_generated_overrides["SnapFunctionFieldLabel"]
+
+        # UNFOLD_INSTALLED lives in snapadmin.admin_gen (#SIMPL1f) — that is
+        # where get_admin_fields() actually reads it from.
+        with patch.object(admin_gen_module, "UNFOLD_INSTALLED", False):
+            rendered = display(None, object())
+
+        assert rendered == "computed-value"
+        assert isinstance(rendered, str)

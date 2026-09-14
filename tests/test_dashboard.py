@@ -1,3 +1,13 @@
+"""
+tests/test_dashboard.py
+
+The SnapAdmin dashboard view and the health endpoint it sits beside: what the
+page puts in its context (service list, model cards, cron jobs) and how it
+behaves when one of the things it reports on is broken.
+
+The two status panels — service reachability and the environment block — have
+their own suite in ``test_dashboard_service_and_environment.py``.
+"""
 
 import pytest
 from django.urls import reverse
@@ -268,3 +278,40 @@ class TestDashboardCronJobs:
         response = admin_client.get(url)
         assert b"Scheduled Cron Jobs" in response.content
         assert b"reindex-products-to-es" in response.content
+
+
+@pytest.mark.django_db
+class TestDashboardToleratesAModelThatCannotBeCounted:
+    """A card whose ``count()`` raises must render as zero, not 500 the page.
+
+    The dashboard counts every registered model. One unreachable shard, one
+    model whose table is missing, and an uncaught exception would take down the
+    whole page rather than the one card. (Re-homed here in #QA1b, where the
+    assertion also gained the rest of the context: the cards are still built.)
+    """
+
+    def test_a_raising_count_leaves_the_card_at_zero_and_keeps_the_others(self):
+        from unittest.mock import patch
+
+        from django.contrib.auth.models import User
+        from django.test import RequestFactory
+
+        from snapadmin.models import EsManager
+        from snapadmin.views import DashboardView
+
+        request = RequestFactory().get("/")
+        request.user = User.objects.create_superuser("dash_count_fail", password="x")
+        view = DashboardView()
+        view.request = request
+        view.kwargs = {}
+        view.args = []
+
+        with patch.object(EsManager, "count", side_effect=Exception("db down")):
+            context = view.get_context_data()
+
+        assert context["registered_models"], "the cards must still be built"
+        assert [card["count"] for card in context["registered_models"]] == [
+            0 for _ in context["registered_models"]
+        ]
+        # Every card still carries its link, so the page renders in full.
+        assert all(card["url"] for card in context["registered_models"])
