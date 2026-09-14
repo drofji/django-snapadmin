@@ -175,6 +175,9 @@ flake8 = "^7.0.0"
 pytest = "^8.0.0"
 pytest-django = "^4.8.0"
 pytest-cov = "^5.0.0"
+# Runs the suite in a random order by default, so a test that only passes because
+# of where it sits in the alphabet fails here rather than in someone else's branch.
+pytest-randomly = "^3.15"
 faker = "^25.0.0"
 # Dev extras (installed via demo/requirements.txt)
 # The suite exercises the REST API and GraphQL end to end; the package core

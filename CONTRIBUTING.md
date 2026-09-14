@@ -12,6 +12,19 @@ that aren't obvious from the code.
   `python demo/manage.py <command>` (it puts the repo root on `sys.path` itself). Docker runs
   via `docker compose -f demo/docker-compose.yml up --build`. See [`demo/README.md`](demo/README.md).
 - **Tests:** `pytest` from the repo root — the `snapadmin/` package is kept at 100% line coverage.
+  The suite runs in a **random order** every time (`pytest-randomly`), because a test that only
+  passes where the alphabet happens to put it is not passing for the right reason. Every run
+  prints the seed it used:
+
+  ```
+  Using --randomly-seed=3432440628
+  ```
+
+  To reproduce a failure exactly, pass that seed back: `pytest -p no:cacheprovider
+  --randomly-seed=3432440628`. To rule order out while debugging something else,
+  `pytest -p no:randomly` restores the old file order. **A failure under one seed and not another
+  is a real bug in the tests** — shared state, an ambient setting, a leaked global — not a reason
+  to pin the order; see the empty-test and isolation notes in the testing rules.
 - **Migrations:** after any model change, run `python demo/manage.py makemigrations` and commit
   the generated migration; never edit an existing migration.
 

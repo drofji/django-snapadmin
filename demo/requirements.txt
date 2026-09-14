@@ -48,6 +48,8 @@ openpyxl>=3.1.0
 pytest>=8.0.0
 pytest-django>=4.8.0
 pytest-cov>=5.0.0
+# Randomises test order every run — order-dependence fails in CI, not later. MIT.
+pytest-randomly>=3.15.0
 factory-boy>=3.3.0
 Faker>=20.0.0
 
