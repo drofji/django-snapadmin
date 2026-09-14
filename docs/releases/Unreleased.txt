@@ -352,6 +352,24 @@ Changed
   id-only index is genuinely wanted, ``'snapadmin.E026'`` in ``SILENCED_SYSTEM_CHECKS`` is the
   documented way out.
 
+* **The README now describes how the suite is built, not only how big it is.** ``Quality &
+  compatibility`` used to open with three numbers and stop there; the counts it quoted had also
+  fallen a full release behind the suite. It now states the working method (test-first, a
+  regression test pinned to every fixed bug, assertions that name a contract rather than check for
+  a pulse, and a guard suite that fails on an assertion no outcome could falsify), lists the test
+  layers with named example files for each, and explains where the mocks stop: one CI job runs the
+  whole suite against a real PostgreSQL 16 and the marker-gated Elasticsearch suite against a live
+  8.13.0 cluster, because a ``MagicMock`` accepts a malformed query that a cluster answers ``400``
+  to. Every run — local and CI — is in random order, so a test that leans on another having run
+  first fails instead of passing quietly.
+
+  It also gains a section listing, plainly, the layers the project's own engineering standard asks
+  for and **does not have**: mutation testing, property-based/fuzz testing, browser E2E, and lint /
+  type / security static analysis in CI (``black`` and ``flake8`` are dev dependencies that no CI
+  job runs). Branch coverage is reported as measured-not-gated — 99%, with 60 partial branches —
+  rather than folded into the 100% headline, which is **line** coverage. Every count in the section
+  is a floor taken from a real collection run: 4,900+ tests across 152 files.
+
 Fixed
 -----
 

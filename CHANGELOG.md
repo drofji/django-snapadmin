@@ -98,6 +98,17 @@ the `0.x` beta series.
   concrete column of every mirrored model to a second datastore on upgrade. Existing projects in
   this state will now fail at startup with two one-line fixes in the hint, or can silence
   `snapadmin.E026` if an id-only index is deliberate.
+- The README's `Quality & compatibility` section now describes the testing method rather than only
+  its size: the layers in use with named example files, the working rules behind them (test-first,
+  a regression test per fixed bug, assertions that state a contract, a guard suite that fails on an
+  assertion no outcome could falsify), random-order runs on every invocation, and the CI job that
+  runs the whole suite against a real PostgreSQL 16 plus a marker-gated suite against a live
+  Elasticsearch 8.13.0 — because a mocked client cannot reject the malformed query a cluster
+  answers `400` to. A new subsection lists what is deliberately **not** in place yet: mutation
+  testing, property-based/fuzz testing, browser E2E, and lint/type/security static analysis in CI.
+  Branch coverage is reported as measured (99%) rather than gated; the enforced 100% is **line**
+  coverage. Every count is a floor from a real collection run — 4,900+ tests across 152 files,
+  replacing stale 4,600+ figures.
 
 ### Fixed
 - Five import-job strings shipped untranslated in all nine translated locales. `Fail`,

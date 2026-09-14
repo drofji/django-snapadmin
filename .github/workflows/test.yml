@@ -1,9 +1,10 @@
 name: Tests
 
 # Runs the full pytest suite across the supported Python × Django matrix on every push and pull
-# request to main, and enforces the 100% coverage bar on the shipped `snapadmin/` package. The suite
-# mocks Elasticsearch / Redis / Celery and uses an in-memory SQLite database, so no service
-# containers are needed.
+# request to main, and enforces the 100% coverage bar on the shipped `snapadmin/` package. Those six
+# matrix jobs mock Elasticsearch / Redis / Celery and use an in-memory SQLite database, so they need
+# no service containers. The seventh job, `real-services`, is the deliberate exception: it runs the
+# same suite against a real PostgreSQL and a live Elasticsearch — see its own comment below.
 
 on:
   push:

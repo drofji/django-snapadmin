@@ -95,12 +95,14 @@ rather than take on trust.
 
 | Question | Evidence |
 |---|---|
-| **Is it tested?** | **4,600+ tests** and **100% line coverage** on the shipped package (11,000+ statements), enforced in CI — the build fails below 100% |
+| **Is it tested?** | **4,900+ tests** across **152 files** and **100% line coverage** on the shipped package (11,000+ statements), enforced in CI — the build fails below 100% |
 | **On our Python and Django?** | Every push runs the full matrix: **Python 3.10–3.13 × Django 5.2 / 6.0** |
-| **Will an upgrade break us?** | **270+ tests exist only to fail** if a public name, signature or default changes — a breaking change cannot ship by accident |
-| **Are the docs actually true?** | **95+ tests** assert that the README, the docs site and the in-package module map describe the code that really ships |
+| **Against a real database, or only SQLite?** | A separate CI job runs the **whole suite against PostgreSQL 16**, and a marker-gated suite against a **live Elasticsearch 8.13.0** — the same image the demo ships. A mocked client cannot reject a malformed query; a real cluster does |
+| **Do the tests lean on each other?** | Every run is in **random order** (`pytest-randomly`), locally and in CI, so a test that depends on another having run first fails instead of passing quietly |
+| **Will an upgrade break us?** | **340+ tests exist only to fail** if a public name, signature or default changes — a breaking change cannot ship by accident |
+| **Are the docs actually true?** | **140+ tests** assert that the README, the docs site and the in-package module map describe the code that really ships |
 | **Does the whole pipeline still connect?** | An end-to-end smoke test posts the real admin form, then proves the REST API serves that same row and the audit trail recorded it |
-| **Is `snapadmin-info` telling the truth?** | **200+ tests** cover the diagnostics report; every capability probe is tested both switched **on and off**, so the readiness audit cannot report a false green |
+| **Is `snapadmin-info` telling the truth?** | **220+ tests** cover the diagnostics report; every capability probe is tested both switched **on and off**, so the readiness audit cannot report a false green |
 | **Can we ship it commercially?** | MIT. The base install carries **only** permissive licences (MIT/BSD/Apache); anything copyleft is an opt-in extra. `snapadmin-license-check` audits what you actually installed |
 
 → [The full quality story](#quality--compatibility), with the names of the test files, so a reviewer
@@ -122,7 +124,7 @@ The questions a tech lead or a manager asks before approving a dependency:
 | **Personal data in the API?** | [PII masking](https://drofji.github.io/django-snapadmin/#pii-masking) — declare a field sensitive once and it is masked in the admin, REST, GraphQL, exports **and** the audit diff. Per-field rules can unlock one field for one permission |
 | **Only HR should see salary?** | [`api_field_permissions`](https://drofji.github.io/django-snapadmin/#field-permissions) gates a field's very presence, per Django permission — absent from a response for anyone lacking it, an explicit `400` naming the field on a denied write, orthogonal to masking (which only controls display) |
 | **Multi-tenant SaaS?** | [Row-level tenant isolation](https://drofji.github.io/django-snapadmin/#multi-tenancy) — opt a model in with `tenant_scoped = True` plus a tenant column, and every generated surface (admin, REST, GraphQL, Elasticsearch routing, exports, imports, the offline cache) becomes unreachable without a bound tenant: default-deny, not opt-out. Logical isolation, not physical — the limitation is documented as plainly as the feature |
-| **Is it tested?** | **100% line coverage** on the shipped package, enforced in CI, across 4,600+ tests. The matrix runs Python 3.10–3.13 × Django 5.2/6.0 on every push. [What those tests cover](#quality--compatibility) |
+| **Is it tested?** | **100% line coverage** on the shipped package, enforced in CI, across 4,900+ tests in random order. The matrix runs Python 3.10–3.13 × Django 5.2/6.0 on every push, and a further job runs the same suite against a real PostgreSQL and a live Elasticsearch. [What those tests cover, and what is not covered yet](#quality--compatibility) |
 | **Will it break on upgrade?** | A written [API-stability policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md), covered by semantic versioning as of `1.0`: deprecations warn before removal and name their replacement — and a [contract suite](#backward-compatibility-is-a-test-not-a-promise) fails the build if a public name changes |
 | **Will it survive our load?** | Read-replica routing, estimated counts, paging caps, streaming exports, and a reusable [quota primitive](https://drofji.github.io/django-snapadmin/#quotas) (`snapadmin.limits.reserve()`) for per-tenant windows, concurrency caps and outbound-call cooldowns. [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) |
 | **Single sign-on?** | [SSO / OAuth2 login helper](https://drofji.github.io/django-snapadmin/#enterprise-config); auth is pluggable — JWT, session, or your own |
@@ -521,27 +523,105 @@ the legal question in one command
 # Quality & compatibility
 
 This is a package other people's products depend on, so the test suite is treated as part of the
-product rather than as developer hygiene. Concretely, on the current release:
+product rather than as developer hygiene. Every count below is a **floor**, read off a real
+`pytest --collect-only -q` run rather than kept current by arithmetic — and [what is *not* in place
+yet](#what-is-not-in-place-yet) is part of this section rather than an omission from it.
 
-- **4,600+ tests**, run on every push.
+Concretely, on the current release:
+
+- **4,900+ tests across 152 files**, run on every push. Twelve of them need a live Elasticsearch, so
+  they carry a marker and are deselected by default: cloning the repository and typing `pytest`
+  starts no container and takes about **forty seconds**.
 - **100% line coverage** on the shipped `snapadmin/` package — 11,000+ statements, no exclusions, no
   `# pragma: no cover` to hide untested code. CI runs
   `pytest --cov=snapadmin --cov-fail-under=100`, so a pull request that adds an untested line fails.
+- **Branch coverage is measured, and reported honestly: 99%** — 3,300+ branches, 60 of them taken
+  only one way. It is *not* a gate yet. Closing those partial branches and then turning the gate on
+  is planned work; this page will say "enforced" only when it is.
+- **Random order on every run.** `pytest-randomly` reshuffles the suite on each invocation, locally
+  and in CI. A test that quietly depends on another one having run first fails instead of passing,
+  and a seed-dependent failure is treated as a real defect in the tests — never as a reason to pin
+  the order.
 - **The full compatibility matrix on every push** — Python 3.10 / 3.11 / 3.12 / 3.13 × Django 5.2
-  and 6.0. A release is gated on the same matrix: the tag-triggered publish workflow runs it before
-  anything reaches PyPI.
+  and 6.0, six jobs. A release is gated on the same matrix: the tag-triggered publish workflow runs
+  it before anything reaches PyPI.
+- **A seventh job runs the same suite against real services**, not mocks — see below.
+
+## How those tests are written
+
+The count is the least interesting part, so here is the method behind it.
+
+- **Test-first.** A behaviour change or a bug fix starts with a test that fails for the right
+  reason; the fix comes second. Every bug fix ships a regression test pinned to the specific input
+  that broke.
+- **Assertions state a contract, not a pulse.** `assert result is not None` is treated as a defect
+  in the test: the suite asserts the value, the status code, the exception type and message, the
+  row that was written, the query count. A guard test (`tests/test_assertions_can_fail.py`) reads
+  the suite with `ast` and fails on assertions no outcome could falsify — `assert True`,
+  `assert x or True`, and tests whose entire claim is "it did not raise".
+- **No test is ever weakened to get a green build.** Not a loosened assertion, not a `skip`, not an
+  `xfail`, not an extra mock, not an edited expected value. When code and test disagree the
+  question of which one is *right* is answered first.
+- **Order-independent by construction** — no shared mutable state, no ambient settings, no reliance
+  on the wall clock or on a previously created row. Random order is what proves it.
+- **The backend is never assumed.** The suite runs on SQLite locally and PostgreSQL in CI, so no
+  test may hard-code one. Where behaviour genuinely differs, both halves are written and each skips
+  on a *capability* (`connection.features.supports_json_field_contains`), never on a vendor name.
+
+## Where the mocks stop and real services start
+
+Elasticsearch, Redis and Celery are stubbed in the everyday run, which keeps it at forty seconds and
+service-free — but a `MagicMock` accepts any call with any arguments, so the query DSL those methods
+exist to build is exactly what a mocked test cannot check. A malformed `terms` clause or a
+wrongly-shaped `search_after` cursor passes a mock and answers `400` from a cluster.
+
+So one CI job (Python 3.12 · Django 5.2) runs against the real thing:
+
+| Service | What it proves |
+|---|---|
+| **PostgreSQL 16**, the whole suite | The backend-specific code paths real users get — `EstimatedCountPaginator`'s `reltuples` estimate, the `pg_dump` backup path, the sharding DSNs — are exercised on PostgreSQL rather than inferred from SQLite. The first run of this job found three tests that had silently assumed SQLite, one of which pinned behaviour that exists *only* on the backend without native JSON containment |
+| **Elasticsearch 8.13.0**, `pytest -m real_es` | The generated query DSL is accepted by a real cluster — filters, aggregations, deep `search_after` scans and the mapping. It is the same image `demo/docker-compose.yml` ships, and `tests/test_version_sync.py` fails if the two ever drift apart or leave the `[elasticsearch]` extra's supported range |
+
+These tests are deselected by default (`-m "not real_es"`), so cloning the repo and running `pytest`
+needs no Docker.
+
+## The layers, and what each one protects
+
+Not one pyramid but several overlapping ones, because a library fails in more ways than an
+application does. Each layer below exists today and runs in the same `pytest` invocation:
+
+| Layer | What it protects | Named examples |
+|---|---|---|
+| **Unit** | one function or class in isolation, with Elasticsearch and sockets stubbed | `tests/test_fields.py`, `tests/test_conf.py`, `tests/test_registry.py` |
+| **Integration** | the Django stack wired together — ORM, generated admin, HTTP, Celery run in-process | `tests/test_model_api.py`, `tests/test_admin_site.py`, `tests/test_backup.py` |
+| **Security** | authentication, authorisation, tenancy, PII masking, field encryption, stored XSS, token storage, the audit log | `tests/test_pii_masking.py`, `tests/test_encryption_leak_surfaces.py`, `tests/test_tenancy.py` |
+| **Contract** | the public import surface: names, signatures, defaults — plus an AST backstop that reads the source rather than a hand-kept list | `tests/test_public_contract.py`, `tests/test_public_surface_snapshot.py`, `tests/test_api_surface_defaults.py` |
+| **Documentation-truth** | that this README, the docs site, `llms.txt` and the in-package module map describe the code that really ships | `tests/test_docs_completeness.py`, `tests/test_ai_entry_points.py`, `tests/test_docs_site.py` |
+| **Regression** | one named past bug each, pinned to the exact input that broke | `tests/test_widget_security.py`, `tests/test_es_delete_sync.py`, `tests/test_api_validation_errors.py` |
+| **Adversarial** | malformed input, hostile settings, conflicting kwargs, wrong permissions — asserting the *right* refusal, not merely the absence of a crash | `tests/test_wysiwyg_sanitize.py`, `tests/test_scaffold_validate.py`, `tests/test_sharding_registration.py` |
+| **Compatibility** | the core still imports with DRF, Graphene, Celery or Unfold absent | `tests/test_api_optional.py`, `tests/test_celery_optional.py`, `tests/test_unfold_optional.py` |
+| **Diagnostics** | every `snapadmin_info` collector renders, and reports honestly on and off | `tests/test_diagnostics_features.py` and ten more |
+| **i18n** | ten catalogs compile, strings are wrapped, switching language works | `tests/test_i18n.py`, `tests/test_demo_i18n.py` |
+| **Accessibility** | WCAG 2.1 AA assertions on the dashboard and the SSO partial | `tests/test_accessibility.py` |
+| **Performance / query count** | list-view knobs and estimated-count pagination, with `assertNumQueries` pins | `tests/test_performance.py`, `tests/test_pagination.py` |
+| **Process-level E2E** | `snapadmin-new` generates a project and that project really boots — a real `subprocess`, real `check` and `migrate` | `tests/test_scaffold_e2e.py` |
+| **End-to-end smoke** | the seam *between* the layers: admin form POST → database row → audit entry → REST read, in one walk | `tests/test_critical_path_smoke.py` |
+| **Live datastore** | the Elasticsearch query DSL against a real cluster, where a mock cannot judge it | `tests/test_elasticsearch_live.py` |
 
 ## Backward compatibility is a test, not a promise
 
 These suites exist for one purpose only: to fail loudly when a public name, signature or default
 changes, so a breaking change is a deliberate decision rather than a side effect of a refactor.
+**340+ of the tests below can only ever fail that way** — they assert nothing about behaviour, only
+about the shape of the surface you import.
 
 | Suite | What it pins |
 |---|---|
-| `tests/test_public_contract.py` | **230+ checks** over the public API surface — every import path (`from snapadmin.backup import …`), every default, every documented signature |
+| `tests/test_public_contract.py` | **260+ checks** over the public API surface — every import path (`from snapadmin.backup import …`), every default, every documented signature |
 | `tests/test_public_surface_snapshot.py` | An **AST-derived inventory** of every public class and function actually defined in the package, compared against a frozen snapshot. Unlike a hand-maintained list it is read from the source, not from memory, so a rename or a silent removal cannot slip past it |
 | `tests/test_ecosystem_compat.py` | That the Django ecosystem still composes: `django-import-export`, `reversion`, `simple-history` and `guardian` mixins layer onto a generated admin, and auto-registration never clobbers an admin you registered yourself |
-| `tests/test_version_sync.py` | That the version is identical in every place the repo publishes it — `pyproject.toml`, the docs site, `SECURITY.md` and the rest |
+| `tests/test_api_surface_defaults.py` | An **AST sweep** proving no read site spells an API switch's default inline — every one of them goes through the single named constant, so a default cannot be changed in nine places and missed in the tenth |
+| `tests/test_version_sync.py` | That the version is identical in every place the repo publishes it — `pyproject.toml`, the docs site, `SECURITY.md` and the rest — and that the Elasticsearch image the CI job and the demo compose file use is the same one |
 
 Removing or renaming a public name is a **major-version-only** change under the
 [API-stability policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md);
@@ -556,18 +636,18 @@ trusted:
 | Suite | What it asserts |
 |---|---|
 | `tests/test_docs_completeness.py` | Every `SNAPADMIN_*` setting the code reads (100+ of them) appears in the docs **and** in the demo project · every registered system-check id is explained somewhere a reader will find it · every optional extra is listed consistently across the README, the docs, `THIRD_PARTY_NOTICES.md` and the licence inventory |
-| `tests/test_ai_entry_points.py` | **80+ checks** that the two machine-readable entry points stay true: the module map in the `snapadmin` package docstring (the only docs layer that reaches every `pip install`) names modules that really import, and every docs anchor `llms.txt` links to really exists |
+| `tests/test_ai_entry_points.py` | **90+ checks** that the two machine-readable entry points stay true: the module map in the `snapadmin` package docstring (the only docs layer that reaches every `pip install`) names modules that really import, and every docs anchor `llms.txt` links to really exists |
 | `tests/test_docs_site.py` | Structural integrity of the docs site — every section has exactly one sidebar link, and every sidebar link points at a section that exists |
 
 ## Automated checks on the operator tooling
 
 `snapadmin-info` is the command an operator runs to answer "is this configured correctly?" — so a
-false green there is worse than no report at all. **200+ tests** across eleven files cover the
-diagnostics package, including **60+ in `tests/test_diagnostics_features.py` alone**, where every
+false green there is worse than no report at all. **220+ tests** across eleven files cover the
+diagnostics package, including **80+ in `tests/test_diagnostics_features.py` alone**, where every
 capability probe in the readiness audit is exercised **both switched on and switched off**. A
 capability cannot ship without a probe, and a probe cannot ship without both tests.
 
-The same standard applies to the rest of the operator surface: **150+ tests** on the startup system
+The same standard applies to the rest of the operator surface: **200+ tests** on the startup system
 checks, **60+** on the licence audit and its command, and full suites on the scaffolding
 (`snapadmin-new`), the read-only integrator (`snapadmin-init`) and the demo fetcher
 (`snapadmin-demo`).
@@ -581,19 +661,33 @@ one the REST API serves and the same one the audit trail recorded, with the acti
 per-field diff. It is deliberately small — a tripwire for "the pipeline stopped connecting", not a
 second copy of the deep suites.
 
+## What is not in place yet
+
+A quality section that only lists what exists is marketing. These are the layers the project's own
+engineering standard asks for and **does not have today**. None of them is claimed anywhere above,
+and none will be claimed here until it actually runs in CI:
+
+| Missing | What it would add | Status |
+|---|---|---|
+| **Mutation testing** | Proof that the tests can *detect* a wrong change, not merely execute the line. 100% line coverage says every statement ran; it says nothing about whether flipping a `>` to a `>=` would fail anything | Planned. Not run, not reported |
+| **Property-based / fuzz testing** | Generated inputs — empty, `None`, unicode, enormous, malformed — against the parsers and validators, finding the classes of bug that hand-written examples miss | Planned. `hypothesis` is not a dependency |
+| **Browser E2E** | A real browser driving the generated admin: navigation, filters, pagination, actions, validation errors. Today the admin is reached only through Django's test client, which is not a browser | Planned. No Playwright, no Cypress |
+| **Lint, format, type and security static analysis in CI** | `ruff`, `mypy` and a security-oriented static pass running on every push. `black` and `flake8` are dev dependencies here, but **no CI job runs either** — that is stated plainly rather than implied away | Planned. Zero such jobs exist |
+| **A branch-coverage gate** | Branch coverage is measured at 99% with 60 partial branches, but nothing fails the build when it drops | Measured, not gated |
+
 <details>
 <summary>Where the rest of the coverage goes</summary>
 
 Beyond the contract and docs suites, the heaviest areas are the ones with the most ways to go
 wrong — each figure below is a **floor**, checked against a collection run rather than kept up to
-date by arithmetic: field behaviour and encrypted fields (300+), the REST surface (190+), field-level
-encryption end to end (370+ across the cipher, the keyset, the blind index, every leak surface and
-the conversion command), export (130+), backups (120+) and restore (60+), PII masking (120+),
-settings resolution (90+), API tokens (90+ across issuing, hashing and validation),
-internationalisation (90+ across the package and the demo), bulk import (70+), alert channels (70+),
-the audit trail (60+), offline mode (60+), multi-tenancy (60+ across the model, admin, audit and
-Elasticsearch layers) and data retention (50+). Accessibility (WCAG 2.1 AA) and GraphQL permission
-enforcement have their own suites.
+date by arithmetic: field behaviour and encrypted fields (250+), the REST surface (190+), field-level
+encryption end to end (400+ across the cipher, the keyset, the blind index, every leak surface and
+the conversion command), export (130+), backups (170+) and restore (90+ including the pre-restore
+snapshot), PII masking (120+), settings resolution (90+), API tokens (100+ across issuing, hashing
+and validation), internationalisation (110+ across the package and the demo), data retention (80+),
+bulk import (70+), alert channels (70+), the audit trail (60+), multi-tenancy (60+ across the model,
+admin, audit and Elasticsearch layers) and offline mode (60+). Accessibility (WCAG 2.1 AA) and
+GraphQL permission enforcement have their own suites.
 
 **`tests/` is not shipped in the wheel or sdist** — only `snapadmin/` (the published package),
 `README.md`, `LICENSE` and the docs are. That is a packaging-size choice, not a coverage gap: the
