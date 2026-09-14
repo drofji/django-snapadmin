@@ -25,6 +25,36 @@ that aren't obvious from the code.
   `pytest -p no:randomly` restores the old file order. **A failure under one seed and not another
   is a real bug in the tests** — shared state, an ambient setting, a leaked global — not a reason
   to pin the order; see the empty-test and isolation notes in the testing rules.
+- **Databases:** the suite runs on in-memory SQLite by default, so there is nothing to start. CI
+  also runs the identical test files against a real PostgreSQL, because the package carries
+  backend-specific code (the estimated-count paginator's `reltuples` query, the `pg_dump` backup
+  path) that SQLite can never exercise. To do the same locally:
+
+  ```bash
+  docker run --rm -d -p 5432:5432 -e POSTGRES_USER=snapadmin \
+      -e POSTGRES_PASSWORD=snapadmin -e POSTGRES_DB=snapadmin_test postgres:16
+  SNAPADMIN_TEST_POSTGRES=localhost pytest
+  ```
+
+  Tests never branch on the backend: the same assertions hold on either. Where behaviour genuinely
+  differs, both halves exist and each skips on the backend it does not apply to — keyed on the
+  *capability* (`connection.features.supports_json_field_contains`), never on the vendor name.
+- **Elasticsearch:** every Elasticsearch test mocks the client, which keeps the everyday run fast
+  but leaves the query DSL unchecked — a mock accepts a malformed `terms` clause or a broken
+  `search_after` cursor without complaint, and a real cluster answers `400`. The tests in
+  `tests/test_elasticsearch_live.py` drive a real one and are **deselected by default**. To run
+  them, start the same image the demo ships and ask for the marker:
+
+  ```bash
+  docker run --rm -d -p 9200:9200 -e discovery.type=single-node \
+      -e xpack.security.enabled=false \
+      docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+  SNAPADMIN_TEST_ES_URL=http://localhost:9200 pytest -m real_es
+  ```
+
+  CI runs both of the above in one job, on one Python/Django combination — a backend difference
+  does not depend on the interpreter version, so spreading it across the matrix would cost six
+  times the minutes to learn the same thing.
 - **Migrations:** after any model change, run `python demo/manage.py makemigrations` and commit
   the generated migration; never edit an existing migration.
 
