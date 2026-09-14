@@ -187,20 +187,28 @@ class TestAdminRegistration:
 
     def test_admin_disabled_model_not_registered(self):
         """A model with admin_enabled=False should not appear in admin."""
+        from django.test.utils import isolate_apps
+
         from snapadmin.models import SnapModel
 
-        class NoAdminModel(SnapModel):
-            admin_enabled = False
-            subject_path = None  # concrete (abstract=False) and lingers in the
-            # real "demo" app registry for the rest of the session — every
-            # registered SnapModel must declare this (snapadmin.E011).
+        # isolate_apps so the class is discarded with the block: a concrete model
+        # declared in a test body otherwise stays in the global "demo" app
+        # registry for the rest of the session, where anything walking
+        # apps.get_models() (the dashboard cards, the landing stats, the system
+        # checks) sees a model the demo never declared.
+        with isolate_apps("demo"):
 
-            class Meta:
-                app_label = "demo"
-                abstract = False
+            class NoAdminModel(SnapModel):
+                admin_enabled = False
+                subject_path = None  # every registered SnapModel must declare
+                # this (snapadmin.E011), isolated or not.
 
-        NoAdminModel.register_admin()
-        assert NoAdminModel not in admin.site._registry
+                class Meta:
+                    app_label = "demo"
+                    abstract = False
+
+            NoAdminModel.register_admin()
+            assert NoAdminModel not in admin.site._registry
 
     def test_model_with_no_show_in_form_fields_still_registers(self):
         """A registered model where no field sets show_in_form=True builds a

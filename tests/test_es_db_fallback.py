@@ -192,13 +192,29 @@ class TestScanMidStreamStop:
         # Once a document has been streamed the search_after cursor is gone, so a
         # mid-stream failure stops where it was — db_fallback=False does not turn
         # that into a raise (there is no DB scan being suppressed there).
-        Product.objects.create(name="A", price=1, available=True)
+        streamed_product = Product.objects.create(name="A", price=1, available=True)
         es = MagicMock()
-        page = {"hits": {"hits": [{"_source": {"id": 1}, "sort": [1]}]}}
+        # The hit has to carry the row's real pk: a DUAL model reconstructs the
+        # yielded objects from the database, so a hard-coded id matches nothing
+        # once SQLite hands out a different rowid — the scan then produces no
+        # document, `produced` stays False and db_fallback=False turns the
+        # mid-stream error into the SnapEsUnavailable this test exists to prove
+        # does *not* happen. Order-dependent before #QA1b.
+        page = {
+            "hits": {
+                "hits": [
+                    {
+                        "_source": {"id": streamed_product.pk},
+                        "sort": [streamed_product.pk],
+                    }
+                ]
+            }
+        }
         es.search.side_effect = [page, RuntimeError("es died mid-scan")]
         collected = []
         with override_settings(ELASTICSEARCH_ENABLED=True), \
                 patch.object(Product, "get_es_client", return_value=es):
             for obj in Product.es_scan(available=True, db_fallback=False, page_size=1):
                 collected.append(obj.pk)
-        assert collected == [1]  # streamed the first page, then stopped — no raise
+        # streamed the first page, then stopped — no raise
+        assert collected == [streamed_product.pk]

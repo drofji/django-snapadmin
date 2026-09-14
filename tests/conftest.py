@@ -98,3 +98,43 @@ def regular_user(db):
     return User.objects.create_user(
         username="regular", password="password", email=f"regular@{DEFAULT_TEST_TENANT}"
     )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def assert_no_model_leaked_into_the_app_registry():
+    """Fail the session if a test left a model class in Django's app registry.
+
+    A model class declared in a test body is registered by ``ModelBase.__new__``
+    the moment the ``class`` statement executes, and it stays registered for the
+    rest of the process — ``apps.all_models[label]`` is global state that nothing
+    unwinds. Two surfaces then see a model the demo never declared: SnapAdmin's
+    own registry (``SnapModel.__init_subclass__`` registers every subclass) and
+    anything iterating ``apps.get_models()``, such as the dashboard's model cards
+    and the demo landing page's stats.
+
+    That is invisible under the suite's alphabetical order and appears the moment
+    the order changes, which is exactly the order-dependence the quality standard
+    forbids (§14). The cure is ``django.test.utils.isolate_apps``, which both the
+    app registry and SnapAdmin's ``WeakKeyDictionary`` registry are built to
+    cooperate with — see ``snapadmin/registry.py``'s module docstring.
+
+    Session-scoped and autouse so it holds for a single file, a class or the whole
+    suite, and so a leak is reported against the run that caused it rather than
+    against whichever unrelated test happened to observe the consequence.
+    """
+    from django.apps import apps
+
+    declared_before = {label: set(models) for label, models in apps.all_models.items()}
+
+    yield
+
+    leaked = sorted(
+        f"{label}.{name}"
+        for label, models in apps.all_models.items()
+        for name in set(models) - declared_before.get(label, set())
+    )
+    assert leaked == [], (
+        "these model classes were declared by a test and left in Django's global "
+        f"app registry: {leaked}. Declare throwaway models inside "
+        '`with isolate_apps("<app_label>"):` so they are discarded with the block.'
+    )

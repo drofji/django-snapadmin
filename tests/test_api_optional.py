@@ -70,6 +70,21 @@ class _HideModules:
     def __exit__(self, *exc):
         sys.meta_path.remove(self)
         sys.modules.update(self._saved)
+        # Restoring ``sys.modules`` is not enough. An import that ran inside the
+        # block re-created an evicted package, and the import machinery bound
+        # that fresh, submodule-less module as an attribute of its parent
+        # (``snapadmin.api`` on ``snapadmin``). Attribute-path patching resolves
+        # through the *attribute*, not through ``sys.modules`` — both
+        # ``mock.patch("snapadmin.api.filters.connections")`` and
+        # ``monkeypatch.setattr`` walk ``getattr(snapadmin, "api")`` — so leaving
+        # the stale binding in place hands every later test a module that never
+        # imported its submodules, and the failure surfaces in whichever
+        # unrelated test patches one next.
+        for module_name, module in self._saved.items():
+            parent_name, _, child_name = module_name.rpartition(".")
+            parent = sys.modules.get(parent_name)
+            if parent is not None:
+                setattr(parent, child_name, module)
         return False
 
 
@@ -84,6 +99,37 @@ def _exec_fresh(module_path: pathlib.Path, name: str):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+class TestHideModulesLeavesNoTraceBehind:
+    """The eviction helper must put the import system back exactly as it was.
+
+    ``_HideModules`` deletes SnapAdmin's API modules so a re-import cannot be
+    served from cache. Anything that imports one of those packages *while they
+    are evicted* makes the import machinery create a fresh module and bind it as
+    an attribute of its parent. Restoring ``sys.modules`` alone leaves that
+    binding pointing at the fresh, submodule-less module, and every later test
+    that patches through an attribute path — ``mock.patch`` and
+    ``monkeypatch.setattr`` both resolve ``getattr(snapadmin, "api")`` rather
+    than reading ``sys.modules`` — patches the wrong object and fails for
+    reasons that have nothing to do with it. Found by running the suite in a
+    shuffled order (#QA1b).
+    """
+
+    def test_an_import_inside_the_block_does_not_outlive_it(self):
+        # Arrange: the real binding, with the submodule attribute in place.
+        import snapadmin
+        import snapadmin.api.filters  # noqa: F401 — binds `filters` on the package
+
+        # Act: re-import the evicted package from inside the block, which is what
+        # executing `snapadmin/urls.py` there does as a side effect.
+        with _HideModules(*API_PACKAGES):
+            importlib.import_module("snapadmin.api")
+
+        # Assert: the attribute path and sys.modules agree again, and the
+        # submodule attribute an attribute-path patch needs is still there.
+        assert snapadmin.api is sys.modules["snapadmin.api"]
+        assert snapadmin.api.filters is sys.modules["snapadmin.api.filters"]
 
 
 class TestPaginationDoesNotRequireDRF:

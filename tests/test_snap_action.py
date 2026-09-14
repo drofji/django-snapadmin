@@ -101,15 +101,28 @@ class TestActionDiscovery:
 
     def test_get_snap_action_does_not_see_an_inherited_action(self):
         # Own-class-dict-only scoping, mirroring @snap_property's precedent.
+        from django.test.utils import isolate_apps
+
         from demo.apps.shop.models import Order
 
-        class SubOrder(Order):
-            class Meta:
-                proxy = True
-                app_label = "demo"
+        # isolate_apps, not a bare `class` statement: ModelBase.__new__ enters a
+        # model into the global app registry as it is declared and nothing takes
+        # it back out, so a throwaway subclass here becomes a permanent extra
+        # "demo" model — a dashboard card, a landing-page stat, and a
+        # NoReverseMatch for any test that renders the dashboard after the admin
+        # URLconf was built. SnapAdmin's own registry holds entries weakly for
+        # exactly this reason (see snapadmin/registry.py), so the block discards
+        # both registrations on exit.
+        with isolate_apps("demo"):
 
-        assert get_snap_action(SubOrder, "recalculate_total") is None
-        assert get_snap_action(Order, "recalculate_total") is not None
+            class SubOrder(Order):
+                class Meta:
+                    proxy = True
+                    app_label = "demo"
+
+            assert get_snap_action(SubOrder, "recalculate_total") is None
+            # The parent still owns it — state that, rather than just "not None".
+            assert get_snap_action(Order, "recalculate_total").name == "recalculate_total"
 
     def test_iter_snap_actions_lists_declared_actions(self):
         from demo.apps.shop.models import Order, Product
