@@ -340,7 +340,7 @@ class TestChecks:
                     app_label = "snapadmin"
 
             found = _run(checks.check_encrypted_field_usage, isolated)
-        assert "snapadmin.E021" in _ids(found)
+        assert _ids(found) == ["snapadmin.E021"]
         assert "secret" in found[0].msg
         assert Searchy is not None
 
@@ -366,7 +366,7 @@ class TestChecks:
                     app_label = "snapadmin"
 
             found = _run(checks.check_encrypted_field_usage, isolated)
-        assert "snapadmin.E022" in _ids(found)
+        assert _ids(found) == ["snapadmin.E022"]
         assert Uniq is not None
 
     def test_ordering_by_an_encrypted_field_errors(self):
@@ -379,7 +379,7 @@ class TestChecks:
                     ordering = ["-secret"]
 
             found = _run(checks.check_encrypted_field_usage, isolated)
-        assert "snapadmin.E023" in _ids(found)
+        assert _ids(found) == ["snapadmin.E023"]
         assert Sorted is not None
 
     def test_a_useless_index_warns(self):
@@ -391,7 +391,7 @@ class TestChecks:
                     app_label = "snapadmin"
 
             found = _run(checks.check_encrypted_field_usage, isolated)
-        assert "snapadmin.W019" in _ids(found)
+        assert _ids(found) == ["snapadmin.W019"]
         assert Indexed is not None
 
     def test_filterable_errors(self):
@@ -404,7 +404,7 @@ class TestChecks:
                     app_label = "snapadmin"
 
             found = _run(checks.check_encrypted_field_usage, isolated)
-        assert "snapadmin.E024" in _ids(found)
+        assert _ids(found) == ["snapadmin.E024"]
         assert Filtered is not None
 
     def test_filterable_errors_even_with_a_blind_index(self):
@@ -419,7 +419,7 @@ class TestChecks:
                     app_label = "snapadmin"
 
             found = _run(checks.check_encrypted_field_usage, isolated)
-        assert "snapadmin.E024" in _ids(found)
+        assert _ids(found) == ["snapadmin.E024"]
         assert StillFiltered is not None
 
     def test_a_sibling_pointing_at_an_unencrypted_field_warns(self):
@@ -434,7 +434,7 @@ class TestChecks:
             found = _run(checks.check_encrypted_field_usage, isolated)
             # Reading the attribute must still work rather than raising.
             assert Mispointed(plain="x", plain_bi="stored").plain_bi == "stored"
-        assert "snapadmin.W020" in _ids(found)
+        assert _ids(found) == ["snapadmin.W020"]
         assert "not an encrypted field" in [w.msg for w in found if w.id == "snapadmin.W020"][0]
 
     def test_a_dangling_blind_index_sibling_warns(self):
@@ -446,7 +446,7 @@ class TestChecks:
                     app_label = "snapadmin"
 
             found = _run(checks.check_encrypted_field_usage, isolated)
-        assert "snapadmin.W020" in _ids(found)
+        assert _ids(found) == ["snapadmin.W020"]
         assert Dangling is not None
 
     def test_an_encrypted_field_in_an_es_mapping_errors(self):
@@ -460,7 +460,7 @@ class TestChecks:
                     app_label = "snapadmin"
 
             found = _run(checks.check_encrypted_fields_not_indexed, isolated)
-        assert "snapadmin.E020" in _ids(found)
+        assert _ids(found) == ["snapadmin.E020"]
         assert "Elasticsearch" in found[0].msg
         assert Mapped is not None
 

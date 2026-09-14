@@ -561,30 +561,40 @@ class TestSecretKeyReuse:
         settings.SECRET_KEY = base64.urlsafe_b64encode(_material(9)).decode()
         settings.SNAPADMIN_ENCRYPTION = {"KEYS": [{"id": "k1", "key": _encoded(9)}]}
         messages = checks.check_encryption_keys(None)
-        assert "snapadmin.E017" in _ids(messages)
+        # The whole message set, not just "E017 is in there": reusing SECRET_KEY
+        # as key material also trips W017, because the key is then, by
+        # definition, sitting in settings.py. Pinning the list says that; a
+        # containment check would also pass if the check grew a message nobody
+        # intended (#QA1b).
+        assert _ids(messages) == ["snapadmin.E017", "snapadmin.W017"]
 
     def test_errors_when_the_key_is_the_secret_key_verbatim(self, settings):
         settings.SECRET_KEY = "s" * keymod.KEY_BYTES
         settings.SNAPADMIN_ENCRYPTION = {
             "KEYS": [{"id": "k1", "key": base64.urlsafe_b64encode(b"s" * 32).decode()}]
         }
-        assert "snapadmin.E017" in _ids(checks.check_encryption_keys(None))
+        assert _ids(checks.check_encryption_keys(None)) == [
+            "snapadmin.E017",
+            "snapadmin.W017",
+        ]
 
     def test_silent_for_an_independent_key(self, settings):
         settings.SECRET_KEY = "an unrelated django secret key"
         settings.SNAPADMIN_ENCRYPTION = {"KEYS": [{"id": "k1", "key": KEY_A}]}
-        assert "snapadmin.E017" not in _ids(checks.check_encryption_keys(None))
+        # No key-reuse error — and W017 alone, since the key still lives in
+        # settings. Saying "E017 is absent" would leave that unstated.
+        assert _ids(checks.check_encryption_keys(None)) == ["snapadmin.W017"]
 
     def test_survives_a_project_with_no_usable_secret_key(self, settings):
         """Django refuses to hand out an empty SECRET_KEY — the check must still report."""
         settings.SECRET_KEY = ""
         settings.SNAPADMIN_ENCRYPTION = {"KEYS": [{"id": "k1", "key": KEY_A}]}
-        assert "snapadmin.E017" not in _ids(checks.check_encryption_keys(None))
+        assert _ids(checks.check_encryption_keys(None)) == ["snapadmin.W017"]
 
     def test_silent_when_the_secret_key_is_not_base64(self, settings):
         settings.SECRET_KEY = "django-insecure-not base64 !!!"
         settings.SNAPADMIN_ENCRYPTION = {"KEYS": [{"id": "k1", "key": KEY_A}]}
-        assert "snapadmin.E017" not in _ids(checks.check_encryption_keys(None))
+        assert _ids(checks.check_encryption_keys(None)) == ["snapadmin.W017"]
 
     def test_the_message_never_repeats_the_key(self, settings):
         settings.SECRET_KEY = base64.urlsafe_b64encode(_material(9)).decode()
@@ -598,11 +608,11 @@ class TestMalformedConfiguration:
     def test_reported_as_a_check_error_not_a_traceback(self, settings):
         settings.SNAPADMIN_ENCRYPTION = {"KEYS": [{"id": "k1", "key": "not base64 !!!"}]}
         messages = checks.check_encryption_keys(None)
-        assert "snapadmin.E019" in _ids(messages)
+        assert _ids(messages) == ["snapadmin.E019"]
 
     def test_the_other_checks_stay_quiet_once_it_is_reported(self, settings, tmp_path):
         settings.SNAPADMIN_ENCRYPTION = {"KEY_FILE": str(tmp_path / "absent")}
-        assert "snapadmin.E019" in _ids(checks.check_encryption_keys(None))
+        assert _ids(checks.check_encryption_keys(None)) == ["snapadmin.E019"]
         assert checks.check_encryption_key_file(None) == []
         assert checks.check_encryption_required(None) == []
 
@@ -613,7 +623,7 @@ class TestKeyFilePermissions:
         path.write_text(f"k1:{KEY_A}\n")
         path.chmod(0o644)
         settings.SNAPADMIN_ENCRYPTION = {"KEY_FILE": str(path)}
-        assert "snapadmin.W016" in _ids(checks.check_encryption_key_file(None))
+        assert _ids(checks.check_encryption_key_file(None)) == ["snapadmin.W016"]
 
     def test_silent_for_an_owner_only_key_file(self, settings, tmp_path):
         path = tmp_path / "keyset"
@@ -638,18 +648,19 @@ class TestKeysInSettings:
     def test_warns_when_key_material_lives_in_settings_in_production(self, settings):
         settings.DEBUG = False
         settings.SNAPADMIN_ENCRYPTION = {"KEYS": [{"id": "k1", "key": KEY_A}]}
-        assert "snapadmin.W017" in _ids(checks.check_encryption_keys(None))
+        assert _ids(checks.check_encryption_keys(None)) == ["snapadmin.W017"]
 
     def test_silent_in_debug(self, settings):
         settings.DEBUG = True
         settings.SNAPADMIN_ENCRYPTION = {"KEYS": [{"id": "k1", "key": KEY_A}]}
-        assert "snapadmin.W017" not in _ids(checks.check_encryption_keys(None))
+        # Silent means silent: no messages at all, not merely "no W017".
+        assert _ids(checks.check_encryption_keys(None)) == []
 
     def test_silent_when_the_keys_come_from_elsewhere(self, settings, monkeypatch):
         settings.DEBUG = False
         settings.SNAPADMIN_ENCRYPTION = {}
         monkeypatch.setenv(keymod.ENV_KEYS, f"k1:{KEY_A}")
-        assert "snapadmin.W017" not in _ids(checks.check_encryption_keys(None))
+        assert _ids(checks.check_encryption_keys(None)) == []
 
 
 class TestKeysetRequiredByEncryptedFields:
@@ -657,7 +668,7 @@ class TestKeysetRequiredByEncryptedFields:
         settings.SNAPADMIN_ENCRYPTION = {}
         with mock.patch.object(keymod, "has_encrypted_fields", return_value=True):
             messages = checks.check_encryption_required(None)
-        assert "snapadmin.E018" in _ids(messages)
+        assert _ids(messages) == ["snapadmin.E018"]
 
     def test_downgraded_to_a_warning_when_strict_is_off(self, settings):
         settings.SNAPADMIN_ENCRYPTION = {"STRICT": False}
