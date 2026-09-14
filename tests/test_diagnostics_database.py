@@ -51,12 +51,23 @@ class TestDbSize:
 
 class TestDatabaseCollector:
     @pytest.mark.django_db
-    def test_reachable_reports_ok_and_tables(self):
+    def test_reachable_reports_the_backend_it_is_actually_connected_to(self):
+        """Read the live connection rather than hard-coding a backend name.
+
+        The suite runs on SQLite by default and on PostgreSQL in its own CI job
+        (#QA1f); the collector's contract is that it reports *whichever* it is
+        talking to, so pinning the literal "sqlite" here would fail on the very
+        backend the extra job exists to exercise.
+        """
+        from django.db import connections
+
         data = get_collector("database").collect(verbose=False)
+
         assert data["ok"] is True
-        assert data["engine"] == "sqlite"
-        assert isinstance(data["tables"], int)
-        assert data["host"] == "localhost"
+        assert data["engine"] == connections["default"].vendor
+        # The demo has tables; "an int" would also be satisfied by a broken zero.
+        assert data["tables"] > 0
+        assert data["host"] == (connections["default"].settings_dict.get("HOST") or "localhost")
         assert "password" not in data  # never leaked
 
     @pytest.mark.django_db

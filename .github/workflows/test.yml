@@ -72,3 +72,75 @@ jobs:
         # sys.path — the suite imports `snapadmin` and `demo` straight from the source tree, exactly
         # as it runs locally. A bare `pytest` would fail to import `demo.core.settings_test`.
         run: python -m pytest --cov=snapadmin --cov-report=term-missing --cov-fail-under=100
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # The same suite, against a real PostgreSQL.
+  #
+  # The matrix above varies Python and Django and runs every one of its six jobs
+  # on in-memory SQLite, so a difference between database backends cannot fail
+  # it — while the package advertises PostgreSQL support and carries
+  # backend-specific code (`EstimatedCountPaginator`'s `pg_class.reltuples`
+  # query, `backup.py`'s `pg_dump` path). 100% line coverage is fully compatible
+  # with never having talked to PostgreSQL at all.
+  #
+  # ONE job, ONE combination, deliberately — a backend difference does not
+  # depend on the interpreter version, so running this across the matrix would
+  # cost six times the minutes to learn the same thing. The matrix keeps running
+  # exactly as it does today; this sits beside it.
+  #
+  # No coverage gate here: the matrix already enforces it, and the two backends
+  # legitimately take different branches (the estimated-count path returns early
+  # on any non-PostgreSQL vendor), so demanding 100% from a single backend would
+  # be asking for the wrong thing.
+  postgres:
+    name: PostgreSQL · py3.12 · Django 5.2
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: snapadmin
+          POSTGRES_PASSWORD: snapadmin
+          POSTGRES_DB: snapadmin_test
+        ports:
+          - 5432:5432
+        # Without the health check the suite races the server's first start-up.
+        options: >-
+          --health-cmd "pg_isready -U snapadmin"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r demo/requirements.txt
+          pip install "Django~=5.2.0"
+
+      - name: Install the age CLI (binary backend for AGE-encrypted backups)
+        run: sudo apt-get update && sudo apt-get install -y age
+
+      - name: Show resolved versions
+        run: |
+          python --version
+          python -c "import django; print('Django', django.get_version())"
+          psql --version
+
+      - name: Run the suite against PostgreSQL
+        # The identical test files: nothing branches on the backend, so the same
+        # assertions have to hold on either one.
+        env:
+          SNAPADMIN_TEST_POSTGRES: localhost
+          SNAPADMIN_TEST_POSTGRES_PORT: "5432"
+          SNAPADMIN_TEST_POSTGRES_DB: snapadmin_test
+          SNAPADMIN_TEST_POSTGRES_USER: snapadmin
+          SNAPADMIN_TEST_POSTGRES_PASSWORD: snapadmin
+        run: python -m pytest

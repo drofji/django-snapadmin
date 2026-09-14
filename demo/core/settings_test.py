@@ -4,12 +4,15 @@ demo/core/settings_test.py
 Lightweight settings override used exclusively by the pytest suite.
 
 Inherits everything from the main settings but:
-- Forces SQLite (never needs PostgreSQL)
+- Uses SQLite by default, and the *same* suite against a real PostgreSQL when
+  ``SNAPADMIN_TEST_POSTGRES`` names a host (see the database block below)
 - Disables Elasticsearch
 - Silences Celery (tasks run eagerly, no broker needed)
 - Turns off structlog colour output to keep CI logs clean
 - Uses a fast password hasher to speed up User.create_superuser()
 """
+
+import os
 
 from demo.core.settings import *  # noqa: F401, F403
 
@@ -28,23 +31,52 @@ SECRET_KEY = "test-secret-key-123"
 # agree (#QA1b).
 DEBUG = False
 
-# ── Database: always SQLite for tests ────────────────────────────────────────
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": ":memory:",
-    },
-    # A read-replica alias for exercising SNAPADMIN_ANALYTICS_DB_ALIAS routing.
-    # TEST.MIRROR makes it share the default test connection, so rows written to
-    # ``default`` are visible when a queryset is routed here via ``.using()``.
-    # Routing stays off unless a test sets SNAPADMIN_ANALYTICS_DB_ALIAS, so this
-    # is inert for the rest of the suite.
-    "replica": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": ":memory:",
-        "TEST": {"MIRROR": "default"},
-    },
-}
+# ── Database: SQLite by default, PostgreSQL when one is offered ──────────────
+# The everyday run stays on in-memory SQLite: no service to start, no container,
+# and the whole suite in about forty seconds. That is also its limitation — the
+# package advertises PostgreSQL support, and a backend difference (a
+# vendor-specific query, a transaction behaviour, a column type) cannot fail a
+# test that never talks to PostgreSQL.
+#
+# Setting SNAPADMIN_TEST_POSTGRES points the identical suite at a real server
+# instead. CI runs both: the 6-way Python x Django matrix on SQLite, and one
+# extra job on PostgreSQL. Nothing in the tests branches on the backend — the
+# point is that the same assertions have to hold on either (#QA1f).
+_POSTGRES_HOST = os.environ.get("SNAPADMIN_TEST_POSTGRES")
+
+if _POSTGRES_HOST:
+    _POSTGRES = {
+        "ENGINE": "django.db.backends.postgresql",
+        "HOST": _POSTGRES_HOST,
+        "PORT": os.environ.get("SNAPADMIN_TEST_POSTGRES_PORT", "5432"),
+        "NAME": os.environ.get("SNAPADMIN_TEST_POSTGRES_DB", "snapadmin_test"),
+        "USER": os.environ.get("SNAPADMIN_TEST_POSTGRES_USER", "snapadmin"),
+        "PASSWORD": os.environ.get("SNAPADMIN_TEST_POSTGRES_PASSWORD", "snapadmin"),
+    }
+    DATABASES = {
+        "default": dict(_POSTGRES),
+        # Same alias as below, and the same MIRROR trick: a second connection to
+        # the same test database, so a queryset routed here with .using() sees
+        # rows written through "default".
+        "replica": dict(_POSTGRES, TEST={"MIRROR": "default"}),
+    }
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ":memory:",
+        },
+        # A read-replica alias for exercising SNAPADMIN_ANALYTICS_DB_ALIAS routing.
+        # TEST.MIRROR makes it share the default test connection, so rows written to
+        # ``default`` are visible when a queryset is routed here via ``.using()``.
+        # Routing stays off unless a test sets SNAPADMIN_ANALYTICS_DB_ALIAS, so this
+        # is inert for the rest of the suite.
+        "replica": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ":memory:",
+            "TEST": {"MIRROR": "default"},
+        },
+    }
 
 # ── Field encryption: a fixed test keyset ────────────────────────────────────
 # CustomerProfile.tax_id is encrypted, and an encrypted field with no keyset is
