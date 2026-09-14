@@ -59,9 +59,10 @@ class TestFindManagePy:
         assert manage_cli.find_manage_py(deep) is None
 
     def test_defaults_to_the_current_directory(self, tmp_path, monkeypatch):
-        (tmp_path / "manage.py").write_text("#")
+        expected = tmp_path / "manage.py"
+        expected.write_text("#")
         monkeypatch.chdir(tmp_path)
-        assert manage_cli.find_manage_py() is not None
+        assert manage_cli.find_manage_py() == expected
 
 
 # ── forwarding ───────────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
 tests/test_api_token.py  –  APIToken model + authentication tests
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -220,7 +220,9 @@ class TestTokenAPIEndpoints:
 
     def test_create_with_expiry_sets_date(self, auth_client):
         r = auth_client.post("/api/tokens/", {"token_name": "E", "expires_in_days": 14}, format="json")
-        assert r.json()["expiration_date"] is not None
+        expires_at = datetime.fromisoformat(r.json()["expiration_date"])
+        # The requested window, not merely "some date was set".
+        assert (expires_at - timezone.now()).days == 13  # 13 full days + a part day
 
     def test_create_with_allowed_models(self, auth_client):
         r = auth_client.post(

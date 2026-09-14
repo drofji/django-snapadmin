@@ -174,7 +174,11 @@ class TestIndexPrimitive:
 class TestSiblingColumn:
     def test_blind_index_adds_the_sibling(self):
         model = _make_model()
-        assert model._meta.get_field("email_bi") is not None
+        sibling = model._meta.get_field("email_bi")
+        # get_field() raises when a field is missing, so "not None" proved
+        # nothing — what matters is which field was added and what it points at.
+        assert type(sibling) is snap_fields.SnapBlindIndexField
+        assert sibling.source_field == "email"
 
     def test_the_sibling_is_indexed_and_hidden_from_forms(self):
         model = _make_model()

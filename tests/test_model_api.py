@@ -492,8 +492,11 @@ class TestModelSchemaView:
 class TestSerializerFactory:
     def test_get_serializer_for_product(self):
         from snapadmin.api.serializers import get_serializer_for_model
+        from demo.apps.shop.models import Product
+
         cls = get_serializer_for_model("demo", "Product")
-        assert cls is not None
+        assert cls.Meta.model is Product
+        assert {"id", "name", "price", "available"} <= set(cls().fields)
 
     def test_serializer_cached(self):
         from snapadmin.api.serializers import get_serializer_for_model

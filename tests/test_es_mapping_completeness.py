@@ -25,7 +25,7 @@ from unittest import mock
 from django.test import TestCase
 from django.test.utils import isolate_apps
 
-from snapadmin import checks
+from snapadmin import checks, registry
 from snapadmin import fields as snap_fields
 from snapadmin import models as snap_models
 
@@ -57,7 +57,9 @@ class TestEmptyEsMappingIsRefused(TestCase):
         assert "nothing but its id" in found[0].msg
         assert "es_auto_mapping = True" in found[0].hint
         assert "searchable=True" in found[0].hint
-        assert Mirrored is not None
+        # The error names the model whose mirror would be empty, so `manage.py
+        # check` output points at the declaration to fix.
+        assert found[0].obj is Mirrored
 
     def test_es_only_without_any_mapping_errors_and_names_the_data_loss(self):
         with isolate_apps("snapadmin") as isolated:
@@ -71,7 +73,7 @@ class TestEmptyEsMappingIsRefused(TestCase):
             found = _run(checks.check_es_mapping_present, isolated)
         assert _ids(found) == ["snapadmin.E026"]
         assert "no database table" in found[0].msg
-        assert OnlyEs is not None
+        assert found[0].obj is OnlyEs
 
     def test_es_index_enabled_on_a_db_only_model_errors_too(self):
         """``es_index_enabled`` indexes documents on its own — same empty doc."""
@@ -85,7 +87,7 @@ class TestEmptyEsMappingIsRefused(TestCase):
 
             found = _run(checks.check_es_mapping_present, isolated)
         assert _ids(found) == ["snapadmin.E026"]
-        assert Indexed is not None
+        assert found[0].obj is Indexed
 
     def test_an_explicit_mapping_is_enough(self):
         with isolate_apps("snapadmin") as isolated:
@@ -98,7 +100,8 @@ class TestEmptyEsMappingIsRefused(TestCase):
                     app_label = "snapadmin"
 
             assert _run(checks.check_es_mapping_present, isolated) == []
-            assert Declared is not None
+            # The arrangement that satisfies the check, stated rather than implied.
+            assert Declared.get_es_mapping() == {"name": {"type": "text"}}
 
     def test_auto_mapping_is_enough(self):
         with isolate_apps("snapadmin") as isolated:
@@ -111,7 +114,8 @@ class TestEmptyEsMappingIsRefused(TestCase):
                     app_label = "snapadmin"
 
             assert _run(checks.check_es_mapping_present, isolated) == []
-            assert Derived is not None
+            # Derived from the fields rather than declared, and non-empty.
+            assert "name" in Derived.get_es_mapping()
 
     def test_a_db_only_model_is_never_reported(self):
         with isolate_apps("snapadmin") as isolated:
@@ -122,7 +126,9 @@ class TestEmptyEsMappingIsRefused(TestCase):
                     app_label = "snapadmin"
 
             assert _run(checks.check_es_mapping_present, isolated) == []
-            assert Plain is not None
+            # Nothing mirrors, so an empty mapping is not a problem to report.
+            assert Plain.es_storage_mode is snap_models.EsStorageMode.DB_ONLY
+            assert Plain.es_index_enabled is False
 
     def test_an_unregistered_model_is_never_reported(self):
         """The check walks every installed model; only SnapAdmin's are its business."""
@@ -136,7 +142,8 @@ class TestEmptyEsMappingIsRefused(TestCase):
                     app_label = "snapadmin"
 
             assert _run(checks.check_es_mapping_present, isolated) == []
-            assert Outsider is not None
+            # A plain Django model carrying the same attribute is not SnapAdmin's.
+            assert registry.is_registered(Outsider) is False
 
     def test_the_check_is_registered(self):
         assert checks.check_es_mapping_present in checks.ALL_CHECKS
@@ -180,7 +187,7 @@ class TestTheEncryptedFieldGuardIsNotUndone(TestCase):
         assert _ids(found) == ["snapadmin.E026"]
         assert "encrypted" in found[0].hint
         assert "es_auto_mapping = True" not in found[0].hint
-        assert AllSecret is not None
+        assert found[0].obj is AllSecret
 
     def test_auto_mapping_with_no_indexable_field_at_all_says_so(self):
         with isolate_apps("snapadmin") as isolated:
@@ -194,7 +201,7 @@ class TestTheEncryptedFieldGuardIsNotUndone(TestCase):
             found = _run(checks.check_es_mapping_present, isolated)
         assert _ids(found) == ["snapadmin.E026"]
         assert "no concrete field" in found[0].hint
-        assert Bare is not None
+        assert found[0].obj is Bare
 
 
 class TestTheDefaultIsDeliberate(TestCase):

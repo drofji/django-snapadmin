@@ -342,7 +342,9 @@ class TestChecks:
             found = _run(checks.check_encrypted_field_usage, isolated)
         assert _ids(found) == ["snapadmin.E021"]
         assert "secret" in found[0].msg
-        assert Searchy is not None
+        # The error points at the offending field, not merely at the model —
+        # that is what makes `manage.py check` output actionable.
+        assert found[0].obj is Searchy._meta.get_field("secret")
 
     def test_searchable_with_a_blind_index_is_fine(self):
         with isolate_apps("snapadmin") as isolated:
@@ -355,7 +357,9 @@ class TestChecks:
                     app_label = "snapadmin"
 
             assert _run(checks.check_encrypted_field_usage, isolated) == []
-            assert Fine is not None
+            # The arrangement under test, stated: searchable *and* blind-indexed.
+            declared = Fine._meta.get_field("secret")
+            assert (declared.searchable, declared.blind_index) == (True, True)
 
     def test_unique_without_a_blind_index_errors(self):
         with isolate_apps("snapadmin") as isolated:
@@ -367,7 +371,7 @@ class TestChecks:
 
             found = _run(checks.check_encrypted_field_usage, isolated)
         assert _ids(found) == ["snapadmin.E022"]
-        assert Uniq is not None
+        assert found[0].obj is Uniq._meta.get_field("secret")
 
     def test_ordering_by_an_encrypted_field_errors(self):
         with isolate_apps("snapadmin") as isolated:
@@ -380,7 +384,8 @@ class TestChecks:
 
             found = _run(checks.check_encrypted_field_usage, isolated)
         assert _ids(found) == ["snapadmin.E023"]
-        assert Sorted is not None
+        # Ordering is declared on Meta, so this one is reported against the model.
+        assert found[0].obj is Sorted
 
     def test_a_useless_index_warns(self):
         with isolate_apps("snapadmin") as isolated:
@@ -392,7 +397,7 @@ class TestChecks:
 
             found = _run(checks.check_encrypted_field_usage, isolated)
         assert _ids(found) == ["snapadmin.W019"]
-        assert Indexed is not None
+        assert found[0].obj is Indexed._meta.get_field("secret")
 
     def test_filterable_errors(self):
         """A sidebar filter lists the column's distinct values — decrypted."""
@@ -405,7 +410,7 @@ class TestChecks:
 
             found = _run(checks.check_encrypted_field_usage, isolated)
         assert _ids(found) == ["snapadmin.E024"]
-        assert Filtered is not None
+        assert found[0].obj is Filtered._meta.get_field("secret")
 
     def test_filterable_errors_even_with_a_blind_index(self):
         """Unlike the others, this one a blind index cannot make safe."""
@@ -420,7 +425,7 @@ class TestChecks:
 
             found = _run(checks.check_encrypted_field_usage, isolated)
         assert _ids(found) == ["snapadmin.E024"]
-        assert StillFiltered is not None
+        assert found[0].obj is StillFiltered._meta.get_field("secret")
 
     def test_a_sibling_pointing_at_an_unencrypted_field_warns(self):
         with isolate_apps("snapadmin") as isolated:
@@ -447,7 +452,8 @@ class TestChecks:
 
             found = _run(checks.check_encrypted_field_usage, isolated)
         assert _ids(found) == ["snapadmin.W020"]
-        assert Dangling is not None
+        # The dangling sibling itself is named, not the field it failed to find.
+        assert found[0].obj is Dangling._meta.get_field("loose")
 
     def test_an_encrypted_field_in_an_es_mapping_errors(self):
         with isolate_apps("snapadmin") as isolated:
@@ -462,7 +468,8 @@ class TestChecks:
             found = _run(checks.check_encrypted_fields_not_indexed, isolated)
         assert _ids(found) == ["snapadmin.E020"]
         assert "Elasticsearch" in found[0].msg
-        assert Mapped is not None
+        # The mapping is a model-level declaration, so the model is the subject.
+        assert found[0].obj is Mapped
 
     def test_a_model_with_no_es_mapping_is_fine(self):
         with isolate_apps("snapadmin") as isolated:
@@ -473,7 +480,8 @@ class TestChecks:
                     app_label = "snapadmin"
 
             assert _run(checks.check_encrypted_fields_not_indexed, isolated) == []
-            assert Quiet is not None
+            # Encrypted field present, no es_mapping at all: nothing to report.
+            assert Quiet.es_mapping is None
 
     def test_a_plain_field_in_an_es_mapping_is_fine(self):
         with isolate_apps("snapadmin") as isolated:
@@ -486,7 +494,8 @@ class TestChecks:
                     app_label = "snapadmin"
 
             assert _run(checks.check_encrypted_fields_not_indexed, isolated) == []
-            assert Plain is not None
+            # A mapping does exist — it just names a field that is not encrypted.
+            assert Plain.es_mapping == {"title": {"type": "text"}}
 
     def test_both_checks_are_registered(self):
         assert checks.check_encrypted_field_usage in checks.ALL_CHECKS

@@ -83,7 +83,7 @@ class TestRegistry:
         assert orders == sorted(orders)
 
     def test_get_collector_found_and_missing(self):
-        assert get_collector("version") is not None
+        assert get_collector("version").name == "version"
         assert get_collector("does-not-exist") is None
 
     def test_collector_collect_calls_fn(self):
@@ -98,7 +98,9 @@ class TestRegistry:
             return {}
 
         try:
-            assert _fn is not None
+            # The decorator registers as a side effect and hands the function
+            # back unchanged, so decorators can be stacked on one collector.
+            assert registry._REGISTRY["temp_reg"].fn is _fn
             assert registry._REGISTRY["temp_reg"].title == "Temp"
         finally:
             registry._REGISTRY.pop("temp_reg", None)

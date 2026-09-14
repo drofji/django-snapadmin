@@ -385,7 +385,10 @@ class TestSelectionAndReporting:
             with mock.patch.object(module, "apps", isolated):
                 with pytest.raises(CommandError) as exc:
                     _run("--adopt", "--models", "snapadmin.Plain")
-            assert Plain is not None
+            # The model really does exist and really has no encrypted column —
+            # the command refused a valid name, not an unresolvable one.
+            assert Plain._meta.label == "snapadmin.Plain"
+            assert not [f for f in Plain._meta.fields if hasattr(f, "key_id")]
 
         assert "declares no encrypted fields" in str(exc.value)
         assert "snapadmin.Plain" in str(exc.value)

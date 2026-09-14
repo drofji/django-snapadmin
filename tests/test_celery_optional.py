@@ -81,7 +81,11 @@ TASK_NAMES = {
 class TestTasksImportWithoutCelery:
     def test_module_executes_with_celery_hidden(self):
         module = _tasks_without_celery()
-        assert module is not None
+        # Imported *and* using its own no-op decorator rather than Celery's, which
+        # is what lets an admin-only project load the package at all.
+        assert module.__name__ == "snapadmin_tasks_no_celery"
+        assert callable(module.shared_task)
+        assert not hasattr(module, "celery")
 
     @pytest.mark.parametrize("attr", sorted(TASK_NAMES))
     def test_every_task_still_exists(self, attr):

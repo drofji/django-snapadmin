@@ -1,3 +1,15 @@
+"""
+tests/test_api_token_validation.py
+
+``validate_allowed_models`` — the field validator behind ``APIToken.allowed_models``.
+
+The value is a list of ``app_label.Model`` strings that narrows a token's reach.
+A malformed entry has to be refused at validation time with a message naming
+what is wrong: silently accepting one would either widen the token's scope to
+everything (an unparseable entry that matches nothing is indistinguishable from
+an empty list, which means "unrestricted") or narrow it to nothing at all.
+"""
+
 
 import pytest
 from django.core.exceptions import ValidationError
