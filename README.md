@@ -861,9 +861,6 @@ tests so they cannot drift from the code: the module map in the `snapadmin` pack
 (`help(snapadmin)` — no network needed) and
 [llms.txt](https://drofji.github.io/django-snapadmin/llms.txt).
 
-Upgrading from `drofji-automatically-django-admin`? See the
-[migration guide](https://github.com/drofji/django-snapadmin/blob/main/docs/migrations/drofji-automatically-django-admin_to_django-snapadmin.md).
-
 ---
 
 # Security
