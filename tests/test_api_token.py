@@ -480,3 +480,85 @@ class TestMalformedAuthorizationHeader:
 
         assert "invalid characters" in str(excinfo.value)
         assert excinfo.value.status_code == 401
+
+
+class TestAuthorizationHeaderShapes:
+    """Every malformed ``Authorization: Token …`` header has a named answer.
+
+    All of these are unauthenticated request paths, so the difference between a
+    401 that says what is wrong and a 500 is the difference between a usable API
+    and a pager. (Re-homed here in #QA1b.)
+    """
+
+    def _authenticate(self, header):
+        from rest_framework.request import Request
+        from rest_framework.test import APIRequestFactory
+
+        from snapadmin.api.authentication import APITokenAuthentication
+
+        raw = APIRequestFactory().get("/", HTTP_AUTHORIZATION=header)
+        return APITokenAuthentication().authenticate(Request(raw))
+
+    def test_the_keyword_with_no_key_after_it_is_rejected(self):
+        from rest_framework.exceptions import AuthenticationFailed
+
+        with pytest.raises(AuthenticationFailed, match="no token key"):
+            self._authenticate("Token")
+
+    def test_a_key_containing_spaces_is_rejected(self):
+        from rest_framework.exceptions import AuthenticationFailed
+
+        with pytest.raises(AuthenticationFailed, match="spaces"):
+            self._authenticate("Token a b c")
+
+    def test_the_www_authenticate_challenge_names_the_scheme(self):
+        from snapadmin.api.authentication import APITokenAuthentication
+
+        assert APITokenAuthentication().authenticate_header(None) == "Token"
+
+
+@pytest.mark.django_db
+class TestTokenListIsScopedToItsOwner:
+    def test_a_regular_user_sees_only_their_own_tokens(self, admin_user, api_token):
+        """``api_token`` belongs to the admin; the caller must not see it."""
+        from django.contrib.auth.models import User
+        from rest_framework.test import APIClient
+
+        from snapadmin.models import APIToken
+
+        regular = User.objects.create_user("covuser", password="pass")
+        own_token = APIToken.create_for_user(regular, "Own Token")
+
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Token {own_token.token_key}")
+        response = client.get("/api/tokens/")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["count"] == 1
+        assert [row["token_name"] for row in body["results"]] == ["Own Token"]
+        assert [row["owner_username"] for row in body["results"]] == ["covuser"]
+        # The raw key is never echoed back, not even to its owner.
+        assert body["results"][0]["token_key"] is None
+
+
+@pytest.mark.django_db
+class TestTokenModelPermission:
+    def test_a_request_authenticated_by_something_other_than_a_token_is_refused(self):
+        """The permission gates on the *token's* allowed models.
+
+        A session-authenticated request carries no token, so there is no scope to
+        check and the permission must say no rather than fall through to a
+        permissive default.
+        """
+        from unittest.mock import MagicMock
+
+        from rest_framework.request import Request
+        from rest_framework.test import APIRequestFactory
+
+        from snapadmin.api.views import TokenModelPermission
+
+        request = Request(APIRequestFactory().get("/"))
+        request._auth = None
+
+        assert TokenModelPermission().has_permission(request, MagicMock()) is False

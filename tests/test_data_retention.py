@@ -820,3 +820,81 @@ class TestEsOnlyModelsAreAccountedFor:
         output = out.getvalue()
         assert "SearchLog" in output
         assert "SKIPPED" not in output
+
+
+# ── The purge reports per model, and one model's failure is not the run's ─────
+
+@pytest.mark.django_db
+class TestPurgeReportsEveryModelItTouched:
+    """The task and the command both answer with a per-model account.
+
+    An operator reads that account to prove a GDPR window was honoured, so a
+    model that raised has to appear as an error rather than vanish from the
+    report — and one model's failure must not abandon the rest of the run.
+    (Re-homed here in #QA1b, where the command's two error tests asserted
+    ``"ERROR" in output or True``.)
+    """
+
+    def test_the_task_accounts_for_every_model_with_a_retention_window(self):
+        from snapadmin.tasks import purge_expired_data
+
+        result = purge_expired_data.apply().get()
+
+        assert result["purged"] == {
+            "demo.AuditLog": 0,
+            "demo.Showcase": 0,
+            "snapadmin.SnapadminAuditLog": 0,
+        }
+        assert result["total"] == 0
+        assert result["errors"] == {}
+        assert result["status"] == "ok"
+
+    def test_the_task_survives_a_model_whose_query_raises(self):
+        from demo.apps.shop.models import AuditLog
+
+        from snapadmin.tasks import purge_expired_data
+
+        with patch.object(
+            AuditLog.objects.__class__, "filter", side_effect=Exception("DB error")
+        ):
+            result = purge_expired_data.apply().get()
+
+        # The failing models are reported, the surviving one still ran.
+        assert result["errors"] == {
+            "demo.AuditLog": "DB error",
+            "demo.Showcase": "DB error",
+        }
+        assert result["purged"] == {"snapadmin.SnapadminAuditLog": 0}
+
+    def test_the_command_names_every_model_and_deletes_nothing_in_dry_run(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command("snapadmin_purge_expired_data", "--dry-run", stdout=out)
+        output = out.getvalue()
+
+        assert "DRY RUN demo.AuditLog: 0 records would be deleted" in output
+        assert "DRY RUN demo.Showcase: 0 records would be deleted" in output
+        assert "DRY RUN snapadmin.SnapadminAuditLog: 0 records would be deleted" in output
+        assert output.rstrip().endswith("Dry run complete - no data was deleted")
+
+    def test_the_command_reports_a_failing_model_and_still_purges_the_others(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        from demo.apps.shop.models import AuditLog
+
+        out = StringIO()
+        with patch.object(
+            AuditLog.objects.__class__, "filter", side_effect=Exception("DB error")
+        ):
+            call_command("snapadmin_purge_expired_data", stdout=out)
+        output = out.getvalue()
+
+        assert "ERROR demo.AuditLog: DB error" in output
+        assert "ERROR demo.Showcase: DB error" in output
+        assert "DELETED snapadmin.SnapadminAuditLog: 0 records" in output
+        assert output.rstrip().endswith("Total deleted: 0")

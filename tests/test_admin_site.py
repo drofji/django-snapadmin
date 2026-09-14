@@ -384,3 +384,184 @@ class TestSnapSaveMixinRecordsTheSave:
         assert written.count() == 1
         assert "Parent" in written.get().change_message
         assert "Renamed" in written.get().change_message
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SnapSaveMixin — an edit (re-homed in #QA1b)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestSnapSaveMixinOnAnEdit:
+    """An edit records the fields that actually changed, once.
+
+    Django's admin writes its own generic "Changed name." entry after
+    ``save_model``. SnapAdmin has already written a detailed "field: old -> new"
+    one, so the generic duplicate is suppressed — but only when there was a
+    detailed entry to suppress it in favour of.
+    """
+
+    def _generated_admin(self, model_class):
+        from django.contrib.admin import ModelAdmin
+
+        from snapadmin.models import SnapSaveMixin
+
+        class GeneratedAdmin(SnapSaveMixin, ModelAdmin):
+            pass
+
+        instance = GeneratedAdmin(model_class, admin.site)
+        instance.model = model_class
+        return instance
+
+    def _request(self, username):
+        from django.contrib.auth.models import User
+        from django.test import RequestFactory
+
+        request = RequestFactory().get("/")
+        request.user = User.objects.create_superuser(username, password="pass")
+        return request
+
+    class _RenameForm:
+        changed_data = ["name"]
+        initial = {"name": "Original"}
+        cleaned_data = {"name": "Updated"}
+
+    class _NoOpForm:
+        changed_data = ["name"]
+        initial = {"name": "Same"}
+        cleaned_data = {"name": "Same"}
+
+    def test_a_changed_field_is_written_as_one_detailed_entry(self):
+        from decimal import Decimal
+
+        from django.contrib.admin.models import LogEntry
+
+        from demo.apps.shop.models import Product
+
+        product = Product.objects.create(name="Original", price=Decimal("10.00"))
+        before = set(LogEntry.objects.values_list("pk", flat=True))
+
+        self._generated_admin(Product).save_model(
+            self._request("savemixin_test"), product, self._RenameForm(), change=True
+        )
+
+        written = LogEntry.objects.exclude(pk__in=before)
+        assert written.count() == 1
+        assert written.get().change_message == "Name: 'Original' -> 'Updated'"
+
+    def test_a_field_marked_changed_but_holding_the_same_value_writes_nothing(self):
+        from decimal import Decimal
+
+        from django.contrib.admin.models import LogEntry
+
+        from demo.apps.shop.models import Product
+
+        product = Product.objects.create(name="Same", price=Decimal("10.00"))
+        before = LogEntry.objects.count()
+
+        self._generated_admin(Product).save_model(
+            self._request("savemixin_nodiff"), product, self._NoOpForm(), change=True
+        )
+
+        assert LogEntry.objects.count() == before
+
+    def test_the_generic_entry_django_would_add_afterwards_is_suppressed(self):
+        from decimal import Decimal
+
+        from django.contrib.admin.models import LogEntry
+
+        from demo.apps.shop.models import Product
+
+        product = Product.objects.create(name="Original", price=Decimal("10.00"))
+        request = self._request("logchange_dedupe")
+        generated_admin = self._generated_admin(Product)
+        before = set(LogEntry.objects.values_list("pk", flat=True))
+
+        generated_admin.save_model(request, product, self._RenameForm(), change=True)
+        suppressed = generated_admin.log_change(request, product, "Changed name.")
+
+        assert suppressed is None
+        written = LogEntry.objects.exclude(pk__in=before)
+        assert written.count() == 1
+        assert written.get().change_message == "Name: 'Original' -> 'Updated'"
+
+    def test_without_a_detailed_entry_django_s_own_message_is_kept(self):
+        """An M2M-only edit produces no diff, so the generic entry is the history."""
+        from decimal import Decimal
+
+        from django.contrib.admin.models import LogEntry
+
+        from demo.apps.shop.models import Product
+
+        product = Product.objects.create(name="Solo", price=Decimal("10.00"))
+        before = set(LogEntry.objects.values_list("pk", flat=True))
+
+        written_entry = self._generated_admin(Product).log_change(
+            self._request("logchange_fallback"), product, "Changed tags."
+        )
+
+        assert written_entry is not None
+        written = LogEntry.objects.exclude(pk__in=before)
+        assert written.count() == 1
+        assert written.get().change_message == "Changed tags."
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# get_admin_fields / register_all_admins (re-homed in #QA1b)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestGeneratedListDisplay:
+    def test_a_function_field_becomes_a_generated_display_column(self):
+        from snapadmin import fields as snap_fields
+        from snapadmin.models import SnapModel
+
+        class ModelWithFunction(SnapModel):
+            total_label = snap_fields.SnapFunctionField(
+                lambda obj: "computed",
+                verbose_name="Total Label",
+            )
+
+            class Meta:
+                app_label = "demo"
+                abstract = True
+
+        _form_fields, list_display, *_ = ModelWithFunction.get_admin_fields()
+
+        assert list_display == ["id", "SnapFunctionFieldTotal_label"]
+
+    def test_a_wysiwyg_column_is_replaced_by_its_sanitising_display_method(self):
+        """``Product.description`` is wysiwyg and shown in the list.
+
+        It must reach ``list_display`` as the generated ``safe_html_*`` method
+        rather than as the raw field, or the changelist renders stored HTML.
+        """
+        from demo.apps.shop.models import Product
+
+        _form_fields, list_display, *_ = Product.get_admin_fields()
+
+        assert "safe_html_description" in list_display
+        assert "description" not in list_display
+        assert "safe_html_description" in Product._admin_generated_overrides
+
+
+@pytest.mark.django_db
+class TestRegisterAllAdmins:
+    def test_filtering_by_app_label_registers_that_app_s_models(self):
+        from demo.apps.shop.models import Product
+        from snapadmin.models import SnapModel
+
+        SnapModel.register_all_admins(app_label="demo")
+
+        assert Product in admin.site._registry
+
+    def test_running_it_twice_leaves_one_registration_per_model(self):
+        from demo.apps.shop.models import Product
+        from snapadmin.models import SnapModel
+
+        SnapModel.register_all_admins()
+        first = admin.site._registry[Product]
+        SnapModel.register_all_admins()
+
+        # Idempotent: AlreadyRegistered is swallowed and the existing admin is
+        # kept, rather than replaced by a second, freshly built one.
+        assert admin.site._registry[Product] is first

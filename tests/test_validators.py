@@ -285,3 +285,68 @@ class TestSnapPhoneValidator:
         with pytest.raises(ValidationError) as exc:
             SnapPhoneValidator()(number)
         assert exc.value.code == "invalid_phone"
+
+
+class TestValidatorEqualityAndHashing:
+    """Two identically configured validators must compare and hash alike.
+
+    Django compares a field's validators when it builds a migration: if two
+    equivalent validators are unequal, or hash differently, every
+    ``makemigrations`` run sees a change that is not there. (Re-homed here in
+    #QA1b, where the tests asserted only ``isinstance(hash(v), int)`` — true of
+    every hashable object ever written.)
+    """
+
+    def test_two_default_phone_validators_are_interchangeable(self):
+        from snapadmin.validators import SnapPhoneValidator
+
+        first, second = SnapPhoneValidator(), SnapPhoneValidator()
+
+        assert first == second
+        assert hash(first) == hash(second)
+        assert len({first, second}) == 1
+
+    def test_two_default_colour_validators_are_interchangeable(self):
+        from snapadmin.validators import SnapColorValidator
+
+        first, second = SnapColorValidator(), SnapColorValidator()
+
+        assert first == second
+        assert hash(first) == hash(second)
+        assert len({first, second}) == 1
+
+    def test_a_phone_validator_is_not_equal_to_a_colour_one(self):
+        from snapadmin.validators import SnapColorValidator, SnapPhoneValidator
+
+        assert SnapPhoneValidator() != SnapColorValidator()
+
+
+class TestSnapOneToOneField:
+    """``SnapOneToOneField`` is a ``OneToOneField`` that carries Snap metadata.
+
+    The Snap-only keywords must not survive ``deconstruct()``, or every project
+    using the field would get a spurious migration. (Re-homed here in #QA1b from
+    an "instantiation" test that asserted the field was not ``None``.)
+    """
+
+    def test_it_is_a_one_to_one_field_and_strips_its_snap_keywords(self):
+        from django.db import models
+
+        from demo.apps.shop.models import Category
+        from snapadmin import fields as snap
+
+        field = snap.SnapOneToOneField(
+            Category,
+            on_delete=models.CASCADE,
+            null=True,
+            blank=True,
+            show_in_list=True,
+        )
+
+        assert isinstance(field, models.OneToOneField)
+        assert field.show_in_list is True
+
+        _name, path, _args, kwargs = field.deconstruct()
+        assert path == "snapadmin.fields.SnapOneToOneField"
+        assert sorted(kwargs) == ["blank", "null", "on_delete", "to"]
+        assert "show_in_list" not in kwargs

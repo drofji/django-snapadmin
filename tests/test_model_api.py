@@ -1851,7 +1851,19 @@ class TestUnknownModelInTheUrl:
 
         assert view.get_queryset() == []
 
-    def test_the_endpoint_itself_answers_404_for_an_unknown_model(self, auth_client):
+    def test_the_endpoint_itself_answers_404_naming_what_was_not_found(self, auth_client):
         response = auth_client.get("/api/models/nope/ghost/")
 
         assert response.status_code == 404
+        assert response.json() == {"detail": "Model 'ghost' not found in app 'nope'."}
+
+    def test_get_serializer_class_is_none_when_the_model_cannot_be_resolved(self):
+        from unittest.mock import MagicMock
+
+        from snapadmin.api.views import DynamicModelViewSet
+
+        view = DynamicModelViewSet()
+        view.kwargs = {"app_label": "nope", "model_name": "ghost"}
+        view.request = MagicMock()
+
+        assert view.get_serializer_class() is None
