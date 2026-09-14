@@ -16,6 +16,18 @@ from demo.core.settings import *  # noqa: F401, F403
 # ── Secret Key for tests ─────────────────────────────────────────────────────
 SECRET_KEY = "test-secret-key-123"
 
+# ── DEBUG: match what the tests actually run under ───────────────────────────
+# demo/core/settings.py defaults DEBUG to True, and pytest-django then forces
+# settings.DEBUG = False for the run — but only *after* Django is set up, so
+# every admin registration built during app-ready was built under DEBUG=True
+# while every test reads DEBUG=False. The two disagree exactly where Django
+# picks an asset filename (``jquery.js`` vs ``jquery.min.js``), so the media on
+# a startup registration never matched the media a test computed, and any test
+# comparing the two passed only when an earlier test happened to have
+# re-registered the model first. Pinning it here makes app-ready and the tests
+# agree (#QA1b).
+DEBUG = False
+
 # ── Database: always SQLite for tests ────────────────────────────────────────
 DATABASES = {
     "default": {

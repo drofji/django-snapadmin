@@ -138,3 +138,76 @@ def assert_no_model_leaked_into_the_app_registry():
         f"app registry: {leaked}. Declare throwaway models inside "
         '`with isolate_apps("<app_label>"):` so they are discarded with the block.'
     )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def assert_admin_registrations_are_restored():
+    """Fail the session if a test left the admin registry holding a different admin.
+
+    Several tests unregister a model, re-register it under an override to prove a
+    setting reaches the generated ``ModelAdmin``, and restore it in a ``finally``.
+    The restore only restores anything if it runs **outside** the override: a
+    ``register_admin()`` called while the override is still live rebuilds the
+    admin from the overridden settings and leaves *that* in the registry for the
+    rest of the session. The media lists are where it shows — a later test reads
+    ``admin.site._registry[Model].Media.js`` and sees an asset list built for a
+    configuration nobody asked for.
+
+    Compares by content rather than by identity, since a correct restore
+    legitimately produces a new, equal ``ModelAdmin`` instance.
+    """
+    from django.contrib import admin
+
+    def media_snapshot():
+        return {
+            f"{model._meta.app_label}.{model._meta.model_name}": (
+                tuple(getattr(model_admin.Media, "js", ())),
+                tuple(getattr(model_admin.Media, "css", {}).get("all", ())),
+            )
+            for model, model_admin in admin.site._registry.items()
+            if hasattr(model_admin, "Media")
+        }
+
+    registered_before = media_snapshot()
+
+    yield
+
+    registered_after = media_snapshot()
+    changed = sorted(
+        name
+        for name in set(registered_before) & set(registered_after)
+        if registered_before[name] != registered_after[name]
+    )
+    added = sorted(set(registered_after) - set(registered_before))
+    removed = sorted(set(registered_before) - set(registered_after))
+    assert (changed, added, removed) == ([], [], []), (
+        f"the admin registry did not come back as it started: media changed for "
+        f"{changed}, models added {added}, models removed {removed}. Restore a "
+        "registration outside the override_settings block that changed it, not "
+        "inside it."
+    )
+
+
+@pytest.fixture(autouse=True)
+def restore_the_active_language():
+    """Put the thread's active translation back after every test.
+
+    ``LocaleMiddleware`` activates a language per request and never deactivates
+    it, so a single ``client.get("/", HTTP_ACCEPT_LANGUAGE="ru")`` leaves "ru"
+    active for everything that follows. Lazy translations then resolve
+    differently — ``Category.is_active``'s ``verbose_name`` becomes "Активен" —
+    and any later test that matches on an English label fails for a reason that
+    has nothing to do with it (found by a shuffled run, #QA1b).
+
+    Restoring is the cure rather than a guard: the leak comes from production
+    middleware doing the right thing for a request, not from a test doing the
+    wrong thing, so every test that issues a localised request would otherwise
+    have to remember to unwind it.
+    """
+    from django.utils import translation
+
+    language_before = translation.get_language()
+    try:
+        yield
+    finally:
+        translation.activate(language_before)

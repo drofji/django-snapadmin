@@ -257,23 +257,34 @@ class TestReserveNoLimits:
 
 
 class TestCacheAlias:
-    @override_settings(CACHES={
-        "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
-        "snapadmin_limits": {
-            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-            "LOCATION": "snapadmin-limits-alias-test",
-        },
-    })
-    def test_setting_selects_a_named_cache(self, settings):
+    def test_setting_selects_a_named_cache(self):
+        # One override for both settings, rather than an @override_settings
+        # decorator plus the pytest-django `settings` fixture: those two unwind
+        # in the wrong order (the decorator exits when the function returns, the
+        # fixture only at teardown), which restores django.conf.settings to a
+        # snapshot taken *inside* the decorator and leaves the CACHES override
+        # installed for the rest of the session. That leak was what made the
+        # system-check collector report an "InvalidCacheBackendError" in tests
+        # that never mention a cache (#QA1b).
         from snapadmin.limits import reserve
-        settings.SNAPADMIN_LIMITS_CACHE_ALIAS = "snapadmin_limits"
-        for _ in range(2):
-            assert reserve("k23", windows={60: 2}).allowed is True
-        assert reserve("k23", windows={60: 2}).allowed is False
-        # The default cache never saw this key at all — its budget is fresh.
-        assert reserve("k23", windows={60: 2}, cache_alias="default").allowed is True
 
-    def test_explicit_cache_alias_argument_overrides_the_setting(self, settings):
+        with override_settings(
+            CACHES={
+                "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
+                "snapadmin_limits": {
+                    "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+                    "LOCATION": "snapadmin-limits-alias-test",
+                },
+            },
+            SNAPADMIN_LIMITS_CACHE_ALIAS="snapadmin_limits",
+        ):
+            for _ in range(2):
+                assert reserve("k23", windows={60: 2}).allowed is True
+            assert reserve("k23", windows={60: 2}).allowed is False
+            # The default cache never saw this key at all — its budget is fresh.
+            assert reserve("k23", windows={60: 2}, cache_alias="default").allowed is True
+
+    def test_explicit_cache_alias_argument_overrides_the_setting(self):
         from snapadmin.limits import reserve
         with override_settings(CACHES={
             "default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"},
@@ -290,13 +301,31 @@ class TestCacheAlias:
 
 
 class TestConcurrencyTimeout:
+    """A crashed holder must not leak its slot forever — a short-lived cache
+    timeout on the concurrency counter is the safety valve.
+
+    Split in two so neither assertion races the clock. Proving the slot is
+    *held* used to share a 50 ms timeout with the expiry half, so a 50 ms stall
+    anywhere between the two calls expired the slot and turned "refused" into
+    "allowed"; it now uses a timeout no test run can outlive. Proving the slot
+    *expires* keeps the short timeout, where a stall can only ever make it more
+    expired, never less (§14: no test may depend on how fast the machine is).
+    """
+
+    def test_a_held_slot_refuses_the_next_caller(self):
+        from snapadmin.limits import reserve
+
+        held_for_the_whole_test = 30
+        reserve("k25a", concurrency=1, concurrency_timeout=held_for_the_whole_test)
+        assert reserve(
+            "k25a", concurrency=1, concurrency_timeout=held_for_the_whole_test
+        ).allowed is False
+
     def test_a_slot_expires_on_its_own_after_the_timeout(self):
-        # A crashed holder must not leak its slot forever — a short-lived
-        # cache timeout on the concurrency counter is the safety valve.
         import time as real_time
 
         from snapadmin.limits import reserve
-        reserve("k25", concurrency=1, concurrency_timeout=0.05)
-        assert reserve("k25", concurrency=1, concurrency_timeout=0.05).allowed is False
+
+        reserve("k25b", concurrency=1, concurrency_timeout=0.05)
         real_time.sleep(0.15)
-        assert reserve("k25", concurrency=1, concurrency_timeout=0.05).allowed is True
+        assert reserve("k25b", concurrency=1, concurrency_timeout=0.05).allowed is True

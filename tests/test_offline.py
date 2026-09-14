@@ -169,14 +169,19 @@ class TestConnectivityJsInjection:
 
     def test_absent_when_setting_is_off(self):
         from demo.apps.shop.models import Customer
-        with override_settings(SNAPADMIN_CONNECTIVITY_ENABLED=False):
-            admin.site.unregister(Customer)
-            try:
-                Customer.register_admin()
-                assert CONNECTIVITY_JS not in _media_js(Customer)
-            finally:
+        try:
+            # The re-registration under the override is the point of the test;
+            # the *restore* must happen once the override is gone, or the
+            # registry keeps an admin whose media was built with connectivity
+            # off — for the rest of the session, in every later test that reads
+            # `admin.site._registry` (#QA1b).
+            with override_settings(SNAPADMIN_CONNECTIVITY_ENABLED=False):
                 admin.site.unregister(Customer)
                 Customer.register_admin()
+                assert CONNECTIVITY_JS not in _media_js(Customer)
+        finally:
+            admin.site.unregister(Customer)
+            Customer.register_admin()
 
     def test_absent_when_no_registered_model_is_offline_capable(self):
         """Nothing to serve ⇒ do not load, even with the setting on."""
@@ -202,14 +207,17 @@ class TestConnectivityJsInjection:
         end-to-end by the standing manual demo walkthrough for this lane.
         """
         from demo.apps.shop.models import Customer
-        with override_settings(SNAPADMIN_REST_API_ENABLED=False, SNAPADMIN_CONNECTIVITY_ENABLED=True):
-            admin.site.unregister(Customer)
-            try:
-                Customer.register_admin()
-                assert CONNECTIVITY_JS in _media_js(Customer)
-            finally:
+        try:
+            with override_settings(
+                SNAPADMIN_REST_API_ENABLED=False, SNAPADMIN_CONNECTIVITY_ENABLED=True
+            ):
                 admin.site.unregister(Customer)
                 Customer.register_admin()
+                assert CONNECTIVITY_JS in _media_js(Customer)
+        finally:
+            # Restore outside the override, for the same reason as above.
+            admin.site.unregister(Customer)
+            Customer.register_admin()
 
 
 class TestConnectivityJsAsset:
