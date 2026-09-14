@@ -100,6 +100,13 @@ the `0.x` beta series.
   `snapadmin.E026` if an id-only index is deliberate.
 
 ### Fixed
+- Five import-job strings shipped untranslated in all nine translated locales. `Fail`,
+  `Report Resume Byte Offset`, `Byte length of the report file confirmed as written.`,
+  `Import Job` and `Import Jobs` were left flagged `#, fuzzy` after a catalog regeneration,
+  and `msgfmt` drops a fuzzy entry — so the admin rendered them in English everywhere while
+  the `.po` files carried a plausible-looking wrong translation (`Import Job` held the
+  translation of `Export Job` in every locale). All forty-five entries are now reviewed and
+  compiled, and a test fails the suite on any future fuzzy entry.
 - A model-level validation rule that rejects an API write now answers `400` naming the
   field instead of escaping as an HTML `500`. Anything raising a Django `ValidationError`
   on a write path — `Model.clean()`, `full_clean()`, a `save()` guard — is translated on

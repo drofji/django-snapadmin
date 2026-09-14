@@ -338,10 +338,8 @@ msgstr "Задание переиндексации"
 msgid "Reindex Jobs"
 msgstr "Задания переиндексации"
 
-#, fuzzy
-#| msgid "Failed"
 msgid "Fail"
-msgstr "Ошибка"
+msgstr "Прервать"
 
 msgid "Skip"
 msgstr "Пропустить"
@@ -381,15 +379,11 @@ msgstr "При конфликте"
 msgid "Report File"
 msgstr "Файл отчёта"
 
-#, fuzzy
-#| msgid "Resume Byte Offset"
 msgid "Report Resume Byte Offset"
-msgstr "Смещение байтов возобновления"
+msgstr "Смещение байтов возобновления отчёта"
 
-#, fuzzy
-#| msgid "Byte length of the working file confirmed at cursor_pk."
 msgid "Byte length of the report file confirmed as written."
-msgstr "Длина рабочего файла в байтах, подтверждённая на cursor_pk."
+msgstr "Длина файла отчёта в байтах, подтверждённая как записанная."
 
 msgid "Skipped"
 msgstr "Пропущено"
@@ -401,15 +395,11 @@ msgstr ""
 "Используется для проверки доступа к PII в маскированных целевых полях; "
 "пусто считается отсутствием доступа к PII."
 
-#, fuzzy
-#| msgid "Export Job"
 msgid "Import Job"
-msgstr "Задание экспорта"
+msgstr "Задание импорта"
 
-#, fuzzy
-#| msgid "Export Jobs"
 msgid "Import Jobs"
-msgstr "Задания экспорта"
+msgstr "Задания импорта"
 
 msgid "Field"
 msgstr "Поле"

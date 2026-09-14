@@ -346,10 +346,8 @@ msgstr "Attività di reindicizzazione"
 msgid "Reindex Jobs"
 msgstr "Attività di reindicizzazione"
 
-#, fuzzy
-#| msgid "Failed"
 msgid "Fail"
-msgstr "Non riuscito"
+msgstr "Interrompi"
 
 msgid "Skip"
 msgstr "Salta"
@@ -389,15 +387,11 @@ msgstr "In caso di conflitto"
 msgid "Report File"
 msgstr "File di report"
 
-#, fuzzy
-#| msgid "Resume Byte Offset"
 msgid "Report Resume Byte Offset"
-msgstr "Offset di byte di ripresa"
+msgstr "Offset di byte di ripresa del report"
 
-#, fuzzy
-#| msgid "Byte length of the working file confirmed at cursor_pk."
 msgid "Byte length of the report file confirmed as written."
-msgstr "Lunghezza in byte del file di lavoro confermata a cursor_pk."
+msgstr "Lunghezza in byte del file di report confermata come scritta."
 
 msgid "Skipped"
 msgstr "Saltato"
@@ -409,15 +403,11 @@ msgstr ""
 "Usato per i controlli di accesso PII sui campi di destinazione mascherati; "
 "vuoto è considerato nessun accesso PII."
 
-#, fuzzy
-#| msgid "Export Job"
 msgid "Import Job"
-msgstr "Attività di esportazione"
+msgstr "Attività di importazione"
 
-#, fuzzy
-#| msgid "Export Jobs"
 msgid "Import Jobs"
-msgstr "Attività di esportazione"
+msgstr "Attività di importazione"
 
 msgid "Field"
 msgstr "Campo"

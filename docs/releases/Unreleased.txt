@@ -355,6 +355,25 @@ Changed
 Fixed
 -----
 
+* **Five import-job strings shipped untranslated in every locale.** A catalog regeneration
+  matched them against similar existing entries and left the results flagged ``#, fuzzy``:
+  ``Fail`` (the ``on_conflict`` choice), ``Report Resume Byte Offset``, ``Byte length of the
+  report file confirmed as written.``, ``Import Job`` and ``Import Jobs``. ``msgfmt`` drops a
+  fuzzy entry when it compiles, so the admin rendered all five in English in de, de_CH, es, fr,
+  fr_CH, it, nl, pl and ru — while the ``.po`` files carried a translation that looked finished.
+
+  The guessed text was not merely unreviewed, it was wrong: ``Import Job`` carried the existing
+  translation of ``Export Job`` in all nine locales, and the byte-length help text described the
+  *working* file "confirmed at cursor_pk" rather than the report file confirmed as written. A
+  reader opening the catalog would have found nothing to fix; the strings were only visibly
+  English in the running admin.
+
+  All forty-five entries have been reviewed and the flag removed, and the catalogs recompiled.
+  The non-``ru`` translations were written without a native reviewer, which this note flags as
+  ``rules.md`` requires. A new test fails the suite on any active ``#, fuzzy`` entry in either
+  the package or the demo catalogs, so the next regeneration cannot leave one behind — the
+  catalog header and obsolete ``#~`` entries are excluded, since neither compiles into anything.
+
 * **A model validation rule that rejects an API write now answers 400, not 500.** A
   ``django.core.exceptions.ValidationError`` is not part of DRF's exception hierarchy, so
   everything that raises Django's flavour on a write path — ``Model.clean()``, ``full_clean()``, a

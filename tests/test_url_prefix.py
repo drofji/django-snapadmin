@@ -5,81 +5,52 @@ SNAPADMIN_URL_PREFIX relocates the entire snapadmin URL surface (REST, Swagger,
 GraphQL) under one extra path segment without changing any route *name*, so a
 project that already owns the mount point can avoid collisions.
 
-The setting is read at import time, so each case reloads ``snapadmin.urls`` under
-an ``override_settings`` block and resolves/reverses against that module directly
-(``urlconf=snap_urls``) to avoid touching the cached root resolver. A ``finally``
-reload restores the default layout for the rest of the suite.
+The setting is read at import time, so each case reloads ``snapadmin.urls``
+through the ``snapadmin_urls_under`` fixture and resolves against that module
+directly. The fixture's docstring explains the import-time trap and owns the
+restore; see ``tests/conftest.py``. (#FIX2 section C, closed in #QA1b — the
+reload-and-restore dance used to be copied into a ``finally`` in every test.)
 """
 
-import importlib
-
 import pytest
-from django.test import override_settings
-from django.urls import clear_url_caches, resolve, reverse, Resolver404
-
-import snapadmin.urls as snap_urls
+from django.urls import Resolver404, resolve, reverse
 
 
-def _reload(**settings_overrides):
-    """Reload snapadmin.urls under the given settings and drop cached resolvers.
+def test_default_has_no_prefix(snapadmin_urls_under):
+    urls = snapadmin_urls_under()
 
-    ``get_resolver`` memoises per urlconf object; the module identity is stable
-    across reloads, so the cache must be cleared for the new patterns to take.
-    """
-    with override_settings(**settings_overrides):
-        importlib.reload(snap_urls)
-    clear_url_caches()
+    assert reverse("api-health", urlconf=urls) == "/health/"
+    assert resolve("/health/", urlconf=urls).url_name == "api-health"
 
 
-def _reload_default():
-    """Restore the un-prefixed urlconf so later tests see the historical layout."""
-    importlib.reload(snap_urls)
-    clear_url_caches()
+def test_prefix_relocates_all_surfaces(snapadmin_urls_under):
+    urls = snapadmin_urls_under(SNAPADMIN_URL_PREFIX="internal/")
 
+    # REST, Swagger and GraphQL all move under the prefix...
+    assert reverse("api-health", urlconf=urls) == "/internal/health/"
+    assert reverse("swagger-ui", urlconf=urls) == "/internal/docs/"
+    assert reverse("graphql", urlconf=urls) == "/internal/graphql/"
+    assert reverse(
+        "model-list", args=["demo", "Product"], urlconf=urls
+    ) == "/internal/models/demo/Product/"
 
-def test_default_has_no_prefix():
-    _reload_default()
-    try:
-        assert reverse("api-health", urlconf=snap_urls) == "/health/"
-        assert resolve("/health/", urlconf=snap_urls).url_name == "api-health"
-    finally:
-        _reload_default()
+    # ...and resolve at the new location, keeping their names.
+    assert resolve("/internal/health/", urlconf=urls).url_name == "api-health"
 
-
-def test_prefix_relocates_all_surfaces():
-    _reload(SNAPADMIN_URL_PREFIX="internal/")
-    try:
-        # REST, Swagger and GraphQL all move under the prefix...
-        assert reverse("api-health", urlconf=snap_urls) == "/internal/health/"
-        assert reverse("swagger-ui", urlconf=snap_urls) == "/internal/docs/"
-        assert reverse("graphql", urlconf=snap_urls) == "/internal/graphql/"
-        assert reverse(
-            "model-list", args=["demo", "Product"], urlconf=snap_urls
-        ) == "/internal/models/demo/Product/"
-
-        # ...and resolve at the new location, keeping their names.
-        assert resolve("/internal/health/", urlconf=snap_urls).url_name == "api-health"
-
-        # The old, un-prefixed paths no longer resolve.
-        with pytest.raises(Resolver404):
-            resolve("/health/", urlconf=snap_urls)
-    finally:
-        _reload_default()
+    # The old, un-prefixed paths no longer resolve.
+    with pytest.raises(Resolver404):
+        resolve("/health/", urlconf=urls)
 
 
 @pytest.mark.parametrize("raw", ["internal", "/internal/", "internal/", "/internal"])
-def test_prefix_is_normalised(raw):
+def test_prefix_is_normalised(raw, snapadmin_urls_under):
     # Leading/trailing slashes are normalised to a single "<seg>/" segment.
-    _reload(SNAPADMIN_URL_PREFIX=raw)
-    try:
-        assert reverse("api-health", urlconf=snap_urls) == "/internal/health/"
-    finally:
-        _reload_default()
+    urls = snapadmin_urls_under(SNAPADMIN_URL_PREFIX=raw)
+
+    assert reverse("api-health", urlconf=urls) == "/internal/health/"
 
 
-def test_empty_prefix_is_a_noop():
-    _reload(SNAPADMIN_URL_PREFIX="")
-    try:
-        assert reverse("api-health", urlconf=snap_urls) == "/health/"
-    finally:
-        _reload_default()
+def test_empty_prefix_is_a_noop(snapadmin_urls_under):
+    urls = snapadmin_urls_under(SNAPADMIN_URL_PREFIX="")
+
+    assert reverse("api-health", urlconf=urls) == "/health/"

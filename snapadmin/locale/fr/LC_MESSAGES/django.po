@@ -348,10 +348,8 @@ msgstr "Tâche de réindexation"
 msgid "Reindex Jobs"
 msgstr "Tâches de réindexation"
 
-#, fuzzy
-#| msgid "Failed"
 msgid "Fail"
-msgstr "Échoué"
+msgstr "Interrompre"
 
 msgid "Skip"
 msgstr "Ignorer"
@@ -391,15 +389,11 @@ msgstr "En cas de conflit"
 msgid "Report File"
 msgstr "Fichier de rapport"
 
-#, fuzzy
-#| msgid "Resume Byte Offset"
 msgid "Report Resume Byte Offset"
-msgstr "Décalage d'octets de reprise"
+msgstr "Décalage d'octets de reprise du rapport"
 
-#, fuzzy
-#| msgid "Byte length of the working file confirmed at cursor_pk."
 msgid "Byte length of the report file confirmed as written."
-msgstr "Longueur en octets du fichier de travail confirmée à cursor_pk."
+msgstr "Longueur en octets du fichier de rapport confirmée comme écrite."
 
 msgid "Skipped"
 msgstr "Ignoré"
@@ -412,15 +406,11 @@ msgstr ""
 "champs cibles masqués ; vide est traité comme aucun accès aux données "
 "personnelles."
 
-#, fuzzy
-#| msgid "Export Job"
 msgid "Import Job"
-msgstr "Tâche d'exportation"
+msgstr "Tâche d'importation"
 
-#, fuzzy
-#| msgid "Export Jobs"
 msgid "Import Jobs"
-msgstr "Tâches d'exportation"
+msgstr "Tâches d'importation"
 
 msgid "Field"
 msgstr "Champ"

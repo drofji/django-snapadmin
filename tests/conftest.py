@@ -236,3 +236,52 @@ def mask_nothing_unless_a_test_says_otherwise(settings):
     """
     settings.SNAPADMIN_MASKED_FIELDS = {}
     settings.SNAPADMIN_MASKING_RULES = {}
+
+
+@pytest.fixture
+def snapadmin_urls_under():
+    """Reload ``snapadmin.urls`` under given settings, and always put it back.
+
+    **The trap this exists to remove.** ``snapadmin/urls.py`` decides what is
+    mounted in *import-time module constants*, and Django imports the root
+    URLconf lazily — so whichever test first triggers a ``reverse()`` fixes
+    those constants for every test that follows it. A test that renders a page
+    with the API switches unset therefore imports ``snapadmin.urls`` with
+    nothing mounted, and a later, entirely unrelated test asserting that Swagger
+    reverses fails with ``NoReverseMatch``. It has cost two debugging sessions
+    already (#FIX1a), because the failure never appears in the test that caused
+    it.
+
+    Two things are needed, and both are easy to forget: ``clear_url_caches()``
+    after the reload (``get_resolver`` memoises per urlconf *object*, and the
+    module identity survives a reload, so the cache would keep serving the old
+    patterns), and a reload back to the default layout **even when the test
+    fails** — which is why this is a fixture rather than a helper a test has to
+    remember to call in a ``finally``.
+
+    Resolve and reverse against the returned module (``urlconf=urls``) rather
+    than the global root, so a leaked cached resolver cannot make the result
+    depend on test order::
+
+        def test_prefix(snapadmin_urls_under):
+            urls = snapadmin_urls_under(SNAPADMIN_URL_PREFIX="internal/")
+            assert reverse("api-health", urlconf=urls) == "/internal/health/"
+    """
+    import importlib
+
+    from django.test import override_settings
+    from django.urls import clear_url_caches
+
+    import snapadmin.urls as snapadmin_urls
+
+    def reload_under(**settings_overrides):
+        with override_settings(**settings_overrides):
+            importlib.reload(snapadmin_urls)
+        clear_url_caches()
+        return snapadmin_urls
+
+    try:
+        yield reload_under
+    finally:
+        importlib.reload(snapadmin_urls)
+        clear_url_caches()

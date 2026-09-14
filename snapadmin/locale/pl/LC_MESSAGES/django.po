@@ -338,10 +338,8 @@ msgstr "Zadanie reindeksowania"
 msgid "Reindex Jobs"
 msgstr "Zadania reindeksowania"
 
-#, fuzzy
-#| msgid "Failed"
 msgid "Fail"
-msgstr "Nieudane"
+msgstr "Przerwij"
 
 msgid "Skip"
 msgstr "Pomiń"
@@ -383,15 +381,11 @@ msgstr "W przypadku konfliktu"
 msgid "Report File"
 msgstr "Plik raportu"
 
-#, fuzzy
-#| msgid "Resume Byte Offset"
 msgid "Report Resume Byte Offset"
-msgstr "Przesunięcie bajtów wznowienia"
+msgstr "Przesunięcie bajtów wznowienia raportu"
 
-#, fuzzy
-#| msgid "Byte length of the working file confirmed at cursor_pk."
 msgid "Byte length of the report file confirmed as written."
-msgstr "Długość w bajtach pliku roboczego potwierdzona przy cursor_pk."
+msgstr "Długość w bajtach pliku raportu potwierdzona jako zapisana."
 
 msgid "Skipped"
 msgstr "Pominięto"
@@ -403,15 +397,11 @@ msgstr ""
 "Używane do sprawdzania dostępu do danych PII w zamaskowanych polach "
 "docelowych; puste jest traktowane jako brak dostępu do PII."
 
-#, fuzzy
-#| msgid "Export Job"
 msgid "Import Job"
-msgstr "Zadanie eksportu"
+msgstr "Zadanie importu"
 
-#, fuzzy
-#| msgid "Export Jobs"
 msgid "Import Jobs"
-msgstr "Zadania eksportu"
+msgstr "Zadania importu"
 
 msgid "Field"
 msgstr "Pole"

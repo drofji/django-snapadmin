@@ -11,8 +11,10 @@ SnapAdmin strings) and half in English (everything the demo itself declares) —
 These tests pin the fix and guard against the catalogs going stale again.
 """
 
+import ast
 import os
 import pathlib
+import re
 
 import pytest
 from django.utils import translation
@@ -143,3 +145,91 @@ class TestDemoPagesRenderFullyLocalised:
         assert labels["audit"] == "Журнал аудита"
         assert labels["user_api"] == "API пользователей"
         assert labels["rest"] == "REST API"          # product name, untranslated
+
+
+# ── every translatable string the demo declares reaches the catalogs ──────────
+
+DEMO_ROOT = LOCALE_ROOT.parent
+
+#: The callables Django's ``makemessages`` treats as translation markers.
+_GETTEXT_CALLABLES = frozenset(
+    {"gettext", "gettext_lazy", "ugettext", "ugettext_lazy", "_", "pgettext", "ngettext"}
+)
+
+_TEMPLATE_TRANS_TAG = re.compile(r"{%\s*(?:trans|translate)\s+([\"'])(.+?)\1", re.S)
+
+
+def _python_translatable_literals() -> set[str]:
+    """Every literal passed to a gettext callable in the demo's Python source."""
+    literals: set[str] = set()
+    for source_file in DEMO_ROOT.rglob("*.py"):
+        if "locale" in source_file.parts or "migrations" in source_file.parts:
+            continue
+        tree = ast.parse(source_file.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            called = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
+            first = node.args[0]
+            if (
+                called in _GETTEXT_CALLABLES
+                and isinstance(first, ast.Constant)
+                and isinstance(first.value, str)
+            ):
+                literals.add(first.value)
+    return literals
+
+
+def _template_translatable_literals() -> set[str]:
+    literals: set[str] = set()
+    for template in DEMO_ROOT.rglob("*.html"):
+        for _quote, text in _TEMPLATE_TRANS_TAG.findall(
+            template.read_text(encoding="utf-8")
+        ):
+            literals.add(text)
+    return literals
+
+
+class TestEveryDemoStringHasAMsgid:
+    """A ``_()`` the catalogs never heard of ships untranslated in all ten locales.
+
+    The rest of this file compares the catalogs to each other — empty msgstrs, a
+    locale whose msgid set has drifted from ``ru``, a dropped placeholder — so it
+    can only see a string the catalogs already know about. It could not see a
+    string that was never extracted at all, and that is the failure that
+    actually happened: #FIX1g added seven translatable strings and the whole
+    suite stayed green with them missing from all ten catalogs (caught by hand).
+    This compares the **source** to the catalog instead. (#FIX2 section C,
+    closed in #QA1b.)
+
+    ``ru`` is the reference catalog for the same reason the rest of the file uses
+    it: it is the one locale with a reviewer.
+    """
+
+    def _russian_msgids(self) -> set[str]:
+        return {
+            msgid
+            for msgid, _msgstr in _parse_po(LOCALE_ROOT / "ru" / "LC_MESSAGES" / "django.po")
+            if msgid
+        }
+
+    def test_every_python_literal_was_extracted(self):
+        missing = sorted(_python_translatable_literals() - self._russian_msgids())
+        assert not missing, (
+            "translatable string(s) in demo/*.py with no msgid in the ru catalog: "
+            f"{missing}. Regenerate per locale — `makemessages -a` is a no-op in "
+            "this repo — then fill the new msgids in."
+        )
+
+    def test_every_template_tag_was_extracted(self):
+        missing = sorted(_template_translatable_literals() - self._russian_msgids())
+        assert not missing, (
+            "{% trans %} string(s) in demo templates with no msgid in the ru "
+            f"catalog: {missing}."
+        )
+
+    def test_the_sweep_actually_finds_the_demo_s_strings(self):
+        """A guard on the guard: a broken extractor would pass silently."""
+        python_literals = _python_translatable_literals()
+        assert len(python_literals) > 100, len(python_literals)
+        assert len(_template_translatable_literals()) > 20

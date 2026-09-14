@@ -6,6 +6,8 @@ gettext, renders a language switcher, and falls back to English for anything
 untranslated.
 """
 
+import pathlib
+
 import pytest
 from django.utils import translation
 
@@ -370,3 +372,66 @@ class TestDashboardDynamicStringsLocalised:
         html = admin_client.get("/dashboard/").content.decode()
         assert 'id="snap-chart-data"' in html
         assert 'type="application/json"' in html
+
+
+# ── no entry ships as a fuzzy match ──────────────────────────────────────────
+
+CATALOG_ROOTS = (
+    pathlib.Path(__file__).resolve().parent.parent / "snapadmin" / "locale",
+    pathlib.Path(__file__).resolve().parent.parent / "demo" / "locale",
+)
+
+
+def _catalogs():
+    for root in CATALOG_ROOTS:
+        yield from sorted(root.glob("*/LC_MESSAGES/django.po"))
+
+
+class TestNoFuzzyTranslationShips:
+    """``#, fuzzy`` means "gettext guessed this from a similar string".
+
+    ``msgfmt`` drops fuzzy entries, so the string ships **untranslated** in every
+    locale while the ``.po`` file carries a plausible-looking wrong translation
+    that nobody reads. It is the quietest failure in the whole i18n layer: the
+    catalogs look complete, every existing test comparing catalogs to each other
+    passes, and a Russian user sees English.
+
+    Found live on 2026-09-14 (#FIX2 section C, closed in #QA1b): five strings
+    from the import-job model were fuzzy in all nine translated locales, and
+    ``"Import Job"`` carried the translation of ``"Export Job"`` in every one of
+    them.
+
+    Two kinds of ``#, fuzzy`` are not entries and are excluded: the catalog
+    header (``msgid ""``), where the flag is what ``makemessages`` writes into a
+    brand-new file, and obsolete entries (``#~``), which are commented out and
+    compile to nothing.
+    """
+
+    @pytest.mark.parametrize("catalog", _catalogs(), ids=lambda p: f"{p.parts[-5]}-{p.parts[-3]}")
+    def test_no_active_entry_is_marked_fuzzy(self, catalog):
+        lines = catalog.read_text(encoding="utf-8").splitlines()
+        offenders = []
+        for index, line in enumerate(lines):
+            if line.strip() != "#, fuzzy":
+                continue
+            following = lines[index + 1 :]
+            entry = next(
+                (text for text in following if not text.startswith("#|")),
+                "",
+            )
+            if entry.startswith("#~"):
+                continue  # obsolete, already commented out
+            if entry == 'msgid ""':
+                continue  # the catalog header
+            offenders.append(f"line {index + 1}: {entry}")
+
+        assert not offenders, (
+            f"{catalog.parts[-5]}/locale/{catalog.parts[-3]} has fuzzy entries, which compile "
+            f"to nothing and ship untranslated: {offenders}. Review each one and drop "
+            "the flag, rather than leaving a guessed translation in the file."
+        )
+
+    def test_the_sweep_is_looking_at_every_catalog(self):
+        """A guard on the guard: a wrong glob would pass silently."""
+        catalogs = list(_catalogs())
+        assert len(catalogs) == 2 * len(TARGET_LOCALES), [str(p) for p in catalogs]

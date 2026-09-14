@@ -344,10 +344,8 @@ msgstr "Reindex-Auftrag"
 msgid "Reindex Jobs"
 msgstr "Reindex-Aufträge"
 
-#, fuzzy
-#| msgid "Failed"
 msgid "Fail"
-msgstr "Fehlgeschlagen"
+msgstr "Abbrechen"
 
 msgid "Skip"
 msgstr "Überspringen"
@@ -387,15 +385,11 @@ msgstr "Bei Konflikt"
 msgid "Report File"
 msgstr "Berichtsdatei"
 
-#, fuzzy
-#| msgid "Resume Byte Offset"
 msgid "Report Resume Byte Offset"
-msgstr "Fortsetzungs-Byte-Offset"
+msgstr "Fortsetzungs-Byte-Offset des Berichts"
 
-#, fuzzy
-#| msgid "Byte length of the working file confirmed at cursor_pk."
 msgid "Byte length of the report file confirmed as written."
-msgstr "Bytelänge der Arbeitsdatei, bestätigt bei cursor_pk."
+msgstr "Bytelänge der Berichtsdatei, als geschrieben bestätigt."
 
 msgid "Skipped"
 msgstr "Übersprungen"
@@ -407,15 +401,11 @@ msgstr ""
 "Wird für PII-Zugriffsprüfungen bei maskierten Zielfeldern verwendet; leer "
 "wird als kein PII-Zugriff behandelt."
 
-#, fuzzy
-#| msgid "Export Job"
 msgid "Import Job"
-msgstr "Exportauftrag"
+msgstr "Importauftrag"
 
-#, fuzzy
-#| msgid "Export Jobs"
 msgid "Import Jobs"
-msgstr "Exportaufträge"
+msgstr "Importaufträge"
 
 msgid "Field"
 msgstr "Feld"

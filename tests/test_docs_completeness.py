@@ -111,6 +111,77 @@ class TestCheckIdsExplained:
 # Every optional extra is listed consistently everywhere it must be
 # ─────────────────────────────────────────────────────────────────────────────
 
+#: Check ids that have been retired, mapped to the release that retired them.
+#: A retired id is **never reused** (SECURITY.md's stable-surface rule: an
+#: operator who silenced it, or who finds it in an old log, must not have it
+#: mean something else later), so it must not reappear in ``checks.py`` — and
+#: any documentation that still names it has to say it is gone rather than
+#: describe a check that no longer runs.
+RETIRED_CHECK_IDS = {"W014": "0.1.0b8"}
+
+#: Every prose surface that may name a check id. ``docs/releases/`` is
+#: deliberately out of scope: a release note describes the state at its own
+#: release and is not rewritten afterwards.
+_DOC_FILES_THAT_NAME_CHECK_IDS = (
+    "README.md",
+    "SECURITY.md",
+    "docs/index.html",
+    "llms.txt",
+    "docs/llms.txt",
+)
+
+#: ``snapadmin.W021`` and a bare ``W021`` are the same id; ranges are written
+#: as ``W001``–``W022``, so both endpoints are matched individually.
+_CHECK_ID_IN_PROSE = re.compile(r"\b(?:snapadmin\.)?([EWI]\d{3})\b")
+
+
+class TestNoCheckIdIsDocumentedAfterItsCheckIsGone:
+    """The reverse of ``TestCheckIdsExplained``, and the half that was missing.
+
+    That class asks "is every registered id explained?". Nothing asked the
+    other way round, so prose describing a check that no longer exists could
+    stay indefinitely — and did: ``W014`` was retired at 1.0 and kept its
+    ``llms.txt`` entry for a whole release, telling an assistant about a warning
+    the package cannot emit. (#FIX2 section C, closed in #QA1b.)
+    """
+
+    def _registered_ids(self) -> set[str]:
+        text = (SNAPADMIN_ROOT / "checks.py").read_text(encoding="utf-8")
+        return set(re.findall(r'id="snapadmin\.([EWI]\d+)"', text))
+
+    def _documented_ids(self, filename: str) -> set[str]:
+        return set(_CHECK_ID_IN_PROSE.findall((REPO_ROOT / filename).read_text(encoding="utf-8")))
+
+    @pytest.mark.parametrize("filename", _DOC_FILES_THAT_NAME_CHECK_IDS)
+    def test_every_documented_id_is_registered_or_listed_as_retired(self, filename):
+        unknown = sorted(
+            self._documented_ids(filename) - self._registered_ids() - set(RETIRED_CHECK_IDS)
+        )
+        assert not unknown, (
+            f"{filename} names check id(s) that no check registers: {unknown}. "
+            "Either the check was removed and the prose must go with it, or the id "
+            "was retired and belongs in RETIRED_CHECK_IDS with its release."
+        )
+
+    def test_a_retired_id_is_never_registered_again(self):
+        reused = sorted(set(RETIRED_CHECK_IDS) & self._registered_ids())
+        assert not reused, (
+            f"retired check id(s) back in checks.py: {reused}. A retired id keeps its "
+            "old meaning in an operator's SILENCED_SYSTEM_CHECKS and in old logs."
+        )
+
+    @pytest.mark.parametrize("filename", _DOC_FILES_THAT_NAME_CHECK_IDS)
+    def test_a_retired_id_is_only_named_alongside_its_retirement(self, filename):
+        text = (REPO_ROOT / filename).read_text(encoding="utf-8")
+        for check_id, released_in in RETIRED_CHECK_IDS.items():
+            for match in re.finditer(rf"\b(?:snapadmin\.)?{check_id}\b", text):
+                sentence = text[match.start() : match.start() + 200]
+                assert "retired" in sentence and released_in in sentence, (
+                    f"{filename} names {check_id} without saying it was retired in "
+                    f"{released_in}; a reader would take it for a live check."
+                )
+
+
 class TestExtrasListedEverywhere:
     def _declared_extras(self) -> list[str]:
         # `tomllib` is stdlib only on 3.11+; the suite still runs on 3.10, where
