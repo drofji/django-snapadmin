@@ -2218,3 +2218,102 @@ class TestBackupEntryPoints:
         result = backup_task.apply().result
         assert result["ran"] is True
         assert "local" in result["results"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The PostgreSQL dump/restore path, run for real (#QA1f)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _running_on_postgres() -> bool:
+    from django.conf import settings as django_settings
+
+    return "postgresql" in django_settings.DATABASES["default"]["ENGINE"]
+
+
+_ON_POSTGRES = _running_on_postgres()
+
+
+@pytest.mark.skipif(not _ON_POSTGRES, reason="needs a real PostgreSQL")
+@pytest.mark.django_db(transaction=True)
+class TestPostgresDumpAndRestoreRoundTrip:
+    """``pg_dump`` and ``psql``, actually executed.
+
+    Everywhere else in this file ``subprocess.Popen`` is faked, which pins the
+    *command line* — genuinely useful, and the reason a wrong flag would be
+    caught — but proves nothing about whether PostgreSQL accepts those flags or
+    whether what comes out can be read back in. A dump that ``pg_dump`` rejects,
+    or one ``psql`` cannot replay, would pass every other test here.
+
+    ``transaction=True`` is load-bearing: ``pg_dump`` connects as its own
+    session, so rows written inside the test's transaction would be invisible
+    to it. The restore goes into a scratch database created for the test, never
+    the one the suite is running on — ``restore_db`` drops and recreates its
+    target.
+    """
+
+    SCRATCH_DB = "snapadmin_restore_probe"
+
+    @pytest.fixture
+    def scratch_database(self):
+        """An empty database to restore into, dropped afterwards either way."""
+        from django.db import connections
+
+        def run_on_maintenance_db(statement):
+            # autocommit: CREATE/DROP DATABASE cannot run inside a transaction.
+            connection = connections["default"].get_new_connection(
+                {
+                    **connections["default"].get_connection_params(),
+                    "dbname": "postgres",
+                }
+            )
+            try:
+                connection.autocommit = True
+                with connection.cursor() as cursor:
+                    cursor.execute(statement)
+            finally:
+                connection.close()
+
+        run_on_maintenance_db(f'DROP DATABASE IF EXISTS "{self.SCRATCH_DB}"')
+        run_on_maintenance_db(f'CREATE DATABASE "{self.SCRATCH_DB}"')
+        try:
+            yield self.SCRATCH_DB
+        finally:
+            run_on_maintenance_db(f'DROP DATABASE IF EXISTS "{self.SCRATCH_DB}"')
+
+    def test_a_real_dump_restores_into_an_empty_database_with_its_rows(
+        self, tmp_path, scratch_database
+    ):
+        from decimal import Decimal
+
+        from django.conf import settings as django_settings
+        from django.db import connections
+
+        from demo.apps.shop.models import Product
+        from snapadmin.restore import restore_db
+
+        Product.objects.create(name="Backed Up Widget", price=Decimal("42.00"))
+
+        dump = create_db_dump(tmp_path)
+
+        # A real pg_dump, not a recorded command line.
+        assert dump.name.endswith(".sql.gz")
+        sql = gzip.decompress(dump.read_bytes()).decode()
+        assert "PostgreSQL database dump" in sql
+        assert Product._meta.db_table in sql
+        assert "Backed Up Widget" in sql
+
+        scratch = {**django_settings.DATABASES["default"], "NAME": scratch_database}
+        with override_settings(DATABASES={**django_settings.DATABASES, "default": scratch}):
+            restore_db(dump)
+
+            connection = connections["default"].get_new_connection(
+                {**connections["default"].get_connection_params(), "dbname": scratch_database}
+            )
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute(f'SELECT name FROM "{Product._meta.db_table}"')
+                    restored = [row[0] for row in cursor.fetchall()]
+            finally:
+                connection.close()
+
+        assert "Backed Up Widget" in restored

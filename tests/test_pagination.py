@@ -20,6 +20,22 @@ from snapadmin.pagination import (
 )
 
 
+def _running_on_postgres() -> bool:
+    """Whether this run's default database is PostgreSQL.
+
+    The estimate is a PostgreSQL feature, so half the behaviour in this file
+    only exists on one backend. The suite runs on SQLite by default and on
+    PostgreSQL in its own CI job, and each half says which one it needs rather
+    than assuming (#QA1f).
+    """
+    from django.conf import settings
+
+    return "postgresql" in settings.DATABASES["default"]["ENGINE"]
+
+
+_ON_POSTGRES = _running_on_postgres()
+
+
 @pytest.fixture
 def products(db):
     from demo.apps.shop.models import Product
@@ -49,8 +65,12 @@ class TestPgEstimate:
     def test_non_queryset_returns_none(self):
         assert pg_estimated_count([1, 2, 3]) is None
 
-    def test_sqlite_returns_none(self, products):
-        # The test DB is SQLite (vendor != postgresql) → no estimate.
+    @pytest.mark.skipif(_ON_POSTGRES, reason="this is the non-PostgreSQL branch")
+    def test_a_non_postgres_backend_returns_none(self, products):
+        """Anything but PostgreSQL has no ``reltuples`` to read, so: exact count."""
+        from django.db import connections
+
+        assert connections[products.db].vendor != "postgresql"
         assert pg_estimated_count(products) is None
 
     def test_filtered_queryset_returns_none(self, products):
@@ -82,6 +102,79 @@ class TestPgEstimate:
         conn.cursor.return_value.__enter__.return_value.fetchone.return_value = [-1]
         with patch("snapadmin.pagination.connections", {products.db: conn}):
             assert pg_estimated_count(products) is None
+
+
+# ── pg_estimated_count() against a real PostgreSQL ───────────────────────────
+
+
+@pytest.mark.skipif(not _ON_POSTGRES, reason="needs a real PostgreSQL")
+@pytest.mark.django_db
+class TestPgEstimateAgainstTheRealPlanner:
+    """The query itself, run by PostgreSQL rather than described to a mock.
+
+    Every other test in this file patches ``connections`` and hands the code a
+    fetched row, so ``SELECT reltuples::bigint FROM pg_class WHERE relname = %s``
+    had never actually executed: a wrong catalogue column, a wrong cast or a
+    table name that does not match ``relname`` would have passed all of them.
+    These run only in the job that has a PostgreSQL service (#QA1f).
+    """
+
+    def test_an_analysed_table_reports_the_planner_s_row_estimate(self, products):
+        from django.db import connections
+
+        from demo.apps.shop.models import Product
+
+        # reltuples is populated by ANALYZE; a table that has never been
+        # analysed carries -1 ("unknown") and is deliberately ignored below.
+        with connections[products.db].cursor() as cursor:
+            cursor.execute(f'ANALYZE "{Product._meta.db_table}"')
+
+        estimate = pg_estimated_count(Product.objects.all())
+
+        assert estimate == Product.objects.count()
+
+    def test_a_negative_estimate_is_treated_as_no_estimate(self):
+        """``-1`` is PostgreSQL for "never analysed" — fall back to exact.
+
+        Reading it as a row count would report a negative total. (A table
+        created but not yet analysed reads **0** rather than -1 on this server,
+        which the threshold check below already keeps harmless; -1 has to be
+        forced here to reach the guard.)
+        """
+        from django.db import connections
+
+        from demo.apps.shop.models import Showcase
+
+        with connections["default"].cursor() as cursor:
+            cursor.execute(
+                "UPDATE pg_class SET reltuples = -1 WHERE relname = %s",
+                [Showcase._meta.db_table],
+            )
+
+        assert pg_estimated_count(Showcase.objects.all()) is None
+
+    def test_a_filtered_queryset_still_takes_the_exact_count(self, products):
+        """``reltuples`` is whole-table, so a WHERE clause makes it wrong."""
+        from django.db import connections
+
+        from demo.apps.shop.models import Product
+
+        with connections["default"].cursor() as cursor:
+            cursor.execute(f'ANALYZE "{Product._meta.db_table}"')
+
+        assert pg_estimated_count(Product.objects.filter(name="P1")) is None
+
+    def test_the_paginator_uses_the_estimate_once_it_clears_the_threshold(self, products):
+        from django.db import connections
+
+        from demo.apps.shop.models import Product
+
+        with connections["default"].cursor() as cursor:
+            cursor.execute(f'ANALYZE "{Product._meta.db_table}"')
+
+        with override_settings(SNAPADMIN_ESTIMATED_COUNT_THRESHOLD=1):
+            paginator = EstimatedCountPaginator(Product.objects.all(), per_page=2)
+            assert paginator.count == Product.objects.count()
 
 
 # ── EstimatedCountPaginator ──────────────────────────────────────────────────
