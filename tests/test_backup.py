@@ -434,8 +434,18 @@ class TestCreateDump:
         assert gzip.decompress(dump.read_bytes()) == b"sqlite-payload"
 
     def test_sqlite_in_memory_rejected(self, tmp_path):
-        with pytest.raises(BackupError, match="in-memory"):
-            create_db_dump(tmp_path)
+        """An in-memory database has nothing on disk to copy — say so, don't
+        write an empty backup.
+
+        The configuration is pinned here rather than inherited: the suite's
+        default backend used to be in-memory SQLite, so this passed by accident,
+        and it fails against the PostgreSQL job — which has no in-memory
+        database to reject (#QA1f).
+        """
+        databases = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}}
+        with override_settings(DATABASES=databases):
+            with pytest.raises(BackupError, match="in-memory"):
+                create_db_dump(tmp_path)
 
     def test_postgres_dump_uses_pg_dump(self, tmp_path, monkeypatch):
         recorded = {}

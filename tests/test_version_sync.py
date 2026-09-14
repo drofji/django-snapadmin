@@ -281,12 +281,17 @@ def _declared_client_constraint() -> str:
     return constraint
 
 
-def _server_major(path: str) -> int:
-    """The ES server major a compose file (or compose template) starts."""
+def _server_version(path: str) -> tuple[int, int, int]:
+    """The full ES server version a file starts, as (major, minor, patch)."""
     text = (REPO_ROOT / path).read_text(encoding="utf-8")
     match = _ES_IMAGE.search(text)
     assert match, f"{path}: no `docker.elastic.co/elasticsearch/elasticsearch:X.Y.Z` image found"
-    return int(match.group(1))
+    return tuple(int(part) for part in match.groups())
+
+
+def _server_major(path: str) -> int:
+    """The ES server major a compose file (or compose template) starts."""
+    return _server_version(path)[0]
 
 
 class TestElasticsearchClientAndServerAgree:
@@ -307,7 +312,25 @@ class TestElasticsearchClientAndServerAgree:
     SERVER_SITES = (
         "snapadmin/scaffold/templates/full/docker-compose.yml.tmpl",
         "demo/docker-compose.yml",
+        # The CI job that runs the suite against a live cluster starts a server
+        # too, and it is the one that would notice the mismatch first.
+        ".github/workflows/test.yml",
     )
+
+    def test_ci_starts_exactly_the_server_the_demo_ships(self):
+        """Not merely a compatible major — the same image.
+
+        The live-Elasticsearch job exists to prove the package works against
+        what a user actually runs. Testing against a different patch release
+        than the one the demo's compose file starts would still leave the
+        shipped combination unproven, and the difference would be invisible.
+        """
+        ci = _server_version(".github/workflows/test.yml")
+        demo = _server_version("demo/docker-compose.yml")
+        assert ci == demo, (
+            f"the CI job starts Elasticsearch {'.'.join(map(str, ci))} while "
+            f"demo/docker-compose.yml ships {'.'.join(map(str, demo))} — bump both together"
+        )
 
     def test_the_client_constraint_is_capped_to_a_major(self):
         constraint = _declared_client_constraint()

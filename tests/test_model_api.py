@@ -1438,6 +1438,22 @@ class TestDynamicViewSetThrottling:
 # ── DynamicModelViewSet – auto-generated JSON key-path filters (#FEAT1) ──────
 
 @pytest.mark.django_db
+def _backend_has_native_json_containment() -> bool:
+    """Whether this run's database can do JSON containment in SQL.
+
+    PostgreSQL can; SQLite cannot, and Django's ``contains`` lookup raises
+    ``NotSupportedError`` there. The filter has a branch for each, so the tests
+    below that pin one branch say which backend they need instead of assuming
+    one (#QA1f — the suite runs on both now).
+    """
+    from django.db import connection
+
+    return bool(connection.features.supports_json_field_contains)
+
+
+_NATIVE_JSON_CONTAINS = _backend_has_native_json_containment()
+
+
 class TestAutoFilterJsonFieldLookups:
     """
     demo.Showcase declares:
@@ -1487,21 +1503,33 @@ class TestAutoFilterJsonFieldLookups:
         assert r.status_code == 200
         assert r.json()["results"] == []
 
-    def test_list_membership_runs_on_sqlite_via_python_fallback(self, showcase_records):
-        # The whole point of #FEAT1: this must work on the default dev/test
-        # backend, not just on a backend with native JSON `contains` support.
-        from django.db import connection
+    def test_list_membership_works_on_whichever_backend_is_running(self, showcase_records):
+        """The same answer from both branches.
+
+        List membership takes a native ``__contains`` lookup where the backend
+        has one (PostgreSQL) and a per-row Python scan where it does not
+        (SQLite). Which branch runs is the backend's business; that the caller
+        gets the same rows either way is the contract, and it is now checked on
+        both — the suite ran only on SQLite until #QA1f, so the native branch
+        had no test at all.
+        """
         from demo.apps.shop.models import Showcase
         from snapadmin.api.filters import build_filterset_for_model
 
-        assert connection.vendor == "sqlite"
-        assert connection.features.supports_json_field_contains is False
-
         FS = build_filterset_for_model(Showcase)
         fs = FS({"json_field__tags": "green"}, queryset=Showcase.objects.all())
+
         assert list(fs.qs.values_list("char_field", flat=True)) == [
             showcase_records["green"].char_field
         ]
+
+    @pytest.mark.skipif(
+        _NATIVE_JSON_CONTAINS, reason="backend has native JSON containment — no scan to fall back to"
+    )
+    def test_without_native_containment_the_python_fallback_is_what_runs(self, showcase_records):
+        from django.db import connection
+
+        assert connection.features.supports_json_field_contains is False
 
     def test_unknown_key_path_is_not_filterable(self, auth_client, showcase_records):
         # A key-path that isn't declared in api_json_filters has no
@@ -1613,11 +1641,37 @@ class TestJsonFilterCommaOrLazyAndCap:
         qs = Showcase.objects.all()
         assert jf.filter(qs, "") is qs
 
-    def test_scan_cap_exceeded_returns_400(self, auth_client, showcase_records):
-        # 3 rows, cap 1 → the SQLite membership scan refuses rather than OOM.
+    @pytest.mark.skipif(
+        _NATIVE_JSON_CONTAINS,
+        reason="the cap guards the Python scan; a native backend never scans",
+    )
+    def test_scan_cap_exceeded_returns_400_where_the_scan_happens(
+        self, auth_client, showcase_records
+    ):
+        # 3 rows, cap 1 → the membership scan refuses rather than risk OOM.
         with override_settings(SNAPADMIN_API_JSON_FILTER_SCAN_CAP=1):
             r = auth_client.get("/api/models/demo/Showcase/?json_field__tags=red")
         assert r.status_code == 400
+
+    @pytest.mark.skipif(
+        not _NATIVE_JSON_CONTAINS, reason="only a native backend can ignore the cap"
+    )
+    def test_the_cap_does_not_apply_where_the_query_is_native(
+        self, auth_client, showcase_records
+    ):
+        """On PostgreSQL the filter is one lazy queryset — nothing to cap.
+
+        The cap exists to stop the SQLite fallback materialising a table in
+        memory. A native backend does the containment in SQL, so the same
+        request that 400s on SQLite must answer normally here rather than
+        refusing for a reason that does not apply. Untested before #QA1f, when
+        the suite first ran against PostgreSQL.
+        """
+        with override_settings(SNAPADMIN_API_JSON_FILTER_SCAN_CAP=1):
+            r = auth_client.get("/api/models/demo/Showcase/?json_field__tags=red")
+
+        assert r.status_code == 200
+        assert {i["char_field"] for i in r.json()["results"]} == {"red"}
 
     def test_scan_cap_not_exceeded_ok(self, auth_client, showcase_records):
         with override_settings(SNAPADMIN_API_JSON_FILTER_SCAN_CAP=1000):

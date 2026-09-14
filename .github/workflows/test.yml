@@ -92,8 +92,8 @@ jobs:
   # legitimately take different branches (the estimated-count path returns early
   # on any non-PostgreSQL vendor), so demanding 100% from a single backend would
   # be asking for the wrong thing.
-  postgres:
-    name: PostgreSQL · py3.12 · Django 5.2
+  real-services:
+    name: Real services · py3.12 · Django 5.2
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -110,6 +110,25 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      elasticsearch:
+        # The same image the demo's compose file ships, so this job exercises
+        # what a user actually runs rather than some other version that happens
+        # to be current. `tests/test_version_sync.py` fails if the two drift
+        # apart, and if either leaves the `[elasticsearch]` extra's range.
+        image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "false"
+          # A single-shard test cluster needs nothing like the default heap, and
+          # a runner that swaps is a runner that times out.
+          ES_JAVA_OPTS: -Xms512m -Xmx512m
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9200/_cluster/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
     steps:
       - uses: actions/checkout@v4
 
@@ -144,3 +163,18 @@ jobs:
           SNAPADMIN_TEST_POSTGRES_USER: snapadmin
           SNAPADMIN_TEST_POSTGRES_PASSWORD: snapadmin
         run: python -m pytest
+
+      - name: Run the live-Elasticsearch tests
+        # Deselected everywhere else (`-m "not real_es"` in pytest.ini), so this
+        # is the only place they run. `-m real_es` on the command line overrides
+        # that default. They are what proves the query DSL is valid: a mocked
+        # client accepts a malformed `terms` clause or a broken `search_after`
+        # cursor without complaint, and Elasticsearch answers 400.
+        env:
+          SNAPADMIN_TEST_POSTGRES: localhost
+          SNAPADMIN_TEST_POSTGRES_PORT: "5432"
+          SNAPADMIN_TEST_POSTGRES_DB: snapadmin_test
+          SNAPADMIN_TEST_POSTGRES_USER: snapadmin
+          SNAPADMIN_TEST_POSTGRES_PASSWORD: snapadmin
+          SNAPADMIN_TEST_ES_URL: http://localhost:9200
+        run: python -m pytest -m real_es
