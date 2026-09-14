@@ -2,9 +2,10 @@
 tests/test_api_token.py  –  APIToken model + authentication tests
 """
 
-from datetime import datetime, timedelta
+from datetime import timedelta
 import pytest
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.test import APIClient
 
 
@@ -220,7 +221,10 @@ class TestTokenAPIEndpoints:
 
     def test_create_with_expiry_sets_date(self, auth_client):
         r = auth_client.post("/api/tokens/", {"token_name": "E", "expires_in_days": 14}, format="json")
-        expires_at = datetime.fromisoformat(r.json()["expiration_date"])
+        # Django's parser, not datetime.fromisoformat: DRF renders the trailing
+        # "Z", which the stdlib could not parse before Python 3.11 — and the
+        # suite supports 3.10. (Caught by the CI matrix, not locally.)
+        expires_at = parse_datetime(r.json()["expiration_date"])
         # The requested window, not merely "some date was set".
         assert (expires_at - timezone.now()).days == 13  # 13 full days + a part day
 

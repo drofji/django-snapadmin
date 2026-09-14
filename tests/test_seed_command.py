@@ -149,11 +149,20 @@ class TestSeedDemoCommand:
 class TestSeedDemoEsIndexing:
     def test_skips_index_when_es_unavailable(self):
         """--no-index flag means no ES calls are made."""
+        from unittest.mock import MagicMock
+
+        from demo.apps.shop.models import Product
+
+        mock_index = MagicMock()
         out = StringIO()
-        with patch("demo.apps.shop.search.is_es_available", return_value=False):
+        with patch("demo.apps.shop.search.is_es_available", return_value=False), \
+             patch("demo.apps.shop.search.index_product", mock_index):
             call_command("seed_demo", count=3, no_index=True, stdout=out)
-        # No exception means graceful skip
-        assert True
+
+        # The name of this test is "no ES calls are made" — say that, rather than
+        # `assert True` under a comment claiming no exception was raised.
+        mock_index.assert_not_called()
+        assert Product.objects.count() == 3  # the rows were still seeded
 
     def test_indexes_when_es_available(self):
         """With ES available and no --no-index, index_product should be called."""
