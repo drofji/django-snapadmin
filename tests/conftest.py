@@ -211,3 +211,28 @@ def restore_the_active_language():
         yield
     finally:
         translation.activate(language_before)
+
+
+@pytest.fixture(autouse=True)
+def mask_nothing_unless_a_test_says_otherwise(settings):
+    """Start every test from "no PII masking configured".
+
+    ``demo/core/settings.py`` dogfoods masking, so without this a package test
+    inherits half its configuration from the demo. Tests named ``test_unset`` or
+    ``test_unconfigured_model_untouched`` then assert unconfigured behaviour
+    without ever unsetting anything, and a test that pins only
+    ``SNAPADMIN_MASKED_FIELDS`` still reads the demo's
+    ``SNAPADMIN_MASKING_RULES`` — which declare their own fields sensitive, so
+    half a pin is not a pin. Changing which model the demo masks then turns
+    tests red that have nothing to do with the change (#FIX1k: 26 of them, in
+    five files).
+
+    Pinning both here rather than at all 79 override sites gives the same
+    end state — every masking test states its whole configuration — in one
+    place, and it holds for tests written later too. A test that wants masking
+    overrides these; an ``override_settings`` decorator or context manager runs
+    after this fixture and unwinds before it, so its value wins while it is
+    live.
+    """
+    settings.SNAPADMIN_MASKED_FIELDS = {}
+    settings.SNAPADMIN_MASKING_RULES = {}

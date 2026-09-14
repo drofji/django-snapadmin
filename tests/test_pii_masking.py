@@ -125,6 +125,8 @@ class TestMaskValue:
 
 class TestGetMaskedFields:
     def test_unset(self):
+        # "Unset" is a pinned baseline, not the demo's ambient configuration —
+        # see `mask_nothing_unless_a_test_says_otherwise` in conftest (#FIX1k).
         assert get_masked_fields("demo", "Customer") == []
 
     @override_settings(SNAPADMIN_MASKED_FIELDS=CUST)
@@ -280,6 +282,7 @@ RULES = {
 
 class TestGetMaskingRules:
     def test_unset(self):
+        # Pinned by conftest's masking baseline, not inherited from the demo.
         assert get_masking_rules("demo", "Customer") == {}
 
     @override_settings(SNAPADMIN_MASKING_RULES=RULES)
