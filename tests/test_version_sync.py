@@ -353,6 +353,61 @@ class TestElasticsearchClientAndServerAgree:
             f"ahead of the server answers 400 to everything"
         )
 
+    #: Elasticsearch client methods the package calls.
+    _ES_CLIENT_METHODS = frozenset(
+        {
+            "search",
+            "count",
+            "create",
+            "put_mapping",
+            "delete",
+            "delete_by_query",
+            "index",
+            "bulk",
+        }
+    )
+
+    def _shim_call_sites(self) -> list[str]:
+        """Every call still passing an 8.x-only keyword to the ES client."""
+        import ast
+
+        sites = []
+        for path in sorted((REPO_ROOT / "snapadmin").rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                    continue
+                if node.func.attr not in self._ES_CLIENT_METHODS:
+                    continue
+                shims = {kw.arg for kw in node.keywords if kw.arg} & {"body", "ignore"}
+                if shims:
+                    relative = path.relative_to(REPO_ROOT)
+                    sites.append(f"{relative}:{node.lineno} {node.func.attr}({', '.join(sorted(shims))}=)")
+        return sites
+
+    def test_the_cap_is_still_earning_its_keep(self):
+        """The cap exists for a reason; this is the reason, made executable.
+
+        ``elasticsearch-py`` 9 removed the ``body=`` and ``ignore=``
+        compatibility keywords, which is *why* the extra is pinned below 9. If
+        those calls are ever modernised, the pin becomes an unexplained
+        restriction that quietly holds every install a major behind — so this
+        fails when the last shim goes, as a prompt to lift the cap deliberately
+        rather than discover the question years later.
+
+        It fails just as loudly in the other direction, if a new shim call
+        appears after someone believed they had removed them all.
+        """
+        sites = self._shim_call_sites()
+        assert sites, (
+            "no call passes body= or ignore= any more, so nothing in the package needs "
+            "an elasticsearch < 9 client — lift the cap in pyproject.toml and "
+            "demo/requirements.txt, bump the compose images, and delete this test"
+        )
+        # A floor rather than an exact number: adding an ES call should not have
+        # to touch this test, but silently dropping to zero must not pass either.
+        assert len(sites) >= 12, sites
+
     def test_the_demo_requirements_pin_the_same_client_majors(self):
         """`demo/requirements.txt` installs the client directly, bypassing the extra."""
         constraint = _declared_client_constraint()

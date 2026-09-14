@@ -181,12 +181,20 @@ class TestTheQueryDslIsValid:
             assert Product.es_count(available=True, db_fallback=False) == 2
 
     def test_the_aggregation_query_is_accepted_and_buckets(self):
+        """The buckets a real cluster returns, in the order it returns them.
+
+        Note the keys: a ``boolean`` field aggregates to the integers **1 and
+        0**, not to ``True``/``False``, so anything rendering these as a facet
+        has to map them back itself. No mocked test could have shown that — the
+        mock hands back whatever bucket shape the test invented.
+        """
         from demo.apps.shop.models import Product
 
         with override_settings(ELASTICSEARCH_ENABLED=True, ELASTICSEARCH_URL=ES_URL):
             buckets = Product.es_aggregate("available", db_fallback=False)
 
-        assert buckets["available"] == {True: 2, False: 1}
+        # Descending by count, which is Elasticsearch's default terms ordering.
+        assert buckets["available"] == [{"key": 1, "count": 2}, {"key": 0, "count": 1}]
 
     def test_the_deep_scan_cursor_is_accepted_and_yields_every_row(self):
         from demo.apps.shop.models import Product
