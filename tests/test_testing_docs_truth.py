@@ -265,8 +265,8 @@ _COVERAGE_PRAGMAS: dict[str, int] = {
 _DOCUMENTED_PRAGMA_TOTAL = 18
 
 #: The suite-wide floors both documents quote.
-_SUITE_FLOOR = 4_900
-_FILE_FLOOR = 152
+_SUITE_FLOOR = 5_000
+_FILE_FLOOR = 153
 #: The live-Elasticsearch tests, deselected by default and described as "twelve".
 _REAL_ES_FLOOR = 12
 
@@ -337,8 +337,8 @@ class TestQuotedCountsAreMetFloors:
     @pytest.mark.parametrize(
         "quoted, document",
         [
-            ("4,900+ tests", "README.md"),
-            ("152 files", "README.md"),
+            ("5,000+ tests", "README.md"),
+            ("153 files", "README.md"),
             ("340+", "README.md"),
             ("260+ checks", "README.md"),
             ("140+ tests", "README.md"),
@@ -346,8 +346,8 @@ class TestQuotedCountsAreMetFloors:
             ("90+ checks", "README.md"),
             ("Eighteen lines across twelve modules", "README.md"),
             ("eighteen lines across twelve modules", "docs/index.html"),
-            ("4,964", "docs/index.html"),
-            ("152 files", "docs/index.html"),
+            ("5,053", "docs/index.html"),
+            ("153 files", "docs/index.html"),
             ("11,349", "docs/index.html"),
             ("3,346", "docs/index.html"),
         ],

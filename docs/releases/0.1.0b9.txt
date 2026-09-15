@@ -473,6 +473,22 @@ Fixed
   test freezes the list as a ceiling, so a nineteenth cannot be added without a deliberate edit and
   a matching correction to both pages. The claim was found by writing the guard that now pins it.
 
+* **A flaky assertion in the encrypted-field leak check, and the class of defect behind it.** The
+  test that proves no plaintext reaches an encrypted column searched the stored envelope for each
+  sample value — and one of those values was the integer ``42``. The envelope's nonce and ciphertext
+  are fresh random base64url on every write, so a two-character needle lands in one roughly **1.1% of
+  runs** (measured over 200,000 simulated envelopes, not estimated). It finally reddened a CI job on
+  ``snap1.test-key.CfCOjWpnM_2kfvuk.42bBPZL4UbtQLmgec7uc_Swf``, where the ``42`` is the first two
+  characters of the ciphertext and means nothing at all.
+
+  Nothing was wrong with the encryption, and the fix is not to relax the assertion: a flaky check is
+  one measuring the wrong thing, not one being too strict. The sample integer is now ten digits, so a
+  hit is a real leak rather than a coincidence. The needles moved into a table beside the sample data
+  with three guards over it — every needle is long enough to be evidence, every needle names a column
+  that is genuinely encrypted (one aimed at the control column would always pass), and every needle
+  really occurs in the plaintext it claims to detect. Those fail at once rather than one run in
+  ninety, which is the point: the next short needle is caught when it is written.
+
 * **Five import-job strings shipped untranslated in every locale.** A catalog regeneration
   matched them against similar existing entries and left the results flagged ``#, fuzzy``:
   ``Fail`` (the ``on_conflict`` choice), ``Report Resume Byte Offset``, ``Byte length of the

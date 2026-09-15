@@ -111,7 +111,7 @@ SAMPLE = {
     "body": "long free text\nwith newlines",
     "email": "private@example.org",
     "payload": {"iban": "DE00 1234", "tags": ["a", "b"], "n": 3},
-    "count": 42,
+    "count": 1928374650,   # ten digits on purpose — see test_no_plaintext_reaches_the_column
     "amount": Decimal("1234.56"),
     "day": datetime.date(2026, 3, 14),
     "moment": datetime.datetime(2026, 3, 14, 15, 9, 26, tzinfo=datetime.timezone.utc),
@@ -119,6 +119,22 @@ SAMPLE = {
 }
 
 ENCRYPTED_COLUMNS = [c for c in SAMPLE if c != "plain"]
+
+#: ``column -> the plaintext that must not be readable in it``. Kept beside
+#: SAMPLE so the two cannot drift, and guarded for length below: the envelope is
+#: random base64url, so a needle shorter than this matches by chance and turns a
+#: leak check into a coin flip.
+LEAK_NEEDLES = {
+    "note": "penicillin",
+    "email": "example.org",
+    "payload": "DE00 1234",
+    "count": "1928374650",
+    "day": "2026-03-14",
+}
+
+#: Six base64url characters give a chance collision rate under one in a billion
+#: per run, against roughly 1.1% for the two-character needle this replaced.
+MIN_NEEDLE_LENGTH = 6
 
 
 def _raw(model, pk: int, column: str) -> object:
@@ -249,12 +265,67 @@ class TestRoundTrip:
             assert ciphermod.looks_encrypted(stored), column
 
     def test_no_plaintext_reaches_the_column(self, vault_model, keyset):
+        """A substring search for the plaintext in what the column really holds.
+
+        **Every needle below has to be long enough to be evidence**, because the
+        envelope's nonce and ciphertext are fresh random base64url on every
+        write, so a short needle turns up in one by luck rather than by leaking.
+        ``count`` used to be ``42``, and a two-character needle against roughly
+        fifty random base64 characters hits about **1.1% of runs** — measured,
+        not estimated. It failed a CI job on
+        ``"snap1.test-key.CfCOjWpnM_2kfvuk.42bBPZL4UbtQLmgec7uc_Swf"``, where the
+        ``42`` is the first two characters of the ciphertext and means nothing.
+
+        A flaky assertion is not a weak one to be relaxed — it is an assertion
+        measuring the wrong thing. The value is now ten digits, so a hit is a
+        real leak. ``test_the_needles_are_long_enough_to_be_evidence`` keeps it
+        that way.
+        """
         row = vault_model.objects.create(**SAMPLE)
-        assert "penicillin" not in _raw(vault_model, row.pk, "note")
-        assert "example.org" not in _raw(vault_model, row.pk, "email")
-        assert "1234" not in _raw(vault_model, row.pk, "payload")
-        assert "42" not in json.dumps(_raw(vault_model, row.pk, "count"))
-        assert "2026-03-14" not in _raw(vault_model, row.pk, "day")
+        for column, needle in LEAK_NEEDLES.items():
+            stored = _raw(vault_model, row.pk, column)
+            haystack = stored if isinstance(stored, str) else json.dumps(stored)
+            assert needle not in haystack, (
+                f"{column}: the plaintext {needle!r} is readable in the stored value {haystack!r}"
+            )
+
+    def test_the_needles_are_long_enough_to_be_evidence(self):
+        """The leak check above is only as good as what it searches for.
+
+        This is the regression test for the flake, and it fails at collection
+        time rather than one run in ninety: shortening a needle, or adding a
+        short one for a new column, is caught here instead of reddening a CI job
+        months later on a value that happens to start with the right characters.
+        """
+        too_short = {
+            column: needle
+            for column, needle in LEAK_NEEDLES.items()
+            if len(needle) < MIN_NEEDLE_LENGTH
+        }
+        assert not too_short, (
+            f"needle(s) short enough to appear in random base64 by chance: {too_short}. "
+            f"A leak check needs at least {MIN_NEEDLE_LENGTH} characters to be evidence."
+        )
+
+    def test_every_needle_names_a_column_that_is_actually_encrypted(self):
+        """A needle pointed at the control column would always pass."""
+        not_encrypted = sorted(set(LEAK_NEEDLES) - set(ENCRYPTED_COLUMNS))
+        assert not not_encrypted, (
+            f"LEAK_NEEDLES names column(s) that are not encrypted: {not_encrypted}"
+        )
+
+    def test_each_needle_really_is_present_in_the_plaintext(self):
+        """And that it is the plaintext's own text, not an invented string that
+        could never have appeared in the column either way."""
+        missing = {
+            column: needle
+            for column, needle in LEAK_NEEDLES.items()
+            if needle not in json.dumps(SAMPLE[column], default=str)
+        }
+        assert not missing, (
+            f"needle(s) that do not occur in the sample value at all, so the leak check "
+            f"proves nothing for them: {missing}"
+        )
 
     def test_the_control_field_stays_plaintext(self, vault_model, keyset):
         """Proof the test is measuring encryption and not a broken column."""
@@ -277,7 +348,7 @@ class TestRoundTrip:
 
     def test_values_list_decrypts(self, vault_model, keyset):
         vault_model.objects.create(**SAMPLE)
-        assert list(vault_model.objects.values_list("count", flat=True)) == [42]
+        assert list(vault_model.objects.values_list("count", flat=True)) == [1928374650]
 
     def test_json_field_keeps_structure_and_types(self, vault_model, keyset):
         row = vault_model.objects.create(**{**SAMPLE, "payload": {"a": [1, 2, {"b": None}]}})

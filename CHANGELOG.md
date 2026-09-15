@@ -154,6 +154,11 @@ Everything else this cycle is additive and inert until configured.
   adding Ruff or mutation testing to CI fails the build until the pages are updated with it.
 
 ### Fixed
+- A flaky assertion in the encrypted-field leak check: it searched the stored envelope for the
+  plaintext `42`, and the envelope is random base64 on every write, so a two-character needle matched
+  by chance in about 1.1% of runs. The encryption was never at fault. The sample value is now ten
+  digits, and three new guards keep every leak-check needle long enough to be evidence, pointed at a
+  genuinely encrypted column, and actually present in the plaintext it claims to detect.
 - The README claimed the shipped package carries no `# pragma: no cover`; it carries eighteen,
   across twelve modules. Both documents now state the number and the four groups they fall into,
   name the five defensive guards as the group worth revisiting, and the two pragmas that carried no

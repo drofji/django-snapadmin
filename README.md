@@ -95,7 +95,7 @@ rather than take on trust.
 
 | Question | Evidence |
 |---|---|
-| **Is it tested?** | **4,900+ tests** across **152 files** and **100% line coverage** on the shipped package (11,000+ statements), enforced in CI — the build fails below 100% |
+| **Is it tested?** | **5,000+ tests** across **153 files** and **100% line coverage** on the shipped package (11,000+ statements), enforced in CI — the build fails below 100% |
 | **On our Python and Django?** | Every push runs the full matrix: **Python 3.10–3.13 × Django 5.2 / 6.0** |
 | **Against a real database, or only SQLite?** | A separate CI job runs the **whole suite against PostgreSQL 16**, and a marker-gated suite against a **live Elasticsearch 8.13.0** — the same image the demo ships. A mocked client cannot reject a malformed query; a real cluster does |
 | **Do the tests lean on each other?** | Every run is in **random order** (`pytest-randomly`), locally and in CI, so a test that depends on another having run first fails instead of passing quietly |
@@ -124,7 +124,7 @@ The questions a tech lead or a manager asks before approving a dependency:
 | **Personal data in the API?** | [PII masking](https://drofji.github.io/django-snapadmin/#pii-masking) — declare a field sensitive once and it is masked in the admin, REST, GraphQL, exports **and** the audit diff. Per-field rules can unlock one field for one permission |
 | **Only HR should see salary?** | [`api_field_permissions`](https://drofji.github.io/django-snapadmin/#field-permissions) gates a field's very presence, per Django permission — absent from a response for anyone lacking it, an explicit `400` naming the field on a denied write, orthogonal to masking (which only controls display) |
 | **Multi-tenant SaaS?** | [Row-level tenant isolation](https://drofji.github.io/django-snapadmin/#multi-tenancy) — opt a model in with `tenant_scoped = True` plus a tenant column, and every generated surface (admin, REST, GraphQL, Elasticsearch routing, exports, imports, the offline cache) becomes unreachable without a bound tenant: default-deny, not opt-out. Logical isolation, not physical — the limitation is documented as plainly as the feature |
-| **Is it tested?** | **100% line coverage** on the shipped package, enforced in CI, across 4,900+ tests in random order. The matrix runs Python 3.10–3.13 × Django 5.2/6.0 on every push, and a further job runs the same suite against a real PostgreSQL and a live Elasticsearch. [What those tests cover, and what is not covered yet](#quality--compatibility) |
+| **Is it tested?** | **100% line coverage** on the shipped package, enforced in CI, across 5,000+ tests in random order. The matrix runs Python 3.10–3.13 × Django 5.2/6.0 on every push, and a further job runs the same suite against a real PostgreSQL and a live Elasticsearch. [What those tests cover, and what is not covered yet](#quality--compatibility) |
 | **Will it break on upgrade?** | A written [API-stability policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md), covered by semantic versioning as of `1.0`: deprecations warn before removal and name their replacement — and a [contract suite](#backward-compatibility-is-a-test-not-a-promise) fails the build if a public name changes |
 | **Will it survive our load?** | Read-replica routing, estimated counts, paging caps, streaming exports, and a reusable [quota primitive](https://drofji.github.io/django-snapadmin/#quotas) (`snapadmin.limits.reserve()`) for per-tenant windows, concurrency caps and outbound-call cooldowns. [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) |
 | **Single sign-on?** | [SSO / OAuth2 login helper](https://drofji.github.io/django-snapadmin/#enterprise-config); auth is pluggable — JWT, session, or your own |
@@ -529,7 +529,7 @@ yet](#what-is-not-in-place-yet) is part of this section rather than an omission 
 
 Concretely, on the current release:
 
-- **4,900+ tests across 152 files**, run on every push. Twelve of them need a live Elasticsearch, so
+- **5,000+ tests across 153 files**, run on every push. Twelve of them need a live Elasticsearch, so
   they carry a marker and are deselected by default: cloning the repository and typing `pytest`
   starts no container and takes about **forty seconds**.
 - **100% line coverage** on the shipped `snapadmin/` package — 11,349 statements, 0 missing. CI runs
