@@ -12,6 +12,28 @@ the `0.x` beta series.
 
 ## Unreleased
 
+### Breaking
+- `snapadmin.E026` fails `manage.py check` on a model that mirrors to Elasticsearch with neither
+  `es_mapping` nor `es_auto_mapping = True`. Such a model indexed its primary key and nothing else
+  while reporting success everywhere, so its search has never worked — but the check is new, and it
+  stops startup. Two one-line fixes are in the hint; `'snapadmin.E026'` in `SILENCED_SYSTEM_CHECKS`
+  is the documented way out.
+- The `[elasticsearch]` extra is capped at `>=8,<9` and no longer resolves a 9.x client. If one is
+  already installed, `pip install "elasticsearch<9"`. A 9.x client never worked against these code
+  paths anyway.
+- `snapadmin.E025` fails `manage.py check` on a misresolved `EXTRA_SETTINGS_ADMIN_APP` — reachable
+  only with the `[extra-settings]` extra installed and admin autodiscovery deferred; the default
+  `AdminConfig` already aborted startup earlier than any check.
+- A `django.core.exceptions.ValidationError` on an API write now answers `400` instead of `500`, in
+  the body shape a client already parses for a serializer error. A project with its own DRF
+  `EXCEPTION_HANDLER` keeps first refusal and is unaffected.
+- Deleting rows of an Elasticsearch-mirrored model no longer uses Django's fast-delete path: keeping
+  the mirror honest on a bulk `QuerySet.delete()` needs a `post_delete` receiver, which costs one
+  `es.delete()` per row. For large deletes use `SnapModel.delete_pks_from_es(pks)`, optionally
+  inside `snapadmin.models.suppress_es_delete_receiver()`. `DB_ONLY` models are unaffected.
+
+Everything else this cycle is additive and inert until configured.
+
 ### Added
 - `data_retention_date_field` gives a model a per-row deletion date instead of one model-wide age:
   name a `Date`/`DateTimeField` and each row expires on the date it carries. It combines with

@@ -7,6 +7,59 @@ Structure your notes by section: Added, Changed, Fixed, Deprecated, Removed, Sec
 
 Each notable change should be a paragraph or bullet, explaining what changed and why — the audience is users upgrading to this version.
 
+Breaking
+--------
+
+Five. Four of them can only be reached by a project already in a broken or unsupported state, but
+all five are things a caller may have to act on, so none of them is buried in another section.
+
+* **``snapadmin.E026`` fails ``manage.py check`` on a model that mirrors to Elasticsearch without a
+  mapping.** A model with ``es_storage_mode = DUAL``/``ES_ONLY`` (or ``es_index_enabled = True``)
+  and neither ``es_mapping`` nor ``es_auto_mapping = True`` used to index its primary key and
+  nothing else, silently, while index creation, every save and ``es_reindex_all()`` all reported
+  success. That configuration now stops startup. **This is the one entry here likely to affect a
+  working-looking deployment** — though a project it fires on has never had a functioning search.
+  Two one-line fixes are in the check's hint (declare ``es_mapping``, or set
+  ``es_auto_mapping = True``); ``'snapadmin.E026'`` in ``SILENCED_SYSTEM_CHECKS`` is the documented
+  way out if an id-only index is genuinely wanted. Full reasoning under Changed.
+
+* **The ``[elasticsearch]`` extra no longer resolves a 9.x client.** The pin was ``>=8.0.0`` with no
+  upper bound and is now ``>=8,<9``. If you already have a 9.x client installed, run
+  ``pip install "elasticsearch<9"``. No 8.x install is affected, and a 9.x client never worked
+  against SnapAdmin's code paths in the first place — it answers ``400`` to every request and has
+  removed the ``body=``/``ignore=`` arguments the indexing paths use. Full reasoning under Fixed.
+
+* **``snapadmin.E025`` fails ``manage.py check`` on a misresolved ``EXTRA_SETTINGS_ADMIN_APP``.**
+  Only reachable with the ``[extra-settings]`` extra installed *and* admin autodiscovery deferred
+  (``SimpleAdminConfig``, a custom ``AdminSite``, or no ``django.contrib.admin``). With Django's
+  default ``AdminConfig`` the upstream ``ImproperlyConfigured`` already aborts startup before any
+  check runs, so nothing changes there. The check names the exact ``INSTALLED_APPS`` entry to write.
+
+* **A ``django.core.exceptions.ValidationError`` raised on an API write now answers ``400``, not
+  ``500``.** An observable change to the status code every SnapAdmin endpoint returns for a
+  model-level rule (``Model.clean()``, a guard in ``save()``, a ``pre_save`` receiver). The body is
+  the shape a client already parses for a serializer error. A project that configures its own DRF
+  ``EXCEPTION_HANDLER`` keeps first refusal and is unaffected; a project that worked around this
+  with a custom handler can now delete it. Full reasoning under Fixed.
+
+* **Deleting rows of an Elasticsearch-mirrored model no longer uses Django's fast-delete path.**
+  Keeping the mirror honest on a bulk ``QuerySet.delete()`` and on an ``on_delete=CASCADE`` sweep
+  requires a ``post_delete`` receiver, and connecting one forces Django's collector to materialise
+  the rows rather than issue a single ``DELETE``. That is a cost, not a defect, and it lands
+  automatically on mirrored models: one ``es.delete()`` round trip per row. For a large delete use
+  the bulk path instead — collect the primary keys, then call the now-public
+  ``SnapModel.delete_pks_from_es(pks)``, optionally inside
+  ``snapadmin.models.suppress_es_delete_receiver()``. A ``DB_ONLY`` model gets no receiver and is
+  completely unaffected. Full reasoning under Fixed.
+
+Everything else this cycle is additive and inert until configured: every new setting defaults to
+off (``api_full_clean``, ``SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE``, ``SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS``
+— "leaving it unset keeps the previous behaviour byte for byte"), the new field types and the
+``[encryption]`` extra add surface rather than change it, ``snapadmin.W021``/``W022`` are warnings
+that do not fail ``manage.py check``, ``snapadmin.W015`` only ever stops firing, and the
+``editable=False`` migration fix is explicitly a no-op for a project that already generated one of
+those migrations.
+
 Added
 -----
 
