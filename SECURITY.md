@@ -15,7 +15,7 @@ receive backported patches — upgrade to the newest version to get security fix
 
 | Version | Supported |
 |---------|-----------|
-| Latest release on PyPI (currently `0.1.0b8`) | ✅ |
+| Latest release on PyPI (currently `0.1.0b9`) | ✅ |
 | Any older pre-`1.0` release | ❌ (upgrade) |
 
 ## API stability and compatibility policy

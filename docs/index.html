@@ -250,7 +250,7 @@
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <h2>⚡ SnapAdmin</h2>
-    <span>Documentation v0.1.0b8</span>
+    <span>Documentation v0.1.0b9</span>
   </div>
   <div class="nav-search">
     <input type="search" id="navSearch" placeholder="Filter sections…" autocomplete="off">
@@ -337,26 +337,24 @@
     <p class="subtitle">Automatic, beautiful, production-ready Django Admin — zero boilerplate. REST &amp; GraphQL, Elasticsearch, offline mode and GDPR retention, all from your model definitions.</p>
 
     <div class="callout callout-success" style="text-align: left; margin: 18px auto 0;">
-      <strong>What's New in v0.1.0b8 — eighth beta</strong>
-      <a href="#field-encryption">Field-encryption key management</a>
-      (<code>SNAPADMIN_ENCRYPTION</code>), <a href="#sharding">declarative database sharding and
-      read-replica routing</a> (<code>SNAPADMIN_SHARDING</code>), and a new
-      <code>manage.py snapadmin_age_keygen</code> command join <a href="#multi-tenancy">row-level
-      multi-tenancy</a> (default-deny across every generated surface),
-      <a href="#gdpr-subject-request">GDPR subject-access export/deletion</a>, CSV/NDJSON
-      <a href="#bulk-import">import</a> mirroring the async export, a <a href="#quotas">cache-backed
-      quota primitive</a> and user-defined <a href="#snap-action">REST actions</a> on top of the
-      existing admin/REST/GraphQL/Elasticsearch generation. <strong>Breaking changes to know about
-      before upgrading — see the <a href="#migration-guides">migration guide</a>:</strong>
-      <code>SNAPADMIN_REST_API_ENABLED</code>/<code>SNAPADMIN_GRAPHQL_ENABLED</code> now default to
-      <code>False</code> (pin either to <code>True</code> to keep serving them); DRF/drf-spectacular/
-      django-filter/graphene-django moved behind the new <a href="#extras"><code>[api]</code>/
-      <code>[graphql]</code></a> extras; the deprecated <code>db_backup</code>/
-      <code>purge_expired_data</code>/<code>send_error_digest</code> command aliases plus the
-      underscored <code>snapadmin_info</code>/<code>snapadmin_license_check</code> console scripts,
-      announced for removal since the beta series, are removed in this release; and
-      <code>SNAPADMIN_PROFILE = "full"</code>/<code>"api"</code> now really mount REST, GraphQL and
-      Swagger, per their documented meaning.
+      <strong>What's New in v0.1.0b9 — ninth beta</strong>
+      <a href="#field-encryption">Field-level encryption</a> now has its cipher and its field types:
+      eight <code>SnapEncrypted*Field</code>s storing AES-256-GCM envelopes behind the
+      <a href="#extras"><code>[encryption]</code></a> extra, lookup guards with an opt-in blind index
+      for equality, a tested default on every surface that could re-emit a plaintext, and
+      <code>manage.py snapadmin_encrypt_fields</code> for data already in the table.
+      <a href="#retention-per-row"><code>data_retention_date_field</code></a> gives a row its own
+      deletion date, and <code>api_full_clean</code> makes a model's cross-field
+      <code>clean()</code> rule hold on the API write path as it already did in the admin.
+      <a href="#testing">Testing &amp; Quality Engineering</a> is a new section describing how the
+      suite is built, what each check verifies — and what is deliberately not in place yet.
+      <strong>Breaking changes to know about before upgrading:</strong> a model that mirrors to
+      Elasticsearch with no mapping now fails <code>manage.py check</code>
+      (<code>snapadmin.E026</code>) — its search has silently never worked; the
+      <code>[elasticsearch]</code> extra is capped to the 8.x client; a model
+      <code>ValidationError</code> on an API write answers <code>400</code> rather than
+      <code>500</code>; and deleting rows of a mirrored model gives up Django's fast-delete path so
+      the index stays honest. All five are listed in the release notes under <code>Breaking</code>.
     </div>
 
     <div class="card-grid">
@@ -5106,7 +5104,7 @@ snapadmin-info --health-check    # probes only; non-zero exit on failure</code><
   Ok: ✓
   Detail: run `manage.py check` for the full text
 📦 Version &amp; Status
-  Version: 0.1.0b8
+  Version: 0.1.0b9
   Status: pre-release
   Django: 6.0.6
   Python: 3.12.4
@@ -5500,7 +5498,7 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
   </table>
 
   <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
-    SnapAdmin v0.1.0b8 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
+    SnapAdmin v0.1.0b9 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
   </div>
 
   <!-- ── AI Assistants ─────────────────────────────────────────────────────── -->

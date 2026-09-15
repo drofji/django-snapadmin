@@ -1,0 +1,693 @@
+0.1.0b9 — 2026-09-15 — Ninth Beta
+=================================
+
+Field-level encryption, and the quality layer made visible. ``0.1.0b8`` shipped encryption key
+management with nothing yet to encrypt; this release adds the cipher, eight ``SnapEncrypted*Field``
+types, lookup guards with an opt-in blind index for equality, a tested default on every surface
+that could re-emit a plaintext, and ``manage.py snapadmin_encrypt_fields`` for data already in the
+table. Retention gains ``data_retention_date_field``, a per-row deadline that overrides the
+model-wide window; the API write path gains ``api_full_clean``, so a ``Model.clean()`` cross-field
+rule finally holds for API clients as it already did in the admin.
+
+The other half of the release is the test suite and the documentation that describes it. The suite
+now runs in a random order on every invocation, and one CI job runs the whole of it against a real
+``postgres:16`` plus a marker-gated suite against a live Elasticsearch — the check a mocked client
+cannot perform, since a ``MagicMock`` accepts the malformed query a cluster answers ``400`` to. The
+first run of that job found three tests that had silently assumed SQLite. The README and the
+documentation site now describe the method rather than only the totals, and — deliberately — the
+layers that are **not** in place yet: mutation testing, property-based testing, browser E2E, and
+lint/type/security static analysis in CI. A guard suite fails the build if any of those claims
+stops being true in either direction.
+
+Read ``Breaking`` first: five entries, four of them reachable only from a state that was already
+broken, and one — ``snapadmin.E026`` — that will stop a deployment whose Elasticsearch search has
+silently never worked. This is a beta release: the public API is not yet covered by semantic
+versioning (see ``SECURITY.md``'s current API-stability policy) — breaking changes remain possible
+in the ``0.x`` series, always announced here and in ``CHANGELOG.md``, with a migration guide when
+manual steps are involved.
+
+Breaking
+--------
+
+Five. Four of them can only be reached by a project already in a broken or unsupported state, but
+all five are things a caller may have to act on, so none of them is buried in another section.
+
+* **``snapadmin.E026`` fails ``manage.py check`` on a model that mirrors to Elasticsearch without a
+  mapping.** A model with ``es_storage_mode = DUAL``/``ES_ONLY`` (or ``es_index_enabled = True``)
+  and neither ``es_mapping`` nor ``es_auto_mapping = True`` used to index its primary key and
+  nothing else, silently, while index creation, every save and ``es_reindex_all()`` all reported
+  success. That configuration now stops startup. **This is the one entry here likely to affect a
+  working-looking deployment** — though a project it fires on has never had a functioning search.
+  Two one-line fixes are in the check's hint (declare ``es_mapping``, or set
+  ``es_auto_mapping = True``); ``'snapadmin.E026'`` in ``SILENCED_SYSTEM_CHECKS`` is the documented
+  way out if an id-only index is genuinely wanted. Full reasoning under Changed.
+
+* **The ``[elasticsearch]`` extra no longer resolves a 9.x client.** The pin was ``>=8.0.0`` with no
+  upper bound and is now ``>=8,<9``. If you already have a 9.x client installed, run
+  ``pip install "elasticsearch<9"``. No 8.x install is affected, and a 9.x client never worked
+  against SnapAdmin's code paths in the first place — it answers ``400`` to every request and has
+  removed the ``body=``/``ignore=`` arguments the indexing paths use. Full reasoning under Fixed.
+
+* **``snapadmin.E025`` fails ``manage.py check`` on a misresolved ``EXTRA_SETTINGS_ADMIN_APP``.**
+  Only reachable with the ``[extra-settings]`` extra installed *and* admin autodiscovery deferred
+  (``SimpleAdminConfig``, a custom ``AdminSite``, or no ``django.contrib.admin``). With Django's
+  default ``AdminConfig`` the upstream ``ImproperlyConfigured`` already aborts startup before any
+  check runs, so nothing changes there. The check names the exact ``INSTALLED_APPS`` entry to write.
+
+* **A ``django.core.exceptions.ValidationError`` raised on an API write now answers ``400``, not
+  ``500``.** An observable change to the status code every SnapAdmin endpoint returns for a
+  model-level rule (``Model.clean()``, a guard in ``save()``, a ``pre_save`` receiver). The body is
+  the shape a client already parses for a serializer error. A project that configures its own DRF
+  ``EXCEPTION_HANDLER`` keeps first refusal and is unaffected; a project that worked around this
+  with a custom handler can now delete it. Full reasoning under Fixed.
+
+* **Deleting rows of an Elasticsearch-mirrored model no longer uses Django's fast-delete path.**
+  Keeping the mirror honest on a bulk ``QuerySet.delete()`` and on an ``on_delete=CASCADE`` sweep
+  requires a ``post_delete`` receiver, and connecting one forces Django's collector to materialise
+  the rows rather than issue a single ``DELETE``. That is a cost, not a defect, and it lands
+  automatically on mirrored models: one ``es.delete()`` round trip per row. For a large delete use
+  the bulk path instead — collect the primary keys, then call the now-public
+  ``SnapModel.delete_pks_from_es(pks)``, optionally inside
+  ``snapadmin.models.suppress_es_delete_receiver()``. A ``DB_ONLY`` model gets no receiver and is
+  completely unaffected. Full reasoning under Fixed.
+
+Everything else this cycle is additive and inert until configured: every new setting defaults to
+off (``api_full_clean``, ``SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE``, ``SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS``
+— "leaving it unset keeps the previous behaviour byte for byte"), the new field types and the
+``[encryption]`` extra add surface rather than change it, ``snapadmin.W021``/``W022`` are warnings
+that do not fail ``manage.py check``, ``snapadmin.W015`` only ever stops firing, and the
+``editable=False`` migration fix is explicitly a no-op for a project that already generated one of
+those migrations.
+
+Added
+-----
+
+* **``data_retention_date_field`` — a per-row deletion date.** ``data_retention_days`` is one
+  constant for a whole table, measured off one timestamp column, so it can express "delete 90 days
+  after this row was created" and nothing else. A table whose records each arrive with their own
+  agreed expiry — a ``delete_at`` an upstream supplier sets per row — had no way in. The closest
+  approximation was to point ``data_retention_field`` at the expiry column and accept a whole-day
+  offset of at least one day (``data_retention_days`` is disabled at ``0``), which also reads the
+  column as an age rather than as a deadline.
+
+  ``data_retention_date_field`` names that column, and it resolves through ``get_model_meta()``
+  like every other model-level option, so a ``@snap_model``-decorated plain model and a
+  ``SnapModel`` subclass declare it the same way. The two rules combine, with the more specific one
+  winning: a row past its own date is purged whatever the window says; a row whose date is still
+  ahead of it is **kept even when it is older than ``data_retention_days``**, because an expiry set
+  per record overrides the house rule rather than racing it; and a row whose date is ``NULL`` falls
+  back to ``data_retention_days`` measured on ``data_retention_field``. When no window is configured
+  at all, a ``NULL`` row is never purged — "no expiry declared" has to mean "keep", never "delete
+  now".
+
+  Set it alone for a table where every row carries its own deadline and there is no house rule: the
+  Celery task, ``manage.py snapadmin_purge_expired_data`` and ``snapadmin.W012`` all treat a model
+  configured that way as a model with retention, rather than skipping it for lack of a
+  ``data_retention_days``. The command's report line names the rule that applied instead of printing
+  a window nobody set. ``ES_ONLY`` models get the identical three-way rule expressed as a query — a
+  ``range`` on the deadline, OR an age range restricted to documents carrying no deadline
+  (``must_not exists``) — so the behaviour does not quietly differ by storage layer; the deadline
+  column has to be mapped as a ``date`` in the index, exactly like ``data_retention_field``. The
+  demo's ``AuditLog`` now dogfoods it with a nullable ``delete_at`` alongside its existing 90-day
+  window, and ``snapadmin_info --section features`` counts the models using one.
+
+* **``api_full_clean`` — the model's own rules now hold on the API write path.** A
+  ``Model.clean()`` rule is enforced wherever a ``ModelForm`` runs, which in practice means the
+  admin and nothing else. The generated serializer validated every field, so the API looked
+  validated; what it skipped were exactly the rules a field validator cannot state — the cross-field
+  ones, "a completed record needs a file". The admin refused such a row and the API accepted it, and
+  the two surfaces disagreed about what a valid row was until a bad one turned up downstream.
+
+  Setting ``api_full_clean = True`` on a model runs its ``full_clean()`` — ``clean_fields()``,
+  ``clean()``, then the model's constraints — inside the generated serializer's ``validate()``, so
+  the rule answers ``400`` naming the field instead of writing the row.
+  ``SNAPADMIN_API_FULL_CLEAN`` turns it on for every registered model at once; a model's own
+  attribute still wins over the setting, so a single model can opt out of a project-wide default.
+
+  **It is off by default and that is deliberate.** Turning it on starts rejecting writes the API
+  used to accept. That is the correct answer — the admin was already refusing them — but a
+  behaviour change that arrives by itself on someone's production API is not a bug fix, so it is a
+  line you write rather than one you discover.
+
+  Two limits are worth knowing. Validation is scoped to the fields the serializer can actually
+  write: an ``auto_now_add`` column is empty on an unsaved row, and judging it would reject every
+  create with an error no client could act on — the same exclusion a ``ModelForm`` makes for the
+  same reason. Uniqueness is left alone (``validate_unique=False``) because DRF's
+  ``UniqueValidator`` and ``UniqueTogetherValidator`` are already installed on the generated
+  serializer and a second pass would report one clash twice. On a ``PATCH`` the rule is checked
+  against the **merged** row — the stored values with the submitted fields applied — so a
+  cross-field rule sees the whole record rather than the fields that happened to be sent.
+
+  ``snapadmin-info`` reports adoption under ``model_validation``, and the demo dogfoods it:
+  ``demo.Product`` declares ``api_full_clean`` with a rule that an available product needs a price
+  above zero.
+
+* **The cipher behind field-level encryption.** ``0.1.0b8`` shipped key management —
+  ``SNAPADMIN_ENCRYPTION``, the four key sources, rotation-ready ordered keysets and
+  ``manage.py snapadmin_encryption_key`` — with nothing yet to encrypt. This release adds the
+  cipher itself: AES-256-GCM behind a new optional ``[encryption]`` extra
+  (``pip install django-snapadmin[encryption]``, which pulls ``cryptography``, dual-licensed
+  Apache-2.0 or BSD-3 and so still proprietary-safe).
+
+  Every encrypted value is stored as one self-describing text envelope,
+  ``snap1.<key id>.<nonce>.<ciphertext+tag>``, which is what makes the rest of the feature
+  possible: the row itself records which key opens it, so rotating a key never requires downtime;
+  the ``snap1`` prefix makes ciphertext greppable in a database dump and makes re-saving a loaded
+  row detectably *already* encrypted rather than encrypting it twice; and text rather than binary
+  keeps ``dumpdata``, fixtures, ``loaddata`` and a psql session working. The nonce is freshly
+  random on every single write, and each envelope is authenticated against its own
+  ``app_label.model.field``, so a ciphertext copied out of one column and pasted into another
+  fails to decrypt instead of quietly relocating a secret.
+
+  Failure is always loud and never silent: a dropped key id, a modified payload, a value bound to
+  a different column and an envelope written by a newer SnapAdmin each raise a ``DecryptionError``
+  that names the key *id* and the column — never key material, never the plaintext, never in a
+  log line. ``cryptography`` is imported lazily, so a project that encrypts nothing neither needs
+  nor loads it, and a project that forgets the extra gets an ``ImproperlyConfigured`` naming it
+  rather than a ``ModuleNotFoundError`` from inside a save.
+
+* **The ``SnapEncrypted*Field`` family.** Eight new field types —
+  ``SnapEncryptedCharField``, ``…TextField``, ``…EmailField``, ``…JSONField``, ``…IntegerField``,
+  ``…DecimalField``, ``…DateField`` and ``…DateTimeField`` — each its plain counterpart plus
+  encryption. Declare one and nothing above the field changes: a ``SnapEncryptedDateField`` still
+  renders a date picker, still validates a date, still hands your code a ``datetime.date``. Only
+  the column changes, to text holding a ``snap1.`` envelope::
+
+      class Patient(snap_models.SnapModel):
+          name = snap.SnapCharField(max_length=200)
+          ssn  = snap.SnapEncryptedCharField(max_length=32, show_in_list=False)
+
+  ``None`` is stored as SQL ``NULL`` and never encrypted, so ``__isnull`` keeps working and an
+  empty string stays distinguishable from a missing one. Re-saving a loaded row, a
+  ``bulk_update()``, a ``QuerySet.update()`` and a fixture reload all refuse to encrypt an
+  envelope twice — the one failure in this feature that is both silent and permanent. ``dumpdata``
+  emits the ciphertext rather than the plaintext, so a fixture is no more sensitive than the
+  database it came from, and ``loaddata`` stores it straight back without needing the key.
+
+  What you give up is what the database can no longer see: it cannot compare, order or index a
+  value it cannot read, so ``icontains``, ``gt``, ``startswith`` and ``ORDER BY`` are impossible
+  rather than merely unsupported on an encrypted column. Note also that the ciphertext is bound to
+  its own ``app_label.model.field`` — that is what stops a value being moved between columns, and
+  it means **renaming the app, model or field requires re-encrypting the rows**.
+
+* **Lookup guards, and an opt-in blind index for equality.** An encrypted column is opaque to SQL,
+  and the dangerous part was never that a query would fail — it is that ``filter(ssn="…")`` would
+  *succeed* and return nothing, because it was comparing against a ciphertext carrying a fresh
+  random nonce. Encrypted data quietly becoming invisible data is a failure no exception announces.
+
+  So every lookup an encrypted column cannot answer honestly now raises a ``FieldError`` naming the
+  field, the lookup and what is available instead. ``__isnull`` always works (NULL is never
+  encrypted). Everything else — ``icontains``, ``gt``, ``startswith``, ``range``, a ``__year``
+  transform, a key transform on an encrypted ``JSONField`` — is refused, and so is a plain
+  ``exact`` unless the field opts into a blind index.
+
+  ``blind_index=True`` adds a ``<field>_bi`` sibling column holding
+  ``HMAC-SHA256(index key, value)`` and rewrites ``__exact`` and ``__in`` onto it, so the SQL that
+  reaches the database contains no plaintext in any parameter. The index key is HKDF-derived from
+  the keyset with the field's own ``app.model.field`` as derivation info, never the encryption key
+  itself, and never shared between columns. Lookups match under **every** key in the keyset, so
+  prepending a new key during a rotation keeps existing rows findable with no rebuild and no
+  downtime. Adding ``unique=True`` moves the constraint to the index, where it means what you
+  meant — a unique constraint on ciphertext would be satisfied by every row.
+
+  **The leak this buys, stated plainly:** a blind index makes *equality* observable. Two rows with
+  the same value have the same index, so anyone who can read the column can count duplicates and
+  confirm a guess. That is a fair trade for an email address and a bad one for a national ID with
+  a known format and a small search space — which is why it is off by default.
+
+* **Every surface that could re-emit the plaintext now has a tested default.** A field decrypts
+  transparently, which is the feature and also the problem: by the time a serializer, an exporter
+  or a search indexer sees the value it is an ordinary Python string, and each of those is a
+  separate place a secret can escape into a store with a different threat model.
+
+  - **Elasticsearch.** Encrypted fields are excluded from the auto-derived mapping *and* from the
+    document itself, so nothing reaches the cluster even if an explicit ``es_mapping`` names one —
+    which is now a startup error (``snapadmin.E020``) rather than a surprise.
+  - **The audit trail.** It records *that* an encrypted field changed and never what it changed
+    from or to, in both the SnapAdmin trail and Django's own admin history message. An audit log is
+    a table people get broad read access to precisely because it is meant to be safe; a diff of
+    secrets would make it a second copy of them.
+  - **Exports, REST, GraphQL, the changelist and imports.** An encrypted field is treated as a
+    masked field automatically, so all six surfaces inherit the PII permission model already in the
+    project — no second permission concept, and a role that should see the value is granted it the
+    usual way, with a per-field rule in ``SNAPADMIN_MASKING_RULES``.
+  - **Declarations the column cannot honour** are refused at startup instead of failing quietly
+    later: ``searchable=True`` without a blind index (``E021``) would search ciphertext with
+    ``icontains`` and report the row missing; ``unique=True`` without one (``E022``) is satisfied by
+    every row, since each ciphertext has its own nonce; ``Meta.ordering`` on an encrypted field
+    (``E023``) sorts by the envelope, and unlike a filter it cannot be refused at query time.
+    ``W019`` flags an index no lookup can use, ``W020`` a blind-index column whose source field has
+    gone.
+
+* **The demo encrypts something real.** ``CustomerProfile.tax_id`` is a
+  ``SnapEncryptedCharField(blind_index=True)`` — a worked example of the whole feature: ciphertext
+  in the column, an ordinary string in Python, ``get(tax_id="…")` still working, and masking,
+  audit and Elasticsearch behaviour visible in a project you can run. The demo ships a fixed,
+  published development key so it works unpacked; it is in version control and therefore protects
+  nothing, which the settings file says in as many words.
+
+* **``manage.py snapadmin_encrypt_fields`` — converting data that is already in the table.**
+  Two moments the ORM cannot handle on its own, plus one repair::
+
+      python manage.py snapadmin_encrypt_fields --adopt --apply    # encrypt what was there
+      python manage.py snapadmin_encrypt_fields --rotate --apply   # move rows onto the new key
+      python manage.py snapadmin_encrypt_fields --reindex --apply  # rebuild blind indexes
+
+  ``--adopt`` is for the rows that were already in a column when it was switched to an encrypted
+  field: they are still plaintext, and every read of one raises until they are converted.
+  ``--rotate`` moves rows written under an older key onto the active one, which is what finally
+  lets the old key be dropped from the keyset. ``--reindex`` rebuilds the ``<field>_bi`` columns —
+  the repair path for a table changed with ``bulk_update()`` or ``QuerySet.update()``, neither of
+  which refreshes a sibling column they were not told to write.
+
+  **It writes nothing without ``--apply``**: an encryption mistake on stored data is not
+  recoverable by re-running something, so the mode you get by accident is the one that only
+  reports. It walks by primary key in batches (``--batch-size``), so a killed run resumes with
+  ``--start-pk``, and works on any orderable primary key, integer or not. A row it cannot convert
+  is counted, named by primary key and skipped rather than aborting the pass and leaving the table
+  half-converted with no summary — the exit is still an error, after everything convertible has
+  been converted. Nothing it prints contains a key or a value, including when the failure came
+  from a malformed legacy value.
+
+* **``SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE`` — stop the backup hour walking.** Each destination's due
+  window has always been measured from its last *actual* run. ``DUE_GRACE_FRACTION`` (#OPS2d) fixed
+  the sharp edge of that — a check landing marginally early no longer skips a whole day — but it
+  cannot stop the run time itself creeping: every run books the next one a full interval after it
+  *finished*, so a daily backup that takes four minutes moves four minutes later every day and,
+  within a month, out of the quiet window it was scheduled for and into working hours.
+
+  Set ``SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE = True`` and the window is measured from the planned slot
+  instead. The schedule is pinned to the clock time of the first run and stays there however long
+  any individual run takes. Slots missed while the process was down collapse into a **single**
+  catch-up run rather than one run per missed slot — three days of downtime produces one backup and
+  then the normal cadence, not three back-to-back dumps.
+
+  It is opt-in and the current behaviour remains the default, deliberately: measuring from the last
+  actual run is the safer answer when runs are long or irregular relative to their interval, since
+  it can never start a run while the previous one is conceptually still owed. The grace margin
+  applies in both modes. Turning the setting on needs no state-file surgery — a state file written
+  by an earlier release anchors the schedule on its last recorded run — and turning it back off is
+  equally safe, because the actual run time the unaligned window needs is recorded either way. A
+  project that never enables it sees the state file it always had. ``snapadmin_info --section
+  features`` reports ``schedule-aligned`` when the mode is on, and stays silent when it is not.
+
+* **A new system check for ``EXTRA_SETTINGS_ADMIN_APP`` (``snapadmin.E025``).** The setting
+  re-homes django-extra-settings' ``Setting`` admin into one of your own apps (the
+  ``[extra-settings]`` extra). django-extra-settings matches its value against
+  ``settings.INSTALLED_APPS`` verbatim and, on a miss, raises ``'<value>' application not listed in
+  settings.INSTALLED_APPS.`` — quoting the value you passed rather than the entry it wanted. For a
+  project whose apps live inside a package (``INSTALLED_APPS`` entry ``"myapps.shop"``, app label
+  ``shop``) the natural-looking bare label is exactly what comes back, so the message reads as "that
+  app is missing" when the app is installed and only the identifier is wrong.
+
+  ``snapadmin.E025`` resolves the value against the app registry and prints the ``INSTALLED_APPS``
+  entry to write instead — the module path, or the ``AppConfig`` dotted path when that is how the
+  app is listed. A value whose first dotted segment is itself an ``INSTALLED_APPS`` entry is left
+  alone, because django-extra-settings accepts it.
+
+  One caveat on reach, and it is why the documentation line matters as much as the check: with
+  Django's default ``AdminConfig``, admin autodiscovery imports ``extra_settings.admin`` during
+  ``django.setup()``, so the upstream ``ImproperlyConfigured`` aborts startup before any system
+  check runs. ``snapadmin.E025`` is what you get wherever that import is deferred instead —
+  ``SimpleAdminConfig`` with an explicit ``admin.autodiscover()``, a custom ``AdminSite``, or no
+  ``django.contrib.admin`` at all — where the misconfiguration is otherwise ignored in silence or
+  only surfaces on the first request. The check is a no-op unless ``extra_settings`` is installed.
+
+* **A startup warning for an unencrypted off-host backup (``snapadmin.W021``).** The ``.env``
+  fail-closed rule (``snapadmin.E007``) guards one part of the bundle and nothing else, so a project
+  that never bundles ``.env`` could ship the *database dump itself*, in plain gzip, to an FTP host,
+  an SFTP Storage Box, an S3 bucket or a mounted NFS share without a word at startup. That dump is
+  the same data the ``.env`` file merely unlocks.
+
+  ``manage.py check`` now warns when any destination that leaves the machine — ``network``,
+  ``remote``, ``sftp``, ``s3`` — is active while ``SNAPADMIN_BACKUP_AGE_RECIPIENTS`` is empty. The
+  message names the offending destinations and the setting that fixes them, in one line rather than
+  one per destination. ``local`` is excluded: it is the staging directory on the same host, so an
+  unencrypted local-only setup is a choice rather than an oversight. The active set is read through
+  the same function the backup run itself uses, so the check and the code that ships the dump can
+  never disagree about which destinations are live.
+
+  It is a **warning**, not an error, and deliberately so. Unlike the ``env`` case this check cannot
+  see the whole picture: the transport may already be encrypted (SFTP, FTPS, HTTPS to S3), the
+  destination may encrypt at rest (SSE-KMS on a bucket, LUKS on the share), and both are legitimate
+  answers that are invisible from ``settings.py``. Blocking boot over a control SnapAdmin cannot
+  observe would be wrong; staying silent in the common case, where nobody chose at all, is worse.
+  Once you have confirmed your destination really does encrypt, ``SILENCED_SYSTEM_CHECKS`` puts it
+  away for good.
+
+* **``SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS`` — host-key verification that does not depend on ``HOME``.**
+  The ``sftp`` destination has always rejected a host whose key is not already known, rather than
+  trusting it on first connect, and that guarantee is unchanged. What changed is *which file*
+  answers the question. Left unset, paramiko expands ``~/.ssh/known_hosts`` against the ``HOME`` of
+  whoever runs the process and says nothing when the file is absent — which is a trap in a
+  container: a ``docker exec`` without a ``USER`` line runs as root with ``HOME=/root``, so a
+  ``known_hosts`` correctly baked into the image at ``/home/<svc>/.ssh/known_hosts`` is never read.
+  The rejection that follows, ``Server '[host]:23' not found in known_hosts``, then sends you
+  hunting for a host key that is sitting right there. The documented ``ssh-keyscan … >>
+  ~/.ssh/known_hosts`` recipe made this worse by not mentioning that ``~`` at build time and ``~``
+  at run time are often different users.
+
+  Set the new setting to the file's real path and the lookup stops depending on ``HOME``. It
+  **replaces** the ``~/.ssh`` lookup rather than adding to it, the way OpenSSH's own
+  ``UserKnownHostsFile`` does — pinning a path must not silently widen trust to whatever the running
+  user's home directory happens to contain — and a file that cannot be read is a hard failure naming
+  the setting, rather than the silent skip the no-argument form performs. Both the backup and the
+  restore path resolve it the same way, since a restore reads from the destination the backup wrote
+  to. Leaving it unset keeps the previous behaviour byte for byte.
+
+* **``SNAPADMIN_BACKUP_SFTP_DIR`` is login-relative, and now says so in three places.** The value is
+  handed to ``sftp.chdir()`` and the upload then targets the working directory by bare filename, so
+  it has always been relative to the SSH login directory rather than the filesystem root. That was
+  documented nowhere, and the failure it produces is actively misleading: on an account restricted
+  to a subtree — a storage sub-account, a chrooted user — the directory change *appears* to succeed
+  and it is the upload that is refused, with paramiko's bare ``Failure`` and no path at all. That
+  reads as an account-permissions problem, so the time goes into credentials rather than into the
+  one setting that is wrong.
+
+  A refused upload now names the full intended path and states the login-relative rule in the same
+  message. An absolute value is ``snapadmin.W022`` at ``manage.py check``, which names the relative
+  spelling to use instead. The default ``"/"`` is deliberately **not** flagged — on an ordinary
+  account it means the login directory's own root and works, and a check that fires on the value
+  every project gets out of the box teaches people to ignore it.
+
+  One genuine bug surfaced while pinning this down: a *relative* directory built a malformed
+  location string, ``sftp://host:22backups/dump.gz``, because the ``rstrip('/')`` that exists for
+  the default ``"/"`` ate the separator. That string is what the run summary reports and what gets
+  logged, so it was the one place an operator would look to confirm where a dump went. The path is
+  now built once and used for both the location and the failure message, so the two can never
+  describe different places.
+
+Changed
+-------
+
+* **``snapadmin_info --section features`` now reports how many fields are actually encrypted**, not
+  only that a keyset resolves. A configured key with nothing encrypted is a real state and was a
+  common one — key management shipped a release before the field types did — and an adoption audit
+  that cannot tell "the key is set up" from "the key is in use" is not auditing adoption.
+
+* **The documentation for field encryption is now in two halves**: the field types
+  (``#field-encryption``) and the keyset they rest on (``#encryption-keys``), in that reading order.
+  ``SECURITY.md`` gains the threat model for the field layer — the AEAD and nonce guarantees, the
+  rename caveat, every leak surface and its default, the blind-index equality leak, and the
+  restore-across-keysets failure that looks like data corruption and is not.
+
+* **An Elasticsearch mirror with no mapping is now a startup error, ``snapadmin.E026``.** The
+  document SnapAdmin writes is ``{"id": pk}`` plus one key per entry in the model's effective
+  mapping, and both sources of that mapping are off by default — ``es_mapping`` is ``None`` and
+  ``es_auto_mapping`` is ``False``. A model that sets ``es_storage_mode = DUAL`` (or ``ES_ONLY``,
+  or ``es_index_enabled = True``) and declares neither therefore indexes its primary key and
+  nothing else, while every signal around it reports success: the index is created, each save is
+  mirrored, ``es_reindex_all()`` returns the full row count, and there is no log line to find.
+  Only the searching fails, silently and for as long as nobody notices. In ``ES_ONLY`` it is worse
+  than a dead search — Elasticsearch *is* the storage layer there, so a field value that never
+  reaches a document is not written anywhere at all.
+
+  The trap was documented into existence. ``searchable=True`` was described as adding a field to
+  "the Elasticsearch mapping", which it has never done — it feeds the admin search box and the
+  REST ``?search=`` filter — and the ``DUAL`` examples on the documentation site declared no
+  mapping, so following them produced exactly the broken configuration. Both are corrected, and
+  the suite now scans every shipped example for an ES model without a mapping, so the check can
+  never fire on the project's own documentation.
+
+  ``es_auto_mapping`` deliberately stays ``False``. Flipping the default would have fixed the
+  reported case by making every mirrored model index every concrete column — including columns a
+  project had deliberately kept out of a second datastore with a different threat model — which
+  trades a dead search for a silent widening of what leaves the database on upgrade. The check,
+  not the default, is what makes the silent case impossible. Encrypted fields keep their existing
+  exemption: they are never auto-mapped (``snapadmin.E020``), so a model whose other fields are
+  mapped is never reported, and a model whose fields are *all* encrypted gets a hint that says so
+  rather than suggesting an option it already set.
+
+  This will fail ``manage.py check`` on an existing project that is in this state, which is the
+  point — that project's Elasticsearch search has never returned a result. Two one-line fixes are
+  offered in the hint (declare ``es_mapping``, or set ``es_auto_mapping = True``), and if an
+  id-only index is genuinely wanted, ``'snapadmin.E026'`` in ``SILENCED_SYSTEM_CHECKS`` is the
+  documented way out.
+
+* **The README now describes how the suite is built, not only how big it is.** ``Quality &
+  compatibility`` used to open with three numbers and stop there; the counts it quoted had also
+  fallen a full release behind the suite. It now states the working method (test-first, a
+  regression test pinned to every fixed bug, assertions that name a contract rather than check for
+  a pulse, and a guard suite that fails on an assertion no outcome could falsify), lists the test
+  layers with named example files for each, and explains where the mocks stop: one CI job runs the
+  whole suite against a real PostgreSQL 16 and the marker-gated Elasticsearch suite against a live
+  8.13.0 cluster, because a ``MagicMock`` accepts a malformed query that a cluster answers ``400``
+  to. Every run — local and CI — is in random order, so a test that leans on another having run
+  first fails instead of passing quietly.
+
+  It also gains a section listing, plainly, the layers the project's own engineering standard asks
+  for and **does not have**: mutation testing, property-based/fuzz testing, browser E2E, and lint /
+  type / security static analysis in CI (``black`` and ``flake8`` are dev dependencies that no CI
+  job runs). Branch coverage is reported as measured-not-gated — 99%, with 60 partial branches —
+  rather than folded into the 100% headline, which is **line** coverage. Every count in the section
+  is a floor taken from a real collection run: 4,900+ tests across 152 files.
+
+* **The documentation site gains a Testing & Quality Engineering section**, linked from the sidebar
+  and cross-referenced from Ecosystem Compatibility. It is the deepest of the four documentation
+  layers and carries the detail the README should not: the measured totals with the command that
+  produced each one, the fifteen test layers with the files that carry them, and — on the
+  developer's instruction — an explanation of *how each check actually works* rather than a list of
+  names. What gets mutated and what a surviving mutant means; why the branch-coverage figure is
+  reported rather than enforced; how the random-order plugin turns an order-dependent test into a
+  failure and how to reproduce one from its seed; how the AST backstop diffs the real public surface
+  against a frozen snapshot; what a contributor is expected to do when each of them fails. The
+  "not in place yet" table describes mutation testing, property-based testing and browser E2E as
+  they *will* work, so that the description is never mistaken for the check.
+
+  ``llms.txt`` (both copies) links the new section and states the methodology set as a Key fact, so
+  an assistant asked "is this library tested, and how?" answers with the method, the enforced gate
+  (**line** coverage, with branch coverage explicitly flagged as measured-not-gated) and the honest
+  list of absent layers — without opening the repository.
+
+Fixed
+-----
+
+* **The README claimed the package ships no coverage pragmas, and it ships eighteen.** The
+  ``Quality & compatibility`` section stated "no exclusions, no ``# pragma: no cover`` to hide
+  untested code" while eighteen lines across twelve modules carried one. Most are defensible —
+  abstract methods whose body is only ``raise NotImplementedError``, ``if TYPE_CHECKING:`` blocks,
+  and the import-time branch taken when an optional dependency is absent — but two carried no
+  reason at all, and five are defensive guards for states their callers make unreachable, which is
+  the group worth revisiting rather than excusing. Both documents now state the number, the four
+  groups and which group is weakest; the two bare pragmas gained a written reason; and a new guard
+  test freezes the list as a ceiling, so a nineteenth cannot be added without a deliberate edit and
+  a matching correction to both pages. The claim was found by writing the guard that now pins it.
+
+* **Five import-job strings shipped untranslated in every locale.** A catalog regeneration
+  matched them against similar existing entries and left the results flagged ``#, fuzzy``:
+  ``Fail`` (the ``on_conflict`` choice), ``Report Resume Byte Offset``, ``Byte length of the
+  report file confirmed as written.``, ``Import Job`` and ``Import Jobs``. ``msgfmt`` drops a
+  fuzzy entry when it compiles, so the admin rendered all five in English in de, de_CH, es, fr,
+  fr_CH, it, nl, pl and ru — while the ``.po`` files carried a translation that looked finished.
+
+  The guessed text was not merely unreviewed, it was wrong: ``Import Job`` carried the existing
+  translation of ``Export Job`` in all nine locales, and the byte-length help text described the
+  *working* file "confirmed at cursor_pk" rather than the report file confirmed as written. A
+  reader opening the catalog would have found nothing to fix; the strings were only visibly
+  English in the running admin.
+
+  All forty-five entries have been reviewed and the flag removed, and the catalogs recompiled.
+  The non-``ru`` translations were written without a native reviewer, which this note flags as
+  ``rules.md`` requires. A new test fails the suite on any active ``#, fuzzy`` entry in either
+  the package or the demo catalogs, so the next regeneration cannot leave one behind — the
+  catalog header and obsolete ``#~`` entries are excluded, since neither compiles into anything.
+
+* **A model validation rule that rejects an API write now answers 400, not 500.** A
+  ``django.core.exceptions.ValidationError`` is not part of DRF's exception hierarchy, so
+  everything that raises Django's flavour on a write path — ``Model.clean()``, ``full_clean()``, a
+  guard inside ``save()``, a ``pre_save`` receiver — escaped the view entirely and reached the
+  client as an HTML 500. A cross-field rule failing is a client mistake, not a server fault, and the
+  response has to say which field was wrong so the client can fix it and retry; a 500 says only that
+  something broke.
+
+  The failure was quiet in the worst way. Field-level validators run inside the serializer and
+  always reported correctly, so the API looked like it validated; only the rules expressed at model
+  level were skipped, and those are exactly the cross-field ones ("a completed record needs a
+  file"). The admin enforced them, the API did not, and the two surfaces disagreed about what a
+  valid row was. Working around it took a custom DRF ``EXCEPTION_HANDLER`` in every project.
+
+  Every SnapAdmin endpoint now translates the exception, keeping the field names:
+  ``ValidationError({"invoice": "..."})`` comes back as ``400 {"invoice": ["..."]}``, and a message
+  raised without a field lands under DRF's ``non_field_errors`` key — the same shape a client
+  already parses for a serializer-level error. It needs no configuration.
+  ``snapadmin.api.exceptions.snap_exception_handler`` is the same translation packaged as a drop-in
+  ``EXCEPTION_HANDLER`` for a project that wants it on views SnapAdmin never generated.
+
+  A project that already configures its own ``EXCEPTION_HANDLER`` keeps first refusal: the
+  untouched exception is offered to it first, and SnapAdmin only steps in where the alternative is
+  the 500 DRF was about to raise. An existing handler therefore behaves exactly as it did before.
+
+* **``collectstatic`` no longer fails on a manifest static-files backend.** The vendored Chart.js
+  bundle ended with a ``//# sourceMappingURL=chart.umd.js.map`` comment, and that ``.map`` file is
+  not shipped — a source map is a devtools convenience with no place in a released minified bundle.
+  Django's ``ManifestStaticFilesStorage`` rewrites exactly that comment when it post-processes
+  collected JavaScript, so it looked for a file that was never there and aborted with a missing-file
+  error. That backend is not exotic: whitenoise's ``CompressedManifestStaticFilesStorage`` is the
+  usual production recommendation, which meant ``collectstatic`` — and with it the image build or
+  the deploy — died outright for anyone following it.
+
+  There was no configuration route around it. ``WHITENOISE_MANIFEST_STRICT = False`` and a
+  ``manifest_strict = False`` subclass both govern missing *manifest entries* at request time, not
+  a referenced file that genuinely is not on disk at collection time; the only workaround was to
+  ``touch`` an empty ``.map`` into ``site-packages`` during the build. The comment is now stripped
+  from the shipped bundle, and the modification is recorded in
+  ``snapadmin/static/snapadmin/vendor/THIRD_PARTY_LICENSES.txt`` alongside the upstream attribution.
+
+  The suite now pins the general property rather than this one file: every shipped ``.css`` and
+  ``.js`` asset is walked, each reference a manifest backend would rewrite — CSS ``url()`` and
+  ``sourceMappingURL`` in either comment form — is resolved against the package, and any shipped
+  asset advertising a source map at all is rejected. The next vendored bundle is covered before it
+  reaches a deployment.
+
+* **The upgrade guides no longer contradict the code about the API defaults.** ``0.1.0b8`` flipped
+  ``SNAPADMIN_REST_API_ENABLED`` and ``SNAPADMIN_GRAPHQL_ENABLED`` to default to ``False``, and the
+  flip reached ``README.md`` and the documentation site but not ``docs/migrations/``. Section 1 of
+  the b7 -> b8 guide still told the reader both switches "still default to ``True`` in this
+  release", three paragraphs above a section 2 titled "…now default to ``False`` (BREAKING)". A
+  reader who stopped at section 1 installed the ``[api]``/``[graphql]`` extras, believed their API
+  would survive the upgrade, and found it gone on the next boot.
+
+  An older guide carried the same stale claim in a settings block — ``# default True`` beside each
+  switch in the v0.0.x -> v0.1.x guide. Both now state the real default and say plainly that
+  restoring a surface takes **both** the extra and the setting; the ``SNAPADMIN_SWAGGER_ENABLED`` line says
+  that it has no default of its own and follows whatever REST resolved to.
+
+  ``tests/test_api_surface_defaults.py`` — the file that already forbids a read site in
+  ``snapadmin/`` from spelling this default out as a literal — now asks the same question of the
+  prose. Every upgrade guide, ``README.md``, ``llms.txt`` and the documentation site is scanned for
+  a claim that either switch defaults to on, with each claim attributed to the setting it is
+  actually about so a neighbouring setting's correct ``# default True`` is not swept up. Release
+  notes are deliberately out of scope: describing a past default is their job.
+
+* **``editable=False`` no longer produces a no-op migration.** ``SnapField``'s docstring promises
+  that none of the Snap-only kwargs add a database migration — "they are stripped in
+  ``handleDjangoKwargs`` before Django sees the field and are absent from ``deconstruct()``". That
+  was false for exactly one of them. ``editable`` is also the name of Django's own
+  ``Field.editable``, and SnapAdmin passes it through deliberately: that is what makes "no changes
+  through the form or the API" true in a hand-written ``ModelForm`` or a DRF serializer, and not
+  only in the admin SnapAdmin generates. The cost was that ``Field.deconstruct()`` reports
+  ``editable`` whenever it differs from the default, so declaring it on 24 fields of one model
+  produced an ``AlterField`` for all 24 — every one of which ``sqlmigrate`` renders as ``(no-op)``,
+  and any project running ``makemigrations --check`` as a build gate went red with nothing in the
+  documentation to explain why.
+
+  The attribute stays where it is; only the migration surface is fixed. The ``deconstruct()``
+  wrapper that already pins ``null``/``blank`` now drops ``editable``, which affects no column on
+  any backend. Because both sides of the autodetector's comparison are deconstructed the same way,
+  **a project that already generated one of these migrations needs to do nothing**: the historical
+  ``AlterField(editable=False)`` and the live field compare equal, and no further migration is
+  detected. Nothing changes at runtime — the field is still excluded from forms, still skipped by
+  ``full_clean()``, still ``read_only`` in a generated serializer, and still read-only in the
+  generated admin.
+
+  ``snap_field()`` carried the same defect on a second surface, and its docstring the same false
+  reasoning: it argued that setting attributes *after* ``Field.__init__`` puts them out of reach of
+  ``deconstruct()``. That holds for every attribute SnapAdmin invented, but ``Field.deconstruct()``
+  reports **live attribute state** rather than recorded constructor arguments, so a post-hoc
+  ``setattr(field, "editable", False)`` landed in a migration just the same. It is now stripped —
+  but only when ``editable=`` was passed to ``snap_field()`` itself. A caller who wrote
+  ``snap_field(models.CharField(..., editable=False), searchable=True)`` meant Django's kwarg,
+  migration included, and it is left exactly where they put it.
+
+* **``snapadmin.W015`` stops warning about admins SnapAdmin never generated.** The check exists for
+  one failure: ``show_in_form`` defaults to ``False``, so a model that never sets it anywhere gets a
+  generated change form with nothing in it, silently. It decided that from three facts — the model
+  is registered with SnapAdmin, it has ``register_admin``, and ``admin_enabled`` is not off — none
+  of which say SnapAdmin built the admin actually serving the model.
+
+  It often did not. ``register_admin()`` swallows ``AlreadyRegistered``, so a project that registers
+  a model itself with ``@admin.register`` and its own ``ModelAdmin`` keeps its class and SnapAdmin's
+  generated one is thrown away. The form those users see is hand-written and complete, and owes
+  nothing to ``show_in_form`` — the report that prompted this was an append-only log model whose
+  fields are all deliberately read-only. ``SILENCED_SYSTEM_CHECKS`` was no answer, since silencing
+  ``W015`` also hides the real cases it exists for.
+
+  The check now asks the live registry which admin won, across every ``AdminSite`` a project has
+  instantiated rather than only ``django.contrib.admin.site``, and skips a model whose registered
+  ``ModelAdmin`` SnapAdmin did not generate. Generated classes carry a
+  ``snapadmin_generated_admin`` marker, so this is an attribute check rather than an ``isinstance``
+  guess against mixins a hand-written admin may perfectly well reuse. A model registered on no site
+  at all still warns: an ``AdminSite`` that never autodiscovers has an empty registry, and reading
+  that as "nothing to warn about" would drop every genuine case at once.
+
+* **The ``[elasticsearch]`` extra now pins the client to the 8.x line (``>=8,<9``).** It was
+  ``>=8.0.0`` with no upper bound, so a fresh ``pip install "django-snapadmin[elasticsearch]"``
+  resolved the 9.x client — while every Elasticsearch server SnapAdmin ships is 8.x: the
+  ``snapadmin-new --full`` compose template and ``demo/docker-compose.yml`` both start an 8.x
+  image. A 9.x client talking to an 8.x cluster does not degrade gracefully; it answers
+  ``BadRequestError(400)`` to every request, so index creation, ``es_search()`` and friends all
+  fail, ``/api/health/`` reports Elasticsearch offline, and the only clue is in the logs — it
+  reads as "Elasticsearch is broken", not "the client is a major ahead of the server". The 9.x
+  client also removed the ``body=`` and ``ignore=`` compatibility arguments that SnapAdmin's
+  indexing and reindexing paths still use, so it would not have worked against a 9.x server
+  either. ``demo/requirements.txt`` carried the same unbounded pin and is capped to match. If you
+  already have a 9.x client installed, ``pip install "elasticsearch<9"``; nothing else changes,
+  and no 8.x install is affected. A new test in ``tests/test_version_sync.py`` reads the pin out
+  of ``pyproject.toml`` and the server majors out of the two compose files and fails if they ever
+  disagree again.
+
+
+* **A backup run no longer crashes over its own state file.** ``_load_state()`` has always treated
+  an unreadable state file as "no state" — a missing or corrupt file is not a reason to refuse to
+  back anything up. The save side had no equivalent guard, and the asymmetry showed under exactly
+  the conditions that make a backup interesting: a state directory the process cannot write. The
+  reporter's root cause was a mis-owned Docker volume alongside a wrong SFTP password. Every
+  destination had already failed and been logged cleanly, and then ``_save_state()`` raised
+  ``PermissionError`` out of ``pathlib.Path.write_text``, so the command ended on a traceback about
+  a JSON file instead of on the credential failure that was the actual problem — which in monitoring
+  reads as the backup system itself being broken.
+
+  The state write, including the ``mkdir`` that precedes it, is now wrapped and logged as
+  ``backup_state_save_failed`` with the path and the underlying error, and the run's real outcome
+  stands. Swallowing it is safe in the direction that matters: with nothing recorded on disk every
+  destination reads as never having run, so the next check repeats work rather than skipping it.
+  That is a real consequence, which is why this is an ``error`` log line and not a silent pass.
+
+* **A bulk ``QuerySet.delete()`` no longer leaves the Elasticsearch document behind.**
+  ``SnapModel.delete()`` has always cleared the mirror, but a bulk ``QuerySet.delete()`` is a single
+  SQL ``DELETE`` that never calls it — and neither does a row removed by an ``on_delete=CASCADE``
+  sweep. Both used to leave the document in the index, so a search kept returning rows that no
+  longer existed anywhere. SnapAdmin now connects a ``post_delete`` receiver at startup for exactly
+  the registered models that mirror to Elasticsearch (``es_storage_mode`` other than ``DB_ONLY``, or
+  ``es_index_enabled``), so the mirror stays honest without every call site having to know ES is
+  involved. A ``DB_ONLY`` model gets no receiver at all and is completely unaffected.
+
+  Two things to be aware of on a mirrored model. The receiver costs one ``es.delete()`` round trip
+  per deleted row, and connecting it opts that model out of Django's fast-delete optimisation — the
+  deletion collector now has to materialise the rows in order to send the signal. For a large
+  delete, prefer the bulk path instead: ``SnapModel.delete_pks_from_es(pks)`` is now public
+  (previously the private ``_delete_pks_from_es``, which still works) and clears any number of
+  documents with one ``delete_by_query``. Collect the primary keys before the delete and call it
+  afterwards; the retention purge and ``snapadmin.etl.stale_sync()`` already do exactly that, and
+  they wrap their delete in the new ``snapadmin.models.suppress_es_delete_receiver()`` context
+  manager (per thread, restored on exit) so the same documents are not cleared twice.
+
+  An Elasticsearch outage never breaks the database delete: the receiver logs
+  ``es_delete_document_failed`` and the delete stands, matching every other ES write path.
+  ``delete_pks_from_es()`` keeps reporting its outcome as a return value instead, which is what lets
+  the retention purge raise ``SnapPurgeError`` rather than report a partial purge as a clean one.
+
+* **``manage.py check`` no longer dies when an S3 backup destination is configured.** The
+  ``snapadmin.W010`` cadence check compares the Celery Beat interval against the shortest
+  ``SNAPADMIN_BACKUP_*_EVERY_HOURS`` among the *active* destinations, and it carried its own copy of
+  the destination-to-interval table. The ``s3`` destination was added to the backup module without
+  that second copy being updated, so a project with ``SNAPADMIN_BACKUP_S3_BUCKET`` set and a Beat
+  entry for ``snapadmin.run_db_backups`` got ``KeyError: 's3'`` out of the system-check framework —
+  taking down ``check``, ``migrate`` and ``runserver`` together, with a traceback that named no
+  setting. The check now reads the intervals from the same table ``backup.due_destinations()`` uses,
+  so a future destination cannot reintroduce it, and ``s3``'s own interval is finally counted when
+  deciding whether Beat runs often enough.
+
+* **The b7 -> b8 upgrade guide now covers the two steps that cost adopters the most time.** It
+  never mentioned ``show_in_form``, which decides whether a field appears on the generated
+  add/change form and defaults to ``False``. ``show_in_list`` defaults to ``True``, so a project
+  that finished the upgrade got a perfectly normal changelist and a completely empty form, with no
+  error to explain it. The guide now names the flag, shows the per-field and the project-wide
+  (``SNAPADMIN_SHOW_IN_FORM_DEFAULT``) fix, and points at ``snapadmin.W015`` as the way to find the
+  affected models before anyone opens the admin.
+
+  The guide now also states that ``SnapModel.get_admin_fields()`` returns **five** values.
+  Unpacking four raises ``ValueError`` during admin autodiscovery — a failure to boot rather than an
+  admin glitch — and the b8 ``AdminFieldSets`` named tuple, which changed nothing about the arity,
+  is described where a reader upgrading from b7 will look for it rather than only in the release
+  notes.

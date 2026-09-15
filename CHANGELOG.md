@@ -12,6 +12,15 @@ the `0.x` beta series.
 
 ## Unreleased
 
+_Nothing yet._
+
+## 0.1.0b9 — 2026-09-15
+
+Field-level encryption gains its cipher and field types; the test suite gains random ordering and a
+real-services CI job; the documentation gains an honest account of both, including what is not
+covered. Read `Breaking` first — `snapadmin.E026` can stop a deployment whose Elasticsearch search
+has silently never worked.
+
 ### Breaking
 - `snapadmin.E026` fails `manage.py check` on a model that mirrors to Elasticsearch with neither
   `es_mapping` nor `es_auto_mapping = True`. Such a model indexed its primary key and nothing else
