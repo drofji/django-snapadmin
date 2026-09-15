@@ -44,7 +44,7 @@ from snapadmin import fields as snapfields
 # without a cycle, so each detects Unfold for itself).
 try:
     if "unfold" not in settings.INSTALLED_APPS:
-        raise ImportError("Unfold not in INSTALLED_APPS")  # pragma: no cover
+        raise ImportError("Unfold not in INSTALLED_APPS")  # pragma: no cover - module-level branch, resolved at import
 
     from unfold.admin import ModelAdmin
     from unfold.contrib.filters.admin import (
@@ -56,7 +56,7 @@ try:
     )
     from unfold.decorators import display as unfold_display
     UNFOLD_INSTALLED = True
-except (ImportError, RuntimeError):  # pragma: no cover
+except (ImportError, RuntimeError):  # pragma: no cover - the Unfold-absent half; covered by tests/test_unfold_optional.py re-importing this module
     from django.contrib.admin import ModelAdmin
     RangeDateFilter = admin.DateFieldListFilter
     RangeNumericFilter = admin.AllValuesFieldListFilter

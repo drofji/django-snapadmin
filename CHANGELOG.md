@@ -109,8 +109,25 @@ the `0.x` beta series.
   Branch coverage is reported as measured (99%) rather than gated; the enforced 100% is **line**
   coverage. Every count is a floor from a real collection run — 4,900+ tests across 152 files,
   replacing stale 4,600+ figures.
+- The documentation site gains a `Testing & Quality Engineering` section (sidebar link included,
+  cross-linked from Ecosystem Compatibility) explaining how each quality check actually works — what
+  a mutant is and what a surviving one means, why branch coverage is reported rather than enforced,
+  how random ordering surfaces an order-dependent test and how to reproduce one from its seed, how
+  the AST contract backstop works, and what a contributor does when each check fails. `llms.txt`
+  (both copies) links it and states the methodology set, the enforced **line**-coverage gate and the
+  absent layers as a Key fact.
+- New `tests/test_testing_docs_truth.py` keeps all of that honest: every test file named in the docs
+  must exist, every quoted count must be a floor a real collection run still meets, no four-figure
+  test claim anywhere may exceed what is collected, every check the docs say runs must be wired up,
+  and — the direction that actually rots — every check they call absent must still be absent, so
+  adding Ruff or mutation testing to CI fails the build until the pages are updated with it.
 
 ### Fixed
+- The README claimed the shipped package carries no `# pragma: no cover`; it carries eighteen,
+  across twelve modules. Both documents now state the number and the four groups they fall into,
+  name the five defensive guards as the group worth revisiting, and the two pragmas that carried no
+  reason now have one. A guard test freezes the list as a ceiling rather than banning what was
+  already there.
 - Five import-job strings shipped untranslated in all nine translated locales. `Fail`,
   `Report Resume Byte Offset`, `Byte length of the report file confirmed as written.`,
   `Import Job` and `Import Jobs` were left flagged `#, fuzzy` after a catalog regeneration,

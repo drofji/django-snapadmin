@@ -370,8 +370,36 @@ Changed
   rather than folded into the 100% headline, which is **line** coverage. Every count in the section
   is a floor taken from a real collection run: 4,900+ tests across 152 files.
 
+* **The documentation site gains a Testing & Quality Engineering section**, linked from the sidebar
+  and cross-referenced from Ecosystem Compatibility. It is the deepest of the four documentation
+  layers and carries the detail the README should not: the measured totals with the command that
+  produced each one, the fifteen test layers with the files that carry them, and — on the
+  developer's instruction — an explanation of *how each check actually works* rather than a list of
+  names. What gets mutated and what a surviving mutant means; why the branch-coverage figure is
+  reported rather than enforced; how the random-order plugin turns an order-dependent test into a
+  failure and how to reproduce one from its seed; how the AST backstop diffs the real public surface
+  against a frozen snapshot; what a contributor is expected to do when each of them fails. The
+  "not in place yet" table describes mutation testing, property-based testing and browser E2E as
+  they *will* work, so that the description is never mistaken for the check.
+
+  ``llms.txt`` (both copies) links the new section and states the methodology set as a Key fact, so
+  an assistant asked "is this library tested, and how?" answers with the method, the enforced gate
+  (**line** coverage, with branch coverage explicitly flagged as measured-not-gated) and the honest
+  list of absent layers — without opening the repository.
+
 Fixed
 -----
+
+* **The README claimed the package ships no coverage pragmas, and it ships eighteen.** The
+  ``Quality & compatibility`` section stated "no exclusions, no ``# pragma: no cover`` to hide
+  untested code" while eighteen lines across twelve modules carried one. Most are defensible —
+  abstract methods whose body is only ``raise NotImplementedError``, ``if TYPE_CHECKING:`` blocks,
+  and the import-time branch taken when an optional dependency is absent — but two carried no
+  reason at all, and five are defensive guards for states their callers make unreachable, which is
+  the group worth revisiting rather than excusing. Both documents now state the number, the four
+  groups and which group is weakest; the two bare pragmas gained a written reason; and a new guard
+  test freezes the list as a ceiling, so a nineteenth cannot be added without a deliberate edit and
+  a matching correction to both pages. The claim was found by writing the guard that now pins it.
 
 * **Five import-job strings shipped untranslated in every locale.** A catalog regeneration
   matched them against similar existing entries and left the results flagged ``#, fuzzy``:

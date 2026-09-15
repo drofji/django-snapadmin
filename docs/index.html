@@ -308,6 +308,7 @@
     <div class="section-label">📚 Reference</div>
     <ul>
       <li><a href="#compatibility">Ecosystem Compatibility</a></li>
+      <li><a href="#testing">Testing &amp; Quality Engineering</a></li>
       <li><a href="#snapadmin-info">Diagnostics (snapadmin_info)</a></li>
       <li><a href="#license-check">Licence Audit</a></li>
       <li><a href="#i18n">Internationalization</a></li>
@@ -4636,7 +4637,9 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset — no p
   <!-- ═══════════════════════ GROUP: Reference ═══════════════════════ -->
   <!-- ── Ecosystem Compatibility ──────────────────────────────────────────── -->
   <h2 id="compatibility">🧩 Ecosystem Compatibility</h2>
-  <p>How SnapAdmin coexists with popular third-party Django packages.</p>
+  <p>How SnapAdmin coexists with popular third-party Django packages. For the Python and Django
+  versions themselves — and for how the whole suite is built and what it does and does not
+  verify — see <a href="#testing">Testing &amp; Quality Engineering</a>.</p>
 
   <h3>The two rules that make SnapAdmin safe by default</h3>
   <ol>
@@ -4717,6 +4720,318 @@ class Invoice(snap_models.SnapModel):
     <code>AdminSite</code>), set <code>admin_enabled = False</code> on that <code>SnapModel</code> and
     register the package admin yourself. SnapAdmin will not touch it, and the model's REST API /
     GraphQL / search continue to work independently of the admin.
+  </div>
+
+  <!-- ── Testing & Quality Engineering ───────────────────────────────────── -->
+  <h2 id="testing">🧪 Testing &amp; Quality Engineering</h2>
+  <p>This page exists so that a team evaluating SnapAdmin can judge the test suite without reading
+  it. Everything below is what the repository does <strong>today</strong>; the
+  <a href="#testing-not-yet">final table</a> is what it deliberately does <em>not</em> do yet, and
+  nothing on this page is claimed before it actually runs in CI.</p>
+
+  <p>Every count here is a <strong>floor</strong>, read off a real
+  <code>pytest --collect-only -q</code> run rather than maintained by arithmetic. Measured
+  2026-09-15 on CPython 3.12 / Django 6.0:</p>
+
+  <table>
+    <thead><tr><th>Measurement</th><th>Value</th><th>Command that produced it</th></tr></thead>
+    <tbody>
+      <tr><td>Tests collected</td><td><strong>4,964 tests</strong> across <strong>152 files</strong></td><td><code>pytest --collect-only -q</code></td></tr>
+      <tr><td>The everyday run</td><td>4,946 passed, 6 skipped, 12 deselected, <strong>~41 s</strong></td><td><code>pytest</code></td></tr>
+      <tr><td>Line coverage of <code>snapadmin/</code></td><td><strong>100%</strong> — 11,349 statements, 0 missing</td><td><code>pytest --cov=snapadmin --cov-fail-under=100</code></td></tr>
+      <tr><td>Branch coverage of <code>snapadmin/</code></td><td><strong>99%</strong> — 3,346 branches, 60 partial <em>(measured, not gated)</em></td><td><code>pytest --cov=snapadmin --cov-branch</code></td></tr>
+      <tr><td>CI jobs per push</td><td><strong>7</strong> — a 6-way Python × Django matrix, plus one real-services job</td><td><code>.github/workflows/test.yml</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-info">
+    <strong>The 100% is <em>line</em> coverage, and that is a floor rather than an achievement.</strong>
+    It proves every statement in the shipped package was executed by some test. It does not prove any
+    test would notice if that statement were wrong — that is what mutation testing measures, and
+    SnapAdmin does not run it yet. The 6 skips are <code>tomllib</code> gates below Python 3.11 and
+    backend-capability gates; the 12 deselected tests need a live Elasticsearch.
+  </div>
+
+  <h3 id="testing-method">How the tests are written</h3>
+  <p>The rules below are the project's own engineering standard, applied to every change:</p>
+  <ul>
+    <li><strong>Test-first.</strong> A behaviour change or a bug fix starts with a test that fails for
+      the right reason; the production change comes second. Every bug fix ships a regression test
+      pinned to the exact input that broke, and then asks which <em>other</em> inputs hit the same
+      class of bug.</li>
+    <li><strong>An assertion states a contract, not a pulse.</strong>
+      <code>assert result is not None</code> is treated as a defect in the test. The suite asserts the
+      value, the status code, the exception type <em>and its message</em>, the row that was written,
+      the number of queries. Where a whole set is checkable —
+      the system-check ids a misconfiguration emits, say — it asserts the set
+      (<code>_ids(found) == ["snapadmin.E026"]</code>), never mere containment, because containment
+      stays green when a spurious second error appears.</li>
+    <li><strong>Never weaken a check to get a green build.</strong> No loosened assertion, no
+      <code>skip</code>, no <code>xfail</code>, no extra mock, no edited expected value, no raised
+      timeout, no <code>#&nbsp;pragma: no cover</code>. When the code and a test disagree, which one is
+      <em>right</em> is answered before either is touched.</li>
+    <li><strong>Arrange-Act-Assert, with names a reader understands a year later</strong> —
+      <code>expected_status</code>, <code>admin_user</code>, <code>invalid_payload</code>; never
+      <code>obj1</code>, <code>data</code>, <code>result2</code>.</li>
+    <li><strong>Ambiguous business logic is a question, not a guess.</strong> If the code, the tests
+      and the documentation disagree, or several behaviours are defensible, the rule is to stop and
+      ask rather than pin a guess into a test where it becomes the specification by accident.</li>
+  </ul>
+
+  <h3 id="testing-layers">The layers, and what each one protects</h3>
+  <p>Not one pyramid but several overlapping ones, because a library fails in more ways than an
+  application does. Every layer below runs inside the same <code>pytest</code> invocation.</p>
+  <table>
+    <thead><tr><th>Layer</th><th>What it protects</th><th>Named examples</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Unit</strong></td><td>one function or class in isolation, with Elasticsearch and sockets stubbed</td><td><code>tests/test_fields.py</code>, <code>tests/test_conf.py</code>, <code>tests/test_registry.py</code></td></tr>
+      <tr><td><strong>Integration</strong></td><td>the Django stack wired together — ORM, generated admin, HTTP, Celery run in-process</td><td><code>tests/test_model_api.py</code>, <code>tests/test_admin_site.py</code>, <code>tests/test_backup.py</code></td></tr>
+      <tr><td><strong>Security</strong></td><td>authentication, authorisation, tenancy, PII masking, field encryption, stored XSS, token storage, the audit log</td><td><code>tests/test_pii_masking.py</code>, <code>tests/test_encryption_leak_surfaces.py</code>, <code>tests/test_tenancy.py</code></td></tr>
+      <tr><td><strong>Contract</strong></td><td>the public import surface: names, signatures, defaults — plus an AST backstop read from the source rather than a hand-kept list</td><td><code>tests/test_public_contract.py</code>, <code>tests/test_public_surface_snapshot.py</code>, <code>tests/test_api_surface_defaults.py</code></td></tr>
+      <tr><td><strong>Documentation-truth</strong></td><td>that this page, the README, <code>llms.txt</code> and the in-package module map describe the code that really ships</td><td><code>tests/test_docs_completeness.py</code>, <code>tests/test_ai_entry_points.py</code>, <code>tests/test_docs_site.py</code></td></tr>
+      <tr><td><strong>Regression</strong></td><td>one named past bug each, pinned to the exact input that broke</td><td><code>tests/test_widget_security.py</code>, <code>tests/test_es_delete_sync.py</code>, <code>tests/test_api_validation_errors.py</code></td></tr>
+      <tr><td><strong>Adversarial</strong></td><td>malformed input, hostile settings, conflicting kwargs, wrong permissions — asserting the <em>right</em> refusal, not merely the absence of a crash</td><td><code>tests/test_wysiwyg_sanitize.py</code>, <code>tests/test_scaffold_validate.py</code>, <code>tests/test_sharding_registration.py</code></td></tr>
+      <tr><td><strong>Compatibility (optional deps)</strong></td><td>the core still imports with DRF, Graphene, Celery or Unfold absent</td><td><code>tests/test_api_optional.py</code>, <code>tests/test_celery_optional.py</code>, <code>tests/test_unfold_optional.py</code></td></tr>
+      <tr><td><strong>Diagnostics</strong></td><td>every <code>snapadmin_info</code> collector renders, and reports honestly both on and off</td><td><code>tests/test_diagnostics_features.py</code> and ten more</td></tr>
+      <tr><td><strong>i18n</strong></td><td>ten catalogs compile, strings are wrapped, switching language works</td><td><code>tests/test_i18n.py</code>, <code>tests/test_demo_i18n.py</code></td></tr>
+      <tr><td><strong>Accessibility</strong></td><td>WCAG 2.1 AA assertions on the dashboard and the SSO partial</td><td><code>tests/test_accessibility.py</code></td></tr>
+      <tr><td><strong>Performance / query count</strong></td><td>list-view knobs and estimated-count pagination, with <code>assertNumQueries</code> pins</td><td><code>tests/test_performance.py</code>, <code>tests/test_pagination.py</code></td></tr>
+      <tr><td><strong>Asset-truth</strong></td><td>every shipped CSS/JS/SVG reference resolves to a file inside the package</td><td><code>tests/test_static_asset_references.py</code>, <code>tests/test_admin_js_asset.py</code></td></tr>
+      <tr><td><strong>Process-level E2E</strong></td><td><code>snapadmin-new</code> generates a project and that project really boots — a real <code>subprocess</code>, a real <code>check</code> and <code>migrate</code></td><td><code>tests/test_scaffold_e2e.py</code></td></tr>
+      <tr><td><strong>End-to-end smoke</strong></td><td>the seam <em>between</em> the layers: admin form POST → database row → audit entry → REST read, in one walk</td><td><code>tests/test_critical_path_smoke.py</code></td></tr>
+      <tr><td><strong>Live datastore</strong></td><td>the Elasticsearch query DSL against a real cluster, where a mock cannot judge it</td><td><code>tests/test_elasticsearch_live.py</code></td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="testing-checks">The checks, and how each one actually works</h3>
+  <p>Naming a tool is not documenting it. Each check below is described so that a team could
+  reproduce the same setup in their own project from this page alone.</p>
+
+  <h4>The 100% line-coverage gate</h4>
+  <p><strong>What runs:</strong> <code>pytest --cov=snapadmin --cov-report=term-missing
+  --cov-fail-under=100</code>, in each of the six matrix jobs.
+  <strong>What it measures:</strong> whether every executable statement in the shipped
+  <code>snapadmin/</code> package was reached by at least one test — 11,349 statements, 0 missing.
+  <code>demo/</code> and <code>tests/</code> are excluded, since coverage of the test suite measures
+  nothing.
+  <strong>What fails the build:</strong> a pull request that adds a line no test reaches.
+  <strong>What a contributor does about it:</strong> write the test. Reaching for
+  <code>#&nbsp;pragma: no cover</code> to silence the gate is not an option — a pragma is treated as
+  a hidden gap rather than an exemption.
+  <strong>The honest exception:</strong> eighteen lines across twelve modules do carry one, each
+  with a written reason, and they fall into four groups — abstract methods whose body is only
+  <code>raise NotImplementedError</code>; <code>if TYPE_CHECKING:</code> blocks that never execute;
+  the import-time branch taken when an optional dependency is absent (which the suite does cover, by
+  re-importing the module with that dependency hidden, but not in a way the coverage counter can
+  attribute); and five defensive guards for states their callers make unreachable. That list is
+  frozen by <code>tests/test_testing_docs_truth.py</code>, so it cannot grow without a deliberate
+  change and a matching edit here. The five defensive guards are the group worth revisiting.
+  <strong>What it does <em>not</em> prove:</strong> that the line is correct, or that any assertion
+  would notice if it changed. Coverage is a helper metric here, not the goal.</p>
+
+  <h4>Branch coverage — measured, not gated</h4>
+  <p><strong>What runs:</strong> the same command with <code>--cov-branch</code>.
+  <strong>What it measures:</strong> whether each conditional was taken <em>both</em> ways. A
+  <code>if x: …</code> that is only ever entered with <code>x</code> true is 100% line-covered and
+  50% branch-covered.
+  <strong>Where it stands:</strong> 99% — 3,346 branches, of which 60 are partial.
+  <strong>Why it is not a gate:</strong> turning it on today would fail every build for 60 pre-existing
+  partials. The plan is to close them first and enable
+  <code>--cov-branch --cov-fail-under=100</code> afterwards; until then this page says "measured",
+  and the number is re-measured whenever the suite changes.</p>
+
+  <h4>Random test order, on every single run</h4>
+  <p><strong>What runs:</strong> <code>pytest-randomly</code> is a dev dependency and needs no flag —
+  it reshuffles the collected tests on every invocation, locally and in CI, and prints the seed it
+  used.
+  <strong>What it catches:</strong> order dependence. A test that passes only because an earlier one
+  created a row, left a setting overridden, populated a cache or seeded the random module will
+  eventually run first and fail.
+  <strong>What a contributor does about a failure:</strong> reproduce it with
+  <code>pytest -p randomly --randomly-seed=&lt;printed seed&gt;</code>, then find the shared state and
+  remove it. Pinning the order with <code>-p no:randomly</code> to make the failure go away is
+  prohibited: a seed-dependent failure is a real defect in the tests, and it is the one class of
+  defect this check exists to surface.</p>
+
+  <h4>The empty-assertion guard</h4>
+  <p><strong>What runs:</strong> <code>tests/test_assertions_can_fail.py</code>, an ordinary test in
+  the suite that parses every other test file with the <code>ast</code> module.
+  <strong>What it checks:</strong> three shapes of assertion that no outcome could falsify —
+  <code>assert True</code>; <code>assert &lt;anything&gt; or True</code>, where the <code>or</code>
+  makes the left-hand side irrelevant; and a test function containing no <code>assert</code>, no
+  <code>pytest.raises</code>, no mock <code>assert_*</code> call and no
+  <code>assertNumQueries</code>, whose entire claim is therefore "it did not raise".
+  <strong>Why it exists:</strong> a test that cannot fail is worse than no test. It takes the name of
+  a guarantee, counts toward the total, keeps the line covered and protects nothing — and it is
+  invisible to every other metric here, the coverage gate included. An audit of this suite found four
+  such assertions that had been shipping.
+  <strong>What a contributor does about it:</strong> assert the behaviour the test is named after. The
+  guard carries a frozen list of pre-existing assertion-free tests which may only ever
+  <em>shrink</em>; adding to it requires a stated reason.</p>
+
+  <h4>The contract suites</h4>
+  <p><strong>What runs:</strong> three files, 349 tests between them, whose only purpose is to fail
+  when the public surface changes shape.
+  <code>tests/test_public_contract.py</code> is the hand-curated half — every import path, signature
+  and default that a downstream project depends on.
+  <code>tests/test_public_surface_snapshot.py</code> is the generated backstop: it walks every
+  top-level <code>snapadmin/*.py</code> module with <code>ast</code>, collects the functions and
+  classes actually defined there, and diffs that against a committed snapshot, so an addition,
+  removal or rename shows up even when nobody remembered to update the hand-curated list.
+  <code>tests/test_api_surface_defaults.py</code> sweeps for a default value spelled inline at a read
+  site instead of going through its single named constant.
+  <strong>What a contributor does when one fails:</strong> first work out which case it is. If the
+  failure is in the surface this change deliberately alters, update the pin in the
+  <em>same commit</em>, following the deprecation policy when something is being removed. If the
+  failure is in a surface the change never meant to touch, the change just broke a published API —
+  fix the code, not the test. Loosening or deleting the assertion is never the answer.</p>
+
+  <h4>The compatibility matrix</h4>
+  <p><strong>What runs:</strong> six jobs per push — Python 3.10, 3.11, 3.12 and 3.13 × Django 5.2 and
+  6.0, minus 3.10/3.11 on Django 6.0, which requires 3.12.
+  <strong>Why six and not one:</strong> anything a test parses or imports can differ between
+  interpreters, and only CI can see it. Two cases have already cost this project a red build after a
+  green local run: <code>tomllib</code>, which is stdlib only from 3.11, and
+  <code>datetime.fromisoformat</code>, which cannot parse a trailing <code>Z</code> before 3.11 —
+  and a trailing <code>Z</code> is exactly how DRF renders timestamps. <strong>A green local run
+  proves one interpreter and nothing more.</strong>
+  <strong>Release gate:</strong> the tag-triggered publish workflow calls this same workflow, so a
+  release cannot reach PyPI on a red matrix.</p>
+
+  <h4>Real PostgreSQL and a live Elasticsearch</h4>
+  <p><strong>What runs:</strong> a seventh job, one combination only (Python 3.12 · Django 5.2), with
+  <code>postgres:16</code> and
+  <code>docker.elastic.co/elasticsearch/elasticsearch:8.13.0</code> as service containers. It runs the
+  identical suite against PostgreSQL, then <code>pytest -m real_es</code> against the cluster.
+  <strong>Why one job and not the whole matrix:</strong> a difference between database backends does
+  not depend on the interpreter version, so spreading it over six jobs would cost six times the
+  minutes to learn the same thing.
+  <strong>Why it exists:</strong> the matrix varies Python and Django but every one of its six jobs
+  runs on in-memory SQLite, so a backend difference cannot fail it — while the package advertises
+  PostgreSQL support and carries backend-specific code. And for Elasticsearch the gap is sharper
+  still: a <code>MagicMock</code> accepts any call with any arguments, so the query DSL these methods
+  exist to build is precisely what a mocked test cannot check. A malformed <code>terms</code> clause
+  or a wrongly-shaped <code>search_after</code> cursor passes the mock and answers
+  <code>400 Bad&nbsp;Request</code> from a cluster.
+  <strong>What it found on its first run:</strong> three tests had silently assumed SQLite — one of
+  them pinning behaviour that exists <em>only</em> on the backend without native JSON containment,
+  which meant the PostgreSQL path real users get had no test at all. The live cluster then corrected
+  an assumption no mock would ever have challenged: a <code>boolean</code> field aggregates to the
+  integer keys <code>1</code>/<code>0</code>, not <code>True</code>/<code>False</code>.
+  <strong>Version drift:</strong> the image is the same one <code>demo/docker-compose.yml</code>
+  ships, and <code>tests/test_version_sync.py</code> fails if the two ever diverge, or if either
+  leaves the range the <code>[elasticsearch]</code> extra supports.</p>
+
+  <div class="callout callout-info">
+    <strong>Running the service-backed tests yourself</strong>
+    <pre><code>docker run --rm -d -p 9200:9200 -e discovery.type=single-node \
+    -e xpack.security.enabled=false \
+    docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+SNAPADMIN_TEST_ES_URL=http://localhost:9200 pytest -m real_es</code></pre>
+    Each test owns its index and deletes it afterwards, so a failed run leaves nothing behind. Point
+    <code>SNAPADMIN_TEST_POSTGRES</code> (plus <code>_PORT</code>, <code>_DB</code>, <code>_USER</code>,
+    <code>_PASSWORD</code>) at a PostgreSQL server to run the whole suite against it instead of SQLite.
+  </div>
+
+  <h4>Documentation-truth tests</h4>
+  <p><strong>What runs:</strong> 145 tests across four files that read the documentation as data.
+  <code>tests/test_docs_completeness.py</code> asserts that every <code>SNAPADMIN_*</code> setting the
+  code reads appears both in the documentation and in the demo project, that every registered
+  system-check id is explained somewhere, and that every optional extra is listed consistently across
+  the README, this page, <code>THIRD_PARTY_NOTICES.md</code> and the licence inventory.
+  <code>tests/test_ai_entry_points.py</code> pins the two machine-readable layers: every module named
+  in the in-package module map really imports, every docs anchor <code>llms.txt</code> links to really
+  resolves, and the two copies of <code>llms.txt</code> are byte-identical.
+  <code>tests/test_docs_site.py</code> checks this page's own structure — one sidebar link per section,
+  no link to a section that does not exist.
+  <code>tests/test_version_sync.py</code> pins the version literal across every place the repository
+  publishes it.
+  <strong>Why:</strong> documentation rot is silent. Nothing breaks at import time when a section
+  disappears or a setting is never written down; it just teaches the next reader something false.</p>
+
+  <h4>The end-to-end tripwire</h4>
+  <p><strong>What runs:</strong> <code>tests/test_critical_path_smoke.py</code>, three tests.
+  <strong>What it does:</strong> posts the real generated admin add form over HTTP, then asserts that
+  the row which comes out is the same one the REST API serves and the same one the audit trail
+  recorded, with the acting user and a per-field diff.
+  <strong>Why a separate test when every layer already has a deep suite:</strong> because each of those
+  suites can keep passing while the seam <em>between</em> the layers quietly breaks. It is deliberately
+  small — a tripwire for "the pipeline stopped connecting", not a second copy of the deep suites.</p>
+
+  <h3 id="testing-not-yet">What is not in place yet</h3>
+  <p>A quality page that lists only what exists is marketing. These are the layers the project's own
+  engineering standard asks for and that this repository <strong>does not have today</strong>. They
+  are described here as they will be built, so that the description is not mistaken for the check:</p>
+
+  <table>
+    <thead><tr><th>Check</th><th>How it will work, and what it will verify</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr>
+        <td><strong>Mutation testing</strong></td>
+        <td>A mutation tool makes a small, deliberately wrong change to the production code — inverts a
+        boolean, turns <code>&gt;</code> into <code>&gt;=</code>, replaces a return value with
+        <code>None</code>, deletes a call, widens a boundary — and then runs the tests against that
+        mutant. If a test fails, the mutant is <em>killed</em> and the tests demonstrably detect that
+        class of error. If every test still passes, the mutant <em>survives</em>: the line was covered,
+        but nothing asserted anything that depended on it. A surviving mutant is therefore a gap in the
+        assertions, not in the coverage. The planned cadence is two-tier — <strong>per push, only the
+        lines that push changed</strong> (a few minutes, so it can run on every pull request), and
+        <strong>weekly over the dangerous modules</strong> in full (<code>encryption/</code>,
+        <code>crypto.py</code>, <code>sharding/router.py</code>, masking, <code>api/filters.py</code>,
+        <code>backup.py</code>, retention). It will <strong>report, never block</strong>: a contributor
+        facing a survivor either strengthens a test until it kills the mutant, or records in writing
+        why that mutation is not worth catching. A 100% mutation score is explicitly not the target —
+        the cost of each case is weighed against its value.</td>
+        <td>Planned. No tool installed, no job, no score</td>
+      </tr>
+      <tr>
+        <td><strong>Property-based / fuzz testing</strong></td>
+        <td>Instead of a handful of hand-written examples, a generator produces hundreds of inputs per
+        run — empty values, <code>None</code>, unexpected types, very long strings, Unicode, special
+        characters, large and empty collections, duplicates, boundary values — and the test asserts a
+        <em>property</em> that must hold for all of them (a round-trip returns the original, a
+        validator never raises anything but <code>ValidationError</code>). When it finds a failure it
+        shrinks the input to the smallest one that still fails. The targets are the parsers and
+        validators: the field validators, the import pipeline, the sharding-settings parser and the
+        encryption envelope format.</td>
+        <td>Planned. <code>hypothesis</code> is not a dependency</td>
+      </tr>
+      <tr>
+        <td><strong>Browser E2E</strong></td>
+        <td>A real browser, driven by Playwright against the <code>demo/</code> project, walking the
+        scenarios the Django test client cannot reach: opening the generated admin, navigation, form
+        widgets, filters, search, pagination, bulk actions, permission denials and validation errors —
+        including the JavaScript layer, which no test here currently executes. Planned as one job, one
+        combination, marker-gated and deselected by default so the everyday run stays at forty seconds.
+        A flaky browser test will be diagnosed, never retried.</td>
+        <td>Planned. No Playwright, no Cypress</td>
+      </tr>
+      <tr>
+        <td><strong>Lint, format, type and security static analysis in CI</strong></td>
+        <td>Ruff for linting and formatting, mypy over <code>snapadmin/</code> for type checking, and a
+        security-oriented static pass. Both Ruff and mypy are planned as <strong>advisory first</strong>
+        — reporting without failing the build — and become blocking per module once that module's
+        backlog is clean, so a large existing codebase can adopt them without a single unreviewable
+        commit. Suppressing a warning to silence it, rather than fixing it or explaining it in the
+        narrowest possible scope, is prohibited.</td>
+        <td>Planned. <code>black</code> and <code>flake8</code> are dev dependencies, but <strong>no CI job runs either</strong></td>
+      </tr>
+      <tr>
+        <td><strong>A branch-coverage gate</strong></td>
+        <td>Adding <code>--cov-branch --cov-fail-under=100</code> to the same command the line gate
+        already uses, so that a half-tested conditional fails the build the way an untested line does.</td>
+        <td>Measured at 99% (60 partial branches), not enforced</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-warn">
+    <strong>Why this table is on the page at all.</strong>
+    SnapAdmin refuses to report a false green anywhere else — <code>snapadmin-info</code> tells an
+    operator what is switched off, not only what is on, and a capability cannot ship without a probe
+    for both states. A quality page that implied checks it does not run would be the same failure in
+    the documentation layer. When one of these lands it moves into the table above it, with the
+    command that runs it.
   </div>
 
   <!-- ── Diagnostics (snapadmin_info) ────────────────────────────────────── -->

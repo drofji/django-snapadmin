@@ -532,9 +532,13 @@ Concretely, on the current release:
 - **4,900+ tests across 152 files**, run on every push. Twelve of them need a live Elasticsearch, so
   they carry a marker and are deselected by default: cloning the repository and typing `pytest`
   starts no container and takes about **forty seconds**.
-- **100% line coverage** on the shipped `snapadmin/` package — 11,000+ statements, no exclusions, no
-  `# pragma: no cover` to hide untested code. CI runs
+- **100% line coverage** on the shipped `snapadmin/` package — 11,349 statements, 0 missing. CI runs
   `pytest --cov=snapadmin --cov-fail-under=100`, so a pull request that adds an untested line fails.
+  **Eighteen lines across twelve modules carry a `# pragma: no cover`**, each with a written reason:
+  abstract methods that only raise, `if TYPE_CHECKING:` blocks, the import-time branch taken when an
+  optional dependency is absent, and five defensive guards for states their callers make
+  unreachable. That list is pinned by a test so it cannot quietly grow. They are still exclusions,
+  and this page will not claim there are none.
 - **Branch coverage is measured, and reported honestly: 99%** — 3,300+ branches, 60 of them taken
   only one way. It is *not* a gate yet. Closing those partial branches and then turning the gate on
   is planned work; this page will say "enforced" only when it is.
