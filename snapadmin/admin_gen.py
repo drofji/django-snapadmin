@@ -109,6 +109,45 @@ def _any_offline_capable_model() -> bool:
     )
 
 
+def _token_admin_enabled() -> bool:
+    """Whether :meth:`AdminGenMixin.register_all_admins` offers the API-token admin.
+
+    ``SNAPADMIN_TOKEN_ADMIN_ENABLED`` decides when set. Left unset (``None``) it
+    follows the APIs that accept tokens — the REST API and GraphQL — so an
+    install with both off is not handed a screen for minting credentials to a
+    surface that does not exist (#EXT2h). A project authenticating its own
+    views with :class:`~snapadmin.api.authentication.APITokenAuthentication`
+    sets it to ``True``.
+    """
+    from snapadmin.conf import GRAPHQL_ENABLED_DEFAULT, REST_API_ENABLED_DEFAULT
+
+    explicit = get_setting("SNAPADMIN_TOKEN_ADMIN_ENABLED", None)
+    if explicit is not None:
+        return bool(explicit)
+    return bool(
+        get_setting("SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT)
+        or get_setting("SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_ENABLED_DEFAULT)
+    )
+
+
+def _pk_list_column(model: type[models.Model]) -> tuple[str, bool]:
+    """``(name, shown)`` for the changelist's primary-key column (#EXT2g).
+
+    The column is referenced by the key's real name — a model whose key is not
+    called ``id`` used to get a column that does not exist. Shown first for an
+    integer key, hidden for any other key type (a UUID is noise in a list),
+    unless the model's ``admin_list_display_pk`` says otherwise. An abstract
+    model has no key until a concrete subclass gets its automatic ``id``, so it
+    is treated as exactly that.
+    """
+    pk = model._meta.pk
+    name = pk.name if pk is not None else "id"
+    override = getattr(model, "admin_list_display_pk", None)
+    if override is not None:
+        return name, bool(override)
+    return name, pk is None or isinstance(pk, models.IntegerField)
+
+
 class AdminGenMixin:
     """``SnapModel``'s generated-admin methods — see the module docstring."""
 
@@ -123,7 +162,8 @@ class AdminGenMixin:
         form_fields = [fn for fn, fo in meta_fields.items() if getattr(fo, SnapFieldAttributeEnum.SHOW_IN_FORM.value, None)]
         list_display = [fn for fn, fo in meta_fields.items() if getattr(fo, SnapFieldAttributeEnum.SHOW_IN_LIST.value, True)]
         search_fields = [fn for fn, fo in meta_fields.items() if getattr(fo, SnapFieldAttributeEnum.SEARCHABLE.value, False)]
-        if "id" not in search_fields: search_fields.append("id")
+        pk_name, show_pk = _pk_list_column(cls)
+        if pk_name not in search_fields: search_fields.append(pk_name)
 
         all_fields_for_readonly = {**meta_fields, **meta_fields_related}
         editable_fields = [fn for fn, fo in all_fields_for_readonly.items() if not getattr(fo, SnapFieldAttributeEnum.EDITABLE.value, False)]
@@ -191,8 +231,8 @@ class AdminGenMixin:
             generated_overrides[method_name] = _make_display_method(attr_value)
             list_display.append(method_name)
 
-        if "id" in list_display: list_display.remove("id")
-        list_display.insert(0, "id")
+        if pk_name in list_display: list_display.remove(pk_name)
+        if show_pk: list_display.insert(0, pk_name)
         cls._admin_generated_overrides = generated_overrides
         return AdminFieldSets(form_fields, list_display, search_fields, list_filter, autocomplete_fields)
 
@@ -440,6 +480,10 @@ class AdminGenMixin:
         # generated class, and the mixins above are public and reused by hand-written
         # admins that SnapAdmin did not build.
         admin_attrs["snapadmin_generated_admin"] = True
+        # Without this, type() records whichever module the metaclass machinery
+        # was called from (a django.forms internal), so tracebacks and any
+        # "is this admin generated?" test name a module the class is not in (#EXT2k).
+        admin_attrs["__module__"] = cls.__module__
         admin_class = type(f"{cls.__name__}Admin", parent_classes, admin_attrs)
         try: admin.site.register(cls, admin_class)
         except admin.sites.AlreadyRegistered: pass
@@ -449,10 +493,11 @@ class AdminGenMixin:
         from snapadmin.admin import APITokenAdmin, ErrorEventAdmin, SnapadminAuditLogAdmin
         from snapadmin.models import APIToken, ErrorEvent, SnapadminAuditLog
 
-        try:
-            admin.site.register(APIToken, APITokenAdmin)
-        except admin.sites.AlreadyRegistered:
-            pass
+        if _token_admin_enabled():
+            try:
+                admin.site.register(APIToken, APITokenAdmin)
+            except admin.sites.AlreadyRegistered:
+                pass
         try:
             admin.site.register(ErrorEvent, ErrorEventAdmin)
         except admin.sites.AlreadyRegistered:

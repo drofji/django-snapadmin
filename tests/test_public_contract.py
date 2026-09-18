@@ -27,6 +27,7 @@ PUBLIC_IMPORTS = [
     "snapadmin.models.EsQuerySet",
     "snapadmin.models.EsStorageMode",
     "snapadmin.models.SnapPurgeError",
+    "snapadmin.models.SnapPurgeResult",
     "snapadmin.models.SnapEsUnavailable",
     "snapadmin.models.SnapSaveMixin",
     "snapadmin.models.hash_token_key",

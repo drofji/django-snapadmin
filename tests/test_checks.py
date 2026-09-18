@@ -550,6 +550,21 @@ class TestBackupSftpDirIsLoginRelative:
         SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
         SNAPADMIN_BACKUP_SFTP_DIR="/srv/backups",
     )
+    def test_the_hint_names_the_login_directory_case_too(self):
+        """#EXT2d — where the login directory *is* the absolute path, dropping
+        the slash misplaces every dump one level deeper. The hint must say when
+        to keep the absolute form, and how to tell which case applies."""
+        hint = checks.check_backup_sftp_dir(None)[0].hint
+
+        assert "Keep '/srv/backups' if 'pwd'" in hint
+        assert "one level too deep" in hint
+        assert "db_backup_stored" in hint
+
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True,
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_DIR="/srv/backups",
+    )
     def test_is_a_warning_not_an_error(self):
         """An absolute path is right whenever the SSH account really is not
         jailed, so this can only ever be advisory."""
@@ -1222,6 +1237,22 @@ class TestRetentionPurgeScheduled:
         # A non-dict entry (a typo'd schedule config) must not crash the
         # check — it is simply not a match, same as any other unrelated entry.
         assert checks.check_retention_purge_scheduled(None) == []
+
+    @override_settings(CELERY_BEAT_SCHEDULE={}, SNAPADMIN_PURGE_EXTERNAL=True)
+    def test_a_declared_external_scheduler_is_clean(self):
+        """#EXT2e — the hint recommends an external cron, which the check can
+        never observe; declaring it is the way out that keeps retention on."""
+        assert checks.check_retention_purge_scheduled(None) == []
+
+    @override_settings(CELERY_BEAT_SCHEDULE={}, SNAPADMIN_PURGE_EXTERNAL=False)
+    def test_an_explicit_false_still_warns(self):
+        result = checks.check_retention_purge_scheduled(None)
+        assert [w.id for w in result] == ["snapadmin.W012"]
+
+    @override_settings(CELERY_BEAT_SCHEDULE={})
+    def test_the_hint_names_the_external_scheduler_setting(self):
+        [warning] = checks.check_retention_purge_scheduled(None)
+        assert "SNAPADMIN_PURGE_EXTERNAL = True" in warning.hint
 
 
 # ── @snap_action / api_read_only conflict (E008) ─────────────────────────────

@@ -60,7 +60,8 @@ re-excluded in every surface by whoever writes it next.
 **What it is not.** It is not a theme, not a framework, and not a lock-in. Underneath it is ordinary
 Django — models, `ModelAdmin`, DRF viewsets. Override any generated piece, or stop using it, without
 rewriting your data layer. Your hand-written `ModelAdmin` classes are never replaced: SnapAdmin
-skips any model you registered yourself.
+skips any model you registered yourself — and `manage.py check` tells you when one of them shows
+masked fields unmasked (`snapadmin.W025`), so add `PIIMaskingAdminMixin` to it.
 
 <details>
 <summary>How is this different from Unfold, Jazzmin or Grappelli?</summary>
@@ -472,7 +473,7 @@ never a false green):
 | Migrations applied | `manage.py migrate --check` |
 | Auth on the API, PII masked where it matters | `snapadmin_info --section features` |
 | Backups on, **2+ destinations**, encryption (**strongly recommended**) | `snapadmin_info --section features` · `manage.py check` warns (`snapadmin.W021`) when a destination that leaves the host has no `SNAPADMIN_BACKUP_AGE_RECIPIENTS` |
-| Have you actually run a restore? | `snapadmin_restore <bundle> --confirm` against a recent dump — an untested backup is the most common form of not having one |
+| Have you actually run a restore? | `snapadmin_restore <bundle> --database <drill-alias> --confirm` restores into a throwaway database and prints the row count per table — an untested backup is the most common form of not having one |
 
 → [Full checklist](https://drofji.github.io/django-snapadmin/#integration-checklist) — Must work /
 Should be configured / Data safety / Optional, with a "why it matters" column.
@@ -712,7 +713,10 @@ pip install django-snapadmin
 Requires **Python ≥ 3.10** and **Django ≥ 5.2**. Pin an exact version in production.
 
 **Adding it to an existing project?** Run `snapadmin-init`. It inspects your project and prints a
-checklist plus the exact snippets to paste. It edits nothing, so there is nothing to undo.
+checklist plus the exact snippets to paste. It edits nothing, so there is nothing to undo. Snap
+fields accept Django's positional label (`SnapCharField("Label", max_length=200)`), so existing
+field declarations switch over unchanged; if your models inherit an `objects` manager from a mixin
+(owner or tenant scoping), `snapadmin.E027` makes sure `SnapModel` does not silently replace it.
 
 <details>
 <summary>Minimal <code>INSTALLED_APPS</code> — the smallest thing that works</summary>

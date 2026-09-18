@@ -20,7 +20,7 @@ from django.core.exceptions import FieldDoesNotExist, FieldError, ImproperlyConf
 from django.db.models.expressions import Col
 from django.db.models.lookups import Lookup
 from django.db.models.query_utils import DeferredAttribute
-from django.utils.functional import cached_property
+from django.utils.functional import Promise, cached_property
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 
@@ -63,11 +63,30 @@ class DjangoFieldAttributeEnum(str, Enum):
     VALIDATORS = "validators"
     AUTO_NOW = "auto_now"
     AUTO_NOW_ADD = "auto_now_add"
+    VERBOSE_NAME = "verbose_name"
 
 
 # ===========================================================================
 # Base mixin
 # ===========================================================================
+
+def _with_positional_verbose_name(
+    verbose_name: str | Promise | None, kwargs: dict[str, object]
+) -> dict[str, object]:
+    """Fold a positionally passed ``verbose_name`` back into ``kwargs`` (#EXT2i).
+
+    Every Django field accepts ``verbose_name`` as its first positional
+    argument (``models.CharField("Label", max_length=200)``), so every
+    ``Snap*Field`` does too — existing model code survives the switch to Snap
+    fields unchanged. ``verbose_name`` is a named parameter of each
+    constructor, so passing it both ways never reaches this function: Python
+    itself raises ``TypeError`` for the duplicated argument.
+    """
+    if verbose_name is None:
+        return kwargs
+    kwargs[DjangoFieldAttributeEnum.VERBOSE_NAME.value] = verbose_name
+    return kwargs
+
 
 def _strip_auto_validator(deconstructed, auto_instance):
     """Drop the auto-injected validator from a field's ``deconstruct()`` output.
@@ -537,7 +556,8 @@ class SnapCharField(models.CharField, SnapField):
     # (the default) yields null=True / blank=True, and `required=True` yields
     # null=False / blank=False. This keeps CharField data parity with the rest
     # of the field types (and with mirrored ES documents).
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
@@ -622,21 +642,24 @@ class SanitizedHtmlOnSaveMixin:
 class SnapTextField(SanitizedHtmlOnSaveMixin, models.TextField, SnapField):
     """Django ``TextField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapEmailField(models.EmailField, SnapField):
     """Django ``EmailField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapSlugField(models.SlugField, SnapField):
     """Django ``SlugField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         kwargs.setdefault(DjangoFieldAttributeEnum.MAX_LENGTH.value, 50)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
@@ -644,84 +667,96 @@ class SnapSlugField(models.SlugField, SnapField):
 class SnapURLField(models.URLField, SnapField):
     """Django ``URLField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapUUIDField(models.UUIDField, SnapField):
     """Django ``UUIDField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapIntegerField(models.IntegerField, SnapField):
     """Django ``IntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapPositiveIntegerField(models.PositiveIntegerField, SnapField):
     """Django ``PositiveIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapFloatField(models.FloatField, SnapField):
     """Django ``FloatField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapDecimalField(models.DecimalField, SnapField):
     """Django ``DecimalField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapBigIntegerField(models.BigIntegerField, SnapField):
     """Django ``BigIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapDateField(models.DateField, SnapField):
     """Django ``DateField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapDateTimeField(models.DateTimeField, SnapField):
     """Django ``DateTimeField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapTimeField(models.TimeField, SnapField):
     """Django ``TimeField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapDurationField(models.DurationField, SnapField):
     """Django ``DurationField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapFileField(models.FileField, SnapField):
     """Django ``FileField`` with upload validation. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         allowed_extensions = kwargs.pop(SnapFieldAttributeEnum.ALLOWED_EXTENSIONS, None)
         allowed_encodings = kwargs.pop(SnapFieldAttributeEnum.ALLOWED_ENCODINGS, None)
@@ -758,7 +793,8 @@ class SnapFileField(models.FileField, SnapField):
 class SnapImageField(models.ImageField, SnapField):
     """Django ``ImageField`` with upload validation. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         allowed_extensions = kwargs.pop(SnapFieldAttributeEnum.ALLOWED_EXTENSIONS, None)
         max_size_bytes = kwargs.pop(SnapFieldAttributeEnum.MAX_SIZE_BYTES, None)
@@ -784,21 +820,24 @@ class SnapImageField(models.ImageField, SnapField):
 class SnapBooleanField(models.BooleanField, SnapField):
     """Django ``BooleanField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapJSONField(models.JSONField, SnapField):
     """Django ``JSONField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapGenericIPAddressField(models.GenericIPAddressField, SnapField):
     """Django ``GenericIPAddressField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
@@ -827,28 +866,32 @@ class SnapManyToManyField(models.ManyToManyField, SnapField):
 class SnapSmallIntegerField(models.SmallIntegerField, SnapField):
     """Django ``SmallIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapPositiveSmallIntegerField(models.PositiveSmallIntegerField, SnapField):
     """Django ``PositiveSmallIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapPositiveBigIntegerField(models.PositiveBigIntegerField, SnapField):
     """Django ``PositiveBigIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 class SnapRichTextField(SanitizedHtmlOnSaveMixin, models.TextField, SnapField):
     """TextField with wysiwyg=True preset - no extra argument needed."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs.setdefault(SnapFieldAttributeEnum.WYSIWYG.value, True)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
@@ -856,7 +899,8 @@ class SnapRichTextField(SanitizedHtmlOnSaveMixin, models.TextField, SnapField):
 class SnapPhoneField(models.CharField, SnapField):
     """CharField pre-wired with phone number validation and a sensible max_length."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         from snapadmin.validators import SnapPhoneValidator
         kwargs.setdefault(DjangoFieldAttributeEnum.MAX_LENGTH.value, 20)
         kwargs = self._initializeSnapLogic(**kwargs)
@@ -872,7 +916,8 @@ class SnapPhoneField(models.CharField, SnapField):
 class SnapColorField(models.CharField, SnapField):
     """CharField pre-wired with hex color validation (#RRGGBB / #RGB)."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         from snapadmin.validators import SnapColorValidator
         kwargs.setdefault(DjangoFieldAttributeEnum.MAX_LENGTH.value, 7)
         kwargs = self._initializeSnapLogic(**kwargs)
@@ -1459,7 +1504,8 @@ class SnapEncryptedCharField(SnapEncryptedField, models.CharField, SnapField):
     ``CharField``) and constrains only what the application may store.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
@@ -1476,7 +1522,8 @@ class SnapEncryptedCharField(SnapEncryptedField, models.CharField, SnapField):
 class SnapEncryptedTextField(SnapEncryptedField, models.TextField, SnapField):
     """Encrypted multi-line text."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
@@ -1489,7 +1536,8 @@ class SnapEncryptedEmailField(SnapEncryptedField, models.EmailField, SnapField):
     ``blind_index=True`` if you need to look rows up by address.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
@@ -1503,7 +1551,8 @@ class SnapEncryptedJSONField(SnapEncryptedField, models.JSONField, SnapField):
     secret; keep the queryable keys in their own columns.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
@@ -1517,7 +1566,8 @@ class SnapEncryptedJSONField(SnapEncryptedField, models.JSONField, SnapField):
 class SnapEncryptedIntegerField(SnapEncryptedField, models.IntegerField, SnapField):
     """Encrypted integer. Sums, ordering and range filters are not available."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
@@ -1546,7 +1596,8 @@ class SnapEncryptedDecimalField(SnapEncryptedField, models.DecimalField, SnapFie
     unencrypted field would be, so switching a column to this type does not
     silently start keeping extra digits."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
@@ -1560,7 +1611,8 @@ class SnapEncryptedDecimalField(SnapEncryptedField, models.DecimalField, SnapFie
 class SnapEncryptedDateField(SnapEncryptedField, models.DateField, SnapField):
     """Encrypted date. Stored ISO-8601; ``__year``/``__gte`` are not available."""
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
@@ -1579,7 +1631,8 @@ class SnapEncryptedDateTimeField(SnapEncryptedField, models.DateTimeField, SnapF
     once the column is ciphertext.
     """
 
-    def __init__(self, **kwargs):
+    def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
+        kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 

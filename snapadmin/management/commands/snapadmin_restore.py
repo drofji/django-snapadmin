@@ -3,12 +3,13 @@ Restore a backup bundle produced by ``snapadmin_db_backup`` (#BKP1c/d).
 
     python manage.py snapadmin_restore --list [--destination sftp]
     python manage.py snapadmin_restore <source> [--only db,media,env] [--skip ...]
-        [--identity PATH] [--confirm] [--no-snapshot]
+        [--identity PATH] [--database ALIAS] [--confirm] [--no-snapshot]
 
 ``<source>`` names a manifest — a local path, or ``<destination>:<name>`` (e.g.
 ``sftp:snapadmin-manifest-20260826-020000.json``) to pull straight from a configured
 destination. Dry-run is the default: without ``--confirm``, this prints exactly what
-would happen and touches nothing.
+would happen and touches nothing. ``--database ALIAS`` restores only the ``db`` part
+into another ``DATABASES`` alias — a restore drill — and prints the row count per table.
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ from snapadmin.restore import (
     plan_restore,
     resolve_source,
     select_parts,
+    table_row_counts,
 )
 
 
@@ -67,6 +69,12 @@ class Command(BaseCommand):
             "--no-snapshot", action="store_true",
             help="Skip the automatic pre-restore snapshot. Not recommended.",
         )
+        parser.add_argument(
+            "--database", default="default",
+            help="DATABASES alias to restore the db part into (a restore drill). Only db "
+                 "is restored then; an alias pointing at the same database as 'default' "
+                 "is refused.",
+        )
 
     def handle(self, *args, **options):
         config = get_backup_config()
@@ -98,10 +106,19 @@ class Command(BaseCommand):
         except RestoreError as exc:
             raise CommandError(str(exc)) from exc
 
+        database = options["database"]
+        if database != "default":
+            if only is not None and any(part != "db" for part in only):
+                raise CommandError(
+                    f"Restoring into {database!r}: only the 'db' part can go to another "
+                    "database — media and env would land on the live system."
+                )
+            parts = [part for part in parts if part == "db"]
+
         if resolved.manifest.get("encrypted") and not options["identity"]:
             self.stdout.write(self.style.WARNING(identity_required_message(resolved.manifest)))
 
-        for line in plan_restore(resolved, parts):
+        for line in plan_restore(resolved, parts, database):
             self.stdout.write(line)
 
         if not options["confirm"]:
@@ -111,7 +128,14 @@ class Command(BaseCommand):
             return
 
         before_restore = None
-        if not options["no_snapshot"]:
+        if database != "default":
+            # The snapshot covers the live 'default' database; it would protect
+            # nothing a drill into another alias touches.
+            self.stdout.write(self.style.WARNING(
+                f"Pre-restore snapshot skipped: it covers 'default', and this restore "
+                f"replaces {database!r} only."
+            ))
+        elif not options["no_snapshot"]:
             from snapadmin.snapshot import take_snapshot
 
             def before_restore(restoring_parts: list[str]) -> None:
@@ -126,12 +150,16 @@ class Command(BaseCommand):
             results = perform_restore(
                 resolved, parts, config,
                 identity_file=options["identity"], before_restore=before_restore,
+                database=database,
             )
         except RestoreError as exc:
             raise CommandError(str(exc)) from exc
 
         for part, result in results.items():
             self.stdout.write(self.style.SUCCESS(f"{part}: {result}"))
+        if database != "default" and "db" in results:
+            for table, count in table_row_counts(database).items():
+                self.stdout.write(f"  {table}: {count}")
         self.stdout.write(self.style.SUCCESS("Restore complete."))
 
     def _handle_list(self, config, destination):

@@ -293,7 +293,14 @@ Operations
         recipients configured; a warning, not an error, because the transport or
         the destination may encrypt where settings cannot see. ``W022`` flags an
         absolute ``SNAPADMIN_BACKUP_SFTP_DIR``, which is read relative to the SSH
-        login directory. ``E008``
+        login directory (unless the login directory is that path). ``W023`` is
+        backups configured while ``SNAPADMIN_BACKUP_ENABLED`` is off, ``W024``
+        an ``env`` part with no file behind ``SNAPADMIN_BACKUP_ENV_FILE``,
+        ``W025`` a model with masked fields behind a hand-written admin that
+        does not mask, ``W026`` the deprecated ``admin_sections``. ``E027`` is
+        ``SnapModel``'s ``EsManager`` and a project's own ``objects`` manager
+        replacing each other silently — a mixin's scoping manager hidden, or a
+        ``tenant_scoped`` model's ``EsManager`` hidden. ``E008``
         catches a ``@snap_action`` whose declared HTTP methods conflict with its
         own model's ``api_read_only``/``api_http_method_names`` policy — dead
         configuration that would otherwise always answer ``403``. ``E011``/``E012``
@@ -399,11 +406,13 @@ Settings
 Everything is namespaced ``SNAPADMIN_*`` and every feature is off-by-default
 unless noted. The families: ``SNAPADMIN_REST_API_*`` / ``SNAPADMIN_API_*``
 (REST surface, throttling, pagination, guards), ``SNAPADMIN_GRAPHQL_*``,
-``SNAPADMIN_SWAGGER_ENABLED``, ``SNAPADMIN_ES_*`` (Elasticsearch routing and
+``SNAPADMIN_SWAGGER_ENABLED``, ``SNAPADMIN_TOKEN_ADMIN_ENABLED`` (whether the
+API-token admin is offered; unset follows REST/GraphQL), ``SNAPADMIN_ES_*`` (Elasticsearch routing and
 fallback), ``SNAPADMIN_BACKUP_*``, ``SNAPADMIN_RESTORE_SNAPSHOT_*``
 (the pre-restore safety net), ``SNAPADMIN_ERROR_*`` and
 ``SNAPADMIN_HEALTH_ALERT_*`` / ``SNAPADMIN_ALERT_*`` (monitoring and alert
-delivery), ``SNAPADMIN_AUDIT_*`` and
+delivery), ``SNAPADMIN_PURGE_EXTERNAL`` (an external scheduler runs the
+retention purge), ``SNAPADMIN_AUDIT_*`` and
 ``SNAPADMIN_MASKED_FIELDS`` / ``SNAPADMIN_MASKING_RULES`` (audit and PII),
 ``SNAPADMIN_ENCRYPTION`` (one dict: the field-encryption keyset and where it is
 read from — ``KEY_PROVIDER``, ``KEY_FILE``, ``KEYS``, ``STRICT``; the

@@ -114,6 +114,10 @@ def purge_expired_data(self):
     ``SnapModel.purge_expired`` / ``SnapPurgeError``) is reported under
     ``errors``, not ``purged`` — it must not be mistaken for a clean purge.
 
+    ``skipped_protected`` maps a model label to the due rows left in place
+    because a ``PROTECT``/``RESTRICT`` foreign key still references them
+    (#EXT2a) — not an error: they are retried on the next run.
+
     ``status`` is ``"noop"`` when no model has retention configured at all,
     ``"partial"`` when some (but not every) considered model's purge raised,
     and the task **raises** ``SnapPurgeError`` when every considered model's
@@ -126,6 +130,7 @@ def purge_expired_data(self):
 
     summary: dict[str, int] = {}
     errors: dict[str, str] = {}
+    skipped_protected: dict[str, int] = {}
     now = timezone.now()
     considered = 0
 
@@ -143,8 +148,11 @@ def purge_expired_data(self):
 
         try:
             count = model.purge_expired(now=now)
-            summary[label] = count
-            logger.info("purge_expired_data_deleted", model=label, count=count)
+            summary[label] = int(count)
+            logger.info("purge_expired_data_deleted", model=label, count=int(count))
+            skipped = getattr(count, "skipped_protected", 0)
+            if skipped:
+                skipped_protected[label] = skipped
         except Exception as exc:
             errors[label] = str(exc)
             logger.error("purge_expired_data_error", model=label, error=str(exc))
@@ -184,6 +192,7 @@ def purge_expired_data(self):
 
     result = {
         "purged": summary, "total": sum(summary.values()), "errors": errors,
+        "skipped_protected": skipped_protected,
         "export_jobs": export_purge,
     }
 

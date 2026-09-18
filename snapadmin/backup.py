@@ -66,6 +66,7 @@ import gzip
 import hashlib
 import json
 import os
+import posixpath
 import re
 import shutil
 import subprocess
@@ -827,8 +828,9 @@ def _sftp_remote_path(config: BackupConfig, name: str) -> str:
     ``<dir>/<name>`` and only an absolute one keeps its leading slash; the
     default ``"/"`` collapses to ``/<name>``.
 
-    Used both for the returned location and for the failure message, so the
-    two can never describe different places.
+    The fallback for the returned location and the failure message when the
+    server does not report its working directory — :func:`store_remote_sftp`
+    prefers ``sftp.getcwd()``, the directory the server actually resolved.
     """
     directory = config.sftp_dir.rstrip("/")
     return f"{directory}/{name}" if directory else f"/{name}"
@@ -882,14 +884,32 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
     else:
         connect_kwargs["password"] = config.sftp_password
     client.connect(**connect_kwargs)
-    remote_path = _sftp_remote_path(config, dump.name)
     try:
         sftp = client.open_sftp()
+        created = False
         try:
             sftp.chdir(config.sftp_dir)
         except IOError:
             sftp.mkdir(config.sftp_dir)
             sftp.chdir(config.sftp_dir)
+            created = True
+        # Report where the server actually put us, not the configured string:
+        # on a managed SFTP product the login directory can *be* the absolute
+        # path, and a relative value then resolves one level too deep — which
+        # only the resolved directory shows (#EXT2d).
+        resolved = sftp.getcwd()
+        remote_path = (
+            posixpath.join(resolved, dump.name) if isinstance(resolved, str)
+            else _sftp_remote_path(config, dump.name)
+        )
+        if created:
+            logger.warning(
+                "sftp_backup_dir_created", configured=config.sftp_dir,
+                path=posixpath.dirname(remote_path),
+                hint="SNAPADMIN_BACKUP_SFTP_DIR did not exist and was created. If "
+                     "that is not the directory you meant, the value resolves "
+                     "relative to the SSH login directory.",
+            )
         try:
             sftp.put(str(dump), dump.name)
         except OSError as exc:
@@ -901,7 +921,8 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
                 f"Could not upload the backup to {remote_path!r} on "
                 f"{config.sftp_host}: {exc}. SNAPADMIN_BACKUP_SFTP_DIR is "
                 f"relative to the SSH login directory, so an absolute value "
-                f"only works if the account is not restricted to a subtree."
+                f"only works if the account is not restricted to a subtree "
+                f"(or if the login directory is that path)."
             ) from exc
         # Retention on the remote end: timestamped names sort chronologically,
         # pruned per part prefix so media/env/manifest don't share db's budget.

@@ -390,6 +390,34 @@ class SnapModelAttributeEnum(str, Enum):
     ADMIN_OVERRIDES = "admin_overrides"
 
 
+class SnapPurgeResult(int):
+    """What :meth:`SnapModel.purge_expired` returns: the purged-row count, plus what was kept.
+
+    An ``int`` subclass so every existing caller — arithmetic, ``== 3``,
+    ``summary[label] = count`` — keeps working unchanged (#EXT2a).
+    ``skipped_protected`` counts due rows left in place because a
+    ``PROTECT``/``RESTRICT`` foreign key still points at them; they are retried
+    on the next run, once whatever protects them is gone. Read it with
+    ``getattr(result, "skipped_protected", 0)`` when the model may override
+    ``purge_expired`` and return a plain ``int``.
+    """
+
+    skipped_protected: int
+
+    def __new__(cls, purged: int, skipped_protected: int = 0) -> "SnapPurgeResult":
+        result = super().__new__(cls, purged)
+        result.skipped_protected = skipped_protected
+        return result
+
+    def __repr__(self) -> str:
+        return f"SnapPurgeResult({int(self)}, skipped_protected={self.skipped_protected})"
+
+    # int has no __str__ of its own (str() falls back to repr), so without this
+    # an f-string or a log line would print the repr above instead of the number.
+    def __str__(self) -> str:
+        return int.__repr__(self)
+
+
 class SnapPurgeError(Exception):
     """Raised when a GDPR purge cannot be fully applied across every storage layer.
 
@@ -507,7 +535,14 @@ class PIIMaskingAdminMixin:
             return mask_field(opts.app_label, opts.model_name, field_name,
                               getattr(obj, field_name, None), user)
 
-        column.short_description = field_name.replace("_", " ").title()
+        # The model's own label, lazy translation intact — a title-cased field
+        # name would relabel every masked column in every non-English admin
+        # (#EXT2g). A masked name that is not a model field keeps the old label.
+        try:
+            label = opts.get_field(field_name).verbose_name
+        except FieldDoesNotExist:
+            label = field_name.replace("_", " ").title()
+        column.short_description = label
         column.__name__ = f"masked_{field_name}"
         return column
 
@@ -710,6 +745,10 @@ class SnapModel(AdminGenMixin, models.Model):
     admin_overrides = {}
     snap_inlines = []
     admin_sections = []
+    # Whether the changelist shows the primary-key column first. ``None`` (the
+    # default) shows it for integer keys only — a UUID is noise in a list; True
+    # or False overrides that either way (#EXT2g).
+    admin_list_display_pk: bool | None = None
     # Ecosystem compatibility: extra ModelAdmin base classes prepended
     # to the auto-generated admin, so third-party admin mixins compose with
     # SnapAdmin's config instead of replacing it — e.g.
@@ -2370,7 +2409,7 @@ class SnapModel(AdminGenMixin, models.Model):
             )
 
     @classmethod
-    def purge_expired(cls, *, now=None, dry_run: bool = False) -> int:
+    def purge_expired(cls, *, now=None, dry_run: bool = False) -> SnapPurgeResult:
         """Delete records past this model's retention rules (GDPR).
 
         Two rules, either or both configured — see :meth:`_retention_filter`
@@ -2390,8 +2429,16 @@ class SnapModel(AdminGenMixin, models.Model):
         files (see the attribute's docstring: no DB table means no field to
         read a path from), so the file pass only runs for ``DB_ONLY``/``DUAL``.
 
-        Returns the number of records purged (or that *would* be purged when
-        ``dry_run=True``); returns ``0`` when retention is not configured. The
+        A due row that a ``PROTECT``/``RESTRICT`` foreign key still references
+        (a tree whose parent is due before its children) is **kept**, not
+        allowed to abort the whole model's purge: everything else goes, a due
+        subtree goes leaves first, and the kept rows are retried on the next
+        run. Their files are kept with them (see :meth:`_delete_expired_rows`).
+
+        Returns a :class:`SnapPurgeResult` — an ``int``, the number of records
+        purged (or that *would* be purged when ``dry_run=True``), whose
+        ``skipped_protected`` attribute counts the due rows kept for that
+        reason; ``0`` when retention is not configured. The
         count always reflects this model's own rows, never the cascade-inflated
         total that ``QuerySet.delete()`` reports when related rows are removed
         via ``on_delete=CASCADE``. ``dry_run=True`` touches nothing — no file is
@@ -2406,14 +2453,14 @@ class SnapModel(AdminGenMixin, models.Model):
         """
         retention_days, retention_field, date_field = cls._retention_rules()
         if not date_field and not (retention_days and retention_days > 0):
-            return 0
+            return SnapPurgeResult(0)
 
         now = now or timezone.now()
 
         if cls.es_storage_mode == EsStorageMode.ES_ONLY:
-            return cls._purge_expired_es_only(
+            return SnapPurgeResult(cls._purge_expired_es_only(
                 now, retention_days, retention_field, date_field, dry_run
-            )
+            ))
 
         # Retention is time-based, not tenant-based: an expired row is purged
         # regardless of which tenant it belongs to, so this sweep is one of
@@ -2427,29 +2474,81 @@ class SnapModel(AdminGenMixin, models.Model):
                 cls._retention_filter(now, retention_days, retention_field, date_field)
             )
             if dry_run:
-                return qs.count()
+                return SnapPurgeResult(qs.count())
 
             purging_pks = set(qs.values_list("pk", flat=True))
-            count = len(purging_pks)
 
             if cls.es_storage_mode == EsStorageMode.DUAL:
-                cls._purge_expired_files(qs, purging_pks)
                 # One bulk ES call below, not one per purged row: the purge
                 # already holds every pk, and it needs the return value the
                 # per-row receiver cannot give it.
                 with suppress_es_delete_receiver():
-                    qs.delete()
-                if not cls.delete_pks_from_es(list(purging_pks)):
+                    deleted_pks, kept_pks = cls._delete_expired_rows(qs, purging_pks)
+                if deleted_pks and not cls.delete_pks_from_es(list(deleted_pks)):
                     raise SnapPurgeError(
-                        f"{cls.__name__}: {count} row(s) deleted from the database, "
+                        f"{cls.__name__}: {len(deleted_pks)} row(s) deleted from the database, "
                         "but the Elasticsearch mirror could not be cleared; personal "
                         "data may still be live and searchable via ES."
                     )
-                return count
+            else:
+                deleted_pks, kept_pks = cls._delete_expired_rows(qs, purging_pks)
 
+            if kept_pks:
+                logger.warning(
+                    "retention_purge_skipped_protected", model=cls._meta.label,
+                    skipped=len(kept_pks), purged=len(deleted_pks),
+                )
+            return SnapPurgeResult(len(deleted_pks), len(kept_pks))
+
+    @classmethod
+    def _delete_expired_rows(cls, qs, purging_pks: set) -> tuple[set, set]:
+        """Delete the due rows in ``qs`` — files first — and return ``(deleted, kept)`` pks.
+
+        The common case is one bulk delete, exactly as before. When a
+        ``PROTECT``/``RESTRICT`` foreign key would refuse it (#EXT2a), one due
+        row that is still referenced must not cost the model its whole run:
+        rows are then deleted one at a time, in passes, so a due subtree loses
+        its leaves first and its parents on a later pass, and a row still
+        protected after a pass that deleted nothing is kept for the next run.
+
+        Deletability is established with Django's own ``Collector`` *before*
+        a row's files are touched — the file pass must never run for a row
+        that then survives, or the row would point at a file that is gone.
+        """
+        from django.db import router
+        from django.db.models.deletion import Collector, ProtectedError, RestrictedError
+
+        using = router.db_for_write(cls)
+
+        def deletable(rows) -> bool:
+            try:
+                Collector(using=using, origin=rows).collect(rows)
+            except (ProtectedError, RestrictedError):
+                return False
+            return True
+
+        if deletable(qs):
             cls._purge_expired_files(qs, purging_pks)
             qs.delete()
-            return count
+            return set(purging_pks), set()
+
+        remaining = set(purging_pks)
+        deleted: set = set()
+        progress = True
+        while remaining and progress:
+            progress = False
+            for pk in sorted(remaining, key=str):
+                row = cls.objects.filter(pk=pk)
+                if not deletable(row):
+                    continue
+                # Only this row is being purged now: a file it shares with a
+                # row that stays must count as still referenced.
+                cls._purge_expired_files(row, {pk})
+                row.delete()
+                remaining.discard(pk)
+                deleted.add(pk)
+                progress = True
+        return deleted, remaining
 
     # ------------------------------------------------------------------
     # Human-readable representation
@@ -2643,7 +2742,7 @@ _SNAP_MODEL_UNEXPOSED_ATTRIBUTES: frozenset[str] = frozenset({
     # Generated admin — needs register_admin()/get_admin_fields() refactored
     # onto get_model_meta() before these mean anything for a plain model
     # (#RFC1g row 3).
-    "admin_enabled", "admin_sections", "admin_tabs", "snap_inlines", "admin_mixins",
+    "admin_enabled", "admin_sections", "admin_list_display_pk", "admin_tabs", "snap_inlines", "admin_mixins",
     "js_admin_files", "css_admin_files",
     "compressed_fields", "warn_unsaved_form", "list_filter_submit",
     "list_per_page", "list_max_show_all", "show_full_result_count",

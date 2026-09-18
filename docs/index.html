@@ -799,6 +799,29 @@ class Product(snap_models.SnapModel):
     gets the first two but not the last two — see <a href="#two-ways">the comparison table</a>.</p>
   </details>
 
+  <div class="callout callout-warn" id="snap-model-managers">
+    <strong>Your own <code>objects</code> manager and <code>SnapModel</code> — <code>snapadmin.E027</code></strong>
+    <code>SnapModel</code> declares <code>objects = EsManager()</code>. Django resolves a manager
+    name by first match in MRO order, so in <code>class Order(SnapModel, OwnerScopedMixin)</code> the
+    mixin's own <code>objects</code> — typically a manager that filters rows by owner or tenant — is
+    silently replaced, and every consumer of <code>Order.objects</code>, the generated admin and the
+    API sees every owner's rows. <code>manage.py check</code> fails with
+    <code>snapadmin.E027</code> when that happens. Declare the manager you mean on the model itself,
+    combining both when you want both:
+    <pre><code>class OrderManager(OwnerScopedManager, EsManager):
+    pass
+
+class Order(SnapModel, OwnerScopedMixin):
+    objects = OrderManager()</code></pre>
+    Prefer that over listing the mixin <em>before</em> <code>SnapModel</code>: then the mixin's
+    manager wins and <code>EsManager</code> is gone — ES query routing, and on a
+    <code>tenant_scoped</code> model the tenant isolation, which lives in <code>EsManager</code>.
+    <code>snapadmin.E027</code> reports that direction too, for a tenant-scoped model whose
+    <code>objects</code> is not an <code>EsManager</code>. If the plain <code>EsManager</code> really
+    is what you want on a model that is not tenant-scoped, add <code>'snapadmin.E027'</code> to
+    <code>SILENCED_SYSTEM_CHECKS</code>.
+  </div>
+
   <!-- ── @snap_model ───────────────────────────────────────────────────────── -->
   <h2 id="snap-model-decorator">🔌 <code>@snap_model</code> — Plain Django Models</h2>
   <p>There are two ways to declare a SnapAdmin model. Subclassing <code>SnapModel</code> (above) is
@@ -878,7 +901,10 @@ class Product(models.Model):
 
   <!-- ── Snap Fields ───────────────────────────────────────────────────────── -->
   <h2 id="snap-fields">📋 Snap Fields</h2>
-  <p>Every Snap field is a drop-in replacement for the corresponding Django field, with extra admin control attributes.</p>
+  <p>Every Snap field is a drop-in replacement for the corresponding Django field, with extra admin control attributes.
+  That includes Django's positional <code>verbose_name</code>: <code>SnapCharField("Label", max_length=200)</code>
+  works exactly like <code>models.CharField("Label", max_length=200)</code>, so existing model code
+  survives the switch unchanged. Relation fields take <code>to</code> first, as in Django.</p>
 
   <details class="info">
   <summary><span class="info-glyph">?</span> The full flag table — <code>searchable</code>, <code>filterable</code>, layout, wysiwyg, …</summary>
@@ -1135,10 +1161,27 @@ SnapModel.register_all_admins()</code></pre>
   <p>To restrict registration to a specific app, pass the <code>app_label</code> argument:</p>
   <pre><code>SnapModel.register_all_admins(app_label="myapp")</code></pre>
 
-  <div class="callout callout-info">
+  <div class="callout callout-info" id="token-admin-registration">
     <strong>Note</strong>
-    The <code>APIToken</code> admin is also registered automatically when <code>register_all_admins()</code> is called.
+    <code>register_all_admins()</code> also registers the <code>ErrorEvent</code> and audit-log
+    admins, and the <code>APIToken</code> admin <strong>while an API that accepts tokens is on</strong>
+    (<code>SNAPADMIN_REST_API_ENABLED</code> or <code>SNAPADMIN_GRAPHQL_ENABLED</code>) — an install
+    with both off is not handed a screen for minting credentials to a surface that does not exist.
+    <code>SNAPADMIN_TOKEN_ADMIN_ENABLED</code> overrides that either way: <code>True</code> for a
+    project that authenticates its own views with <code>APITokenAuthentication</code>,
+    <code>False</code> to never offer it.
   </div>
+
+  <p id="admin-pk-column"><strong>The primary-key column.</strong> The changelist shows the
+  primary key first — referenced by its real name, so a key not called <code>id</code> works — for
+  <strong>integer keys only</strong>; a UUID key is noise in a list and is left out. Set
+  <code>admin_list_display_pk = True</code> or <code>False</code> on the model to override that
+  either way. Search still covers the key.</p>
+
+  <p id="admin-sections-deprecated"><strong><code>admin_sections</code> is deprecated.</strong> It was
+  declared on <code>SnapModel</code> but never read by anything; a model that sets it gets
+  <code>snapadmin.W026</code>. Group form fields with the per-field <code>tab</code> and
+  <code>row</code> flags, or pass <code>fieldsets</code> through <code>admin_overrides</code>.</p>
 
   <h3 id="admin-extension-surface">Extending the generated admin</h3>
   <p><code>register_admin()</code> builds and registers a <code>ModelAdmin</code> from a model's Snap
@@ -2609,6 +2652,12 @@ beat:
   </table>
 
   <h3>Configuration</h3>
+  <p id="backup-disabled-w023"><strong>Backups are strictly opt-in, and forgetting the switch is
+  reported.</strong> With <code>SNAPADMIN_BACKUP_ENABLED</code> off, a scheduled
+  <code>snapadmin.run_db_backups</code> ends every run as <code>disabled</code> and stores nothing —
+  while the rest of the configuration looks complete. <code>snapadmin.W023</code> warns when backups
+  are off <em>and</em> a Beat entry, a destination or AGE recipients are configured. Schedule the task
+  only while backups are on, or silence the check on an environment that keeps them off on purpose.</p>
   <pre><code>SNAPADMIN_BACKUP_ENABLED = True               # strictly opt-in (default: False)
 SNAPADMIN_BACKUP_KEEP = 7                     # dumps kept per destination (oldest pruned)
 
@@ -2689,6 +2738,16 @@ SNAPADMIN_BACKUP_S3_EVERY_HOURS = 168               # weekly</code></pre>
     refused, with paramiko's bare <code>Failure</code> and no path at all. SnapAdmin now names the
     full intended path in that failure, so a wrong directory no longer reads as a credentials
     problem.</p>
+    <p id="sftp-login-directory"><strong>The opposite case: the login directory <em>is</em> the
+    absolute path.</strong> Several managed SFTP products log you straight into the directory you
+    would configure — <code>pwd</code> right after login prints it. There the absolute form is
+    correct, and the relative one resolves <em>inside</em> it: the directory does not exist, SnapAdmin
+    creates it, and every dump lands one level too deep. So keep the absolute value when
+    <code>pwd</code> already prints it, and accept the warning (or silence
+    <code>snapadmin.W022</code>). You do not have to guess which case you are in: the backup summary
+    and the <code>db_backup_stored</code> log line name the directory the <strong>server
+    resolved</strong>, not the configured string, and a directory created on the fly is logged as the
+    warning <code>sftp_backup_dir_created</code>.</p>
   </div>
 
   <h3 id="storage-box">Hetzner Storage Box — a worked SFTP recipe</h3>
@@ -2871,6 +2930,9 @@ SNAPADMIN_BACKUP_ENV_FILE = "/etc/snapadmin/project.env"</code></pre>
     <code>.env</code> file holds <code>SECRET_KEY</code>, database passwords and API keys; it is never
     written to a backup destination unencrypted.
   </div>
+  <p id="backup-env-w024">Naming <code>env</code> with no file behind it is reported too:
+  <code>snapadmin.W024</code> warns when <code>SNAPADMIN_BACKUP_ENV_FILE</code> is unset or does not
+  point at a file, because the run would otherwise skip that part and still report success.</p>
 
   <p>An unreadable media file (permission error, a broken symlink, one that vanished mid-run) is
   <strong>skipped with a warning</strong>, not an aborted backup — a broken thumbnail must not cost you
@@ -2918,6 +2980,7 @@ python manage.py snapadmin_restore sftp:snapadmin-manifest-20260826-020000.json 
     <tr><td><code>--identity PATH</code></td><td>Path to the AGE identity (private key) file, for an encrypted bundle</td></tr>
     <tr><td><code>--confirm</code></td><td>Actually perform the restore (default: plan only)</td></tr>
     <tr><td><code>--no-snapshot</code></td><td>Skip the automatic pre-restore snapshot — prints a loud warning</td></tr>
+    <tr><td><code>--database ALIAS</code></td><td>Restore the <code>db</code> part into another <code>DATABASES</code> alias — a restore drill — and print the row count per table (default: <code>default</code>)</td></tr>
   </table>
 
   <div class="callout callout-warn">
@@ -2930,6 +2993,34 @@ python manage.py snapadmin_restore sftp:snapadmin-manifest-20260826-020000.json 
   <p>Restoring <code>db</code> is <strong>not live-safe</strong>: existing connections are terminated
   and, for PostgreSQL, the database is dropped and recreated before the dump loads. Run it in a
   maintenance window. SQLite is a straight file replace after closing the connection.</p>
+
+  <h3 id="restore-drill">Restore drills — <code>--database</code></h3>
+  <p>A periodic restore into a throwaway database is what proves a backup works. Declare the drill
+  database as an extra alias and restore into it; <code>default</code> is never touched:</p>
+  <pre><code># settings.py
+DATABASES = {
+    "default": {...},
+    "restore_drill": {**DATABASES["default"], "NAME": "app_restore_drill", "USER": "drill"},
+}
+
+# The drill — plan first, then restore and verify:
+python manage.py snapadmin_restore sftp:snapadmin-manifest-20260826-020000.json --database restore_drill
+python manage.py snapadmin_restore sftp:snapadmin-manifest-20260826-020000.json --database restore_drill \
+    --identity /etc/snapadmin/age-identity.txt --confirm</code></pre>
+  <ul>
+    <li><strong>Only <code>db</code> goes to another alias.</strong> Media and <code>.env</code> have
+      no per-alias target and would land on the live system, so a bare selection restores
+      <code>db</code> alone and <code>--only media</code>/<code>env</code> is refused.</li>
+    <li><strong>An alias that is <code>default</code> in disguise is refused</strong> — the same
+      SQLite file, or the same host, port and database name — so a typo cannot turn a drill into an
+      overwrite of production.</li>
+    <li><strong>No <code>CREATEDB</code> needed.</strong> On PostgreSQL the drill database is
+      emptied by recreating its <code>public</code> schema instead of <code>dropdb</code>/<code>createdb</code>;
+      the drill role only has to own that database.</li>
+    <li><strong>The result is verified.</strong> The command prints the row count of every table in
+      the drill database, and a restore that produced no tables fails instead of reporting success.
+      The pre-restore snapshot is skipped — it covers <code>default</code>, which a drill never touches.</li>
+  </ul>
 
   <h3 id="restore-rollback">The pre-restore safety net: <code>snapadmin_rollback</code></h3>
   <p>Before a <code>--confirm</code>ed restore touches anything, it automatically snapshots the
@@ -3220,6 +3311,20 @@ logger.error("payment_failed", reason="card_declined")</code></pre>
   a per-row deadline is a retention rule on its own. On an <code>ES_ONLY</code> model the deadline
   column must be mapped as a <code>date</code> in the index, like <code>data_retention_field</code>.</p>
 
+  <h3 id="retention-protected">Rows a <code>PROTECT</code> foreign key still holds</h3>
+  <p>A tree whose retention is decided per row — <code>parent = ForeignKey("self",
+  on_delete=PROTECT)</code> — has due parents whose children are not due yet. Such a row is
+  <strong>kept, not allowed to abort the model's purge</strong>: everything else that is due goes, a
+  fully due subtree goes leaves first in the same run, and the kept rows are retried on the next run
+  once whatever protects them has expired too. A kept row keeps its
+  <code>data_retention_files</code> as well — files are deleted only for rows that are actually
+  deleted. The same applies to <code>RESTRICT</code>.</p>
+  <p>It is reported, never swallowed: <code>purge_expired()</code> returns a
+  <code>SnapPurgeResult</code> — still an <code>int</code>, the purged count — whose
+  <code>skipped_protected</code> attribute counts the kept rows; the management command prints a
+  <code>SKIPPED</code> line per model, and the Celery task's summary carries them under
+  <code>skipped_protected</code>.</p>
+
   <h3>Running the cleanup</h3>
   <pre><code># Via Celery Beat (recommended — add to CELERY_BEAT_SCHEDULE):
 "purge-expired-data": {
@@ -3296,7 +3401,10 @@ AuditLog.purge_expired(dry_run=True)  # count what *would* be deleted, delete no
     <code>SNAPADMIN_EXPORT_RETENTION_DAYS</code>) but no <code>CELERY_BEAT_SCHEDULE</code> entry runs
     <code>snapadmin.purge_expired_data</code> — every report behind this warning turned out to be
     retention configured but nothing ever scheduled to enforce it, so the table quietly grows forever
-    exactly as if it had never been set.
+    exactly as if it had never been set. Running
+    <code>manage.py snapadmin_purge_expired_data</code> from an external scheduler instead (cron, a
+    Kubernetes CronJob, a systemd timer) is invisible from settings — declare it with
+    <code>SNAPADMIN_PURGE_EXTERNAL = True</code> and the warning goes quiet with retention still on.
   </div>
 
   <h3 id="retention-table">Every purge the package performs, in one place</h3>
@@ -3793,6 +3901,19 @@ SNAPADMIN_MASKED_FIELDS = {
   (<code>snapadmin.E001</code>) or a field name that doesn't exist on it
   (<code>snapadmin.E002</code>) is a startup error, not a silent no-op — masking a typo'd field would
   otherwise fail open.</p>
+  <p id="masking-hand-written-admin"><strong>Hand-written admins.</strong> The changelist masking
+  lives in <code>snapadmin.models.PIIMaskingAdminMixin</code>, which generated admins get
+  automatically. A model you register yourself — a custom user model derived from
+  <code>AbstractUser</code> is the usual case — needs it as the first base of its
+  <code>ModelAdmin</code>; without it the admin shows those fields unmasked, which
+  <code>snapadmin.W025</code> reports at <code>manage.py check</code> (every <code>AdminSite</code>
+  is checked, not only the default one). A masked column keeps the field's own
+  <code>verbose_name</code>, translation included.</p>
+  <pre><code>from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from snapadmin.models import PIIMaskingAdminMixin
+
+class UserAdmin(PIIMaskingAdminMixin, BaseUserAdmin):
+    ...</code></pre>
 
   <h4 id="masking-rules">Per-field rules — <code>SNAPADMIN_MASKING_RULES</code></h4>
   <p>The setting above says <em>which</em> fields are sensitive; this one says <em>how</em> each is
@@ -4496,6 +4617,7 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset — no p
     <tr><td><code>SNAPADMIN_REST_API_ENABLED</code></td><td><code>False</code></td><td>Serve the REST CRUD endpoints</td></tr>
     <tr><td><code>SNAPADMIN_SWAGGER_ENABLED</code></td><td><code>SNAPADMIN_REST_API_ENABLED</code></td><td>Serve Swagger UI + ReDoc — follows the REST setting unless set explicitly</td></tr>
     <tr><td><code>SNAPADMIN_GRAPHQL_ENABLED</code></td><td><code>False</code></td><td>Serve the GraphQL endpoint</td></tr>
+    <tr><td><code>SNAPADMIN_TOKEN_ADMIN_ENABLED</code></td><td><code>None</code> (auto)</td><td>Whether <code>register_all_admins()</code> offers the <code>APIToken</code> admin. Unset, it follows the APIs that accept tokens (REST or GraphQL on); <code>True</code>/<code>False</code> force it (see <a href="#token-admin-registration">Admin Registration</a>)</td></tr>
     <tr><td><code>SNAPADMIN_GRAPHIQL_ENABLED</code></td><td><code>DEBUG</code></td><td>GraphiQL playground — keep it out of production</td></tr>
     <tr><td><code>SNAPADMIN_GRAPHQL_REQUIRE_AUTH</code></td><td><code>True</code></td><td>Require auth + per-model permissions on every GraphQL resolver</td></tr>
     <tr><td><code>SNAPADMIN_URL_PREFIX</code></td><td><code>""</code></td><td>Extra path segment prepended to every SnapAdmin route (relocates the whole API/GraphQL/Swagger surface)</td></tr>
@@ -4554,6 +4676,7 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset — no p
     <tr><td><code>SNAPADMIN_ENCRYPTION_KEY_FILE</code></td><td>—</td><td>Path to a mounted secret holding the same content</td></tr>
     <tr><td><code>SNAPADMIN_AUDIT_LOG_ENABLED</code></td><td><code>True</code></td><td>Record admin create/update/delete as an immutable audit trail</td></tr>
     <tr><td><code>SNAPADMIN_AUDIT_RETENTION_DAYS</code></td><td><code>365</code></td><td>Retention window for <code>snapadmin_audit_export --purge</code></td></tr>
+    <tr><td><code>SNAPADMIN_PURGE_EXTERNAL</code></td><td><code>False</code></td><td>Declare that an external scheduler (cron, a Kubernetes CronJob) runs <code>snapadmin_purge_expired_data</code>, so <code>snapadmin.W012</code> stops asking for a Celery Beat entry (see <a href="#retention-w012">GDPR Data Retention</a>)</td></tr>
     <tr><td><code>SNAPADMIN_ESTIMATED_COUNT</code></td><td><code>True</code></td><td>Use PostgreSQL's fast row estimate for huge, unfiltered changelists</td></tr>
     <tr><td><code>SNAPADMIN_ESTIMATED_COUNT_THRESHOLD</code></td><td><code>100000</code></td><td>Only estimate the count above this many rows</td></tr>
   </table>

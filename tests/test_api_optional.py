@@ -194,9 +194,12 @@ class TestCoreBootsWithoutTheAPIStack:
             # The admin layer is what an API-less project actually uses: register
             # SnapAdmin's own models the way a project's admin.py does.
             from django.contrib import admin
-            from snapadmin.models import APIToken, SnapModel
+            from snapadmin.models import APIToken, ErrorEvent, SnapModel, SnapadminAuditLog
             SnapModel.register_all_admins()
-            assert APIToken in admin.site._registry, "the admin did not register"
+            assert ErrorEvent in admin.site._registry, "the admin did not register"
+            assert SnapadminAuditLog in admin.site._registry, "the admin did not register"
+            # No API accepts tokens here, so no token admin is offered (#EXT2h).
+            assert APIToken not in admin.site._registry, "token admin offered without an API"
             print("OK")
             """
         )

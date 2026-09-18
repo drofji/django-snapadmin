@@ -12,7 +12,39 @@ the `0.x` beta series.
 
 ## Unreleased
 
-_Nothing yet._
+### Breaking
+- `snapadmin.E027` fails `manage.py check` when `SnapModel`'s `EsManager` silently replaces a
+  mixin's own `objects` manager, or a `tenant_scoped` model's `objects` is not an `EsManager` —
+  both cross-scope data leaks. Declare a manager inheriting from both on the model.
+- The `APIToken` admin is registered only while REST or GraphQL is on;
+  `SNAPADMIN_TOKEN_ADMIN_ENABLED = True` keeps it for projects using token auth in their own views.
+- The generated changelist shows the primary key for integer keys only (`admin_list_display_pk`
+  overrides), and references a key not named `id` by its real name.
+- The SFTP backup location in the run summary and `db_backup_stored` is the directory the server
+  resolved, so a relative `SNAPADMIN_BACKUP_SFTP_DIR` now reports the full path from the login
+  directory.
+
+### Added
+- `snapadmin_restore --database <alias>` for restore drills: `db` only, into another alias, with a
+  per-table row count; an alias pointing at `default`'s database is refused.
+- `SNAPADMIN_PURGE_EXTERNAL = True` lets an external cron satisfy `snapadmin.W012`.
+- Snap fields accept a positional `verbose_name`, like Django fields.
+- System checks `snapadmin.W023` (backups configured but disabled), `W024` (`env` part with no env
+  file) and `W025` (masked fields behind a hand-written admin that does not mask).
+- `SnapModel.purge_expired()` returns `SnapPurgeResult`, an `int` with `skipped_protected`.
+
+### Changed
+- `snapadmin.W022`'s hint covers SFTP accounts whose login directory is the absolute path, and a
+  directory created on the fly is logged as `sftp_backup_dir_created`.
+
+### Fixed
+- A due row held by a `PROTECT`/`RESTRICT` foreign key no longer aborts the model's retention purge,
+  and no longer loses its `data_retention_files` while the row stays.
+- A masked changelist column keeps the field's `verbose_name`.
+- Generated `ModelAdmin` classes report the model's module as `__module__`.
+
+### Deprecated
+- `SnapModel.admin_sections` — never read; setting it raises `snapadmin.W026`.
 
 ## 0.1.0b9 — 2026-09-15
 

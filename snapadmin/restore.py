@@ -210,8 +210,48 @@ def _ungzip_to(src: Path, dst: Path) -> None:
         shutil.copyfileobj(reader, writer)
 
 
-def restore_db(decrypted_path: Path) -> None:
-    """Overwrite the live database with the dump at `decrypted_path` (gzipped).
+def _database_settings(database: str) -> dict:
+    databases = settings.DATABASES
+    if database not in databases:
+        raise RestoreError(
+            f"{database!r} is not in DATABASES — configured aliases: {', '.join(sorted(databases))}."
+        )
+    return databases[database]
+
+
+def _database_identity(db: dict) -> tuple[str, ...]:
+    """What makes two ``DATABASES`` entries the same physical database."""
+    engine = str(db.get("ENGINE", ""))
+    if "sqlite" in engine:
+        return (engine, str(Path(str(db.get("NAME", ""))).resolve()))
+    return (
+        engine,
+        str(db.get("HOST") or "localhost"),
+        str(db.get("PORT") or "5432"),
+        str(db.get("NAME") or ""),
+    )
+
+
+def _check_restore_target(database: str) -> dict:
+    """The settings of the alias a restore writes to, refusing an alias that is ``default`` in disguise.
+
+    A restore drill (#EXT2f) goes to a throwaway alias; one that resolves to
+    the same file, or the same server and database name, as ``default`` would
+    silently turn the drill into an overwrite of the live database.
+    """
+    db = _database_settings(database)
+    if database != "default" and _database_identity(db) == _database_identity(
+        _database_settings("default")
+    ):
+        raise RestoreError(
+            f"DATABASES[{database!r}] points at the same database as 'default' — "
+            "refusing to restore over the live database through another alias."
+        )
+    return db
+
+
+def restore_db(decrypted_path: Path, database: str = "default") -> None:
+    """Overwrite a database with the dump at `decrypted_path` (gzipped).
 
     SQLite: the dump *is* the database file, gzip-compressed — decompress
     straight over the configured file, after closing the current connection
@@ -220,12 +260,18 @@ def restore_db(decrypted_path: Path) -> None:
     stdin — existing connections are terminated first so the reload isn't
     fighting live traffic, then the database is dropped and recreated empty.
     Both are inherently **not** live-safe; run this in a maintenance window.
+
+    ``database`` names the ``DATABASES`` alias to restore into (#EXT2f) — a
+    restore drill into a throwaway database. Any alias but ``default`` is
+    refused when it resolves to the same database as ``default``, and on
+    PostgreSQL it is reset by recreating its ``public`` schema rather than
+    with ``dropdb``/``createdb``, so the drill role needs no ``CREATEDB``.
     """
     from django.db import connections
 
-    db = settings.DATABASES["default"]
+    db = _check_restore_target(database)
     engine = db["ENGINE"]
-    connections["default"].close()
+    connections[database].close()
 
     if "sqlite" in engine:
         target = str(db["NAME"])
@@ -233,13 +279,13 @@ def restore_db(decrypted_path: Path) -> None:
         return
 
     if "postgresql" in engine:
-        _restore_postgres(db, decrypted_path)
+        _restore_postgres(db, decrypted_path, recreate_database=database == "default")
         return
 
     raise RestoreError(f"Unsupported database engine for restore: {engine}")
 
 
-def _restore_postgres(db: dict, decrypted_path: Path) -> None:
+def _restore_postgres(db: dict, decrypted_path: Path, *, recreate_database: bool = True) -> None:
     host, port = str(db.get("HOST") or "localhost"), str(db.get("PORT") or "5432")
     user, name = str(db.get("USER") or ""), str(db.get("NAME") or "")
     env = {**os.environ, "PGPASSWORD": str(db.get("PASSWORD") or "")}
@@ -249,16 +295,25 @@ def _restore_postgres(db: dict, decrypted_path: Path) -> None:
         if process.returncode != 0:
             raise RestoreError(f"{args[0]} failed: {process.stderr.decode(errors='replace')}")
 
-    # Terminate other connections, then drop and recreate empty — a restore
-    # replaces the database wholesale rather than trying to reconcile with
-    # whatever is already there.
+    # Terminate other connections, then start from empty — a restore replaces
+    # the database wholesale rather than trying to reconcile with whatever is
+    # already there.
     terminate_sql = (
         f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
         f"WHERE datname = '{name}' AND pid <> pg_backend_pid();"
     )
     run(["psql", "--no-password", "-h", host, "-p", port, "-U", user, "-d", "postgres", "-c", terminate_sql])
-    run(["dropdb", "--no-password", "-h", host, "-p", port, "-U", user, name])
-    run(["createdb", "--no-password", "-h", host, "-p", port, "-U", user, name])
+    if recreate_database:
+        run(["dropdb", "--no-password", "-h", host, "-p", port, "-U", user, name])
+        run(["createdb", "--no-password", "-h", host, "-p", port, "-U", user, name])
+    else:
+        # A drill target: emptied in place, so the role needs to own the
+        # schema, not to hold CREATEDB.
+        run([
+            "psql", "--no-password", "-h", host, "-p", port, "-U", user, "-d", name,
+            "-v", "ON_ERROR_STOP=1",
+            "-c", "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;",
+        ])
 
     with gzip.open(decrypted_path, "rb") as sql:
         process = subprocess.Popen(
@@ -270,6 +325,34 @@ def _restore_postgres(db: dict, decrypted_path: Path) -> None:
         stderr_output = process.stderr.read()
         if process.wait() != 0:
             raise RestoreError(f"psql restore failed: {stderr_output.decode(errors='replace')}")
+
+
+def table_row_counts(database: str = "default") -> dict[str, int]:
+    """``{table: row count}`` for every table in the ``database`` alias, sorted by name.
+
+    The verification step of a restore drill (#EXT2f): proof that the
+    restored database holds data, not only that the restore command exited 0.
+    """
+    from django.db import connections
+
+    connection = connections[database]
+    counts: dict[str, int] = {}
+    with connection.cursor() as cursor:
+        for table in sorted(connection.introspection.table_names(cursor)):
+            cursor.execute(f"SELECT COUNT(*) FROM {connection.ops.quote_name(table)}")
+            counts[table] = int(cursor.fetchone()[0])
+    return counts
+
+
+def verify_restored_database(database: str) -> dict[str, int]:
+    """:func:`table_row_counts` for a freshly restored alias; no tables at all is a failed restore."""
+    counts = table_row_counts(database)
+    if not counts:
+        raise RestoreError(
+            f"The restore into {database!r} finished, but the database has no tables — "
+            "the dump did not load. Treat this drill as failed."
+        )
+    return counts
 
 
 def restore_media(decrypted_path: Path, media_exclude_existing: bool = False) -> int:
@@ -329,7 +412,7 @@ def select_parts(manifest: dict, *, only: list[str] | None, skip: list[str] | No
     return selected
 
 
-def plan_restore(resolved: ResolvedSource, parts: list[str]) -> list[str]:
+def plan_restore(resolved: ResolvedSource, parts: list[str], database: str = "default") -> list[str]:
     """Human-readable lines describing what --confirm would do. Touches nothing."""
     manifest = resolved.manifest
     lines = [
@@ -345,8 +428,9 @@ def plan_restore(resolved: ResolvedSource, parts: list[str]) -> list[str]:
     for part in parts:
         entry = manifest["parts"][part]
         if part == "db":
-            db_name = settings.DATABASES["default"].get("NAME")
-            lines.append(f"  db: {entry['filename']} -> would replace database {db_name!r}")
+            db_name = settings.DATABASES.get(database, {}).get("NAME")
+            alias = f" (alias {database!r})" if database != "default" else ""
+            lines.append(f"  db: {entry['filename']} -> would replace database {db_name!r}{alias}")
         elif part == "media":
             lines.append(f"  media: {entry['filename']} -> would extract into MEDIA_ROOT")
         elif part == "env":
@@ -386,13 +470,26 @@ def perform_restore(
     *,
     identity_file: str = "",
     before_restore: Callable[[list[str]], None] | None = None,
+    database: str = "default",
 ) -> dict[str, str]:
     """Verify, decrypt and apply every part in `parts`. Only called after --confirm.
 
     `before_restore` — the pre-restore snapshot hook (#BKP1e) — runs after
     fetch+checksum verification (no point snapshotting before knowing the
     bundle is even usable) but before any part is actually applied.
+
+    `database` restores the ``db`` part into another ``DATABASES`` alias — a
+    restore drill (#EXT2f). Only ``db`` may go there: media and env have no
+    per-alias target and would overwrite the live system. The restored alias
+    is verified (:func:`verify_restored_database`) and the ``db`` result names
+    its table and row totals.
     """
+    if database != "default" and any(part != "db" for part in parts):
+        raise RestoreError(
+            f"Restoring into {database!r}: only the 'db' part can go to another "
+            "database — media and env would land on the live system."
+        )
+    _check_restore_target(database)
     results: dict[str, str] = {}
     work_dir = Path(tempfile.mkdtemp(prefix="snapadmin-restore-"))
     try:
@@ -407,8 +504,15 @@ def perform_restore(
                 continue
             decrypted = _decrypt_if_needed(fetched[part], resolved.manifest, identity_file, config)
             if part == "db":
-                restore_db(decrypted)
-                results["db"] = "restored"
+                restore_db(decrypted, database=database)
+                if database == "default":
+                    results["db"] = "restored"
+                else:
+                    counts = verify_restored_database(database)
+                    results["db"] = (
+                        f"restored into {database!r} "
+                        f"({len(counts)} tables, {sum(counts.values())} rows)"
+                    )
             elif part == "media":
                 count = restore_media(decrypted)
                 results["media"] = f"restored ({count} files)"

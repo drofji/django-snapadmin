@@ -7,6 +7,7 @@ Tests for the 3-2-1 database backup stack (v0.1.0a5):
 
 import gzip
 import json
+import posixpath
 import shutil
 import sys
 from datetime import datetime, timedelta
@@ -205,6 +206,9 @@ class FakeSFTP:
     #: Set to an exception a test wants ``put()`` to raise — a real server
     #: answers a refused upload with paramiko's bare ``IOError("Failure")``.
     put_error: Exception | None = None
+    #: Where the account lands after login — what ``pwd`` prints first thing.
+    #: ``chdir`` resolves a relative path against it, like a real server.
+    login_dir: str = "/home/backup"
 
     def __init__(self, fail_chdir_once):
         self.fail_chdir_once = fail_chdir_once
@@ -214,6 +218,7 @@ class FakeSFTP:
         self.chdir_calls = []
         self.mkdir_calls = []
         self.closed = False
+        self.cwd = None  # paramiko's getcwd() is None until the first chdir
         self.existing = list(FakeSFTP.shared_existing)
         self.contents = dict(FakeSFTP.shared_contents)
 
@@ -222,6 +227,10 @@ class FakeSFTP:
             self.fail_chdir_once = False
             raise IOError("No such file or directory")
         self.chdir_calls.append(path)
+        self.cwd = posixpath.normpath(posixpath.join(FakeSFTP.login_dir, path))
+
+    def getcwd(self):
+        return self.cwd
 
     def mkdir(self, path):
         self.mkdir_calls.append(path)
@@ -303,6 +312,7 @@ def fake_sftp(monkeypatch):
     FakeSFTP.shared_existing = [f"{BACKUP_PREFIX}00000000-000000.sql.gz"]
     FakeSFTP.shared_contents = {}
     FakeSFTP.put_error = None
+    FakeSFTP.login_dir = "/home/backup"
     monkeypatch.setattr(paramiko, "SSHClient", FakeSSHClient)
     monkeypatch.setattr(paramiko, "RejectPolicy", lambda: "reject-policy")
     return FakeSSHClient
@@ -1330,14 +1340,93 @@ class TestSftpUploadFailureNamesThePath:
     )
     def test_a_successful_upload_is_unchanged(self, tmp_path, fake_sftp):
         """The wrapper must not alter the working path — same chdir, same
-        relative put, same returned location."""
+        relative put. The returned location names the directory the server
+        actually resolved (#EXT2d): the login directory plus the relative value."""
         source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
         source.write_bytes(b"x")
         location = store_remote_sftp(source, get_backup_config())
         sftp = fake_sftp.instances[0].sftp
         assert sftp.chdir_calls == ["backups"]
         assert sftp.put_calls == [(str(source), source.name)]
-        assert location == f"sftp://offsite.example.com:22/backups/{source.name}"
+        assert location == f"sftp://offsite.example.com:22/home/backup/backups/{source.name}"
+
+
+class TestSftpReportsTheDirectoryTheServerUsed:
+    """#EXT2d — on managed SFTP products the login directory frequently *is*
+    the absolute path an operator configures. Following W022's old advice
+    (drop the leading slash) then made the relative ``chdir`` fail, the library
+    ``mkdir``-ed a same-named directory *inside* the login directory, and the
+    dump landed one level too deep — with a success report that echoed the
+    configured string either way. The report now names the directory the
+    server resolved, and a directory created on the fly is a warning."""
+
+    @override_settings(
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_DIR="data/backups",
+    )
+    def test_the_reported_misplacement_is_visible(self, tmp_path, fake_sftp):
+        from structlog.testing import capture_logs
+
+        FakeSFTP.login_dir = "/data/backups"
+        FakeSSHClient.fail_chdir_once = True  # "data/backups" does not exist under it
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+
+        with capture_logs() as emitted:
+            location = store_remote_sftp(source, get_backup_config())
+
+        assert location == f"sftp://offsite.example.com:22/data/backups/data/backups/{source.name}"
+        created = [e for e in emitted if e["event"] == "sftp_backup_dir_created"]
+        assert len(created) == 1
+        assert created[0]["log_level"] == "warning"
+        assert created[0]["configured"] == "data/backups"
+        assert created[0]["path"] == "/data/backups/data/backups"
+
+    @override_settings(
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_DIR="/data/backups",
+    )
+    def test_the_absolute_form_lands_in_the_login_directory(self, tmp_path, fake_sftp):
+        from structlog.testing import capture_logs
+
+        FakeSFTP.login_dir = "/data/backups"
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+
+        with capture_logs() as emitted:
+            location = store_remote_sftp(source, get_backup_config())
+
+        assert location == f"sftp://offsite.example.com:22/data/backups/{source.name}"
+        assert not [e for e in emitted if e["event"] == "sftp_backup_dir_created"]
+
+    @override_settings(
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_DIR="/dumps",
+    )
+    def test_a_refused_upload_names_the_resolved_directory(self, tmp_path, fake_sftp):
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+        FakeSFTP.put_error = IOError("Failure")
+
+        with pytest.raises(BackupError) as excinfo:
+            store_remote_sftp(source, get_backup_config())
+
+        assert f"'/dumps/{source.name}'" in str(excinfo.value)
+
+    @override_settings(
+        SNAPADMIN_BACKUP_SFTP_HOST="offsite.example.com",
+        SNAPADMIN_BACKUP_SFTP_DIR="dumps",
+    )
+    def test_a_server_that_reports_no_directory_falls_back_to_the_configured_path(
+        self, tmp_path, fake_sftp, monkeypatch
+    ):
+        monkeypatch.setattr(FakeSFTP, "getcwd", lambda self: None)
+        source = tmp_path / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        source.write_bytes(b"x")
+
+        location = store_remote_sftp(source, get_backup_config())
+
+        assert location == f"sftp://offsite.example.com:22/dumps/{source.name}"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

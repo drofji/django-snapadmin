@@ -187,6 +187,11 @@ Key protections:
   available for administrators who want it gone outright. A regular user manages their own tokens —
   list, rotate, deactivate — without needing to be a superuser; a superuser sees and manages every
   token.
+- **No token admin for an API that is off.** `register_all_admins()` offers the `APIToken` admin only
+  while an API that accepts tokens is enabled (`SNAPADMIN_REST_API_ENABLED` or
+  `SNAPADMIN_GRAPHQL_ENABLED`), so an install with both off is not handed a screen for minting
+  credentials to a surface that does not exist. `SNAPADMIN_TOKEN_ADMIN_ENABLED` forces it either way
+  — `True` for a project authenticating its own views with `APITokenAuthentication`.
 
 ### Injection / XSS
 - **Wysiwyg (rich-text) values are sanitized with `nh3` on write and on render.** The field's
@@ -296,6 +301,11 @@ Key protections:
   backtrack catastrophically (`(a+)+`); values over 4096 characters skip the regex. Every one of those
   paths — plus a replacement referencing a group the pattern lacks — falls back to the built-in
   masker, so a broken rule degrades to *more* masking, never to raw data.
+- **A hand-written admin that does not mask is reported (`snapadmin.W025`)** — changelist masking
+  lives in `PIIMaskingAdminMixin`, which generated admins get automatically. A model a project
+  registers with its own `ModelAdmin` (a custom user model is the usual case) showed its masked
+  fields — and its encrypted fields — raw, with nothing to say so. `manage.py check` now warns for
+  every model with masked fields whose admin, on any `AdminSite`, lacks the mixin.
 - **Field-encryption key management** — encrypted model fields read their key
   material through one resolver, `snapadmin.encryption.keys`, configured by the single
   `SNAPADMIN_ENCRYPTION` dict. Four sources are tried most-secure-first and **never merged**, so a
@@ -417,7 +427,15 @@ Key protections:
   `SNAPADMIN_EXPORT_RETENTION_DAYS`)
   but no `CELERY_BEAT_SCHEDULE` entry runs `snapadmin.purge_expired_data` — the exact state every
   retention-scattered report this batch of checks addresses turned out to be in: retention configured,
-  nothing scheduled to enforce it.
+  nothing scheduled to enforce it. A project running the management command from an external
+  scheduler declares it with `SNAPADMIN_PURGE_EXTERNAL = True`, which keeps retention on and the
+  warning quiet.
+- **One protected row no longer stops a model's purge.** A due row still referenced through a
+  `PROTECT`/`RESTRICT` foreign key is kept and retried on the next run instead of aborting the whole
+  model's purge — before, the `data_retention_files` pass had already deleted the files of every due
+  row by the time the delete failed. Files now go only for rows that are actually deleted, and the kept
+  rows are reported (`SnapPurgeResult.skipped_protected`, the command's `SKIPPED` line, the task's
+  `skipped_protected` summary).
 - **GDPR subject-access requests** (`manage.py snapadmin_subject_request export|delete`) — export or
   delete everything reachable from one data subject, via every registered model's own `subject_path`
   declaration (`snapadmin.E011` fails `manage.py check` for a registered model that never declares it
@@ -545,6 +563,17 @@ Key protections:
   be named explicitly in `--only`. A restore is **not live-safe**: existing database connections are
   terminated and, for PostgreSQL, the database is dropped and recreated before the dump loads — plan
   a maintenance window.
+- **Restore drills without touching production** — `snapadmin_restore --database <alias>` restores
+  only the `db` part into another `DATABASES` alias and prints the row count per table; a restore that
+  produced no tables fails. An alias that resolves to the same database as `default` (same SQLite
+  file, or same host, port and name) is refused, and `media`/`env` cannot be sent there — they have
+  no per-alias target and would land on the live system. On PostgreSQL the drill database is emptied
+  by recreating its `public` schema, so the drill role needs no `CREATEDB`.
+- **Backups that are configured but off are reported (`snapadmin.W023`, `snapadmin.W024`)** —
+  `SNAPADMIN_BACKUP_ENABLED` defaults to off and every other backup check stays silent while it is,
+  so a project with a Beat entry, destinations and AGE recipients could run nightly and store nothing.
+  W023 warns about exactly that combination; W024 warns when `env` is in `SNAPADMIN_BACKUP_INCLUDE`
+  but `SNAPADMIN_BACKUP_ENV_FILE` is unset or not a file, which used to skip the part silently.
 - **The pre-restore snapshot and `manage.py snapadmin_rollback`** — before a `--confirm`ed restore
   touches anything, the current live state of every part it is about to overwrite is automatically
   snapshotted (encrypted the same way a real backup would be, if recipients are configured) into
@@ -588,6 +617,15 @@ Key protections:
   emails — and prefer a private channel for the health alert, which names failing subsystems.
 
 ### Multi-tenancy
+- **A scoping manager hidden by `SnapModel` stops startup (`snapadmin.E027`)** — `SnapModel` declares
+  `objects = EsManager()`, and Django resolves a manager name by first match in MRO order, so in
+  `class Order(SnapModel, OwnerScopedMixin)` the mixin's own `objects` — the manager that filters by
+  owner or tenant — was silently replaced and every consumer saw every scope's rows. The same check
+  covers the reverse: a `tenant_scoped` model whose `objects` is **not** an `EsManager` (a mixin listed
+  first, or a manager declared on the model) loses tenant isolation, which is enforced in
+  `EsManager`. An **error** either way, because the failure is a cross-scope data leak; declare a
+  manager that inherits from both (documented), or silence `snapadmin.E027` if the plain `EsManager`
+  is really meant on a model that is not tenant-scoped.
 - **Row-level tenant isolation** (`snapadmin.tenancy`) — a model opts in with `tenant_scoped = True`
   plus a tenant column (`tenant_field()`); once opted in, **every generated surface requires a bound
   tenant to see or write a single row**: the admin, REST, GraphQL, Elasticsearch routing

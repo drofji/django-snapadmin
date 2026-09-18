@@ -278,6 +278,14 @@ SNAPADMIN_PROFILE = os.getenv('SNAPADMIN_PROFILE', 'full')
 SNAPADMIN_REST_API_ENABLED = env_bool('SNAPADMIN_REST_API_ENABLED', True)
 SNAPADMIN_SWAGGER_ENABLED = env_bool('SNAPADMIN_SWAGGER_ENABLED', True)
 SNAPADMIN_GRAPHQL_ENABLED = env_bool('SNAPADMIN_GRAPHQL_ENABLED', True)
+# APIToken admin: unset (None) follows the APIs that accept tokens — offered while
+# REST or GraphQL is on. True/False forces it; True for a project whose own views
+# authenticate with snapadmin.api.authentication.APITokenAuthentication.
+# An empty value (dist.env ships it empty) means unset, not False.
+SNAPADMIN_TOKEN_ADMIN_ENABLED = (
+    env_bool('SNAPADMIN_TOKEN_ADMIN_ENABLED', None)
+    if os.getenv('SNAPADMIN_TOKEN_ADMIN_ENABLED', '').strip() else None
+)
 # Optional extra segment prepended to every snapadmin route (REST/Swagger/GraphQL),
 # for projects whose mount point already collides (e.g. they own /api/). Empty = no-op.
 SNAPADMIN_URL_PREFIX = os.getenv('SNAPADMIN_URL_PREFIX', '')
@@ -515,6 +523,10 @@ SNAPADMIN_APP_LABELS = {}    # {"auth": "Administration"} → rename a group's h
 # Export for a SIEM with `manage.py snapadmin_audit_export`.
 SNAPADMIN_AUDIT_LOG_ENABLED = env_bool('SNAPADMIN_AUDIT_LOG_ENABLED', True)
 SNAPADMIN_AUDIT_RETENTION_DAYS = int(os.getenv('SNAPADMIN_AUDIT_RETENTION_DAYS', '365'))
+# True declares that an external scheduler (cron, a Kubernetes CronJob) runs
+# `manage.py snapadmin_purge_expired_data`, so snapadmin.W012 stops asking for a
+# Celery Beat entry. The demo schedules the purge through Beat, so it stays False.
+SNAPADMIN_PURGE_EXTERNAL = env_bool('SNAPADMIN_PURGE_EXTERNAL', False)
 
 # Row-level multi-tenancy (#FUT1). Dotted path to a callable resolving the
 # current tenant — request-scoped (admin/REST/GraphQL/offline cache) and
@@ -900,6 +912,10 @@ CELERY_BEAT_SCHEDULE = {
         "description": _("3-2-1 DB backups to local / network / remote FTP when due"),
     },
 }
+# Schedule the backup task only while backups are on: a Beat entry for a
+# disabled feature runs nightly, stores nothing and is what snapadmin.W023 flags.
+if not SNAPADMIN_BACKUP_ENABLED:
+    del CELERY_BEAT_SCHEDULE["run-db-backups"]
 
 # ------------------------------------------------------------------------------
 # EXTRA SETTINGS (optional — django-snapadmin[extra-settings]; used by the demo only)

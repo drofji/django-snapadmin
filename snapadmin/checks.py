@@ -468,8 +468,11 @@ def check_backup_sftp_dir(app_configs, **kwargs):
     store_remote_sftp`'s failure message is what explains it.
 
     A warning, never an error: an absolute path is exactly right whenever the
-    SSH account is not restricted to a subtree, and nothing in ``settings.py``
-    says which kind of account this is.
+    SSH account is not restricted to a subtree — or when the login directory
+    *is* that path, as on several managed SFTP products (#EXT2d) — and nothing
+    in ``settings.py`` says which kind of account this is. A system check must
+    not open a network connection to find out, so the hint names both cases and
+    the upload itself reports the directory the server resolved.
     """
     from snapadmin.backup import get_backup_config
 
@@ -483,11 +486,14 @@ def check_backup_sftp_dir(app_configs, **kwargs):
     return [Warning(
         f"SNAPADMIN_BACKUP_SFTP_DIR = {directory!r} is an absolute path, but the "
         "value is relative to the SSH login directory.",
-        hint=f"Write it as {relative!r} unless the SSH account really can reach "
-             f"{directory!r} from the filesystem root. On a jailed account (a "
-             "storage sub-account, a chrooted user) the directory change appears "
-             "to succeed and the upload is refused instead, with no path in the "
-             "error.",
+        hint=f"Keep {directory!r} if 'pwd' right after an SSH login already prints "
+             "it — some managed SFTP products log you in there, and the relative "
+             f"form would then create {relative!r} inside it, one level too deep. "
+             f"Otherwise write {relative!r}: on a jailed account (a storage "
+             "sub-account, a chrooted user) the directory change appears to succeed "
+             "and the upload is refused instead. The backup summary and the "
+             "'db_backup_stored' log line name the directory the server actually "
+             "used, so the first run shows which case you are in.",
         id="snapadmin.W022",
     )]
 
@@ -722,7 +728,7 @@ def check_retention_purge_scheduled(app_configs, **kwargs):
     bounded quietly growing forever — the exact state every #RET2 report was
     actually in. This can only see ``CELERY_BEAT_SCHEDULE`` as Django settings
     define it; a cron entry calling the management command directly is
-    invisible here and does not need to trip this warning.
+    invisible here, so ``SNAPADMIN_PURGE_EXTERNAL = True`` declares one.
     """
     from snapadmin.models import SnapadminAuditLog, _retention_configured
 
@@ -744,6 +750,11 @@ def check_retention_purge_scheduled(app_configs, **kwargs):
     }
     if "snapadmin.purge_expired_data" in scheduled_tasks:
         return []
+    # An external scheduler (cron, a Kubernetes CronJob, systemd timer) running
+    # the management command is invisible from settings — the project says so
+    # instead (#EXT2e). Without this, following the hint below kept the warning.
+    if get_setting("SNAPADMIN_PURGE_EXTERNAL", False):
+        return []
 
     return [Warning(
         "Retention is configured (a model's data_retention_days or "
@@ -753,7 +764,8 @@ def check_retention_purge_scheduled(app_configs, **kwargs):
         "the tables it names will keep growing until something calls it.",
         hint="Add a CELERY_BEAT_SCHEDULE entry for the 'snapadmin.purge_expired_data' "
              "task (see docs/index.html#gdpr), or run "
-             "'manage.py snapadmin_purge_expired_data' from an external cron instead.",
+             "'manage.py snapadmin_purge_expired_data' from an external cron and "
+             "declare it with SNAPADMIN_PURGE_EXTERNAL = True.",
         id="snapadmin.W012",
     )]
 
@@ -1838,6 +1850,243 @@ def check_extra_settings_admin_app(app_configs, **kwargs) -> list[CheckMessage]:
     )]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Second field report (#EXT2) — integration traps a project cannot see
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _shadowed_objects_manager(model: type) -> tuple[type, object] | None:
+    """``(base, manager)`` when ``SnapModel.objects`` hides a base's own ``objects``.
+
+    Django resolves a manager name by first match in MRO order, so in
+    ``class Order(SnapModel, OwnerScopedMixin)`` the ``EsManager`` that
+    :class:`~snapadmin.models.SnapModel` declares wins over the mixin's
+    ``objects`` — and a manager that exists to filter rows by owner or tenant
+    is dropped without a message. Returns the first base (after the class
+    whose manager won) that declares an ``objects`` manager which is not an
+    ``EsManager``, or ``None`` when nothing is hidden: the model declares its
+    own ``objects``, the mixin comes first in the MRO, or no base declares one.
+    """
+    from snapadmin.es import EsManager
+    from snapadmin.models import SnapModel
+
+    if not (isinstance(model, type) and issubclass(model, SnapModel)):
+        return None
+    # Django's own resolution order: every class in the MRO that declares an
+    # ``objects`` manager, first declaration wins.
+    declarations = [
+        (base, manager)
+        for base in model.__mro__
+        for manager in getattr(getattr(base, "_meta", None), "local_managers", ())
+        if manager.name == "objects"
+    ]
+    if not declarations or declarations[0][0] is not SnapModel:
+        # The project declared the winning manager itself — a deliberate choice.
+        return None
+    for base, manager in declarations[1:]:
+        if not isinstance(manager, EsManager):
+            return base, manager
+    return None
+
+
+def _tenant_scoping_manager_lost(model: type) -> bool:
+    """Whether a ``tenant_scoped`` SnapModel's ``objects`` is not an ``EsManager``.
+
+    Tenant scoping is enforced in ``EsManager.get_queryset`` and every generated
+    surface reads through ``Model.objects``. Any other manager there — a mixin
+    listed before ``SnapModel``, or one declared on the model — serves every
+    tenant's rows, which ``snapadmin.E009`` (a claim about the tenant column)
+    cannot see.
+    """
+    from snapadmin.es import EsManager
+    from snapadmin.models import SnapModel
+    from snapadmin.tenancy import is_tenant_scoped
+
+    if not (isinstance(model, type) and issubclass(model, SnapModel)):
+        return False
+    if not is_tenant_scoped(model):
+        return False
+    return not isinstance(model._meta.managers_map.get("objects"), EsManager)
+
+
+def check_snap_model_manager_shadowing(app_configs, **kwargs) -> list[CheckMessage]:
+    """Error: ``SnapModel``'s ``objects`` and a project's own manager replace each other silently.
+
+    Two directions, one cause — Django resolves ``objects`` by first match in
+    MRO order: ``SnapModel``'s ``EsManager`` hides a mixin's scoping manager, or,
+    on a ``tenant_scoped`` model, another manager hides the ``EsManager`` that
+    enforces tenant isolation.
+
+    An **error**, not a warning, on purpose (#EXT2b): the manager being hidden
+    is usually a scoping one — raise without a tenant, filter by owner — and
+    losing it means every consumer of ``Model.objects``, the generated admin
+    and the API sees every scope's rows. Nothing else reports it. The rare
+    project that really wants the plain ``EsManager`` there silences
+    ``snapadmin.E027``; everyone else re-declares the manager they meant.
+    """
+    errors: list[CheckMessage] = []
+    for model in apps.get_models():
+        if _tenant_scoping_manager_lost(model):
+            manager_cls = type(model._meta.managers_map["objects"]).__name__
+            errors.append(Error(
+                f"{model._meta.label} sets tenant_scoped = True, but its 'objects' is "
+                f"{manager_cls}, not an EsManager — tenant scoping is enforced in "
+                "EsManager, so Model.objects, the generated admin and the API serve "
+                "every tenant's rows.",
+                hint=f"Make 'objects' a manager that inherits from both: 'class "
+                     f"{model.__name__}Manager({manager_cls}, EsManager): pass' and "
+                     f"'objects = {model.__name__}Manager()'.",
+                obj=model,
+                id="snapadmin.E027",
+            ))
+            continue
+        found = _shadowed_objects_manager(model)
+        if found is None:
+            continue
+        base, manager = found
+        manager_cls = type(manager).__name__
+        errors.append(Error(
+            f"{model._meta.label}: SnapModel's 'objects = EsManager()' shadows "
+            f"'objects = {manager_cls}()' declared on {base.__name__}, because "
+            f"SnapModel comes first in the MRO. {model.__name__}.objects, the "
+            "generated admin and the API use the unfiltered EsManager.",
+            hint=f"Declare the manager on {model.__name__} itself (or on an "
+                 "abstract base listed before SnapModel), e.g. "
+                 f"'class {model.__name__}Manager({manager_cls}, EsManager): pass' and "
+                 f"'objects = {model.__name__}Manager()' to keep both behaviours. If the "
+                 "plain EsManager is really what you want, add 'snapadmin.E027' to "
+                 "SILENCED_SYSTEM_CHECKS.",
+            obj=model,
+            id="snapadmin.E027",
+        ))
+    return errors
+
+
+#: Destination settings whose presence says "this project means to back up".
+_BACKUP_INTENT_SETTINGS = (
+    "SNAPADMIN_BACKUP_NETWORK_DIR", "SNAPADMIN_BACKUP_FTP_HOST",
+    "SNAPADMIN_BACKUP_SFTP_HOST", "SNAPADMIN_BACKUP_S3_BUCKET",
+    "SNAPADMIN_BACKUP_AGE_RECIPIENTS",
+)
+
+
+def check_backup_configured_but_disabled(app_configs, **kwargs) -> list[CheckMessage]:
+    """Warn: backups look configured, but ``SNAPADMIN_BACKUP_ENABLED`` is off.
+
+    Every other backup check opens with "backups disabled → nothing to say",
+    which is right for a project that never set anything — and exactly wrong
+    for one with a Beat entry, destinations and AGE recipients in place: its
+    nightly run ends in ``disabled`` and ``manage.py check`` stays silent
+    (#EXT2c). The switch defaults to off, so forgetting it is the easy mistake.
+    """
+    from snapadmin.backup import get_backup_config
+
+    if get_backup_config().enabled:
+        return []
+    beat_schedule = getattr(settings, "CELERY_BEAT_SCHEDULE", None) or {}
+    scheduled = any(
+        isinstance(entry, dict) and entry.get("task") == "snapadmin.run_db_backups"
+        for entry in beat_schedule.values()
+    )
+    configured = [name for name in _BACKUP_INTENT_SETTINGS if get_setting(name, None)]
+    if not scheduled and not configured:
+        return []
+    evidence = (["a 'snapadmin.run_db_backups' Celery Beat entry"] if scheduled else []) + configured
+    return [Warning(
+        "SNAPADMIN_BACKUP_ENABLED is off, but backups are configured "
+        f"({_format_labels(evidence)}) — every run ends as 'disabled' and nothing is stored.",
+        hint="Set SNAPADMIN_BACKUP_ENABLED = True to take backups. If they are off on "
+             "purpose (a staging copy of production settings), remove the Beat entry, or "
+             "add 'snapadmin.W023' to SILENCED_SYSTEM_CHECKS.",
+        id="snapadmin.W023",
+    )]
+
+
+def check_backup_env_file_present(app_configs, **kwargs) -> list[CheckMessage]:
+    """Warn: ``env`` is in ``SNAPADMIN_BACKUP_INCLUDE`` but there is no file to bundle.
+
+    ``create_env_bundle`` skips a missing ``.env`` with one log line, so the
+    backup reports success without the part the project asked for (#EXT2c).
+    Only while backups are enabled — ``snapadmin.W023`` speaks for the rest.
+    """
+    from snapadmin.backup import get_backup_config
+
+    config = get_backup_config()
+    if not config.enabled or "env" not in config.include:
+        return []
+    if not config.env_file:
+        problem = "SNAPADMIN_BACKUP_ENV_FILE is not set"
+    elif not os.path.isfile(config.env_file):
+        problem = f"SNAPADMIN_BACKUP_ENV_FILE = {config.env_file!r} is not a file"
+    else:
+        return []
+    return [Warning(
+        f"SNAPADMIN_BACKUP_INCLUDE names 'env', but {problem} — every backup skips "
+        "the env part and still reports success.",
+        hint="Point SNAPADMIN_BACKUP_ENV_FILE at the .env file to bundle, or remove "
+             "'env' from SNAPADMIN_BACKUP_INCLUDE.",
+        id="snapadmin.W024",
+    )]
+
+
+def check_masked_models_use_masking_admin(app_configs, **kwargs) -> list[CheckMessage]:
+    """Warn: a model with masked fields is served by an admin that does not mask.
+
+    Masking lives in :class:`~snapadmin.models.PIIMaskingAdminMixin`, which
+    only generated admins get automatically. A hand-written ``ModelAdmin`` —
+    unavoidable for e.g. a custom user model — shows the raw values of every
+    field ``SNAPADMIN_MASKED_FIELDS`` / ``SNAPADMIN_MASKING_RULES`` names, and
+    every encrypted field, with nothing to say so (#EXT2g). Checked on every
+    ``AdminSite`` the project instantiated, not only the default one.
+    """
+    from django.contrib.admin.sites import all_sites
+
+    from snapadmin.masking import get_masked_fields
+    from snapadmin.models import PIIMaskingAdminMixin
+
+    offenders: list[str] = []
+    for model in apps.get_models():
+        admins = [
+            site._registry[model] for site in all_sites
+            if model in getattr(site, "_registry", {})
+        ]
+        if not admins or all(isinstance(a, PIIMaskingAdminMixin) for a in admins):
+            continue
+        if get_masked_fields(model._meta.app_label, model._meta.model_name):
+            offenders.append(model._meta.label)
+    if not offenders:
+        return []
+    return [Warning(
+        f"Masked fields are configured for {_format_labels(sorted(offenders))}, but the "
+        "ModelAdmin serving it is hand-written without PIIMaskingAdminMixin — the "
+        "admin shows those values unmasked.",
+        hint="Add snapadmin.models.PIIMaskingAdminMixin as the first base of that "
+             "ModelAdmin (class UserAdmin(PIIMaskingAdminMixin, BaseUserAdmin)).",
+        id="snapadmin.W025",
+    )]
+
+
+def check_admin_sections_deprecated(app_configs, **kwargs) -> list[CheckMessage]:
+    """Warn: ``admin_sections`` is set, but nothing has ever read it.
+
+    The attribute was declared on ``SnapModel`` and documented, yet no code path
+    consumed it (#EXT2h). It is deprecated rather than silently kept: a project
+    that set it believes it configured something.
+    """
+    labels = sorted(
+        model._meta.label for model in apps.get_models()
+        if is_registered(model) and getattr(model, "admin_sections", None)
+    )
+    if not labels:
+        return []
+    return [Warning(
+        f"admin_sections is set on {_format_labels(labels)}, but it has no effect and "
+        "is deprecated; it will be removed in a future release.",
+        hint="Group form fields with the per-field 'tab' and 'row' options, or pass "
+             "'fieldsets' through admin_overrides.",
+        id="snapadmin.W026",
+    )]
+
+
 ALL_CHECKS = [
     check_analytics_db_alias,
     check_masked_fields,
@@ -1873,6 +2122,11 @@ ALL_CHECKS = [
     check_encrypted_fields_not_indexed,
     check_es_mapping_present,
     check_extra_settings_admin_app,
+    check_snap_model_manager_shadowing,
+    check_backup_configured_but_disabled,
+    check_backup_env_file_present,
+    check_masked_models_use_masking_admin,
+    check_admin_sections_deprecated,
 ]
 
 

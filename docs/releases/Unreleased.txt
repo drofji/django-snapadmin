@@ -12,4 +12,91 @@ Every release carries a `Breaking` heading, including a pre-release. If nothing 
 Breaking
 --------
 
-None.
+Four entries from the second round of production field reports. Each is a deliberate change of
+something that was silently wrong; each comes with a one-line way back.
+
+* **``snapadmin.E027`` can stop ``manage.py check``.** It fires when ``SnapModel``'s own
+  ``objects = EsManager()`` silently replaces a manager a mixin declares (``class
+  Order(SnapModel, OwnerScopedMixin)`` — Django resolves a manager name by first match in MRO
+  order), or when a ``tenant_scoped`` model's ``objects`` is anything but an ``EsManager``, which is
+  where tenant isolation is enforced. Both are cross-scope data leaks that nothing reported before.
+  Fix: declare a manager inheriting from both on the model (``class OrderManager(OwnerScopedManager,
+  EsManager): pass``). If the plain ``EsManager`` really is meant on a model that is not
+  tenant-scoped, add ``'snapadmin.E027'`` to ``SILENCED_SYSTEM_CHECKS``.
+* **The ``APIToken`` admin is no longer registered while no API accepts tokens.** With both
+  ``SNAPADMIN_REST_API_ENABLED`` and ``SNAPADMIN_GRAPHQL_ENABLED`` off, ``register_all_admins()``
+  used to offer a screen for minting credentials to a surface that does not exist. A project that
+  authenticates its own views with ``APITokenAuthentication`` sets
+  ``SNAPADMIN_TOKEN_ADMIN_ENABLED = True`` to keep it.
+* **The changelist hides a non-integer primary key.** A UUID ``id`` column was forced first into
+  every generated changelist; it is now shown for integer keys only. ``admin_list_display_pk =
+  True`` on the model brings it back. A key not named ``id`` used to produce a column that did not
+  exist; it is now referenced by its real name.
+* **The SFTP location in the backup summary and in ``db_backup_stored`` is the directory the server
+  resolved**, not the configured string. With a relative ``SNAPADMIN_BACKUP_SFTP_DIR`` the reported
+  path therefore now starts at the login directory (``sftp://host:22/home/backup/backups/...``
+  instead of ``sftp://host:22/backups/...``). Only code that parses that string is affected.
+
+Added
+-----
+
+* **Restore drills — ``snapadmin_restore --database <alias>``.** Restores the ``db`` part into
+  another ``DATABASES`` alias and leaves ``default`` untouched, then prints the row count of every
+  table; a restore that produced no tables fails instead of reporting success. An alias that
+  resolves to the same database as ``default`` is refused, ``media``/``env`` cannot be sent there
+  (they would land on the live system), and on PostgreSQL the drill database is emptied by
+  recreating its ``public`` schema, so the drill role needs no ``CREATEDB``. Public helpers
+  ``snapadmin.restore.table_row_counts()`` and ``verify_restored_database()`` expose the same check.
+* **``SNAPADMIN_PURGE_EXTERNAL = True``** declares that an external scheduler (cron, a Kubernetes
+  CronJob) runs ``manage.py snapadmin_purge_expired_data``, so ``snapadmin.W012`` stops asking for a
+  Celery Beat entry. Before, following the warning's own advice kept the warning forever.
+* **``SNAPADMIN_TOKEN_ADMIN_ENABLED``** — see Breaking.
+* **``admin_list_display_pk``** on ``SnapModel`` — see Breaking.
+* **Snap fields accept a positional ``verbose_name``**, like every Django field:
+  ``SnapCharField("Label", max_length=200)`` used to raise a ``TypeError`` that named neither the
+  argument nor the fix, on every field of a model being moved onto Snap fields.
+* **New system checks** for configurations that looked complete and silently did nothing:
+  ``snapadmin.W023`` (backups configured — a ``snapadmin.run_db_backups`` Beat entry, a destination
+  or AGE recipients — while ``SNAPADMIN_BACKUP_ENABLED`` is off, so every run stores nothing),
+  ``snapadmin.W024`` (``env`` in ``SNAPADMIN_BACKUP_INCLUDE`` with no file behind
+  ``SNAPADMIN_BACKUP_ENV_FILE``), ``snapadmin.W025`` (a model with masked fields served by a
+  hand-written ``ModelAdmin`` without ``PIIMaskingAdminMixin``, which shows them raw), and
+  ``snapadmin.E027`` (see Breaking).
+* **``SnapPurgeResult``** — what ``SnapModel.purge_expired()`` now returns: still an ``int`` (the
+  purged count), with a ``skipped_protected`` attribute. Existing callers are unaffected.
+
+Changed
+-------
+
+* **``snapadmin.W022``'s hint names both SFTP cases.** On several managed SFTP products the login
+  directory *is* the absolute path; dropping the leading slash, as the hint used to advise, created
+  a same-named directory inside it and put every dump one level too deep, with a success report
+  either way. The hint now says when to keep the absolute form, the reported location is the
+  directory the server resolved, and a directory created on the fly is logged as the warning
+  ``sftp_backup_dir_created``.
+
+Fixed
+-----
+
+* **A single ``PROTECT``-ed row no longer stops a model's retention purge.** One due row still
+  referenced through a ``PROTECT``/``RESTRICT`` foreign key (a tree whose parent is due before its
+  children) made the single bulk delete raise, so nothing was purged for that model, run after run
+  — and the ``data_retention_files`` pass had already deleted the files of every due row, leaving
+  rows that point at files that no longer exist. Protected rows are now kept and retried on the next
+  run, a fully due subtree goes leaves first, files go only with rows actually deleted, and the kept
+  rows are reported: ``SnapPurgeResult.skipped_protected``, a ``SKIPPED`` line in
+  ``snapadmin_purge_expired_data``, and a ``skipped_protected`` map in the Celery task's summary.
+* **A masked changelist column keeps the field's ``verbose_name``**, translation included, instead
+  of a title-cased field name.
+* **Generated ``ModelAdmin`` classes report the model's module as ``__module__``**, not a
+  ``django.forms`` internal — tracebacks and "is this admin generated?" tests now name the right
+  place.
+* **The demo project schedules its backup task only while backups are on**, so it no longer
+  exhibits the very state ``snapadmin.W023`` reports.
+
+Deprecated
+----------
+
+* **``SnapModel.admin_sections``** has never been read by any code path. Setting it now raises
+  ``snapadmin.W026``; it will be removed in a future release. Group form fields with the per-field
+  ``tab`` and ``row`` flags, or pass ``fieldsets`` through ``admin_overrides``.

@@ -76,6 +76,15 @@ class Command(BaseCommand):
                 else:
                     self.stdout.write(self.style.SUCCESS(f"  DELETED {label}: {count} records ({rule})"))
                     total += count
+                    # Due rows a PROTECT/RESTRICT foreign key still holds (#EXT2a):
+                    # kept for the next run, reported so the run never quietly
+                    # does less than it says.
+                    skipped = getattr(count, "skipped_protected", 0)
+                    if skipped:
+                        self.stdout.write(self.style.WARNING(
+                            f"  SKIPPED {label}: {skipped} records kept — still referenced "
+                            "by a PROTECT/RESTRICT foreign key; retried on the next run"
+                        ))
             except Exception as exc:
                 self.stdout.write(self.style.ERROR(f"  ERROR {label}: {exc}"))
 
