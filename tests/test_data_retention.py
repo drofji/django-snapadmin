@@ -316,6 +316,29 @@ class TestDeletePksFromEs:
              patch.object(Product, "get_es_client", side_effect=RuntimeError("boom")):
             assert Product._delete_pks_from_es([1]) is False  # must not raise
 
+    def test_a_partial_failure_in_the_response_is_a_failure(self):
+        """#EXT2j — ``delete_by_query`` answers 200 with a ``failures`` list
+        when some documents could not be deleted; that is not a cleared mirror."""
+        from demo.apps.shop.models import Product
+        from unittest.mock import MagicMock, patch
+        from django.test import override_settings
+        es = MagicMock()
+        es.delete_by_query.return_value = {"deleted": 1, "failures": [{"id": "2"}]}
+        with override_settings(ELASTICSEARCH_ENABLED=True), \
+             patch.object(Product, "get_es_client", return_value=es):
+            assert Product.delete_pks_from_es([1, 2]) is False
+
+    def test_an_es8_response_object_is_read_through_its_body(self):
+        from demo.apps.shop.models import Product
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock, patch
+        from django.test import override_settings
+        es = MagicMock()
+        es.delete_by_query.return_value = SimpleNamespace(body={"deleted": 2, "failures": []})
+        with override_settings(ELASTICSEARCH_ENABLED=True), \
+             patch.object(Product, "get_es_client", return_value=es):
+            assert Product.delete_pks_from_es([1, 2]) is True
+
 
 class TestPurgeExpiredEsOnly:
     """ES_ONLY models purge via a range delete_by_query against the index."""
@@ -355,14 +378,47 @@ class TestPurgeExpiredEsOnly:
             assert SearchLog.purge_expired(dry_run=True) == 3
         mock_es.delete_by_query.assert_not_called()
 
-    def test_swallows_exceptions(self):
+    def test_an_es_failure_is_raised_not_reported_as_nothing_to_purge(self):
+        """#EXT2j — an ES_ONLY model has no other copy: when the purge query
+        fails, returning 0 read as "nothing was due" and the task reported the
+        model as cleanly purged while every expired document stayed live."""
         from demo.apps.shop.models import SearchLog
         from unittest.mock import patch
         from django.test import override_settings
+        from snapadmin.models import SnapPurgeError
         with override_settings(ELASTICSEARCH_ENABLED=True), \
              patch.object(SearchLog, "data_retention_days", 30), \
              patch.object(SearchLog, "get_es_client", side_effect=RuntimeError("boom")):
-            assert SearchLog.purge_expired() == 0
+            with pytest.raises(SnapPurgeError, match="SearchLog.*boom"):
+                SearchLog.purge_expired()
+
+    def test_partial_delete_failures_are_raised(self):
+        """``delete_by_query`` answers 200 with a ``failures`` list when some
+        documents could not be deleted (version conflicts, shard errors)."""
+        from demo.apps.shop.models import SearchLog
+        from unittest.mock import MagicMock, patch
+        from django.test import override_settings
+        from snapadmin.models import SnapPurgeError
+        es = MagicMock()
+        es.delete_by_query.return_value = {"deleted": 2, "failures": [{"id": "x", "cause": {}}]}
+        with override_settings(ELASTICSEARCH_ENABLED=True), \
+             patch.object(SearchLog, "data_retention_days", 30), \
+             patch.object(SearchLog, "get_es_client", return_value=es):
+            with pytest.raises(SnapPurgeError, match="1 document"):
+                SearchLog.purge_expired()
+
+    @pytest.mark.django_db
+    def test_the_task_reports_it_as_an_error(self):
+        from demo.apps.shop.models import SearchLog
+        from unittest.mock import patch
+        from django.test import override_settings
+        from snapadmin.tasks import purge_expired_data
+        with override_settings(ELASTICSEARCH_ENABLED=True), \
+             patch.object(SearchLog, "data_retention_days", 30), \
+             patch.object(SearchLog, "get_es_client", side_effect=RuntimeError("boom")):
+            result = purge_expired_data.apply().get()
+        assert "demo.SearchLog" in result["errors"]
+        assert "demo.SearchLog" not in result["purged"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -428,7 +428,7 @@ def plan_restore(resolved: ResolvedSource, parts: list[str], database: str = "de
     for part in parts:
         entry = manifest["parts"][part]
         if part == "db":
-            db_name = settings.DATABASES.get(database, {}).get("NAME")
+            db_name = str(settings.DATABASES.get(database, {}).get("NAME"))
             alias = f" (alias {database!r})" if database != "default" else ""
             lines.append(f"  db: {entry['filename']} -> would replace database {db_name!r}{alias}")
         elif part == "media":

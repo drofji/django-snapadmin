@@ -3319,6 +3319,11 @@ logger.error("payment_failed", reason="card_declined")</code></pre>
   once whatever protects them has expired too. A kept row keeps its
   <code>data_retention_files</code> as well — files are deleted only for rows that are actually
   deleted. The same applies to <code>RESTRICT</code>.</p>
+  <p>An <code>ES_ONLY</code> model has no other copy, so its purge query failing — or answering
+  with documents it could not delete — raises <code>SnapPurgeError</code> and the run reports the
+  model as failed, instead of returning <code>0</code> as though nothing had been due. The same
+  <code>failures</code> list in a <code>delete_by_query</code> answer makes
+  <code>delete_pks_from_es()</code> report <code>False</code> for a <code>DUAL</code> mirror.</p>
   <p>It is reported, never swallowed: <code>purge_expired()</code> returns a
   <code>SnapPurgeResult</code> — still an <code>int</code>, the purged count — whose
   <code>skipped_protected</code> attribute counts the kept rows; the management command prints a
@@ -3883,7 +3888,8 @@ SNAPADMIN_ANALYTICS_DB_ALIAS = "read_replica"</code></pre>
   <p>Declare sensitive fields once. They are obfuscated in the admin changelist, dropped from the
   admin change form, and masked in both REST API and GraphQL responses for anyone who is not a
   superuser or a holder of the <code>snapadmin.view_raw_pii</code> permission. Emails become
-  <code>a***@domain.com</code>, other values <code>+3********78</code>. Masking is enforced on every
+  <code>a***@domain.com</code> (just <code>***@domain.com</code> when the local part is one or two
+  characters, so the first character is never the whole of it), other values <code>+3********78</code>. Masking is enforced on every
   path that could otherwise leak the raw value: a masked field can't be targeted by
   <code>?field=</code>, <code>?ordering=field</code> or <code>?search=</code> for an unprivileged
   caller (silently ignored, not a 400), the async export (<code>POST /api/exports/</code>) masks
@@ -3944,7 +3950,9 @@ SNAPADMIN_MASKING_RULES = {
   fails to compile, one whose replacement references a group it does not have, one shaped like a
   catastrophic-backtracking bomb (a quantified group containing a quantifier, <code>(a+)+</code>), and
   any value longer than 4096 characters all fall back to the built-in masker and log the reason —
-  every failure path degrades to <em>more</em> masking, never to raw data. A rule naming a model or
+  every failure path degrades to <em>more</em> masking, never to raw data. So does a
+  <code>pattern</code> that matches nothing in a non-empty value — "keep the first three characters"
+  against a two-character value would otherwise hand the value back unchanged. A rule naming a model or
   field that does not exist would instead fail <em>open</em>, so it is a startup error
   (<code>snapadmin.E003</code>–<code>E005</code>) rather than a silent no-op.</p>
 
@@ -4332,6 +4340,16 @@ python manage.py snapadmin_import --model demo.Product --file products.csv --res
   <code>SNAPADMIN_API_AUTHENTICATION_CLASSES</code> at any DRF authenticators — model CRUD, schema
   and token endpoints all honour it. With non-token auth, model permissions fall back to plain
   Django model permissions (a token additionally applies its <code>allowed_models</code> scope):</p>
+  <p id="api-action-permissions"><strong>Every viewset action is mapped to one permission, and an
+  unmapped action is refused.</strong> List/retrieve/<code>count</code>/<code>export</code>/<code>fetch_by</code>
+  and <code>OPTIONS</code> need <code>view</code>; create needs <code>add</code>; update needs
+  <code>change</code>; destroy needs <code>delete</code>. An action the map does not know is denied
+  for everyone, superusers included — it used to fall back to <code>view</code>, which would open any
+  new <em>write</em> action to read-only users the moment someone forgot to map it. A project that adds
+  its own action to a subclassed <code>DynamicModelViewSet</code> maps it explicitly; the built-in
+  entries always win, and only <code>view</code>/<code>add</code>/<code>change</code>/<code>delete</code>
+  are accepted (<code>@snap_action</code> actions carry their own permission and need no entry):</p>
+  <pre><code>SNAPADMIN_API_ACTION_PERMISSIONS = {"recalculate": "change", "preview": "view"}</code></pre>
   <pre><code>SNAPADMIN_API_AUTHENTICATION_CLASSES = [
     "rest_framework_simplejwt.authentication.JWTAuthentication",
     "rest_framework.authentication.SessionAuthentication",
@@ -4617,6 +4635,7 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset — no p
     <tr><td><code>SNAPADMIN_REST_API_ENABLED</code></td><td><code>False</code></td><td>Serve the REST CRUD endpoints</td></tr>
     <tr><td><code>SNAPADMIN_SWAGGER_ENABLED</code></td><td><code>SNAPADMIN_REST_API_ENABLED</code></td><td>Serve Swagger UI + ReDoc — follows the REST setting unless set explicitly</td></tr>
     <tr><td><code>SNAPADMIN_GRAPHQL_ENABLED</code></td><td><code>False</code></td><td>Serve the GraphQL endpoint</td></tr>
+    <tr><td><code>SNAPADMIN_API_ACTION_PERMISSIONS</code></td><td><code>{}</code></td><td>Map a project's own viewset action to the model permission it needs (<code>view</code>/<code>add</code>/<code>change</code>/<code>delete</code>); an unmapped action is refused (see <a href="#api-action-permissions">Integrating</a>)</td></tr>
     <tr><td><code>SNAPADMIN_TOKEN_ADMIN_ENABLED</code></td><td><code>None</code> (auto)</td><td>Whether <code>register_all_admins()</code> offers the <code>APIToken</code> admin. Unset, it follows the APIs that accept tokens (REST or GraphQL on); <code>True</code>/<code>False</code> force it (see <a href="#token-admin-registration">Admin Registration</a>)</td></tr>
     <tr><td><code>SNAPADMIN_GRAPHIQL_ENABLED</code></td><td><code>DEBUG</code></td><td>GraphiQL playground — keep it out of production</td></tr>
     <tr><td><code>SNAPADMIN_GRAPHQL_REQUIRE_AUTH</code></td><td><code>True</code></td><td>Require auth + per-model permissions on every GraphQL resolver</td></tr>

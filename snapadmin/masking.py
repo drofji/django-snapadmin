@@ -366,7 +366,9 @@ def _mask_string(s: str) -> str:
         return s
     if "@" in s:
         local, _, domain = s.partition("@")
-        masked_local = (local[0] + "***") if local else "***"
+        # One or two characters: the first one *is* the local part, or half
+        # of it — reveal nothing (#EXT2j).
+        masked_local = (local[0] + "***") if len(local) > 2 else "***"
         return f"{masked_local}@{domain}" if domain else f"{masked_local}@"
     if len(s) < 6:
         return "*" * len(s)
@@ -379,7 +381,8 @@ def mask_value(value):
 
     * ``None`` → returned unchanged.
     * ``str`` → emails become first char of the local part + ``***`` +
-      ``@domain`` (e.g. ``a***@example.com``); strings under 6 chars are
+      ``@domain`` (e.g. ``a***@example.com``), or just ``***@domain`` when the
+      local part is one or two characters long; strings under 6 chars are
       fully starred; longer strings keep a 2-char head/tail (e.g.
       ``+3********78``).
     * ``bool``, ``int``, ``float``, ``Decimal`` → the fixed sentinel
@@ -415,7 +418,9 @@ def apply_masking_rule(value, rule: dict | None):
     * no rule, or a rule that is not a dict → the built-in :func:`mask_value`;
     * ``replacement`` alone → that constant, whatever the value was;
     * ``pattern`` (+ optional ``replacement``, default ``"*"``) →
-      ``re.sub(pattern, replacement, str(value))``;
+      ``re.sub(pattern, replacement, str(value))``; a non-empty value the
+      pattern does not match at all falls back to :func:`mask_value` rather
+      than being returned unchanged;
     * ``list`` / ``dict`` → the rule applied to each element / value.
 
     ``None`` is never masked (there is nothing to reveal), matching
@@ -451,7 +456,7 @@ def apply_masking_rule(value, rule: dict | None):
         )
         return mask_value(value)
     try:
-        return regex.sub(replacement, text)
+        masked, substitutions = regex.subn(replacement, text)
     except re.error as exc:
         logger.warning(
             "snapadmin.masking.replacement_invalid",
@@ -459,6 +464,12 @@ def apply_masking_rule(value, rule: dict | None):
             error=str(exc),
         )
         return mask_value(value)
+    if not substitutions and text:
+        # A pattern that matches nothing — "keep the first three characters"
+        # against a two-character value — would hand the value back raw.
+        # Masking fails closed: the built-in masker takes over (#EXT2j).
+        return mask_value(value)
+    return masked
 
 
 def mask_field(

@@ -44,6 +44,9 @@ class Tag(snap_models.SnapModel):
 
     api_write_fields = ["name"]
     subject_path = None  # nothing subject-scoped — see Category above
+    # admin_list_display_pk → the changelist leaves the pk column out. The
+    # default shows it for integer keys only; a tag is identified by its name.
+    admin_list_display_pk = False
 
     class Meta:
         verbose_name = _("Tag")

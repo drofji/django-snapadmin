@@ -405,7 +405,8 @@ Settings
 --------
 Everything is namespaced ``SNAPADMIN_*`` and every feature is off-by-default
 unless noted. The families: ``SNAPADMIN_REST_API_*`` / ``SNAPADMIN_API_*``
-(REST surface, throttling, pagination, guards), ``SNAPADMIN_GRAPHQL_*``,
+(REST surface, throttling, pagination, guards, and
+``SNAPADMIN_API_ACTION_PERMISSIONS`` for a project's own viewset actions), ``SNAPADMIN_GRAPHQL_*``,
 ``SNAPADMIN_SWAGGER_ENABLED``, ``SNAPADMIN_TOKEN_ADMIN_ENABLED`` (whether the
 API-token admin is offered; unset follows REST/GraphQL), ``SNAPADMIN_ES_*`` (Elasticsearch routing and
 fallback), ``SNAPADMIN_BACKUP_*``, ``SNAPADMIN_RESTORE_SNAPSHOT_*``

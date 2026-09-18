@@ -1118,6 +1118,37 @@ class TestFileFieldValidatorConfig:
             assert self._config(rebuilt._validators[0]) == (["pdf", "txt"], ["utf-8"], 1024)
             name, path, args, kwargs = rebuilt.deconstruct()
 
+    def test_rebuilt_image_field_still_enforces_its_limits(self):
+        """#EXT2j — the image twin of the test below: a migration round trip must
+        not leave an image field that accepts any extension or any size."""
+        import io
+
+        from django.core.exceptions import ValidationError
+
+        from snapadmin.fields import SnapImageField
+
+        field = SnapImageField(allowed_extensions=["jpg"], max_size_bytes=10)
+        _, _, args, kwargs = field.deconstruct()
+        rebuilt = SnapImageField(*args, **kwargs)
+        [validator] = [v for v in rebuilt._validators if v is rebuilt._snap_auto_validator]
+
+        bad_extension = io.BytesIO(b"x")
+        bad_extension.name = "photo.exe"
+        bad_extension.size = 1
+        with pytest.raises(ValidationError, match="extension"):
+            validator(bad_extension)
+
+        too_big = io.BytesIO(b"0123456789ABCDE")
+        too_big.name = "photo.jpg"
+        too_big.size = len(too_big.getvalue())
+        with pytest.raises(ValidationError, match="size"):
+            validator(too_big)
+
+        fine = io.BytesIO(b"ok")
+        fine.name = "photo.jpg"
+        fine.size = 2
+        validator(fine)
+
     def test_rebuilt_field_still_enforces_its_limits(self):
         """#REL2c: config-attribute equality alone doesn't prove the validator
         still *runs* after a migration-style round trip — construct files that

@@ -124,6 +124,12 @@ Key protections:
   own setting) — SnapAdmin token auth by default; add session and/or JWT.
 - **Permissions are enforced everywhere.** REST and GraphQL both require the caller to hold the model's
   Django `view` / change permissions; there is no anonymous data access by default.
+- **An unmapped REST action is refused, not given the `view` floor.** Every `DynamicModelViewSet`
+  action maps to exactly one Django permission (`count`/`export`/`fetch_by`/`OPTIONS` explicitly to
+  `view`); anything else is denied for everyone, superusers included. The old `view` fallback would
+  have opened any future *write* action to read-only users the moment someone forgot to map it. A
+  project maps its own actions with `SNAPADMIN_API_ACTION_PERMISSIONS`; built-in entries always win
+  and only `view`/`add`/`change`/`delete` are accepted.
 - **GraphQL** requires authentication and per-model permissions when
   `SNAPADMIN_GRAPHQL_REQUIRE_AUTH = True` (default). The check applies to **every relation the query
   traverses**, not just the top-level query field: reading `A { relatedB { … } }` requires the
@@ -300,7 +306,9 @@ Key protections:
   compiled once and rejected when it cannot compile or carries a nested quantifier that could
   backtrack catastrophically (`(a+)+`); values over 4096 characters skip the regex. Every one of those
   paths — plus a replacement referencing a group the pattern lacks — falls back to the built-in
-  masker, so a broken rule degrades to *more* masking, never to raw data.
+  masker, so a broken rule degrades to *more* masking, never to raw data — and so does a `pattern`
+  that matches nothing in a non-empty value, which used to hand the value back unchanged. The
+  built-in e-mail mask no longer reveals a one- or two-character local part (`***@domain`).
 - **A hand-written admin that does not mask is reported (`snapadmin.W025`)** — changelist masking
   lives in `PIIMaskingAdminMixin`, which generated admins get automatically. A model a project
   registers with its own `ModelAdmin` (a custom user model is the usual case) showed its masked
@@ -430,6 +438,10 @@ Key protections:
   nothing scheduled to enforce it. A project running the management command from an external
   scheduler declares it with `SNAPADMIN_PURGE_EXTERNAL = True`, which keeps retention on and the
   warning quiet.
+- **A failed Elasticsearch purge is a failure, not "nothing was due".** An `ES_ONLY` model's purge
+  query failing, or `delete_by_query` answering with a `failures` list, raises `SnapPurgeError` — the
+  run reports the model as failed instead of returning `0` while every expired document stays
+  searchable. The same `failures` list makes `delete_pks_from_es()` return `False` for a `DUAL` mirror.
 - **One protected row no longer stops a model's purge.** A due row still referenced through a
   `PROTECT`/`RESTRICT` foreign key is kept and retried on the next run instead of aborting the whole
   model's purge — before, the `data_retention_files` pass had already deleted the files of every due

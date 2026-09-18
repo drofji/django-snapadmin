@@ -20,6 +20,9 @@ the `0.x` beta series.
   `SNAPADMIN_TOKEN_ADMIN_ENABLED = True` keeps it for projects using token auth in their own views.
 - The generated changelist shows the primary key for integer keys only (`admin_list_display_pk`
   overrides), and references a key not named `id` by its real name.
+- A REST viewset action missing from the permission map is refused instead of falling back to
+  `view`; map a project's own with `SNAPADMIN_API_ACTION_PERMISSIONS`.
+- An `ES_ONLY` retention purge that fails raises `SnapPurgeError` instead of returning `0`.
 - The SFTP backup location in the run summary and `db_backup_stored` is the directory the server
   resolved, so a relative `SNAPADMIN_BACKUP_SFTP_DIR` now reports the full path from the login
   directory.
@@ -34,12 +37,15 @@ the `0.x` beta series.
 - `SnapModel.purge_expired()` returns `SnapPurgeResult`, an `int` with `skipped_protected`.
 
 ### Changed
+- An e-mail with a one- or two-character local part masks to `***@domain`; a masking-rule pattern
+  that matches nothing falls back to the built-in masker instead of returning the raw value.
 - `snapadmin.W022`'s hint covers SFTP accounts whose login directory is the absolute path, and a
   directory created on the fly is logged as `sftp_backup_dir_created`.
 
 ### Fixed
 - A due row held by a `PROTECT`/`RESTRICT` foreign key no longer aborts the model's retention purge,
   and no longer loses its `data_retention_files` while the row stays.
+- `delete_pks_from_es()` treats a `failures` list in the Elasticsearch answer as a failed delete.
 - A masked changelist column keeps the field's `verbose_name`.
 - Generated `ModelAdmin` classes report the model's module as `__module__`.
 

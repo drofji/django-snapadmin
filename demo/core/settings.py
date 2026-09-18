@@ -144,6 +144,18 @@ else:
         }
     }
 
+# Restore drill target (opt-in): a throwaway database next to 'default' that
+# `manage.py snapadmin_restore <bundle> --database restore_drill --confirm`
+# restores into, leaving the live database untouched and printing the row count
+# per table. On PostgreSQL the role only needs to own this database (no CREATEDB).
+RESTORE_DRILL_DB_NAME = os.getenv('RESTORE_DRILL_DB_NAME', '').strip()
+if RESTORE_DRILL_DB_NAME:
+    DATABASES['restore_drill'] = (
+        {**DATABASES['default'], 'NAME': RESTORE_DRILL_DB_NAME}
+        if DB_HOST else
+        {'ENGINE': 'django.db.backends.sqlite3', 'NAME': BASE_DIR / RESTORE_DRILL_DB_NAME}
+    )
+
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -278,6 +290,10 @@ SNAPADMIN_PROFILE = os.getenv('SNAPADMIN_PROFILE', 'full')
 SNAPADMIN_REST_API_ENABLED = env_bool('SNAPADMIN_REST_API_ENABLED', True)
 SNAPADMIN_SWAGGER_ENABLED = env_bool('SNAPADMIN_SWAGGER_ENABLED', True)
 SNAPADMIN_GRAPHQL_ENABLED = env_bool('SNAPADMIN_GRAPHQL_ENABLED', True)
+# Map a project's own viewset action to the model permission it needs; an action
+# missing from SnapAdmin's built-in map is refused (never given the view floor).
+# The demo adds no actions of its own, so it maps none.
+SNAPADMIN_API_ACTION_PERMISSIONS = {}
 # APIToken admin: unset (None) follows the APIs that accept tokens — offered while
 # REST or GraphQL is on. True/False forces it; True for a project whose own views
 # authenticate with snapadmin.api.authentication.APITokenAuthentication.

@@ -2154,6 +2154,33 @@ class TestRunBackups:
         state = json.loads((backup_env["local"] / STATE_FILENAME).read_text())
         assert "network" not in state and "local" in state
 
+    def test_a_failing_retention_prune_is_reported_not_success(self, backup_env, monkeypatch):
+        """#EXT2j — cleanup across two storage backends: when pruning old dumps
+        on the second destination fails, the run must say so rather than report
+        that destination as done. It stays failed and due, so the next run
+        retries the prune."""
+        network = backup_env["network"]
+        network.mkdir(parents=True)
+        for stamp in ("20200101-000000", "20200102-000000", "20200103-000000"):
+            (network / f"{BACKUP_PREFIX}{stamp}.sql.gz").write_bytes(b"old")
+        real_unlink = Path.unlink
+
+        def refusing_unlink(self, *args, **kwargs):
+            if self.parent == network:
+                raise PermissionError(f"read-only share: {self.name}")
+            return real_unlink(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", refusing_unlink)
+
+        summary = run_backup(["local", "network"])
+
+        assert summary["status"] == "partial"
+        assert summary["failed"] == ["network"]
+        assert summary["results"]["network"].startswith("error:")
+        assert "read-only share" in summary["results"]["network"]
+        state = json.loads((backup_env["local"] / STATE_FILENAME).read_text())
+        assert "network" not in state and "local" in state
+
     def test_no_recipients_never_calls_the_encrypted_path(self, backup_env, monkeypatch):
         """Backward compatibility, pinned at the dispatch point itself: with no
         recipients configured, create_encrypted_db_dump must never even be

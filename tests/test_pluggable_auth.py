@@ -149,13 +149,15 @@ class TestSessionAuthEndToEnd:
 
 @pytest.mark.django_db
 class TestTokenModelPermissionActionMap:
-    """The action → permission map (and its ``view`` default) gates every verb.
+    """The action → permission map gates every verb, and nothing outside it.
 
     Regression cover for #TEST1: a mutating action must require its own
-    add/change/delete permission and never slip through on ``view``; a custom
-    or otherwise unmapped action (``count``/``export``, or anything the map
-    doesn't know) must fall back to the safe ``view`` floor — never to an
-    unauthenticated-open ``.get(action, <no check>)``.
+    add/change/delete permission and never slip through on ``view``. The
+    built-in read actions (``count``/``export``/``fetch_by``/``metadata``) are
+    mapped to ``view`` explicitly. An action the map does not know is
+    **denied** (#EXT2j) — it used to fall back to ``view``, which would have
+    opened any future *write* action to read-only users the moment someone
+    forgot to map it. ``SNAPADMIN_API_ACTION_PERMISSIONS`` maps a project's own.
     """
 
     class _View:
@@ -189,19 +191,41 @@ class TestTokenModelPermissionActionMap:
         user = _grant(regular_user, needed)
         assert self._allows(user, action) is True
 
-    @pytest.mark.parametrize("action", ["count", "export"])
+    @pytest.mark.parametrize("action", ["count", "export", "fetch_by", "metadata"])
     def test_readonly_custom_action_requires_view(self, regular_user, action):
-        # Not in _action_map → resolves to the `view` floor, not "open".
+        # Mapped to view explicitly — reachable with view, not without it.
         assert self._allows(regular_user, action) is False          # no perms
         user = _grant(regular_user, "view_product")
         assert self._allows(user, action) is True
 
-    def test_unmapped_action_defaults_to_view_not_open(self, regular_user):
-        # An action the map doesn't know still demands *at least* view — the
-        # `.get(action, "view")` default must never degrade to no permission check.
-        assert self._allows(regular_user, "frobnicate") is False
-        user = _grant(regular_user, "view_product")
-        assert self._allows(user, "frobnicate") is True
+    def test_unmapped_action_is_denied_even_with_every_permission(self, regular_user):
+        # Fail closed: an action nobody mapped must not inherit the view floor
+        # — that is how a new write action would become reachable read-only.
+        user = _grant(regular_user, "view_product", "add_product", "change_product", "delete_product")
+        assert self._allows(user, "frobnicate") is False
+
+    def test_a_method_with_no_handler_is_left_to_drf_s_405(self, regular_user):
+        # view.action is None when the route maps no handler to the method;
+        # nothing is reachable, and DRF answers 405 once permissions pass.
+        assert self._allows(regular_user, None) is True
+
+    def test_unmapped_action_is_denied_for_a_superuser_too(self, admin_user):
+        assert self._allows(admin_user, "frobnicate") is False
+
+    @override_settings(SNAPADMIN_API_ACTION_PERMISSIONS={"frobnicate": "change"})
+    def test_a_project_maps_its_own_action(self, regular_user):
+        assert self._allows(_grant(regular_user, "view_product"), "frobnicate") is False
+        assert self._allows(_grant(regular_user, "change_product"), "frobnicate") is True
+
+    @override_settings(SNAPADMIN_API_ACTION_PERMISSIONS={"frobnicate": "anything"})
+    def test_a_mapping_to_an_unknown_permission_is_denied(self, admin_user):
+        assert self._allows(admin_user, "frobnicate") is False
+
+    @override_settings(SNAPADMIN_API_ACTION_PERMISSIONS={"destroy": "view"})
+    def test_the_setting_cannot_weaken_a_built_in_action(self, regular_user):
+        # The built-in CRUD map wins: a typo'd or hostile entry must not let a
+        # view-only user delete.
+        assert self._allows(_grant(regular_user, "view_product"), "destroy") is False
 
     def test_add_permission_does_not_grant_read_actions(self, regular_user):
         # `add` implies neither `view` nor read-only custom actions (count/export).

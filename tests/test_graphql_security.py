@@ -87,6 +87,40 @@ class TestGraphQLRelationPermission:
         assert result.errors is None
         assert result.data["demoOrder"]["customer"]["firstName"] == "Alice"
 
+    def test_forward_m2m_relation_denied_without_view_perm(self, regular_user):
+        """#EXT2j — the forward many-to-many case: Product.tags → Tag."""
+        from demo.apps.shop.models import Product, Tag
+        from snapadmin.api.graphql import schema
+
+        product = Product.objects.create(name="Lamp", price="9.99")
+        product.tags.add(Tag.objects.create(name="SecretTagName"))
+        user = _grant(regular_user, "view_product")
+
+        result = schema.execute(
+            f"{{ demoProduct(id: {product.pk}) {{ name tags {{ name }} }} }}",
+            context_value=_ctx(user),
+        )
+
+        assert result.errors
+        assert "Permission denied" in str(result.errors[0])
+        assert "SecretTagName" not in str(result.data)
+
+    def test_forward_m2m_relation_allowed_with_view_perm(self, regular_user):
+        from demo.apps.shop.models import Product, Tag
+        from snapadmin.api.graphql import schema
+
+        product = Product.objects.create(name="Lamp", price="9.99")
+        product.tags.add(Tag.objects.create(name="Visible"))
+        user = _grant(regular_user, "view_product", "view_tag")
+
+        result = schema.execute(
+            f"{{ demoProduct(id: {product.pk}) {{ tags {{ name }} }} }}",
+            context_value=_ctx(user),
+        )
+
+        assert result.errors is None
+        assert result.data["demoProduct"]["tags"] == [{"name": "Visible"}]
+
     def test_reverse_fk_to_many_relation_denied(self, order, regular_user):
         # A to-many relation (reverse FK) is resolved through DjangoListField,
         # which calls get_queryset directly — it must be guarded too.

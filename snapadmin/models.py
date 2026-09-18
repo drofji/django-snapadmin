@@ -2175,6 +2175,20 @@ class SnapModel(AdminGenMixin, models.Model):
     # GDPR / data-retention purge
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _es_delete_failures(response: object) -> int:
+        """How many documents a ``delete_by_query`` response says it could not delete.
+
+        ES answers ``200`` with a ``failures`` list when some documents were
+        not deleted (version conflicts, shard errors), so a call that did not
+        raise is not yet a cleared index (#EXT2j). The 8.x client wraps the
+        body in an ``ObjectApiResponse``; a plain ``dict`` is read as-is.
+        """
+        body = getattr(response, "body", response)
+        if not isinstance(body, dict):
+            return 0
+        return len(body.get("failures") or [])
+
     @classmethod
     def delete_pks_from_es(cls, pks: list) -> bool:
         """Remove the given primary keys from the ES index via a single bulk call.
@@ -2212,12 +2226,11 @@ class SnapModel(AdminGenMixin, models.Model):
         try:
             es = cls.get_es_client()
             index_name = cls.get_es_index_name()
-            es.delete_by_query(
+            response = es.delete_by_query(
                 index=index_name,
                 body={"query": {"ids": {"values": list(pks)}}},
                 ignore=[404],
             )
-            return True
         except Exception as exc:
             logger.warning(
                 "es_purge_delete_failed",
@@ -2226,6 +2239,14 @@ class SnapModel(AdminGenMixin, models.Model):
                 error=str(exc),
             )
             return False
+        failed = cls._es_delete_failures(response)
+        if failed:
+            logger.warning(
+                "es_purge_delete_failed", model=cls.__name__, pk_count=len(pks),
+                error=f"{failed} document(s) reported in the response's failures",
+            )
+            return False
+        return True
 
     @classmethod
     def _delete_pks_from_es(cls, pks: list) -> bool:
@@ -2321,6 +2342,8 @@ class SnapModel(AdminGenMixin, models.Model):
         ES_ONLY models have no DB table, so retention must run against the index
         directly. Requires the retention field (and the per-row
         ``data_retention_date_field``, when set) to be mapped as a date in ES.
+        A failed query, or a response listing documents it could not delete,
+        raises :class:`SnapPurgeError` — never a silent ``0``.
         """
         if not getattr(settings, "ELASTICSEARCH_ENABLED", False):
             return 0
@@ -2334,15 +2357,27 @@ class SnapModel(AdminGenMixin, models.Model):
                 resp = es.count(index=index_name, body=body)
                 return resp.get("count", 0)
             resp = es.delete_by_query(index=index_name, body=body, ignore=[404])
-            return resp.get("deleted", 0)
         except Exception as exc:
+            # The index is this model's only copy, so a failed query is not
+            # "nothing was due" — raise, and the task/command report the model
+            # as failed instead of cleanly purged (#EXT2j).
             logger.warning(
                 "es_purge_query_failed",
                 model=cls.__name__,
                 retention_field=retention_field,
                 error=str(exc),
             )
-            return 0
+            raise SnapPurgeError(
+                f"{cls.__name__}: the Elasticsearch retention purge failed ({exc}); "
+                "expired documents may still be live and searchable."
+            ) from exc
+        failed = cls._es_delete_failures(resp)
+        if failed:
+            raise SnapPurgeError(
+                f"{cls.__name__}: Elasticsearch could not delete {failed} document(s) "
+                "due for retention; they are still live and searchable."
+            )
+        return resp.get("deleted", 0)
 
     @classmethod
     def _purge_expired_files(cls, qs, purging_pks: set) -> None:

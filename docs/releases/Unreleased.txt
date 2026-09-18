@@ -12,7 +12,7 @@ Every release carries a `Breaking` heading, including a pre-release. If nothing 
 Breaking
 --------
 
-Four entries from the second round of production field reports. Each is a deliberate change of
+Six entries from the second round of production field reports. Each is a deliberate change of
 something that was silently wrong; each comes with a one-line way back.
 
 * **``snapadmin.E027`` can stop ``manage.py check``.** It fires when ``SnapModel``'s own
@@ -32,6 +32,16 @@ something that was silently wrong; each comes with a one-line way back.
   every generated changelist; it is now shown for integer keys only. ``admin_list_display_pk =
   True`` on the model brings it back. A key not named ``id`` used to produce a column that did not
   exist; it is now referenced by its real name.
+* **An unmapped REST action is refused.** ``TokenModelPermission`` used to give any viewset action
+  missing from its map the ``view`` floor — so a write action added later, and not mapped, would
+  have been reachable with read-only rights. ``count``/``export``/``fetch_by``/``OPTIONS`` are now
+  mapped to ``view`` explicitly and anything else is denied, superusers included. A project that
+  added its own action to a subclassed ``DynamicModelViewSet`` maps it with
+  ``SNAPADMIN_API_ACTION_PERMISSIONS = {"my_action": "view"}``. ``@snap_action`` is unaffected.
+* **An ``ES_ONLY`` retention purge that fails now raises ``SnapPurgeError``** instead of returning
+  ``0``. The task and the management command already report a raising model under ``errors`` /
+  ``ERROR``, so a failed purge stops being reported as a clean one. Code calling
+  ``purge_expired()`` directly on an ``ES_ONLY`` model should expect the exception.
 * **The SFTP location in the backup summary and in ``db_backup_stored`` is the directory the server
   resolved**, not the configured string. With a relative ``SNAPADMIN_BACKUP_SFTP_DIR`` the reported
   path therefore now starts at the login directory (``sftp://host:22/home/backup/backups/...``
@@ -51,6 +61,9 @@ Added
   CronJob) runs ``manage.py snapadmin_purge_expired_data``, so ``snapadmin.W012`` stops asking for a
   Celery Beat entry. Before, following the warning's own advice kept the warning forever.
 * **``SNAPADMIN_TOKEN_ADMIN_ENABLED``** — see Breaking.
+* **``SNAPADMIN_API_ACTION_PERMISSIONS``** — see Breaking.
+* **The demo project wires a restore drill** (``RESTORE_DRILL_DB_NAME`` adds a ``restore_drill``
+  alias) and shows ``admin_list_display_pk = False`` on its ``Tag`` model.
 * **``admin_list_display_pk``** on ``SnapModel`` — see Breaking.
 * **Snap fields accept a positional ``verbose_name``**, like every Django field:
   ``SnapCharField("Label", max_length=200)`` used to raise a ``TypeError`` that named neither the
@@ -67,6 +80,11 @@ Added
 
 Changed
 -------
+
+* **Short values are masked harder.** An e-mail whose local part is one or two characters masks to
+  ``***@domain`` — ``a***@x.io`` for ``a@x.io`` printed the whole local part. A
+  ``SNAPADMIN_MASKING_RULES`` ``pattern`` that matches nothing in a non-empty value falls back to
+  the built-in masker instead of returning the value unchanged.
 
 * **``snapadmin.W022``'s hint names both SFTP cases.** On several managed SFTP products the login
   directory *is* the absolute path; dropping the leading slash, as the hint used to advise, created
@@ -86,6 +104,9 @@ Fixed
   run, a fully due subtree goes leaves first, files go only with rows actually deleted, and the kept
   rows are reported: ``SnapPurgeResult.skipped_protected``, a ``SKIPPED`` line in
   ``snapadmin_purge_expired_data``, and a ``skipped_protected`` map in the Celery task's summary.
+* **``delete_pks_from_es()`` reports a partial failure.** A ``delete_by_query`` answer carrying a
+  ``failures`` list now returns ``False`` (so ``DUAL`` purges raise ``SnapPurgeError``) instead of
+  counting as a cleared mirror.
 * **A masked changelist column keeps the field's ``verbose_name``**, translation included, instead
   of a title-cased field name.
 * **Generated ``ModelAdmin`` classes report the model's module as ``__module__``**, not a

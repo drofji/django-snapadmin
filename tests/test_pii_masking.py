@@ -785,3 +785,58 @@ class TestFieldPermissionGraphQLResolver:
         }, user)
         assert masked["email"] == {"old": "old@example.com", "new": "new@example.com"}
         assert masked["first_name"] == {"old": "[redacted]", "new": "[redacted]"}
+
+
+class TestMaskFieldAcrossTypes:
+    """#EXT2j — ``mask_field`` itself (the choke point every surface uses) over
+    every value shape a model can hand it, with and without a configured rule,
+    and the two ways short values used to be masked too weakly."""
+
+    @pytest.mark.parametrize("value, expected", [
+        (42, "***"),
+        (Decimal("9.99"), "***"),
+        (True, "***"),
+        ([12, "alice@example.com"], ["***", "a***@example.com"]),
+        ({"card": "4111111111111111", "n": None}, {"card": "41************11", "n": None}),
+        ("ab", "**"),
+        ("abc", "***"),
+        ("", ""),
+        (None, None),
+    ])
+    def test_builtin_masking_per_type(self, value, expected):
+        assert mask_field("demo", "Customer", "notes", value) == expected
+
+    @override_settings(SNAPADMIN_MASKING_RULES={"demo.Customer": {"notes": {"replacement": "[x]"}}})
+    @pytest.mark.parametrize("value, expected", [
+        (42, "[x]"),
+        ("ab", "[x]"),
+        ([1, "a"], ["[x]", "[x]"]),
+        ({"k": 1}, {"k": "[x]"}),
+        (None, None),
+    ])
+    def test_replacement_rule_per_type(self, value, expected):
+        assert mask_field("demo", "Customer", "notes", value) == expected
+
+    @pytest.mark.parametrize("email, expected", [
+        ("a@x.io", "***@x.io"),
+        ("ab@x.io", "***@x.io"),
+        ("abc@x.io", "a***@x.io"),
+    ])
+    def test_a_one_or_two_character_local_part_is_not_revealed(self, email, expected):
+        # "a***@x.io" for "a@x.io" printed the whole local part.
+        assert mask_value(email) == expected
+
+    @override_settings(SNAPADMIN_MASKING_RULES={
+        "demo.Customer": {"notes": {"pattern": r"(?<=.{3}).", "replacement": "*"}},
+    })
+    def test_a_pattern_that_matches_nothing_falls_back_instead_of_returning_raw(self):
+        # "keep the first three characters": a two-character value has nothing
+        # after position 3, so the rule used to hand it back untouched.
+        assert mask_field("demo", "Customer", "notes", "ab") == "**"
+        assert mask_field("demo", "Customer", "notes", "abcdef") == "abc***"
+
+    @override_settings(SNAPADMIN_MASKING_RULES={
+        "demo.Customer": {"notes": {"pattern": r"\d", "replacement": "#"}},
+    })
+    def test_a_non_string_value_matching_nothing_falls_back_too(self):
+        assert mask_field("demo", "Customer", "notes", ["abc", 12]) == ["***", "##"]

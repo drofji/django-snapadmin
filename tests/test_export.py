@@ -266,6 +266,41 @@ class TestRunExportJob:
         assert len(set(data_rows)) == 5
 
     @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
+    def test_json_crash_between_flush_and_checkpoint_resumes_without_duplicates(self, products):
+        """#EXT2j — the ``json`` format (NDJSON, one object per line) resumes
+        too: after a torn write and a retry every line must still parse on its
+        own — a half-written line surviving the truncation would not — and
+        every row must be there exactly once."""
+        import json
+
+        job = _job(export_format="json")
+        real_save = SnapExportJob.save
+        state = {"checkpoints": 0}
+
+        def failing_save(self, *a, **k):
+            fields = k.get("update_fields") or []
+            if "cursor_pk" in fields:
+                state["checkpoints"] += 1
+                if state["checkpoints"] == 2:
+                    raise RuntimeError("crash after fsync, before checkpoint")
+            return real_save(self, *a, **k)
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(SnapExportJob, "save", failing_save)
+            exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "failed"
+        assert job.processed_rows == 2
+
+        exporting.run_export_job(job.pk)
+        job.refresh_from_db()
+        assert job.status == "completed" and job.processed_rows == 5
+        with open(exporting.output_path(job)) as handle:
+            rows = [json.loads(line) for line in handle.read().splitlines()]
+        assert len(rows) == 5
+        assert len({row["id"] for row in rows}) == 5
+
+    @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
     def test_crash_before_first_checkpoint_discards_stale_partial(self, products):
         # Crash before *any* checkpoint ever lands: the local working file has
         # a header (and maybe a first chunk) flushed to it, but cursor_pk is

@@ -757,6 +757,59 @@ class TestApiWriteFieldsAllowlist:
         fields = build_model_serializer(Product)().fields
         assert fields["id"].read_only is True
 
+    def test_create_does_not_persist_an_excluded_or_non_allowlisted_key(self, auth_client):
+        """#EXT2j — the create path, not only update: ``user_email`` is in
+        ``api_exclude_fields`` and ``created_at`` is not in ``api_write_fields``
+        on the demo AuditLog. Neither may reach the row, whatever the body says."""
+        from datetime import datetime, timezone as dt_timezone
+
+        from demo.apps.shop.models import AuditLog
+
+        r = auth_client.post(
+            "/api/models/demo/AuditLog/",
+            {"action": "login", "user_email": "planted@example.com",
+             "created_at": "2000-01-01T00:00:00Z"},
+            format="json",
+        )
+
+        assert r.status_code == 201, r.content
+        assert "user_email" not in r.json()
+        row = AuditLog.objects.get(pk=r.json()["id"])
+        assert row.action == "login"
+        assert row.user_email != "planted@example.com"
+        assert row.created_at > datetime(2001, 1, 1, tzinfo=dt_timezone.utc)
+
+    def test_update_does_not_persist_an_excluded_key(self, auth_client):
+        from demo.apps.shop.models import AuditLog
+
+        row = AuditLog.objects.create(action="login", user_email="real@example.com")
+
+        r = auth_client.patch(
+            f"/api/models/demo/AuditLog/{row.pk}/",
+            {"action": "logout", "user_email": "planted@example.com"},
+            format="json",
+        )
+
+        assert r.status_code == 200, r.content
+        row.refresh_from_db()
+        assert row.action == "logout"
+        assert row.user_email == "real@example.com"
+
+    def test_full_put_ignores_non_allowlisted_field(
+        self, auth_client, product, restricted_product_serializer
+    ):
+        original_name = product.name
+        r = auth_client.put(
+            f"/api/models/demo/Product/{product.pk}/",
+            {"name": "Hacked Name", "price": "1.00", "available": False},
+            format="json",
+        )
+        assert r.status_code == 200, r.content
+        product.refresh_from_db()
+        assert product.name == original_name
+        assert str(product.price) != "1.00"
+        assert product.available is False
+
     def test_update_ignores_non_allowlisted_field(
         self, auth_client, product, restricted_product_serializer
     ):

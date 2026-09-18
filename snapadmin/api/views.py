@@ -85,7 +85,22 @@ class SnapUserRateThrottle(UserRateThrottle):
         return get_setting("SNAPADMIN_THROTTLE_USER", "600/min")
 
 
+#: The Django permission verbs an action can be mapped to.
+_PERMISSION_VERBS = frozenset({"view", "add", "change", "delete"})
+
+
 class TokenModelPermission(permissions.BasePermission):
+    """Map each viewset action to the Django model permission it needs — and deny the rest.
+
+    An action missing from the map is **refused** rather than given the
+    ``view`` floor (#EXT2j): a fallback to ``view`` would open any future
+    *write* action to read-only users the moment somebody forgot to map it.
+    A project that adds its own action to a subclassed viewset maps it with
+    ``SNAPADMIN_API_ACTION_PERMISSIONS = {"my_action": "change"}``; built-in
+    entries always win over that setting, and an entry naming anything but
+    ``view``/``add``/``change``/``delete`` is refused too.
+    """
+
     _action_map = {
         "list":    "view",
         "retrieve": "view",
@@ -93,7 +108,22 @@ class TokenModelPermission(permissions.BasePermission):
         "update":  "change",
         "partial_update": "change",
         "destroy": "delete",
+        # Read-only custom actions: fetch_by is a POST only because its value
+        # list does not fit a query string; metadata is DRF's OPTIONS answer.
+        "count": "view",
+        "export": "view",
+        "fetch_by": "view",
+        "metadata": "view",
     }
+
+    def _required_verb(self, action: str | None) -> str | None:
+        verb = self._action_map.get(action or "")
+        if verb is None:
+            verb = (get_setting("SNAPADMIN_API_ACTION_PERMISSIONS", None) or {}).get(action)
+        if verb not in _PERMISSION_VERBS:
+            logger.warning("api_action_unmapped", action=action, mapped_to=verb)
+            return None
+        return verb
 
     def has_permission(self, request: Request, view) -> bool:
         app_label  = view.kwargs.get("app_label", "")
@@ -111,7 +141,14 @@ class TokenModelPermission(permissions.BasePermission):
             # the model at all, same as every other action.
             return token.can_access_model(app_label, model_name) if isinstance(token, APIToken) else True
 
-        action_str = self._action_map.get(view.action, "view")
+        if view.action is None:
+            # The route has no handler for this HTTP method (a GET on the
+            # POST-only fetch-by route): nothing can be served, and letting it
+            # through is what lets DRF answer 405 rather than a misleading 403.
+            return True
+        action_str = self._required_verb(view.action)
+        if action_str is None:
+            return False
         if isinstance(token, APIToken):
             return token_has_permission(
                 token, request.user, app_label, model_name, action_str
