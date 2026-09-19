@@ -33,10 +33,12 @@ from drf_spectacular.utils import extend_schema
 #: Overall status values that must not take an instance out of rotation.
 SERVING_STATUSES = frozenset({"healthy", "degraded"})
 
+
 class HealthCheckView(APIView):
     """
     Check the health of the system.
     """
+
     permission_classes = [AllowAny]
 
     @extend_schema(summary="Health check for services")
@@ -46,7 +48,7 @@ class HealthCheckView(APIView):
             "services": {
                 "database": "offline",
                 "elasticsearch": "offline",
-            }
+            },
         }
 
         # Check Database
@@ -60,6 +62,7 @@ class HealthCheckView(APIView):
 
         # Check Elasticsearch
         if getattr(settings, "ELASTICSEARCH_ENABLED", False):
+
             def _elasticsearch_down() -> None:
                 # Only an *upgrade* in severity may overwrite the overall status:
                 # a database outage already set "unhealthy", and Elasticsearch —
@@ -72,6 +75,7 @@ class HealthCheckView(APIView):
 
             try:
                 from elasticsearch import Elasticsearch
+
                 url = getattr(settings, "ELASTICSEARCH_URL", "http://localhost:9200")
                 es = Elasticsearch([url], request_timeout=2)
                 if es.ping():

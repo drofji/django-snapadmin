@@ -44,6 +44,17 @@ include = [
     { path = "llms.txt", format = ["sdist", "wheel"] },
     { path = "THIRD_PARTY_NOTICES.md", format = ["sdist", "wheel"] },
     { path = "SECURITY.md", format = ["sdist"] },
+    # The test suite, and what it runs against, travel with the sdist only (#EXT1g):
+    # the wheel stays lean, and a downstream packager or auditor can unpack the sdist
+    # and run `python -m pytest` there. The suite needs the demo project (its settings
+    # module), the docs it checks for truth, and the CI/contributor files it pins.
+    { path = "tests/**/*.py", format = ["sdist"] },
+    { path = "conftest.py", format = ["sdist"] },
+    { path = "pytest.ini", format = ["sdist"] },
+    { path = "demo/**/*", format = ["sdist"] },
+    { path = "docs/**/*", format = ["sdist"] },
+    { path = "CONTRIBUTING.md", format = ["sdist"] },
+    { path = ".github/**/*", format = ["sdist"] },
 ]
 
 # Extra links shown in the PyPI sidebar ("Project links"). `homepage`, `repository` and
@@ -170,8 +181,11 @@ graphql = ["graphene-django"]
 all = ["django-unfold", "elasticsearch", "celery", "django-celery-beat", "django-celery-results", "paramiko", "pyrage", "boto3", "django-extra-settings", "django-ckeditor-5", "django-admin-autocomplete-filter", "openpyxl", "djangorestframework", "drf-spectacular", "django-filter", "graphene-django", "cryptography"]
 
 [tool.poetry.group.dev.dependencies]
-black = "^24.0.0"
-flake8 = "^7.0.0"
+# Lint + format (replaces black + flake8) and type checking — both run in CI
+# (#QA1c). Dev-only: nothing here reaches `pip install django-snapadmin`.
+ruff = ">=0.6"
+mypy = ">=1.10"
+django-stubs = ">=5.0"
 pytest = "^8.0.0"
 pytest-django = "^4.8.0"
 pytest-cov = "^5.0.0"
@@ -203,6 +217,50 @@ openpyxl = ">=3.1.0"
 # The suite covers encrypted fields end to end; the package core imports it lazily
 # behind the [encryption] extra.
 cryptography = ">=42.0.0"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+extend-exclude = ["snapadmin/migrations", "snapadmin/scaffold/templates"]
+
+[tool.ruff.lint]
+# E/W/F: pyflakes + pycodestyle; B: bugbear; S: bandit's security rules over the
+# whole package (backup, crypto, encryption, api, sharding included); C901:
+# complexity. Every suppression in the code is local and states its reason.
+select = ["E", "W", "F", "B", "S", "C901"]
+# The formatter owns line length; E501 would only flag long strings and comments.
+ignore = ["E501"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 15
+
+[tool.ruff.format]
+quote-style = "preserve"
+
+[tool.mypy]
+python_version = "3.10"
+files = ["snapadmin"]
+exclude = ["snapadmin/migrations/", "snapadmin/scaffold/templates/"]
+# Non-strict on day one (#QA1a decision 2); strictness is raised per module via
+# [[tool.mypy.overrides]] once a module is clean, starting with the ones where a
+# wrong type costs most.
+ignore_missing_imports = true
+warn_unused_ignores = true
+check_untyped_defs = false
+# Model fields, managers and settings typed by django-stubs; the plugin boots the
+# demo project's test settings (the same module pytest uses) to read the models.
+plugins = ["mypy_django_plugin.main"]
+
+# Raised strictness where a wrong type is most expensive (#QA1a decision 2).
+# Clean today; any new unannotated or untyped code here fails the check.
+[[tool.mypy.overrides]]
+module = ["snapadmin.encryption.*", "snapadmin.crypto", "snapadmin.sharding.*"]
+check_untyped_defs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[tool.django-stubs]
+django_settings_module = "demo.core.settings_test"
 
 [build-system]
 requires = ["poetry-core>=1.0.0"]

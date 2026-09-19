@@ -14,9 +14,29 @@ from rest_framework import serializers
 from rest_framework.utils import model_meta
 
 from snapadmin.api.exceptions import as_drf_validation_error
-from snapadmin.masking import get_masked_fields, mask_field, user_can_access_field, user_can_view_pii
+from snapadmin.masking import (
+    get_masked_fields,
+    mask_field,
+    user_can_access_field,
+    user_can_view_pii,
+)
 from snapadmin.models import APIToken
 from snapadmin.registry import get_model_meta
+
+
+def _bound_model(serializer: object) -> type | None:
+    """The model a serializer is for: ``_snap_model`` when SnapAdmin built the class,
+    otherwise ``Meta.model``.
+
+    The mixins below are public and a project's own ``ModelSerializer`` mixes
+    them in without ever setting ``_snap_model``. Reading only that attribute
+    turned masking and the field-permission gate silently off for such a class
+    (F8) — the one case where "no model" meant "fail open".
+    """
+    model = getattr(serializer, "_snap_model", None)
+    if model is None:
+        model = getattr(getattr(serializer, "Meta", None), "model", None)
+    return model
 
 
 class PIIMaskingSerializerMixin:
@@ -32,8 +52,8 @@ class PIIMaskingSerializerMixin:
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        model = self._snap_model
-        if model is None:  # pragma: no cover - defensive; always set in practice
+        model = _bound_model(self)
+        if model is None:  # a plain Serializer: no model, nothing configured for it
             return data
         masked = get_masked_fields(model._meta.app_label, model._meta.model_name)
         if not masked:
@@ -79,8 +99,8 @@ class FieldPermissionSerializerMixin:
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        model = self._snap_model
-        if model is None:  # pragma: no cover - defensive; always set in practice
+        model = _bound_model(self)
+        if model is None:  # a plain Serializer: no model, nothing configured for it
             return data
         user = getattr(self.context.get("request"), "user", None)
         for field in list(data):
@@ -90,15 +110,17 @@ class FieldPermissionSerializerMixin:
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        model = self._snap_model
-        if model is None:  # pragma: no cover - defensive; always set in practice
+        model = _bound_model(self)
+        if model is None:  # a plain Serializer: no model, nothing configured for it
             return attrs
         user = getattr(self.context.get("request"), "user", None)
-        denied = [field for field in attrs if not user_can_access_field(user, model, field, write=True)]
+        denied = [
+            field for field in attrs if not user_can_access_field(user, model, field, write=True)
+        ]
         if denied:
-            raise serializers.ValidationError({
-                field: "You do not have permission to set this field." for field in denied
-            })
+            raise serializers.ValidationError(
+                {field: "You do not have permission to set this field." for field in denied}
+            )
         return attrs
 
 
@@ -176,9 +198,7 @@ class ModelCleanSerializerMixin:
             raise as_drf_validation_error(exc) from exc
         return attrs
 
-    def _snap_instance_for_validation(
-        self, model: type[Model], attrs: dict[str, Any]
-    ) -> Model:
+    def _snap_instance_for_validation(self, model: type[Model], attrs: dict[str, Any]) -> Model:
         """The row the rule is checked against: the merged result of the write.
 
         On a create that is a fresh unsaved instance; on a PATCH it is a copy of
@@ -208,9 +228,7 @@ class ModelCleanSerializerMixin:
     def _snap_validation_exclusions(self, model: type[Model]) -> list[str]:
         """Model fields this serializer cannot write, and so must not judge."""
         writable = {
-            field.source or name
-            for name, field in self.fields.items()
-            if not field.read_only
+            field.source or name for name, field in self.fields.items() if not field.read_only
         }
         return [f.name for f in model._meta.fields if f.name not in writable]
 
@@ -241,6 +259,31 @@ class APITokenSerializer(serializers.ModelSerializer):
             "last_used_at",
         ]
         read_only_fields = ["token_prefix", "created_at", "last_used_at"]
+
+
+class APITokenRenameSerializer(serializers.ModelSerializer):
+    """The one edit a token accepts after creation: its name (#EXT1p).
+
+    Any other key in the body is rejected by name rather than ignored, so a
+    client cannot believe it changed a token's scope or expiry through a
+    request that only renamed it. Scope and expiry changes mean a new token.
+    """
+
+    class Meta:
+        model = APIToken
+        fields = ["token_name"]
+        extra_kwargs = {"token_name": {"required": True, "allow_blank": False}}
+
+    def validate(self, attrs):
+        unexpected = sorted(set(self.initial_data) - {"token_name"})
+        if unexpected:
+            raise serializers.ValidationError(
+                {
+                    name: "Only token_name can be changed; create a new token instead."
+                    for name in unexpected
+                }
+            )
+        return attrs
 
 
 class APITokenCreateSerializer(serializers.ModelSerializer):

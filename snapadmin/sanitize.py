@@ -25,6 +25,7 @@ whole module at Django startup or, worse, silently letting unsanitized HTML
 through. The ``SNAPADMIN_HTML_SANITIZER`` escape hatch never touches ``nh3`` at
 all, so it keeps working even in that state.
 """
+
 from __future__ import annotations
 
 import functools
@@ -80,7 +81,5 @@ def sanitize_html(value: str) -> str:
     if not value:
         return value
     dotted = get_setting("SNAPADMIN_HTML_SANITIZER", None)
-    sanitizer: Callable[[str], str] = (
-        import_string(dotted) if dotted else _default_sanitizer
-    )
+    sanitizer: Callable[[str], str] = import_string(dotted) if dotted else _default_sanitizer
     return sanitizer(value)

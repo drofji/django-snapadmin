@@ -78,3 +78,27 @@ class TestBuildContext:
     def test_not_a_directory(self, tmp_path):
         with pytest.raises(IntegrateError, match="Not a directory"):
             detect.build_context(project_dir=str(tmp_path / "nope"))
+
+
+class TestDetectionFallsBackToAGlob:
+    """#QA1d — a pointer that names a file which is not there must not stop the
+    search: the glob fallback still finds the real one."""
+
+    def test_manage_py_naming_a_missing_settings_module(self, tmp_path):
+        (tmp_path / "manage.py").write_text(
+            'os.environ.setdefault("DJANGO_SETTINGS_MODULE", "gone.settings")\n'
+        )
+        (tmp_path / "shop").mkdir()
+        (tmp_path / "shop" / "settings.py").write_text("")
+
+        assert detect.find_settings(tmp_path, None) == tmp_path / "shop" / "settings.py"
+
+    def test_settings_without_a_sibling_urls_py(self, tmp_path):
+        (tmp_path / "conf").mkdir()
+        (tmp_path / "conf" / "settings.py").write_text("")
+        (tmp_path / "site").mkdir()
+        (tmp_path / "site" / "urls.py").write_text("")
+
+        found = detect.find_urls(tmp_path, tmp_path / "conf" / "settings.py", None)
+
+        assert found == tmp_path / "site" / "urls.py"

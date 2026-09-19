@@ -40,11 +40,6 @@ USER appuser
 
 EXPOSE 8000
 
-# The admin-only /api/health/ probe checks the database and answers 503 when it
-# is unreachable (curl -f then fails and the container is restarted/replaced).
-# It is available while SNAPADMIN_REST_API_ENABLED=True, which the generated
-# settings.py sets (the package-wide default is off since 1.0).
-HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD curl -fsS http://localhost:8000/api/health/ || exit 1
+$healthcheck_block
 
 CMD ["gunicorn", "$project_name.wsgi:application", "--bind", "0.0.0.0:8000", "--workers", "4"]

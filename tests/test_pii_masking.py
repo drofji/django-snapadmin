@@ -840,3 +840,51 @@ class TestMaskFieldAcrossTypes:
     })
     def test_a_non_string_value_matching_nothing_falls_back_too(self):
         assert mask_field("demo", "Customer", "notes", ["abc", 12]) == ["***", "##"]
+
+
+def test_an_encrypted_field_without_a_blind_index_masks_only_itself(monkeypatch):
+    """#QA1d — the ``_bi`` sibling is masked alongside its column only when the
+    field has one; without a blind index no phantom sibling name is added."""
+    from demo.apps.shop.models import CustomerProfile
+
+    field = CustomerProfile._meta.get_field("tax_id")
+    monkeypatch.setattr(field, "blind_index_name", None)
+
+    masked = get_masked_fields("demo", "customerprofile")
+
+    assert "tax_id" in masked
+    assert not any(name.endswith("_bi") for name in masked)
+
+
+@pytest.mark.django_db
+@override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["tags", "name"]})
+def test_an_export_skips_a_masked_name_that_is_not_an_exported_column(regular_user):
+    """#QA1d — a masked many-to-many (``tags``) is not a column of the flat
+    export; masking passes over it instead of failing, and still masks ``name``."""
+    from decimal import Decimal
+    from demo.apps.shop.models import Product
+    from snapadmin.exporting import _DefaultOrmSource
+
+    Product.objects.create(name="Visible Lamp", price=Decimal("1.00"))
+    job = SimpleNamespace(target_model=lambda: Product, requested_by=regular_user, filters=None)
+
+    batch, _cursor = next(_DefaultOrmSource(job).iter_batches(cursor=None, chunk_size=10))
+
+    assert "tags" not in batch[0]
+    assert batch[0]["name"] != "Visible Lamp"
+
+
+@pytest.mark.django_db
+@override_settings(SNAPADMIN_MASKED_FIELDS={"demo.AuditLog": ["user_email"]})
+def test_graphql_attaches_no_resolver_to_a_masked_field_it_excludes():
+    """#QA1d — ``user_email`` is both masked and in ``api_exclude_fields``: the
+    field is not in the schema at all, so no masking resolver is wired for it."""
+    from snapadmin.api.graphql import get_dynamic_graphql_schema
+
+    schema = get_dynamic_graphql_schema()
+    audit_type = schema.graphql_schema.get_type("DemoAuditLogType") or next(
+        t for name, t in schema.graphql_schema.type_map.items() if name.lower().endswith("auditlogtype")
+    )
+
+    assert "userEmail" not in audit_type.fields
+    assert "action" in audit_type.fields

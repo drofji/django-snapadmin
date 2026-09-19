@@ -315,3 +315,24 @@ class TestDashboardToleratesAModelThatCannotBeCounted:
         ]
         # Every card still carries its link, so the page renders in full.
         assert all(card["url"] for card in context["registered_models"])
+
+
+@pytest.mark.django_db
+def test_swagger_link_is_omitted_when_swagger_is_off_but_rest_is_on(settings, admin_user):
+    """#QA1d — Swagger follows REST by default; switched off explicitly, the
+    dashboard offers the REST root and no Swagger link."""
+    from django.test import RequestFactory
+
+    from snapadmin.views import DashboardView
+
+    settings.SNAPADMIN_REST_API_ENABLED = True
+    settings.SNAPADMIN_SWAGGER_ENABLED = False
+    view = DashboardView()
+    view.request = RequestFactory().get("/")
+    view.request.user = admin_user
+    view.args, view.kwargs = [], {}
+
+    names = [str(link["name"]) for link in view.get_context_data()["links"]]
+
+    assert "REST API Root" in names
+    assert "Swagger Docs" not in names

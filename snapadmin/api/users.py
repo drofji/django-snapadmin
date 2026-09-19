@@ -49,8 +49,8 @@ class SnapUserSerializer(serializers.ModelSerializer):
         model = UserModel
         # fields + read_only_fields are set below — they depend on which
         # optional fields the concrete (possibly custom) user model defines.
-        fields = None
-        read_only_fields = None
+        fields: list[str] | None = None
+        read_only_fields: list[str] | None = None
 
     def get_permissions(self, obj) -> list[str]:
         return sorted(
@@ -62,7 +62,7 @@ class SnapUserSerializer(serializers.ModelSerializer):
         try:
             validate_password(value)
         except DjangoValidationError as exc:
-            raise serializers.ValidationError(exc.messages)
+            raise serializers.ValidationError(exc.messages) from exc
         return value
 
     def create(self, validated_data):
@@ -138,9 +138,7 @@ class SnapUserViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             app_label, _, codename = str(entry).partition(".")
             try:
                 resolved.append(
-                    Permission.objects.get(
-                        content_type__app_label=app_label, codename=codename
-                    )
+                    Permission.objects.get(content_type__app_label=app_label, codename=codename)
                 )
             except Permission.DoesNotExist:
                 return Response(

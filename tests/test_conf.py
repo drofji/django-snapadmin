@@ -49,11 +49,24 @@ class TestProfilePreset:
         assert "SNAPADMIN_NOT_IN_ANY_PRESET" not in conf._PRESETS["api"]
         assert conf.get_setting("SNAPADMIN_NOT_IN_ANY_PRESET", "builtin-default") == "builtin-default"
 
-    def test_full_profile_matches_the_builtin_default_by_construction(self, monkeypatch):
-        """`full` is documented as "today's defaults" — every preset value must equal it."""
-        monkeypatch.setitem(conf._PRESETS["full"], "SNAPADMIN_FAKE_SETTING", "builtin")
-        with override_settings(SNAPADMIN_PROFILE="full"):
-            assert conf.get_setting("SNAPADMIN_FAKE_SETTING", "builtin") == "builtin"
+    def test_full_profile_turns_the_api_surfaces_on_unlike_no_profile(self, settings):
+        """#RM1d — the contract since 0.1.0b8, confirmed: ``full`` means every generated
+        surface on, *not* "whatever the built-in defaults are". The two used to coincide
+        and stopped when the REST/GraphQL defaults flipped to off; a preset that merely
+        mirrored the defaults would have inverted with them. Pinned so a later default
+        change cannot quietly turn ``full`` into a no-op again."""
+        from snapadmin.conf import GRAPHQL_ENABLED_DEFAULT, REST_API_ENABLED_DEFAULT
+
+        for name in ("SNAPADMIN_REST_API_ENABLED", "SNAPADMIN_GRAPHQL_ENABLED"):
+            if hasattr(settings, name):
+                delattr(settings, name)
+        settings.SNAPADMIN_PROFILE = "full"
+        assert conf.get_setting("SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT) is True
+        assert conf.get_setting("SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_ENABLED_DEFAULT) is True
+
+        del settings.SNAPADMIN_PROFILE
+        assert conf.get_setting("SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT) is False
+        assert conf.get_setting("SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_ENABLED_DEFAULT) is False
 
 
 # ── the backward-compatibility guarantee ──────────────────────────────────────

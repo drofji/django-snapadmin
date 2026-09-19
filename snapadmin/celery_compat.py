@@ -77,6 +77,8 @@ def shared_task(*args: Any, **kwargs: Any):
         return UnavailableTask(fn, name=fn.__name__)
 
     def decorator(fn: Callable[..., Any]) -> UnavailableTask:
-        return UnavailableTask(fn, name=kwargs.get("name", fn.__name__), bind=bool(kwargs.get("bind")))
+        return UnavailableTask(
+            fn, name=kwargs.get("name", fn.__name__), bind=bool(kwargs.get("bind"))
+        )
 
     return decorator

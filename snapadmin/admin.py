@@ -23,15 +23,18 @@ from django.utils.translation import gettext_lazy as _
 
 try:
     from django.conf import settings
+
     if 'unfold' not in settings.INSTALLED_APPS:
         raise ImportError("Unfold not in INSTALLED_APPS")
 
     from unfold.admin import ModelAdmin, TabularInline, StackedInline
     from unfold.contrib.filters.admin import RelatedDropdownFilter, ChoicesDropdownFilter
     from unfold.decorators import display
+
     UNFOLD_INSTALLED = True
 except (ImportError, RuntimeError):
     from django.contrib.admin import ModelAdmin, TabularInline, StackedInline
+
     RelatedDropdownFilter = admin.RelatedFieldListFilter
     ChoicesDropdownFilter = admin.ChoicesFieldListFilter
     UNFOLD_INSTALLED = False
@@ -41,7 +44,9 @@ except (ImportError, RuntimeError):
             if description:
                 func.short_description = description
             return func
+
         return decorator
+
 
 from snapadmin import audit
 from snapadmin.models import APIToken, ErrorEvent, SnapadminAuditLog
@@ -52,6 +57,7 @@ class SnapTabularInline(TabularInline):
     """
     Standard inline class for SnapAdmin. Fallback to Django admin if Unfold is missing.
     """
+
     extra = 1
 
 
@@ -59,6 +65,7 @@ class SnapStackedInline(StackedInline):
     """
     Standard stacked inline class for SnapAdmin. Fallback to Django admin if Unfold is missing.
     """
+
     extra = 1
 
 
@@ -77,7 +84,7 @@ class APITokenAdmin(ModelAdmin):
         "last_used_at",
         "created_at",
     ]
-    list_filter  = [
+    list_filter = [
         ("is_active", ChoicesDropdownFilter),
         ("user", RelatedDropdownFilter),
     ]
@@ -89,16 +96,25 @@ class APITokenAdmin(ModelAdmin):
     list_filter_submit = True
 
     fieldsets = [
-        (None, {
-            "fields": ["token_name", "user", "full_key"],
-        }),
-        (_("Access Control"), {
-            "fields": ["is_active", "expiration_date", "allowed_models", "allowed_scopes"],
-        }),
-        (_("Audit"), {
-            "fields": ["created_at", "last_used_at"],
-            "classes": ["collapse"],
-        }),
+        (
+            None,
+            {
+                "fields": ["token_name", "user", "full_key"],
+            },
+        ),
+        (
+            _("Access Control"),
+            {
+                "fields": ["is_active", "expiration_date", "allowed_models", "allowed_scopes"],
+            },
+        ),
+        (
+            _("Audit"),
+            {
+                "fields": ["created_at", "last_used_at"],
+                "classes": ["collapse"],
+            },
+        ),
     ]
 
     def formfield_for_dbfield(self, db_field, request, **kwargs):
@@ -171,8 +187,14 @@ class ErrorEventAdmin(ModelAdmin):
     list_filter = ["exception_class", "method", "status_code"]
     search_fields = ["exception_class", "message", "path"]
     readonly_fields = [
-        "exception_class", "message", "path", "method",
-        "status_code", "fingerprint", "traceback", "created_at",
+        "exception_class",
+        "message",
+        "path",
+        "method",
+        "status_code",
+        "fingerprint",
+        "traceback",
+        "created_at",
     ]
     ordering = ["-created_at"]
     date_hierarchy = "created_at"
@@ -219,13 +241,30 @@ class SnapadminAuditLogAdmin(ModelAdmin):
     #: available through ``manage.py snapadmin_audit_export``.
     timeline_max_entries = 100
 
-    list_display = ["timestamp", "action_badge", "actor_repr", "model", "object_timeline", "ip_address"]
+    list_display = [
+        "timestamp",
+        "action_badge",
+        "actor_repr",
+        "model",
+        "object_timeline",
+        "ip_address",
+    ]
     list_filter = ["action", "app_label", "model"]
     search_fields = ["actor_repr", "object_repr", "object_id", "ip_address", "model"]
     readonly_fields = [
-        "action", "actor", "actor_repr", "ip_address", "user_agent",
-        "content_type", "app_label", "model", "object_id", "object_repr",
-        "changes", "timeline_link", "timestamp",
+        "action",
+        "actor",
+        "actor_repr",
+        "ip_address",
+        "user_agent",
+        "content_type",
+        "app_label",
+        "model",
+        "object_id",
+        "object_repr",
+        "changes",
+        "timeline_link",
+        "timestamp",
     ]
     ordering = ["-timestamp"]
     date_hierarchy = "timestamp"
@@ -279,7 +318,9 @@ class SnapadminAuditLogAdmin(ModelAdmin):
         ]
         return custom + super().get_urls()
 
-    def timeline_view(self, request, app_label: str, model: str, object_id: str) -> TemplateResponse:
+    def timeline_view(
+        self, request, app_label: str, model: str, object_id: str
+    ) -> TemplateResponse:
         """Render every recorded change to one object as a diff timeline.
 
         Gated on the audit log's own view permission — the same thing that
@@ -295,12 +336,14 @@ class SnapadminAuditLogAdmin(ModelAdmin):
             raise PermissionDenied
 
         entries = SnapadminAuditLog.objects.filter(
-            app_label=app_label, model=model, object_id=object_id,
+            app_label=app_label,
+            model=model,
+            object_id=object_id,
         ).order_by("-timestamp")
         total = entries.count()
         items = [
             {"entry": entry, "rows": audit.diff_rows(self._visible_changes(entry, request.user))}
-            for entry in entries[:self.timeline_max_entries]
+            for entry in entries[: self.timeline_max_entries]
         ]
         context = {
             **self.admin_site.each_context(request),
@@ -339,6 +382,7 @@ class SnapadminAuditLogAdmin(ModelAdmin):
         the single call both the change form and the timeline go through.
         """
         from snapadmin.masking import mask_changes
+
         return mask_changes(obj.app_label, obj.model, obj.changes, user)
 
     @staticmethod
@@ -348,9 +392,12 @@ class SnapadminAuditLogAdmin(ModelAdmin):
         Every value is escaped by the template — an audit row holds whatever was
         typed into the admin, so it is markup only after Django has escaped it.
         """
-        return mark_safe(render_to_string(
-            "snapadmin/audit_diff.html", {"rows": audit.diff_rows(changes)},
-        ))
+        return mark_safe(  # noqa: S308 - the template autoescapes every value
+            render_to_string(
+                "snapadmin/audit_diff.html",
+                {"rows": audit.diff_rows(changes)},
+            )
+        )
 
     def get_exclude(self, request, obj=None):
         # Keep the raw "changes" JSONField out of the change form entirely: it

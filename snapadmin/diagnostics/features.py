@@ -285,8 +285,7 @@ def _sharding() -> tuple[bool, str]:
     replicas = sum(len(shard.replica_dsns) for shard in shards.values())
     strategy = get_sharding_config().get("STRATEGY", "modulo")
     return True, (
-        f"{_count(len(shards), 'shard')}, {_count(replicas, 'replica')}, "
-        f"strategy {strategy!r}"
+        f"{_count(len(shards), 'shard')}, {_count(replicas, 'replica')}, strategy {strategy!r}"
     )
 
 
@@ -300,9 +299,7 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     # A per-row deadline column (#EXT1o) is a retention rule on its own — a
     # model carrying only that one is swept, so the audit has to count it or it
     # reports "off" for a table that is actively being purged.
-    retention_dates = sum(
-        1 for m in models if get_model_meta(m, "data_retention_date_field", None)
-    )
+    retention_dates = sum(1 for m in models if get_model_meta(m, "data_retention_date_field", None))
     # data_retention_files (#RET2c) and the always-on audit-log purge (#RET2a)
     # and opt-in export-job purge (#RET2b) all feed the same retention_purge
     # capability below — one entry for "is anything being auto-deleted here",
@@ -323,17 +320,22 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     ruled_fields = sum(len(rule or {}) for rule in rules.values())
     es_enabled = _flag("ELASTICSEARCH_ENABLED", False)
     es_models = sum(1 for m in models if get_model_meta(m, "es_index_enabled", False))
-    recipients = list(get_setting("SNAPADMIN_HEALTH_ALERT_EMAILS", []) or
-                      get_setting("SNAPADMIN_ERROR_ALERT_EMAILS", []))
-    throttled = bool(get_setting("SNAPADMIN_THROTTLE_ANON", None) or
-                     get_setting("SNAPADMIN_THROTTLE_USER", None))
+    recipients = list(
+        get_setting("SNAPADMIN_HEALTH_ALERT_EMAILS", [])
+        or get_setting("SNAPADMIN_ERROR_ALERT_EMAILS", [])
+    )
+    throttled = bool(
+        get_setting("SNAPADMIN_THROTTLE_ANON", None) or get_setting("SNAPADMIN_THROTTLE_USER", None)
+    )
     read_only = sum(1 for m in models if get_model_meta(m, "api_read_only", False))
     # api_full_clean (#EXT1k) — "on" means at least one registered model runs its
     # own clean() on the API write path. Worth surfacing because the alternative
     # is silent: a cross-field rule the admin enforces and the API ignores looks
     # like nothing at all until a bad row is already in the database.
     full_clean_models = sum(1 for m in models if get_model_meta(m, "api_full_clean", False))
-    write_allowlist = sum(1 for m in models if get_model_meta(m, "api_write_fields", None) is not None)
+    write_allowlist = sum(
+        1 for m in models if get_model_meta(m, "api_write_fields", None) is not None
+    )
     # Registered plain models (@snap_model) carry none of SnapModel's machinery:
     # ``register_admin`` is the marker for it. Worth surfacing, because these are
     # the models the ES reindex and the retention purge deliberately skip. The
@@ -344,7 +346,9 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     # at least one model has offline_mode=True (SnapModel.get_admin_media()'s
     # own gate, #JS2e) — the setting alone is not enough to mean anything is
     # actually running.
-    connectivity_on = bool(get_setting("SNAPADMIN_CONNECTIVITY_ENABLED", False)) and offline_models > 0
+    connectivity_on = (
+        bool(get_setting("SNAPADMIN_CONNECTIVITY_ENABLED", False)) and offline_models > 0
+    )
     # GDPR subject-access declaration (#FUT4a/#FUT4b) — "on" means at least one
     # valid manage.py snapadmin_subject_request entry point exists; the detail
     # also names how many registered models a request from it can reach.
@@ -357,15 +361,35 @@ def _capabilities() -> list[tuple[str, bool, str]]:
     tenant_scoped_models = sum(1 for m in models if get_model_meta(m, "tenant_scoped", False))
 
     return [
-        ("rest_api", bool(get_setting("SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT)), _extra_missing_detail("rest_framework", "drf_spectacular", "django_filters", extra="api")),
-        ("graphql", bool(get_setting("SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_ENABLED_DEFAULT)), _extra_missing_detail("graphene_django", extra="graphql")),
+        (
+            "rest_api",
+            bool(get_setting("SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT)),
+            _extra_missing_detail(
+                "rest_framework", "drf_spectacular", "django_filters", extra="api"
+            ),
+        ),
+        (
+            "graphql",
+            bool(get_setting("SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_ENABLED_DEFAULT)),
+            _extra_missing_detail("graphene_django", extra="graphql"),
+        ),
         ("audit_trail", bool(get_setting("SNAPADMIN_AUDIT_LOG_ENABLED", True)), ""),
         ("error_monitoring", bool(get_setting("SNAPADMIN_ERROR_MONITOR_ENABLED", True)), ""),
         ("backups", bool(get_setting("SNAPADMIN_BACKUP_ENABLED", False)), _backup_detail()),
-        ("retention_purge",
-         retention > 0 or retention_dates > 0 or audit_retention_on or bool(export_retention_days),
-         _retention_detail(retention, retention_files, audit_retention_on, export_retention_days,
-                           retention_dates)),
+        (
+            "retention_purge",
+            retention > 0
+            or retention_dates > 0
+            or audit_retention_on
+            or bool(export_retention_days),
+            _retention_detail(
+                retention,
+                retention_files,
+                audit_retention_on,
+                export_retention_days,
+                retention_dates,
+            ),
+        ),
         ("pii_masking", masked_fields > 0, _masking_detail(masked_fields, ruled_fields)),
         ("field_encryption", *_encryption()),
         ("sharding", *_sharding()),
@@ -380,15 +404,27 @@ def _capabilities() -> list[tuple[str, bool, str]]:
         ("delete_guard", bool(get_setting("SNAPADMIN_API_DELETE_GUARD", None)), ""),
         ("decorated_models", decorated > 0, _count(decorated, "plain model")),
         ("show_in_form_default", bool(get_setting("SNAPADMIN_SHOW_IN_FORM_DEFAULT", False)), ""),
-        ("connectivity_awareness", connectivity_on, _count(offline_models, "offline-capable model") if offline_models else ""),
+        (
+            "connectivity_awareness",
+            connectivity_on,
+            _count(offline_models, "offline-capable model") if offline_models else "",
+        ),
         ("snap_actions", *_snap_actions(models)),
         ("field_permissions", *_field_permissions(models)),
-        ("gdpr_subject_access", subject_models > 0,
-         f"{_count(subject_models, 'subject model')}, {_count(subject_path_models, 'model')} reachable"
-         if subject_models else ""),
+        (
+            "gdpr_subject_access",
+            subject_models > 0,
+            f"{_count(subject_models, 'subject model')}, {_count(subject_path_models, 'model')} reachable"
+            if subject_models
+            else "",
+        ),
         ("sso", *_sso()),
         ("profile", *_profile()),
-        ("tenant_scoping", tenant_scoped_models > 0, _count(tenant_scoped_models, "tenant-scoped model")),
+        (
+            "tenant_scoping",
+            tenant_scoped_models > 0,
+            _count(tenant_scoped_models, "tenant-scoped model"),
+        ),
     ]
 
 

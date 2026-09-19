@@ -11,7 +11,14 @@ that aren't obvious from the code.
 - **Running things:** the demo's `manage.py` lives in `demo/`; run it from the repo root as
   `python demo/manage.py <command>` (it puts the repo root on `sys.path` itself). Docker runs
   via `docker compose -f demo/docker-compose.yml up --build`. See [`demo/README.md`](demo/README.md).
+- **Static analysis:** `ruff check snapadmin && ruff format --check snapadmin` must be clean (CI
+  blocks on it); `PYTHONPATH=. mypy` reports type findings (advisory, but `encryption/`, `crypto.py`
+  and `sharding/` are strict and clean — keep them that way). A suppression is local, names its rule
+  and says why: `# noqa: S603 - argv list, no shell`.
 - **Tests:** `pytest` from the repo root — the `snapadmin/` package is kept at 100% line coverage.
+  The same suite ships in the **sdist** (never the wheel): `pip download --no-binary :all:
+  --no-deps django-snapadmin`, unpack, install the test dependencies, and run `python -m pytest`
+  inside the unpacked directory.
   The suite runs in a **random order** every time (`pytest-randomly`), because a test that only
   passes where the alphabet happens to put it is not passing for the right reason. Every run
   prints the seed it used:

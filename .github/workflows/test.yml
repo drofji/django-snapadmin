@@ -1,10 +1,11 @@
 name: Tests
 
 # Runs the full pytest suite across the supported Python × Django matrix on every push and pull
-# request to main, and enforces the 100% coverage bar on the shipped `snapadmin/` package. Those six
+# request to main, and enforces the 100% line + branch coverage bar on the shipped `snapadmin/` package. Those six
 # matrix jobs mock Elasticsearch / Redis / Celery and use an in-memory SQLite database, so they need
 # no service containers. The seventh job, `real-services`, is the deliberate exception: it runs the
-# same suite against a real PostgreSQL and a live Elasticsearch — see its own comment below.
+# same suite against a real PostgreSQL and a live Elasticsearch — see its own comment below. The
+# eighth, `static-analysis`, runs Ruff (lint, format, security rules) and mypy.
 
 on:
   push:
@@ -68,11 +69,11 @@ jobs:
           python --version
           python -c "import django; print('Django', django.get_version())"
 
-      - name: Run tests with 100% coverage gate
+      - name: Run tests with 100% line + branch coverage gate
         # `python -m pytest` (not the bare `pytest` console script) so the repository root lands on
         # sys.path — the suite imports `snapadmin` and `demo` straight from the source tree, exactly
         # as it runs locally. A bare `pytest` would fail to import `demo.core.settings_test`.
-        run: python -m pytest --cov=snapadmin --cov-report=term-missing --cov-fail-under=100
+        run: python -m pytest --cov=snapadmin --cov-branch --cov-report=term-missing --cov-fail-under=100
 
   # ───────────────────────────────────────────────────────────────────────────
   # The same suite, against a real PostgreSQL.
@@ -93,6 +94,42 @@ jobs:
   # legitimately take different branches (the estimated-count path returns early
   # on any non-PostgreSQL vendor), so demanding 100% from a single backend would
   # be asking for the wrong thing.
+  static-analysis:
+    # Ruff lint + format are clean and blocking. mypy runs over snapadmin/ with
+    # raised strictness on encryption/, crypto and sharding/ (clean, and any
+    # regression there shows up in the report); the remaining backlog keeps it
+    # advisory for now (#QA1c) — the step reports and does not fail the job.
+    name: Static analysis · Ruff + mypy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        # mypy's Django plugin boots demo.core.settings_test, so it needs the
+        # same runtime stack the suite does.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r demo/requirements.txt
+          pip install "ruff>=0.6" "mypy>=1.10" "django-stubs>=5.0"
+
+      - name: Ruff lint (incl. security rules)
+        run: ruff check snapadmin
+
+      - name: Ruff format
+        run: ruff format --check snapadmin
+
+      - name: mypy (advisory)
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: mypy
+
   real-services:
     name: Real services · py3.12 · Django 5.2
     runs-on: ubuntu-latest

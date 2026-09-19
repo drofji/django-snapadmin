@@ -128,3 +128,11 @@ class TestInTheCommand:
         from snapadmin.diagnostics import get_collector
 
         assert get_collector("checks").health_probe is True
+
+
+class TestVerboseOnACleanProject:
+    def test_verbose_with_nothing_to_show_adds_no_messages_key(self, fake_messages):
+        """#QA1d — verbose asks for every message; with none there is no empty
+        ``messages`` list to render as a blank section."""
+        fake_messages([])
+        assert checks_collector.collect(verbose=True) == {"ok": True}

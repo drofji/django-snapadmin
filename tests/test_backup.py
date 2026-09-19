@@ -2433,3 +2433,48 @@ class TestPostgresDumpAndRestoreRoundTrip:
                 connection.close()
 
         assert "Backed Up Widget" in restored
+
+
+class TestBackupBranchClosures:
+    """#QA1d — three backup paths no test reached."""
+
+    def test_an_env_part_with_no_env_file_is_left_out_of_the_bundle(
+        self, tmp_path, sqlite_db, age_keypairs
+    ):
+        _identity_path, recipient = age_keypairs[0]
+        with override_settings(
+            SNAPADMIN_BACKUP_ENABLED=True,
+            SNAPADMIN_BACKUP_LOCAL_DIR=str(tmp_path / "local"),
+            SNAPADMIN_BACKUP_INCLUDE=["env", "db"],
+            SNAPADMIN_BACKUP_AGE_RECIPIENTS=[recipient],
+            SNAPADMIN_BACKUP_ENV_FILE=str(tmp_path / "missing.env"),
+        ):
+            parts = backup_module.build_backup_bundle(tmp_path / "out", get_backup_config())
+
+        assert "env" not in parts
+        assert "db" in parts  # the loop went on to the next part
+
+    def test_a_dump_already_in_the_local_dir_is_not_copied_onto_itself(
+        self, tmp_path, backup_env, monkeypatch
+    ):
+        local = backup_env["local"]
+        local.mkdir(parents=True, exist_ok=True)
+        dump = local / f"{BACKUP_PREFIX}20260101-000000.sql.gz"
+        dump.write_bytes(b"x")
+        copies = []
+        monkeypatch.setattr(backup_module.shutil, "copy2", lambda *a, **k: copies.append(a))
+
+        assert store_local(dump, get_backup_config()) == str(dump)
+        assert copies == []
+
+    def test_fetching_into_the_local_dir_itself_does_not_copy(self, tmp_path, backup_env, monkeypatch):
+        local = backup_env["local"]
+        local.mkdir(parents=True, exist_ok=True)
+        (local / "bundle.gz").write_bytes(b"x")
+        copies = []
+        monkeypatch.setattr(backup_module.shutil, "copy2", lambda *a, **k: copies.append(a))
+
+        fetched = backup_module.fetch_local("bundle.gz", local, get_backup_config())
+
+        assert fetched == local / "bundle.gz"
+        assert copies == []

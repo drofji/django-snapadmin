@@ -53,11 +53,23 @@ class SnapJobBase(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     app_label = models.CharField(max_length=100, verbose_name=_("App Label"))
     model = models.CharField(max_length=100, verbose_name=_("Model"))
-    status = models.CharField(max_length=16, choices=Status.choices, default=Status.PENDING, db_index=True, verbose_name=_("Status"))
+    status = models.CharField(
+        max_length=16,
+        choices=Status.choices,
+        default=Status.PENDING,
+        db_index=True,
+        verbose_name=_("Status"),
+    )
     total_rows = models.PositiveIntegerField(default=0, verbose_name=_("Total Rows"))
-    processed_rows = models.PositiveIntegerField(default=0, verbose_name=_("Processed Rows"), help_text=_("Rows written so far — drives progress-percent and ETA reporting."))
+    processed_rows = models.PositiveIntegerField(
+        default=0,
+        verbose_name=_("Processed Rows"),
+        help_text=_("Rows written so far — drives progress-percent and ETA reporting."),
+    )
     error = models.TextField(blank=True, verbose_name=_("Error"))
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("Created At"))
+    created_at = models.DateTimeField(
+        auto_now_add=True, db_index=True, verbose_name=_("Created At")
+    )
     started_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Started At"))
     finished_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Finished At"))
     # The submitter's tenant (#FUT1b), captured once when the job targets a
@@ -67,7 +79,16 @@ class SnapJobBase(models.Model):
     # creation paths. Blank for a job targeting a model that is not
     # tenant-scoped, and for SnapReindexJob, whose sweep is deliberately
     # cross-tenant (see snapadmin.reindexing) and never stamps this field.
-    tenant_id = models.CharField(max_length=64, blank=True, default="", db_index=True, verbose_name=_("Tenant"), help_text=_("The submitter's tenant, replayed when the job runs. Blank for a job whose target model is not tenant-scoped."))
+    tenant_id = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        db_index=True,
+        verbose_name=_("Tenant"),
+        help_text=_(
+            "The submitter's tenant, replayed when the job runs. Blank for a job whose target model is not tenant-scoped."
+        ),
+    )
 
     class Meta:
         abstract = True
@@ -128,24 +149,54 @@ class SnapExportJob(SnapJobBase):
         JSON = "json", "JSON"
         XLSX = "xlsx", "XLSX"
 
-    export_format = models.CharField(max_length=8, choices=Format.choices, default=Format.CSV, verbose_name=_("Format"))
-    filters = models.JSONField(default=dict, blank=True, verbose_name=_("Filters"), help_text=_("ORM field=value filters applied to the export queryset."))
+    export_format = models.CharField(
+        max_length=8, choices=Format.choices, default=Format.CSV, verbose_name=_("Format")
+    )
+    filters = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_("Filters"),
+        help_text=_("ORM field=value filters applied to the export queryset."),
+    )
     # Named row source (see SNAPADMIN_EXPORT_SOURCES + snapadmin.exporting). Blank
     # (the default) uses the built-in ORM source: model.objects.filter(**filters)
     # serialized as raw column rows. A non-blank value names a registered custom
     # source (ES-query-backed, key-list-backed, custom document shape); the runner's
     # crash-safe chunking / progress / cancel / resume / storage are unchanged.
-    source = models.CharField(max_length=64, blank=True, default="", verbose_name=_("Row Source"), help_text=_("Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."))
+    source = models.CharField(
+        max_length=64,
+        blank=True,
+        default="",
+        verbose_name=_("Row Source"),
+        help_text=_("Registered SNAPADMIN_EXPORT_SOURCES name; blank uses the default ORM source."),
+    )
     # Crash-safe resume checkpoint (see snapadmin.exporting). cursor_pk is the
     # primary key of the last exported row, used for pk__gt cursor pagination on
     # resume (no OFFSET drift); cursor_bytes is the working file's byte length
     # confirmed at that pk, used to truncate any uncheckpointed tail on resume.
     # Stored as a string so any primary-key type (int / UUID / char) round-trips.
     # (Declared here rather than on SnapJobBase — see the base's docstring.)
-    cursor_pk = models.CharField(max_length=255, blank=True, default="", verbose_name=_("Resume Cursor (PK)"), help_text=_("Primary key of the last exported row; blank means start from the beginning."))
-    cursor_bytes = models.PositiveBigIntegerField(default=0, verbose_name=_("Resume Byte Offset"), help_text=_("Byte length of the working file confirmed at cursor_pk."))
+    cursor_pk = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name=_("Resume Cursor (PK)"),
+        help_text=_("Primary key of the last exported row; blank means start from the beginning."),
+    )
+    cursor_bytes = models.PositiveBigIntegerField(
+        default=0,
+        verbose_name=_("Resume Byte Offset"),
+        help_text=_("Byte length of the working file confirmed at cursor_pk."),
+    )
     file_name = models.CharField(max_length=255, blank=True, verbose_name=_("File Name"))
-    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+", verbose_name=_("Requested By"))
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name=_("Requested By"),
+    )
 
     class Meta(SnapJobBase.Meta):
         verbose_name = _("Export Job")
@@ -175,7 +226,13 @@ class SnapReindexJob(SnapJobBase):
     # (int / UUID / char) round-trips. ES_ONLY models have no DB pk cursor and
     # always reindex in a single pass, so this stays blank for them.
     # (Declared here rather than on SnapJobBase — see the base's docstring.)
-    cursor_pk = models.CharField(max_length=255, blank=True, default="", verbose_name=_("Resume Cursor (PK)"), help_text=_("Primary key of the last indexed row; blank means start from the beginning."))
+    cursor_pk = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name=_("Resume Cursor (PK)"),
+        help_text=_("Primary key of the last indexed row; blank means start from the beginning."),
+    )
 
     class Meta(SnapJobBase.Meta):
         verbose_name = _("Reindex Job")
@@ -217,24 +274,64 @@ class SnapImportJob(SnapJobBase):
         SKIP = "skip", _("Skip")
         UPDATE = "update", _("Update")
 
-    import_format = models.CharField(max_length=8, choices=Format.choices, default=Format.CSV, verbose_name=_("Format"))
-    source_name = models.CharField(max_length=255, blank=True, verbose_name=_("Source File"), help_text=_("Display-only name of the input file this job reads."))
+    import_format = models.CharField(
+        max_length=8, choices=Format.choices, default=Format.CSV, verbose_name=_("Format")
+    )
+    source_name = models.CharField(
+        max_length=255,
+        blank=True,
+        verbose_name=_("Source File"),
+        help_text=_("Display-only name of the input file this job reads."),
+    )
     # Explicit header -> field-name overrides (see snapadmin.importing.resolve_column_map).
     # Header-name matching fills in every column not named here.
-    column_map = models.JSONField(default=dict, blank=True, verbose_name=_("Column Map"), help_text=_("Explicit CSV/JSON header -> field name overrides; header-name matching fills the rest."))
+    column_map = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name=_("Column Map"),
+        help_text=_(
+            "Explicit CSV/JSON header -> field name overrides; header-name matching fills the rest."
+        ),
+    )
     # A field name or list of field names; blank resolves the default at run time
     # (the model's first unique=True field, or the pk if the file carries it).
-    natural_key = models.JSONField(default=list, blank=True, verbose_name=_("Natural Key"), help_text=_("Field name(s) that identify a duplicate row; blank resolves the default at run time."))
-    on_conflict = models.CharField(max_length=8, choices=OnConflict.choices, default=OnConflict.FAIL, verbose_name=_("On Conflict"))
+    natural_key = models.JSONField(
+        default=list,
+        blank=True,
+        verbose_name=_("Natural Key"),
+        help_text=_(
+            "Field name(s) that identify a duplicate row; blank resolves the default at run time."
+        ),
+    )
+    on_conflict = models.CharField(
+        max_length=8,
+        choices=OnConflict.choices,
+        default=OnConflict.FAIL,
+        verbose_name=_("On Conflict"),
+    )
     # Crash-safe resume checkpoint for the NDJSON report file — see the class
     # docstring. Stored the same way SnapExportJob.cursor_bytes is.
     report_file_name = models.CharField(max_length=255, blank=True, verbose_name=_("Report File"))
-    report_cursor_bytes = models.PositiveBigIntegerField(default=0, verbose_name=_("Report Resume Byte Offset"), help_text=_("Byte length of the report file confirmed as written."))
+    report_cursor_bytes = models.PositiveBigIntegerField(
+        default=0,
+        verbose_name=_("Report Resume Byte Offset"),
+        help_text=_("Byte length of the report file confirmed as written."),
+    )
     created_count = models.PositiveIntegerField(default=0, verbose_name=_("Created"))
     updated_count = models.PositiveIntegerField(default=0, verbose_name=_("Updated"))
     skipped_count = models.PositiveIntegerField(default=0, verbose_name=_("Skipped"))
     failed_count = models.PositiveIntegerField(default=0, verbose_name=_("Failed"))
-    requested_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+", verbose_name=_("Requested By"), help_text=_("Used for PII-access checks on masked target fields; blank is treated as no PII access."))
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name=_("Requested By"),
+        help_text=_(
+            "Used for PII-access checks on masked target fields; blank is treated as no PII access."
+        ),
+    )
 
     class Meta(SnapJobBase.Meta):
         verbose_name = _("Import Job")

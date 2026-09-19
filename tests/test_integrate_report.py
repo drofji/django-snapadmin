@@ -71,3 +71,12 @@ class TestRenderJson:
         payload = json.loads(render_json(steps, _project()))
         assert payload["steps"][0]["group"] == "data_safety"
         assert payload["steps"][0]["present"] is None
+
+
+def test_a_not_checked_step_without_a_note_is_a_single_line():
+    """#QA1d — no note means no indented note line after the heading."""
+    out = render_text([Step("x", "X probe", None, "snippet-x")], _project())
+
+    lines = out.splitlines()
+    heading = next(i for i, line in enumerate(lines) if "X probe: not checked" in line)
+    assert not lines[heading + 1].startswith("    ")

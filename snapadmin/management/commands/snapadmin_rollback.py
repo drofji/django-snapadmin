@@ -8,6 +8,7 @@ With no ``<snapshot-id>``, the most recent snapshot is used (and named). Dry-run
 default, exactly like ``snapadmin_restore``: without ``--confirm``, this prints what
 would happen and touches nothing.
 """
+
 from __future__ import annotations
 
 from django.core.management.base import BaseCommand, CommandError
@@ -33,19 +34,23 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "snapshot_id", nargs="?",
+            "snapshot_id",
+            nargs="?",
             help="Snapshot to roll back to. Defaults to the most recent one.",
         )
         parser.add_argument(
-            "--list", action="store_true",
+            "--list",
+            action="store_true",
             help="List available snapshots without rolling back anything.",
         )
         parser.add_argument(
-            "--identity", default="",
+            "--identity",
+            default="",
             help="Path to the AGE identity (private key) file, if the snapshot is encrypted.",
         )
         parser.add_argument(
-            "--confirm", action="store_true",
+            "--confirm",
+            action="store_true",
             help="Actually perform the rollback. Without this, only a plan is printed.",
         )
 
@@ -76,7 +81,9 @@ class Command(BaseCommand):
             part: {**entry, "filename": str(run_dir / entry["filename"])}
             for part, entry in manifest.get("parts", {}).items()
         }
-        resolved = ResolvedSource(destination=None, manifest_path=run_dir, manifest=resolved_manifest)
+        resolved = ResolvedSource(
+            destination=None, manifest_path=run_dir, manifest=resolved_manifest
+        )
         parts = sorted(manifest.get("parts", {}))
 
         if manifest.get("encrypted") and not options["identity"]:
@@ -86,9 +93,11 @@ class Command(BaseCommand):
             self.stdout.write(line)
 
         if not options["confirm"]:
-            self.stdout.write(self.style.WARNING(
-                "\nDry run — nothing was changed. Pass --confirm to perform this rollback."
-            ))
+            self.stdout.write(
+                self.style.WARNING(
+                    "\nDry run — nothing was changed. Pass --confirm to perform this rollback."
+                )
+            )
             return
 
         # A snapshot's parts already live in run_dir; perform_restore()'s

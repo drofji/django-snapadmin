@@ -67,6 +67,7 @@ class DashboardView(StaffRequiredMixin, TemplateView):
     Main SnapAdmin dashboard view providing system health monitoring,
     quick links, and environment details.
     """
+
     template_name = "snapadmin/dashboard.html"
 
     def get_context_data(self, **kwargs):
@@ -83,7 +84,11 @@ class DashboardView(StaffRequiredMixin, TemplateView):
 
         # Dashboard Quick Links
         links = [
-            {"name": _("Admin Panel"), "url": reverse("admin:index"), "icon": "admin_panel_settings"},
+            {
+                "name": _("Admin Panel"),
+                "url": reverse("admin:index"),
+                "icon": "admin_panel_settings",
+            },
         ]
 
         rest_api_enabled = get_setting("SNAPADMIN_REST_API_ENABLED", REST_API_ENABLED_DEFAULT)
@@ -102,18 +107,16 @@ class DashboardView(StaffRequiredMixin, TemplateView):
         # Registered Models
         from django.apps import apps
         from django.contrib import admin
-        from django.db.models import Count
 
         from snapadmin.registry import get_model_meta, is_registered
+
         registered_models = []
 
         # Stats for charts
-        chart_data = {
-            "labels": [],
-            "counts": []
-        }
+        chart_data = {"labels": [], "counts": []}
 
         from snapadmin.models import EsStorageMode
+
         for model in apps.get_models():
             if is_registered(model):
                 # A model can opt out of the admin entirely (admin_enabled = False),
@@ -127,8 +130,12 @@ class DashboardView(StaffRequiredMixin, TemplateView):
                 count = 0
                 try:
                     count = model.objects.count() if model._meta.managed else 0
-                except Exception:
-                    pass
+                except Exception as exc:
+                    # One unreadable table (a pending migration, a dropped view)
+                    # shows 0 on its card rather than taking the dashboard down.
+                    logger.warning(
+                        "dashboard_count_failed", model=model._meta.label, error=str(exc)
+                    )
 
                 es_mode = get_model_meta(model, "es_storage_mode", EsStorageMode.DB_ONLY)
                 # capfirst on the *plural* name, not .title(): a card counts many
@@ -140,28 +147,32 @@ class DashboardView(StaffRequiredMixin, TemplateView):
                     "name": label,
                     "app": model._meta.app_label,
                     "count": count,
-                    "url": reverse(f"admin:{model._meta.app_label}_{model._meta.model_name}_changelist"),
+                    "url": reverse(
+                        f"admin:{model._meta.app_label}_{model._meta.model_name}_changelist"
+                    ),
                     "es_mode": es_mode.value if hasattr(es_mode, "value") else str(es_mode),
                     "retention_days": get_model_meta(model, "data_retention_days", None),
                 }
                 registered_models.append(model_info)
+                # SnapAdmin's own models (tokens, audit log, jobs) never pass
+                # is_registered(), so every model reaching here is a project's.
+                chart_data["labels"].append(str(label))
+                chart_data["counts"].append(count)
 
-                if model._meta.app_label != 'snapadmin':
-                    chart_data["labels"].append(str(label))
-                    chart_data["counts"].append(count)
-
-        context.update({
-            "services": services,
-            "links": links,
-            "registered_models": registered_models,
-            "chart_data": chart_data,
-            "env_details": env_details,
-            "cron_jobs": cron_jobs,
-            "debug": settings.DEBUG,
-            "allowed_hosts": settings.ALLOWED_HOSTS,
-            "version": __version__,
-            "graphql_enabled": graphql_enabled,
-        })
+        context.update(
+            {
+                "services": services,
+                "links": links,
+                "registered_models": registered_models,
+                "chart_data": chart_data,
+                "env_details": env_details,
+                "cron_jobs": cron_jobs,
+                "debug": settings.DEBUG,
+                "allowed_hosts": settings.ALLOWED_HOSTS,
+                "version": __version__,
+                "graphql_enabled": graphql_enabled,
+            }
+        )
         return context
 
     def _get_service_status(self):
@@ -177,32 +188,38 @@ class DashboardView(StaffRequiredMixin, TemplateView):
         except OperationalError:
             pass
 
-        services.append({
-            "name": _("Database (%(name)s)") % {"name": db_name},
-            "status": db_status,
-            "status_label": SERVICE_STATUS_LABELS[db_status],
-            "is_live": db_status == "online"
-        })
+        services.append(
+            {
+                "name": _("Database (%(name)s)") % {"name": db_name},
+                "status": db_status,
+                "status_label": SERVICE_STATUS_LABELS[db_status],
+                "is_live": db_status == "online",
+            }
+        )
 
         # Elasticsearch Monitoring
         if getattr(settings, "ELASTICSEARCH_ENABLED", False):
             es_status = "offline"
             try:
                 from elasticsearch import Elasticsearch
+
                 url = getattr(settings, "ELASTICSEARCH_URL", "http://localhost:9200")
                 es = Elasticsearch([url], request_timeout=1)
                 if es.ping():
                     es_status = "online"
-            except Exception:
-                pass
+            except Exception as exc:
+                # "offline" is the answer being computed; the cause goes to the log.
+                logger.info("dashboard_es_ping_failed", error=str(exc))
         else:
             es_status = "disabled"
         # "Elasticsearch" is a product name — never translated.
-        services.append({
-            "name": "Elasticsearch",
-            "status": es_status,
-            "status_label": SERVICE_STATUS_LABELS[es_status],
-        })
+        services.append(
+            {
+                "name": "Elasticsearch",
+                "status": es_status,
+                "status_label": SERVICE_STATUS_LABELS[es_status],
+            }
+        )
 
         return services
 
@@ -245,11 +262,13 @@ class DashboardView(StaffRequiredMixin, TemplateView):
         beat_schedule = getattr(settings, "CELERY_BEAT_SCHEDULE", {})
 
         for name, info in beat_schedule.items():
-            jobs.append({
-                "name": name,
-                "task": info.get("task"),
-                "schedule": str(info.get("schedule")),
-                "description": info.get("description") or _("No description provided.")
-            })
+            jobs.append(
+                {
+                    "name": name,
+                    "task": info.get("task"),
+                    "schedule": str(info.get("schedule")),
+                    "description": info.get("description") or _("No description provided."),
+                }
+            )
 
         return jobs

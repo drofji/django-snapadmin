@@ -84,9 +84,7 @@ def get_config() -> ErrorMonitorConfig:
         alert_enabled=bool(get_setting("SNAPADMIN_ERROR_ALERT_ENABLED", True)),
         alert_threshold=int(get_setting("SNAPADMIN_ERROR_ALERT_THRESHOLD", 20)),
         alert_window_minutes=window,
-        alert_cooldown_minutes=int(
-            get_setting("SNAPADMIN_ERROR_ALERT_COOLDOWN_MINUTES", window)
-        ),
+        alert_cooldown_minutes=int(get_setting("SNAPADMIN_ERROR_ALERT_COOLDOWN_MINUTES", window)),
         alert_emails=alert_emails,
         digest_enabled=bool(get_setting("SNAPADMIN_ERROR_DIGEST_ENABLED", True)),
         digest_emails=digest_emails,
@@ -182,20 +180,15 @@ def maybe_send_spike_alert(*, config: ErrorMonitorConfig | None = None) -> bool:
         )
         return False
 
-    token = alerts.arm_cooldown(
-        ALERT_COOLDOWN_CACHE_KEY, minutes=config.alert_cooldown_minutes
-    )
+    token = alerts.arm_cooldown(ALERT_COOLDOWN_CACHE_KEY, minutes=config.alert_cooldown_minutes)
     if token is None:
         return False
 
-    groups, hidden_groups, hidden_events = group_events(
-        recent, max_groups=config.digest_max_groups
-    )
+    groups, hidden_groups, hidden_events = group_events(recent, max_groups=config.digest_max_groups)
     alert = alerts.Alert(
         kind=alerts.ALERT_KIND_ERROR_SPIKE,
         subject=(
-            f"[SnapAdmin] {count} server errors in the last "
-            f"{config.alert_window_minutes} minutes"
+            f"[SnapAdmin] {count} server errors in the last {config.alert_window_minutes} minutes"
         ),
         summary=(
             f"{count} errors in {config.alert_window_minutes} min "
@@ -255,9 +248,7 @@ def group_lines(
     remaining_groups = len(trimmed) + hidden_groups
     if remaining_groups:
         remaining_events = sum(group["count"] for group in trimmed) + hidden_events
-        lines.append(
-            f"…and {remaining_groups} more group(s) covering {remaining_events} error(s)"
-        )
+        lines.append(f"…and {remaining_groups} more group(s) covering {remaining_events} error(s)")
     return tuple(lines)
 
 
@@ -309,9 +300,7 @@ def send_error_digest(*, hours: int = 24) -> dict:
     # deleted rows counted in `total`, group_events()'s own re-evaluation of
     # `events` could then aggregate a different, smaller set of rows — leaving
     # the digest subject's total and the body's grouped counts disagreeing.
-    groups, hidden_groups, hidden_events = group_events(
-        events, max_groups=config.digest_max_groups
-    )
+    groups, hidden_groups, hidden_events = group_events(events, max_groups=config.digest_max_groups)
     purged = purge_expired_events(config=config)
 
     if not config.digest_enabled:
@@ -331,8 +320,7 @@ def send_error_digest(*, hours: int = 24) -> dict:
     alert = alerts.Alert(
         kind=alerts.ALERT_KIND_ERROR_DIGEST,
         subject=(
-            f"[SnapAdmin] Error digest — {total} errors in {len(groups)} groups "
-            f"(last {hours}h)"
+            f"[SnapAdmin] Error digest — {total} errors in {len(groups)} groups (last {hours}h)"
         ),
         summary=f"{total} errors in {len(groups)} group(s) over the last {hours}h.",
         lines=group_lines(groups, hidden_groups=hidden_groups, hidden_events=hidden_events),

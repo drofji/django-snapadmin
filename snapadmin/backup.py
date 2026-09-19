@@ -203,6 +203,7 @@ def get_backup_config() -> BackupConfig:
 # Dump creation
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _shard_primary_targets() -> list[tuple[str, str]]:
     """``[(shard_name, primary_alias), ...]``, sorted by shard name.
 
@@ -238,9 +239,12 @@ def _postgres_dump_command(db: dict) -> tuple[list[str], dict]:
     command = [
         "pg_dump",
         "--no-password",
-        "-h", str(db.get("HOST") or "localhost"),
-        "-p", str(db.get("PORT") or "5432"),
-        "-U", str(db.get("USER") or ""),
+        "-h",
+        str(db.get("HOST") or "localhost"),
+        "-p",
+        str(db.get("PORT") or "5432"),
+        "-U",
+        str(db.get("USER") or ""),
         str(db.get("NAME") or ""),
     ]
     env = {**os.environ, "PGPASSWORD": str(db.get("PASSWORD") or "")}
@@ -252,7 +256,7 @@ def _copy_postgres_into(db: dict, writer: BinaryIO) -> None:
     # Stream pg_dump's stdout straight into the writer so the whole uncompressed
     # dump never has to fit in memory at once — a large database would OOM the
     # worker otherwise.
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)  # noqa: S603 - argv list, no shell
     shutil.copyfileobj(process.stdout, writer)
     stderr_output = process.stderr.read()
     returncode = process.wait()
@@ -263,9 +267,12 @@ def _copy_postgres_into(db: dict, writer: BinaryIO) -> None:
 def _mysql_dump_command(db: dict) -> tuple[list[str], dict]:
     command = [
         "mysqldump",
-        "-h", str(db.get("HOST") or "localhost"),
-        "-P", str(db.get("PORT") or "3306"),
-        "-u", str(db.get("USER") or ""),
+        "-h",
+        str(db.get("HOST") or "localhost"),
+        "-P",
+        str(db.get("PORT") or "3306"),
+        "-u",
+        str(db.get("USER") or ""),
         str(db.get("NAME") or ""),
     ]
     # MYSQL_PWD, never a command-line argument — mirrors PGPASSWORD above so
@@ -280,7 +287,7 @@ def _copy_mysql_into(db: dict, writer: BinaryIO) -> None:
     # the Postgres branch above — a large database must never have to fit in
     # memory at once.
     try:
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)  # noqa: S603 - argv list, no shell
     except FileNotFoundError as exc:
         raise BackupError("mysqldump is not installed or not on PATH.") from exc
     shutil.copyfileobj(process.stdout, writer)
@@ -349,6 +356,7 @@ def create_db_dump(target_dir: Path, *, alias: str = "default", label: str | Non
 # corrupt or partial one.
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 class _ProducerThread(threading.Thread):
     """Runs `producer(write_end)` in the background, capturing any exception
     so the reader side can re-raise it via `check()` once done reading."""
@@ -404,7 +412,11 @@ def _gzip_into(writer: BinaryIO, copy_fn: Callable[[BinaryIO], None]) -> None:
 
 
 def create_encrypted_db_dump(
-    target_dir: Path, config: BackupConfig, *, alias: str = "default", label: str | None = None,
+    target_dir: Path,
+    config: BackupConfig,
+    *,
+    alias: str = "default",
+    label: str | None = None,
 ) -> Path:
     """Like :func:`create_db_dump`, but gzip-then-AGE-encrypted in one stream.
 
@@ -466,6 +478,7 @@ def create_encrypted_db_dump(
 # are written directly.
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _iter_media_files(media_root: Path, exclude: list[str]) -> list[Path]:
     """Every regular file under media_root, skipping any glob-matched path.
 
@@ -478,12 +491,13 @@ def _iter_media_files(media_root: Path, exclude: list[str]) -> list[Path]:
     if not exclude:
         return files
     return [
-        p for p in files
-        if not any(p.relative_to(media_root).match(pattern) for pattern in exclude)
+        p for p in files if not any(p.relative_to(media_root).match(pattern) for pattern in exclude)
     ]
 
 
-def _tar_media_into(media_root: Path, files: list[Path], writer: BinaryIO, warning_bytes: int) -> None:
+def _tar_media_into(
+    media_root: Path, files: list[Path], writer: BinaryIO, warning_bytes: int
+) -> None:
     """Write every file in `files` into a tar stream on `writer`.
 
     An unreadable file (permission error, vanished between listing and read,
@@ -528,7 +542,9 @@ def create_media_bundle(target_dir: Path, config: BackupConfig, stamp: str) -> P
     media_root = Path(media_root_setting)
 
     files = _iter_media_files(media_root, config.media_exclude)
-    tar_fn = functools.partial(_tar_media_into, media_root, files, warning_bytes=config.media_size_warning_bytes)
+    tar_fn = functools.partial(
+        _tar_media_into, media_root, files, warning_bytes=config.media_size_warning_bytes
+    )
 
     if config.age_recipients:
         out = target_dir / f"{PART_PREFIXES['media']}{stamp}.tar.gz.age"
@@ -537,8 +553,11 @@ def create_media_bundle(target_dir: Path, config: BackupConfig, stamp: str) -> P
         try:
             with open(tmp, "wb") as dst:
                 crypto.encrypt_stream(
-                    reader, dst, config.age_recipients,
-                    backend=config.age_backend, binary_path=config.age_binary_path,
+                    reader,
+                    dst,
+                    config.age_recipients,
+                    backend=config.age_backend,
+                    binary_path=config.age_binary_path,
                 )
             thread.check()
         except Exception:
@@ -595,8 +614,11 @@ def create_env_bundle(target_dir: Path, config: BackupConfig, stamp: str) -> Pat
     try:
         with open(env_path, "rb") as reader, open(tmp, "wb") as writer:
             crypto.encrypt_stream(
-                reader, writer, config.age_recipients,
-                backend=config.age_backend, binary_path=config.age_binary_path,
+                reader,
+                writer,
+                config.age_recipients,
+                backend=config.age_backend,
+                binary_path=config.age_binary_path,
             )
     except Exception:
         tmp.unlink(missing_ok=True)
@@ -613,7 +635,9 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def write_manifest(target_dir: Path, config: BackupConfig, stamp: str, parts: dict[str, Path]) -> Path:
+def write_manifest(
+    target_dir: Path, config: BackupConfig, stamp: str, parts: dict[str, Path]
+) -> Path:
     """Write the always-unencrypted manifest.json sidecar for one backup run.
 
     Never encrypted — it must be readable without an identity, for
@@ -691,7 +715,9 @@ def build_backup_bundle(target_dir: Path, config: BackupConfig) -> dict[str, Pat
             if env is not None:
                 parts["env"] = env
         else:
-            raise BackupError(f"Unknown SNAPADMIN_BACKUP_INCLUDE part: {name!r} (expected one of {BACKUP_PARTS}).")
+            raise BackupError(
+                f"Unknown SNAPADMIN_BACKUP_INCLUDE part: {name!r} (expected one of {BACKUP_PARTS})."
+            )
 
     manifest = write_manifest(target_dir, config, stamp, parts)
     parts["manifest"] = manifest
@@ -778,7 +804,7 @@ def store_remote_ftp(dump: Path, config: BackupConfig) -> str:
         # pruned per part prefix so media/env/manifest don't share db's budget.
         prefix = _part_prefix_for(dump.name)
         dumps = sorted(name for name in ftp.nlst() if name.startswith(prefix))
-        for name in dumps[:-config.keep] if config.keep > 0 else dumps:
+        for name in dumps[: -config.keep] if config.keep > 0 else dumps:
             ftp.delete(name)
     finally:
         ftp.quit()
@@ -899,16 +925,18 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
         # only the resolved directory shows (#EXT2d).
         resolved = sftp.getcwd()
         remote_path = (
-            posixpath.join(resolved, dump.name) if isinstance(resolved, str)
+            posixpath.join(resolved, dump.name)
+            if isinstance(resolved, str)
             else _sftp_remote_path(config, dump.name)
         )
         if created:
             logger.warning(
-                "sftp_backup_dir_created", configured=config.sftp_dir,
+                "sftp_backup_dir_created",
+                configured=config.sftp_dir,
                 path=posixpath.dirname(remote_path),
                 hint="SNAPADMIN_BACKUP_SFTP_DIR did not exist and was created. If "
-                     "that is not the directory you meant, the value resolves "
-                     "relative to the SSH login directory.",
+                "that is not the directory you meant, the value resolves "
+                "relative to the SSH login directory.",
             )
         try:
             sftp.put(str(dump), dump.name)
@@ -928,7 +956,7 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
         # pruned per part prefix so media/env/manifest don't share db's budget.
         prefix = _part_prefix_for(dump.name)
         dumps = sorted(name for name in sftp.listdir() if name.startswith(prefix))
-        for name in dumps[:-config.keep] if config.keep > 0 else dumps:
+        for name in dumps[: -config.keep] if config.keep > 0 else dumps:
             sftp.remove(name)
         sftp.close()
     finally:
@@ -946,6 +974,7 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
 # destination instead — see the module docstring.
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @functools.lru_cache(maxsize=1)
 def _load_boto3():
     """Return the imported ``boto3`` package, imported lazily and cached.
@@ -960,8 +989,7 @@ def _load_boto3():
         import boto3
     except ImportError as exc:
         raise ImproperlyConfigured(
-            "S3 backups need the boto3 library. Install it "
-            "(`pip install django-snapadmin[s3]`)."
+            "S3 backups need the boto3 library. Install it (`pip install django-snapadmin[s3]`)."
         ) from exc
     return boto3
 
@@ -1066,7 +1094,7 @@ def store_s3(dump: Path, config: BackupConfig) -> str:
     # deployment; this is a fallback for providers/setups without one.
     part_prefix = f"{_s3_prefix(config)}{_part_prefix_for(dump.name)}"
     keys = sorted(_s3_list_keys(client, config.s3_bucket, part_prefix))
-    for stale in (keys[:-config.keep] if config.keep > 0 else keys):
+    for stale in keys[: -config.keep] if config.keep > 0 else keys:
         client.delete_object(Bucket=config.s3_bucket, Key=stale)
     return f"s3://{config.s3_bucket}/{key}"
 
@@ -1083,6 +1111,7 @@ _STORE_FUNCTIONS = {
 # ─────────────────────────────────────────────────────────────────────────────
 # Fetching — the restore-side mirror of the store functions above — #BKP1d
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def list_local(config: BackupConfig) -> list[str]:
     if not config.local_dir.is_dir():
@@ -1227,7 +1256,7 @@ def list_s3(config: BackupConfig) -> list[str]:
     client = _s3_client(config)
     prefix = _s3_prefix(config)
     keys = _s3_list_keys(client, config.s3_bucket, prefix)
-    return sorted(key[len(prefix):] for key in keys)
+    return sorted(key[len(prefix) :] for key in keys)
 
 
 def fetch_s3(name: str, target_dir: Path, config: BackupConfig) -> Path:
@@ -1265,6 +1294,7 @@ FETCH_FUNCTIONS = {
 # Scheduling state
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _state_path(config: BackupConfig) -> Path:
     return config.local_dir / STATE_FILENAME
 
@@ -1297,7 +1327,9 @@ def _save_state(config: BackupConfig, state: dict) -> None:
         _state_path(config).write_text(json.dumps(state))
     except OSError as exc:
         logger.error(
-            "backup_state_save_failed", path=str(_state_path(config)), error=str(exc),
+            "backup_state_save_failed",
+            path=str(_state_path(config)),
+            error=str(exc),
         )
 
 
@@ -1400,7 +1432,9 @@ def _next_state_entry(previous: str | dict | None, dest: str, config: BackupConf
         return now.isoformat()
     _, planned_iso = _state_times(previous)
     every_hours = getattr(config, _INTERVAL_ATTRS[dest])
-    planned = _advance_slot(datetime.fromisoformat(planned_iso), every_hours, now) if planned_iso else now
+    planned = (
+        _advance_slot(datetime.fromisoformat(planned_iso), every_hours, now) if planned_iso else now
+    )
     return {"last_run": now.isoformat(), "planned": planned.isoformat()}
 
 
@@ -1437,6 +1471,7 @@ def due_destinations(config: BackupConfig | None = None) -> list[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Entry points
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _log_backup_outcome(status: str, **fields) -> None:
     """Log the shared outcome marker/level for ``snapadmin.run_db_backups``.
@@ -1507,7 +1542,9 @@ def run_backup(destinations: list[str], *, config: BackupConfig | None = None) -
                 for part_name, part_path in parts.items():
                     locations[part_name] = _STORE_FUNCTIONS[dest](part_path, config)
                     logger.info(
-                        "db_backup_stored", destination=dest, part=part_name,
+                        "db_backup_stored",
+                        destination=dest,
+                        part=part_name,
                         location=locations[part_name],
                     )
                 state[dest] = _next_state_entry(state.get(dest), dest, config)
@@ -1543,7 +1580,13 @@ def run_due_backups() -> dict:
     config = get_backup_config()
     if not config.enabled:
         _log_backup_outcome("disabled")
-        return {"ran": False, "reason": "disabled", "results": {}, "status": "disabled", "failed": []}
+        return {
+            "ran": False,
+            "reason": "disabled",
+            "results": {},
+            "status": "disabled",
+            "failed": [],
+        }
     due = due_destinations(config)
     if not due:
         _log_backup_outcome("noop")

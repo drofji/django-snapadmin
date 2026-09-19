@@ -44,7 +44,9 @@ from snapadmin import fields as snapfields
 # without a cycle, so each detects Unfold for itself).
 try:
     if "unfold" not in settings.INSTALLED_APPS:
-        raise ImportError("Unfold not in INSTALLED_APPS")  # pragma: no cover - module-level branch, resolved at import
+        raise ImportError(
+            "Unfold not in INSTALLED_APPS"
+        )  # pragma: no cover - module-level branch, resolved at import
 
     from unfold.admin import ModelAdmin
     from unfold.contrib.filters.admin import (
@@ -55,9 +57,14 @@ try:
         ChoicesDropdownFilter,
     )
     from unfold.decorators import display as unfold_display
+
     UNFOLD_INSTALLED = True
-except (ImportError, RuntimeError):  # pragma: no cover - the Unfold-absent half; covered by tests/test_unfold_optional.py re-importing this module
+except (
+    ImportError,
+    RuntimeError,
+):  # pragma: no cover - the Unfold-absent half; covered by tests/test_unfold_optional.py re-importing this module
     from django.contrib.admin import ModelAdmin
+
     RangeDateFilter = admin.DateFieldListFilter
     RangeNumericFilter = admin.AllValuesFieldListFilter
     TextFilter = admin.AllValuesFieldListFilter
@@ -69,7 +76,9 @@ except (ImportError, RuntimeError):  # pragma: no cover - the Unfold-absent half
             if description:
                 func.short_description = description
             return func
+
         return decorator
+
     UNFOLD_INSTALLED = False
 
 
@@ -152,25 +161,58 @@ class AdminGenMixin:
     """``SnapModel``'s generated-admin methods — see the module docstring."""
 
     @classmethod
-    def get_admin_fields(cls):
+    def get_admin_fields(cls):  # noqa: C901 - refactor tracked as #QA1c-cx
         from snapadmin.models import AdminFieldSets
 
-        meta_fields = {f.name: f for f in cls._meta.get_fields() if hasattr(f, "name") and not (f.one_to_many or f.one_to_one or f.many_to_many)}
-        meta_fields_related = {f.name: f for f in cls._meta.get_fields() if hasattr(f, "name") and (f.many_to_one or f.many_to_many)}
+        meta_fields = {
+            f.name: f
+            for f in cls._meta.get_fields()
+            if hasattr(f, "name") and not (f.one_to_many or f.one_to_one or f.many_to_many)
+        }
+        meta_fields_related = {
+            f.name: f
+            for f in cls._meta.get_fields()
+            if hasattr(f, "name") and (f.many_to_one or f.many_to_many)
+        }
         attr_fields = {fn: fo for fn, fo in cls.__dict__.items()}
 
-        form_fields = [fn for fn, fo in meta_fields.items() if getattr(fo, SnapFieldAttributeEnum.SHOW_IN_FORM.value, None)]
-        list_display = [fn for fn, fo in meta_fields.items() if getattr(fo, SnapFieldAttributeEnum.SHOW_IN_LIST.value, True)]
-        search_fields = [fn for fn, fo in meta_fields.items() if getattr(fo, SnapFieldAttributeEnum.SEARCHABLE.value, False)]
+        form_fields = [
+            fn
+            for fn, fo in meta_fields.items()
+            if getattr(fo, SnapFieldAttributeEnum.SHOW_IN_FORM.value, None)
+        ]
+        list_display = [
+            fn
+            for fn, fo in meta_fields.items()
+            if getattr(fo, SnapFieldAttributeEnum.SHOW_IN_LIST.value, True)
+        ]
+        search_fields = [
+            fn
+            for fn, fo in meta_fields.items()
+            if getattr(fo, SnapFieldAttributeEnum.SEARCHABLE.value, False)
+        ]
         pk_name, show_pk = _pk_list_column(cls)
-        if pk_name not in search_fields: search_fields.append(pk_name)
+        if pk_name not in search_fields:
+            search_fields.append(pk_name)
 
         all_fields_for_readonly = {**meta_fields, **meta_fields_related}
-        editable_fields = [fn for fn, fo in all_fields_for_readonly.items() if not getattr(fo, SnapFieldAttributeEnum.EDITABLE.value, False)]
-        updatable_fields = [fn for fn, fo in all_fields_for_readonly.items() if not getattr(fo, SnapFieldAttributeEnum.UPDATABLE.value, True)]
+        editable_fields = [
+            fn
+            for fn, fo in all_fields_for_readonly.items()
+            if not getattr(fo, SnapFieldAttributeEnum.EDITABLE.value, False)
+        ]
+        updatable_fields = [
+            fn
+            for fn, fo in all_fields_for_readonly.items()
+            if not getattr(fo, SnapFieldAttributeEnum.UPDATABLE.value, True)
+        ]
 
         def dynamic_get_readonly_fields(self, request, obj=None):
-            return [fn for fn, fo in all_fields_for_readonly.items() if fn in editable_fields or (fn in updatable_fields and obj and obj.pk)]
+            return [
+                fn
+                for fn, fo in all_fields_for_readonly.items()
+                if fn in editable_fields or (fn in updatable_fields and obj and obj.pk)
+            ]
 
         # Generated callables (this one, the wysiwyg safe_html_<field> displays
         # below, and the SnapFunctionField displays further down) are stashed
@@ -185,14 +227,24 @@ class AdminGenMixin:
 
         list_filter = []
         for field_name, field in meta_fields.items():
-            if not getattr(field, SnapFieldAttributeEnum.FILTERABLE.value, False): continue
-            if isinstance(field, (models.DateField, models.DateTimeField, models.TimeField)): list_filter.append((field_name, RangeDateFilter))
-            elif isinstance(field, (models.IntegerField, models.FloatField, models.DecimalField)): list_filter.append((field_name, RangeNumericFilter))
-            elif isinstance(field, models.ForeignKey): list_filter.append((field_name, RelatedDropdownFilter))
-            elif isinstance(field, models.CharField) and field.choices: list_filter.append((field_name, ChoicesDropdownFilter))
-            else: list_filter.append(field_name)
+            if not getattr(field, SnapFieldAttributeEnum.FILTERABLE.value, False):
+                continue
+            if isinstance(field, (models.DateField, models.DateTimeField, models.TimeField)):
+                list_filter.append((field_name, RangeDateFilter))
+            elif isinstance(field, (models.IntegerField, models.FloatField, models.DecimalField)):
+                list_filter.append((field_name, RangeNumericFilter))
+            elif isinstance(field, models.ForeignKey):
+                list_filter.append((field_name, RelatedDropdownFilter))
+            elif isinstance(field, models.CharField) and field.choices:
+                list_filter.append((field_name, ChoicesDropdownFilter))
+            else:
+                list_filter.append(field_name)
 
-        autocomplete_fields = [fn for fn, fo in meta_fields_related.items() if getattr(fo, SnapFieldAttributeEnum.AUTOCOMPLETE.value, True)]
+        autocomplete_fields = [
+            fn
+            for fn, fo in meta_fields_related.items()
+            if getattr(fo, SnapFieldAttributeEnum.AUTOCOMPLETE.value, True)
+        ]
 
         # Handle WYSIWYG fields for safe HTML rendering in list view
         wysiwyg_fields = [fn for fn, fo in meta_fields.items() if getattr(fo, "wysiwyg", False)]
@@ -203,6 +255,7 @@ class AdminGenMixin:
 
                 def make_wysiwyg_display(field_name):
                     field_obj = cls._meta.get_field(field_name)
+
                     @unfold_display(description=field_obj.verbose_name)
                     def _display(self, obj):
                         raw = getattr(obj, field_name, "") or ""
@@ -210,31 +263,43 @@ class AdminGenMixin:
                         # before mark_safe to prevent stored XSS in the changelist,
                         # unless the field explicitly trusts its content.
                         if getattr(field_obj, "safe_html", False):
-                            return mark_safe(raw)
-                        return mark_safe(sanitize_html(raw))
+                            return mark_safe(raw)  # noqa: S308 - safe_html=True: the developer vouches for it
+                        return mark_safe(sanitize_html(raw))  # noqa: S308 - sanitized on the line itself
+
                     return _display
 
                 generated_overrides[method_name] = make_wysiwyg_display(fn)
                 list_display[idx] = method_name
 
         for attr_name, attr_value in attr_fields.items():
-            if not isinstance(attr_value, snapfields.SnapFunctionField): continue
+            if not isinstance(attr_value, snapfields.SnapFunctionField):
+                continue
             method_name = f"SnapFunctionField{attr_name.capitalize()}"
+
             def _make_display_method(field):
-                @unfold_display(description=getattr(field, "verbose_name", "") or getattr(field, "name", ""), header=True)
+                @unfold_display(
+                    description=getattr(field, "verbose_name", "") or getattr(field, "name", ""),
+                    header=True,
+                )
                 def _display(self, obj):
                     val = field.get_display_value(obj)
                     if UNFOLD_INSTALLED:
                         return [val, None, None]
                     return val
+
                 return _display
+
             generated_overrides[method_name] = _make_display_method(attr_value)
             list_display.append(method_name)
 
-        if pk_name in list_display: list_display.remove(pk_name)
-        if show_pk: list_display.insert(0, pk_name)
+        if pk_name in list_display:
+            list_display.remove(pk_name)
+        if show_pk:
+            list_display.insert(0, pk_name)
         cls._admin_generated_overrides = generated_overrides
-        return AdminFieldSets(form_fields, list_display, search_fields, list_filter, autocomplete_fields)
+        return AdminFieldSets(
+            form_fields, list_display, search_fields, list_filter, autocomplete_fields
+        )
 
     @classmethod
     def get_admin_media(cls) -> tuple[list[str], list[str]]:
@@ -277,12 +342,21 @@ class AdminGenMixin:
         # `admin-unfold.css` fills the few gaps Unfold leaves. Both come after
         # `admin.css` so they win the cascade over the shared cosmetics.
         css.append(
-            "snapadmin/css/admin-unfold.css" if UNFOLD_INSTALLED
+            "snapadmin/css/admin-unfold.css"
+            if UNFOLD_INSTALLED
             else "snapadmin/css/admin-stock.css"
         )
 
-        extra_js = [cls.js_admin_files] if isinstance(cls.js_admin_files, str) else list(cls.js_admin_files)
-        extra_css = [cls.css_admin_files] if isinstance(cls.css_admin_files, str) else list(cls.css_admin_files)
+        extra_js = (
+            [cls.js_admin_files]
+            if isinstance(cls.js_admin_files, str)
+            else list(cls.js_admin_files)
+        )
+        extra_css = (
+            [cls.css_admin_files]
+            if isinstance(cls.css_admin_files, str)
+            else list(cls.css_admin_files)
+        )
         final_js = list(dict.fromkeys(js + extra_js))
         if cls.offline_mode:
             final_js.append("snapadmin/js/offline.js")
@@ -290,7 +364,7 @@ class AdminGenMixin:
         return final_js, final_css
 
     @classmethod
-    def register_admin(cls) -> None:
+    def register_admin(cls) -> None:  # noqa: C901 - refactor tracked as #QA1c-cx
         """Build and register this model's ``ModelAdmin`` from its Snap field flags.
 
         ``admin_overrides`` is merged in last, so it always wins over every
@@ -299,9 +373,15 @@ class AdminGenMixin:
         ``get_readonly_fields`` and the wysiwyg ``safe_html_<field>`` display
         methods (#ADM2a).
         """
-        from snapadmin.models import DjangoAdminClassAttributeEnum, PIIMaskingAdminMixin, SnapSaveMixin, formatted_id
+        from snapadmin.models import (
+            DjangoAdminClassAttributeEnum,
+            PIIMaskingAdminMixin,
+            SnapSaveMixin,
+            formatted_id,
+        )
 
-        if not cls.admin_enabled: return
+        if not cls.admin_enabled:
+            return
         admin_fields = cls.get_admin_fields()
         form_fields = admin_fields.form_fields
         list_display = admin_fields.list_display
@@ -355,10 +435,9 @@ class AdminGenMixin:
             fieldsets.append((None, {"fields": group_fields_by_row(untabbed_fields)}))
 
         for tab_name, fields in tabs_map.items():
-            fieldsets.append((tab_name, {
-                "fields": group_fields_by_row(fields),
-                "classes": ("tab",)
-            }))
+            fieldsets.append(
+                (tab_name, {"fields": group_fields_by_row(fields), "classes": ("tab",)})
+            )
 
         final_js, final_css = cls.get_admin_media()
 
@@ -367,8 +446,7 @@ class AdminGenMixin:
         # this issues one extra query per row — the classic admin N+1. We only join the
         # FKs that appear in list_display, so we never pull relations we won't display.
         fk_field_names = {
-            f.name for f in cls._meta.get_fields()
-            if getattr(f, "many_to_one", False)
+            f.name for f in cls._meta.get_fields() if getattr(f, "many_to_one", False)
         }
         list_select_related = [fn for fn in list_display if fn in fk_field_names]
 
@@ -379,8 +457,7 @@ class AdminGenMixin:
         # passes through the field's own lookup guard, so it has to be taken
         # away here. snapadmin.E023 covers the Meta.ordering half.
         encrypted_names = {
-            f.name for f in cls._meta.get_fields()
-            if getattr(f, "is_snap_encrypted", False)
+            f.name for f in cls._meta.get_fields() if getattr(f, "is_snap_encrypted", False)
         }
         sortable_by = [fn for fn in list_display if fn not in encrypted_names]
 
@@ -405,16 +482,22 @@ class AdminGenMixin:
             # tables, exact everywhere else (see snapadmin.pagination).
             "paginator": EstimatedCountPaginator,
             "formatted_id": formatted_id,
-            A.MEDIA_CLASS.value: type(A.MEDIA_CLASS.value, (), {A.CSS_MEDIA.value: {A.ALL_MEDIA.value: final_css}, A.JS_MEDIA.value: final_js}),
+            A.MEDIA_CLASS.value: type(
+                A.MEDIA_CLASS.value,
+                (),
+                {A.CSS_MEDIA.value: {A.ALL_MEDIA.value: final_css}, A.JS_MEDIA.value: final_js},
+            ),
         }
 
         if UNFOLD_INSTALLED:
-            admin_attrs.update({
-                "compressed_fields": cls.compressed_fields,
-                "warn_unsaved_form": cls.warn_unsaved_form,
-                "list_filter_submit": cls.list_filter_submit,
-                "tabs": cls.admin_tabs,
-            })
+            admin_attrs.update(
+                {
+                    "compressed_fields": cls.compressed_fields,
+                    "warn_unsaved_form": cls.warn_unsaved_form,
+                    "list_filter_submit": cls.list_filter_submit,
+                    "tabs": cls.admin_tabs,
+                }
+            )
 
         if fieldsets:
             admin_attrs[A.FIELDSETS.value] = fieldsets
@@ -422,7 +505,9 @@ class AdminGenMixin:
             admin_attrs[A.FIELDS.value] = form_fields
 
         def formfield_for_dbfield(self, db_field, request, **kwargs):
-            if isinstance(db_field, (models.TextField, snapfields.SnapTextField)) and getattr(db_field, "wysiwyg", False):
+            if isinstance(db_field, (models.TextField, snapfields.SnapTextField)) and getattr(
+                db_field, "wysiwyg", False
+            ):
                 kwargs["widget"] = _wysiwyg_widget()
             return super(ModelAdmin, self).formfield_for_dbfield(db_field, request, **kwargs)
 
@@ -434,6 +519,7 @@ class AdminGenMixin:
             # users without PII access, so raw values never reach an editable
             # input. The changelist shows them masked (see PIIMaskingAdminMixin).
             from snapadmin.masking import get_masked_fields, user_can_view_pii
+
             masked = set(get_masked_fields(cls._meta.app_label, cls._meta.model_name))
             if masked and not user_can_view_pii(request.user):
                 filtered = []
@@ -450,7 +536,7 @@ class AdminGenMixin:
                 fs = filtered
 
             if UNFOLD_INSTALLED:
-                for name, opts in fs:
+                for _name, opts in fs:
                     fields = opts.get("fields", [])
                     has_row = any(isinstance(f, tuple) for f in fields)
                     if has_row:
@@ -485,8 +571,10 @@ class AdminGenMixin:
         # "is this admin generated?" test name a module the class is not in (#EXT2k).
         admin_attrs["__module__"] = cls.__module__
         admin_class = type(f"{cls.__name__}Admin", parent_classes, admin_attrs)
-        try: admin.site.register(cls, admin_class)
-        except admin.sites.AlreadyRegistered: pass
+        try:
+            admin.site.register(cls, admin_class)
+        except admin.sites.AlreadyRegistered:
+            pass
 
     @staticmethod
     def register_all_admins(app_label: str | None = None) -> None:

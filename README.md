@@ -432,6 +432,7 @@ the fields that need Snap behaviour get it. [Worked example](https://drofji.gith
 ```bash
 snapadmin-new myshop --app-name storefront   # name the example app yourself
 snapadmin-new myshop --full                  # + Dockerfile, compose, Postgres/Redis/ES
+snapadmin-new myshop --admin-only            # the admin alone — no REST API, no GraphQL
 
 snapadmin-init --api --graphql               # also check the REST / GraphQL config
 
@@ -533,16 +534,20 @@ Concretely, on the current release:
 - **5,000+ tests across 153 files**, run on every push. Twelve of them need a live Elasticsearch, so
   they carry a marker and are deselected by default: cloning the repository and typing `pytest`
   starts no container and takes about **forty seconds**.
-- **100% line coverage** on the shipped `snapadmin/` package — 11,349 statements, 0 missing. CI runs
-  `pytest --cov=snapadmin --cov-fail-under=100`, so a pull request that adds an untested line fails.
-  **Eighteen lines across twelve modules carry a `# pragma: no cover`**, each with a written reason:
-  abstract methods that only raise, `if TYPE_CHECKING:` blocks, the import-time branch taken when an
-  optional dependency is absent, and five defensive guards for states their callers make
-  unreachable. That list is pinned by a test so it cannot quietly grow. They are still exclusions,
-  and this page will not claim there are none.
-- **Branch coverage is measured, and reported honestly: 99%** — 3,300+ branches, 60 of them taken
-  only one way. It is *not* a gate yet. Closing those partial branches and then turning the gate on
-  is planned work; this page will say "enforced" only when it is.
+- **100% line and branch coverage** on the shipped `snapadmin/` package — 11,700+ statements and
+  3,400+ branches, 0 missing, 0 partial. CI runs `pytest --cov=snapadmin --cov-branch
+  --cov-fail-under=100`, so a pull request that adds an untested line or a half-tested conditional
+  fails.
+  **Twelve lines across nine modules carry a `# pragma: no cover`**, each with a written reason:
+  abstract methods that only raise, `if TYPE_CHECKING:` blocks, and the import-time branch taken
+  when an optional dependency is absent. That list is pinned by a test so it cannot quietly grow.
+  There used to be eighteen: six "defensive, unreachable" guards turned out to be reachable — one of
+  them had switched PII masking **off** for a hand-written serializer — and are now tested instead.
+  They are still exclusions, and this page will not claim there are none.
+- **Branch coverage is a gate, since the partials were closed one test at a time** — never with
+  `# pragma: no branch`. Closing them found real defects: an ES search result whose `delete()` removed
+  nothing while reporting every row deleted, an `ES_ONLY` delete that counted an Elasticsearch
+  failure as success, and two tasks that could return without a `status`.
 - **Random order on every run.** `pytest-randomly` reshuffles the suite on each invocation, locally
   and in CI. A test that quietly depends on another one having run first fails instead of passing,
   and a seed-dependent failure is treated as a real defect in the tests — never as a reason to pin
@@ -677,8 +682,7 @@ and none will be claimed here until it actually runs in CI:
 | **Mutation testing** | Proof that the tests can *detect* a wrong change, not merely execute the line. 100% line coverage says every statement ran; it says nothing about whether flipping a `>` to a `>=` would fail anything | Planned. Not run, not reported |
 | **Property-based / fuzz testing** | Generated inputs — empty, `None`, unicode, enormous, malformed — against the parsers and validators, finding the classes of bug that hand-written examples miss | Planned. `hypothesis` is not a dependency |
 | **Browser E2E** | A real browser driving the generated admin: navigation, filters, pagination, actions, validation errors. Today the admin is reached only through Django's test client, which is not a browser | Planned. No Playwright, no Cypress |
-| **Lint, format, type and security static analysis in CI** | `ruff`, `mypy` and a security-oriented static pass running on every push. `black` and `flake8` are dev dependencies here, but **no CI job runs either** — that is stated plainly rather than implied away | Planned. Zero such jobs exist |
-| **A branch-coverage gate** | Branch coverage is measured at 99% with 60 partial branches, but nothing fails the build when it drops | Measured, not gated |
+| **A blocking type-check gate** | mypy runs on every push, but advisory: the dynamic admin/field mixins still carry a backlog. Ruff (lint, format, security rules) is already clean and blocking | Advisory; strict and clean on `encryption/`, `crypto.py`, `sharding/` |
 
 <details>
 <summary>Where the rest of the coverage goes</summary>
@@ -694,11 +698,11 @@ bulk import (70+), alert channels (70+), the audit trail (60+), multi-tenancy (6
 admin, audit and Elasticsearch layers) and offline mode (60+). Accessibility (WCAG 2.1 AA) and
 GraphQL permission enforcement have their own suites.
 
-**`tests/` is not shipped in the wheel or sdist** — only `snapadmin/` (the published package),
-`README.md`, `LICENSE` and the docs are. That is a packaging-size choice, not a coverage gap: the
-suite runs in CI on every push against the matrix above, so what a release ships is exactly what
-that suite already verified, on a clone of this repository — not a second, weaker copy trailing
-behind inside every install.
+**The wheel carries only `snapadmin/`** — the published package, with its migrations, templates,
+static files and translations. **The sdist also carries the test suite** and what it runs against
+(the demo project, the docs it checks for truth, `pytest.ini`): unpack it and run
+`python -m pytest` inside to hold an installed version to the same checks CI runs on every push —
+without cloning this repository.
 
 </details>
 

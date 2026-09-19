@@ -186,7 +186,9 @@ class ExportRowSource(Protocol):
     def count(self) -> int:
         """Total row count, for progress/ETA (may be an estimate)."""
 
-    def iter_batches(self, *, cursor: str | None, chunk_size: int) -> Iterator[tuple[list[dict], str]]:
+    def iter_batches(
+        self, *, cursor: str | None, chunk_size: int
+    ) -> Iterator[tuple[list[dict], str]]:
         """Yield ``(rows, next_cursor)`` starting *after* ``cursor``.
 
         ``rows`` is a list of dicts keyed by :meth:`field_names`; ``next_cursor`` is
@@ -224,7 +226,9 @@ class _DefaultOrmSource:
     def count(self) -> int:
         return self._qs.count()
 
-    def iter_batches(self, *, cursor: str | None, chunk_size: int) -> Iterator[tuple[list[dict], str]]:
+    def iter_batches(
+        self, *, cursor: str | None, chunk_size: int
+    ) -> Iterator[tuple[list[dict], str]]:
         while True:
             chunk_qs = self._qs.filter(pk__gt=cursor) if cursor is not None else self._qs
             batch = list(chunk_qs[:chunk_size].values(*self._fields))
@@ -234,8 +238,9 @@ class _DefaultOrmSource:
                 for row in batch:
                     for name in self._masked:
                         if name in row:
-                            row[name] = mask_field(*self._model_key, name, row[name],
-                                                   self._requested_by)
+                            row[name] = mask_field(
+                                *self._model_key, name, row[name], self._requested_by
+                            )
             cursor = str(batch[-1][self._pk_attname])
             yield batch, cursor
 
@@ -512,11 +517,9 @@ def run_export_job(job_id) -> None:
     from snapadmin.models import SnapExportJob
 
     Status = SnapExportJob.Status
-    claimed = (
-        SnapExportJob.objects
-        .filter(pk=job_id, status__in=[Status.PENDING, Status.FAILED])
-        .update(status=Status.PROCESSING)
-    )
+    claimed = SnapExportJob.objects.filter(
+        pk=job_id, status__in=[Status.PENDING, Status.FAILED]
+    ).update(status=Status.PROCESSING)
     if not claimed:
         logger.info("snapadmin.export.skipped", job=str(job_id))
         return
@@ -637,7 +640,8 @@ def _run(job) -> None:
 # e.g. by hand, or by a pre-#RET2b version of this purge).
 # ─────────────────────────────────────────────────────────────────────────────
 
-def purge_expired_export_jobs(*, now=None, dry_run: bool = False) -> dict:
+
+def purge_expired_export_jobs(*, now=None, dry_run: bool = False) -> dict:  # noqa: C901 - refactor tracked as #QA1c-cx
     """Purge finished ``SnapExportJob``/``SnapReindexJob`` rows and their files.
 
     A no-op (``{"enabled": False, ...}``) when :func:`export_retention_days`
@@ -675,7 +679,9 @@ def purge_expired_export_jobs(*, now=None, dry_run: bool = False) -> dict:
     retention_days = export_retention_days()
     result: dict = {
         "enabled": retention_days is not None,
-        "jobs_deleted": {}, "files_deleted": 0, "orphan_files_deleted": 0,
+        "jobs_deleted": {},
+        "files_deleted": 0,
+        "orphan_files_deleted": 0,
         "failed": [],
     }
     if retention_days is None:
@@ -707,7 +713,9 @@ def purge_expired_export_jobs(*, now=None, dry_run: bool = False) -> dict:
             except Exception as exc:
                 logger.error(
                     "snapadmin.export_retention.file_delete_failed",
-                    job=str(job.pk), name=name, error=str(exc),
+                    job=str(job.pk),
+                    name=name,
+                    error=str(exc),
                 )
                 result["failed"].append(f"SnapExportJob {job.pk} file {name!r}: {exc}")
         if export_pks and not result["failed"]:
@@ -726,7 +734,9 @@ def purge_expired_export_jobs(*, now=None, dry_run: bool = False) -> dict:
         deleted, _ = reindex_qs.delete()
         result["jobs_deleted"]["SnapReindexJob"] = deleted
 
-    known_names = set(SnapExportJob.objects.exclude(file_name="").values_list("file_name", flat=True))
+    known_names = set(
+        SnapExportJob.objects.exclude(file_name="").values_list("file_name", flat=True)
+    )
     try:
         _, storage_files = storage.listdir("")
     except NotImplementedError:
@@ -750,7 +760,9 @@ def purge_expired_export_jobs(*, now=None, dry_run: bool = False) -> dict:
             result["orphan_files_deleted"] += 1
         except Exception as exc:
             logger.error(
-                "snapadmin.export_retention.orphan_delete_failed", name=name, error=str(exc),
+                "snapadmin.export_retention.orphan_delete_failed",
+                name=name,
+                error=str(exc),
             )
             result["failed"].append(f"orphan file {name!r}: {exc}")
 

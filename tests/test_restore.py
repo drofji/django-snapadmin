@@ -828,3 +828,17 @@ class TestRestoreCommand:
                 call_command(
                     "snapadmin_restore", str(local / name), "--confirm", "--no-snapshot",
                 )
+
+
+class TestFetchIntoItsOwnDirectory:
+    """#QA1d — a manifest fetched from the directory it already sits in is
+    returned as is, never copied onto itself."""
+
+    def test_no_self_copy(self, tmp_path, sqlite_db, monkeypatch):
+        (tmp_path / "part.gz").write_bytes(b"x")
+        copies = []
+        monkeypatch.setattr(restore_module.shutil, "copy2", lambda *a, **k: copies.append(a))
+        with _BackupEnv(tmp_path) as env:
+            fetched = restore_module._fetch_one(None, str(tmp_path / "part.gz"), tmp_path, env.config())
+        assert fetched == tmp_path / "part.gz"
+        assert copies == []

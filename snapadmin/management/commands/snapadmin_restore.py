@@ -11,6 +11,7 @@ destination. Dry-run is the default: without ``--confirm``, this prints exactly 
 would happen and touches nothing. ``--database ALIAS`` restores only the ``db`` part
 into another ``DATABASES`` alias — a restore drill — and prints the row count per table.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -37,15 +38,18 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "source", nargs="?",
+            "source",
+            nargs="?",
             help="Manifest to restore: a local path, or <destination>:<name>.",
         )
         parser.add_argument(
-            "--list", action="store_true",
+            "--list",
+            action="store_true",
             help="List available manifests without restoring anything.",
         )
         parser.add_argument(
-            "--destination", choices=DESTINATIONS,
+            "--destination",
+            choices=DESTINATIONS,
             help="With --list, enumerate this destination instead of the local directory.",
         )
         parser.add_argument(
@@ -62,18 +66,21 @@ class Command(BaseCommand):
             help="Path to the AGE identity (private key) file, for an encrypted bundle.",
         )
         parser.add_argument(
-            "--confirm", action="store_true",
+            "--confirm",
+            action="store_true",
             help="Actually perform the restore. Without this, only a plan is printed.",
         )
         parser.add_argument(
-            "--no-snapshot", action="store_true",
+            "--no-snapshot",
+            action="store_true",
             help="Skip the automatic pre-restore snapshot. Not recommended.",
         )
         parser.add_argument(
-            "--database", default="default",
+            "--database",
+            default="default",
             help="DATABASES alias to restore the db part into (a restore drill). Only db "
-                 "is restored then; an alias pointing at the same database as 'default' "
-                 "is refused.",
+            "is restored then; an alias pointing at the same database as 'default' "
+            "is refused.",
         )
 
     def handle(self, *args, **options):
@@ -122,19 +129,23 @@ class Command(BaseCommand):
             self.stdout.write(line)
 
         if not options["confirm"]:
-            self.stdout.write(self.style.WARNING(
-                "\nDry run — nothing was changed. Pass --confirm to perform this restore."
-            ))
+            self.stdout.write(
+                self.style.WARNING(
+                    "\nDry run — nothing was changed. Pass --confirm to perform this restore."
+                )
+            )
             return
 
         before_restore = None
         if database != "default":
             # The snapshot covers the live 'default' database; it would protect
             # nothing a drill into another alias touches.
-            self.stdout.write(self.style.WARNING(
-                f"Pre-restore snapshot skipped: it covers 'default', and this restore "
-                f"replaces {database!r} only."
-            ))
+            self.stdout.write(
+                self.style.WARNING(
+                    f"Pre-restore snapshot skipped: it covers 'default', and this restore "
+                    f"replaces {database!r} only."
+                )
+            )
         elif not options["no_snapshot"]:
             from snapadmin.snapshot import take_snapshot
 
@@ -142,14 +153,17 @@ class Command(BaseCommand):
                 snapshot_id = take_snapshot(restoring_parts, config)
                 self.stdout.write(self.style.SUCCESS(f"Pre-restore snapshot taken: {snapshot_id}"))
         else:
-            self.stdout.write(self.style.WARNING(
-                "--no-snapshot: proceeding WITHOUT a pre-restore safety net."
-            ))
+            self.stdout.write(
+                self.style.WARNING("--no-snapshot: proceeding WITHOUT a pre-restore safety net.")
+            )
 
         try:
             results = perform_restore(
-                resolved, parts, config,
-                identity_file=options["identity"], before_restore=before_restore,
+                resolved,
+                parts,
+                config,
+                identity_file=options["identity"],
+                before_restore=before_restore,
                 database=database,
             )
         except RestoreError as exc:

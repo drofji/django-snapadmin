@@ -70,7 +70,9 @@ def get_offline_model_limits(user=None) -> dict[str, int]:
     from snapadmin.registry import get_model_meta
 
     return {
-        f"{m._meta.app_label}/{m._meta.model_name}": int(get_model_meta(m, "offline_cache_limit", 100))
+        f"{m._meta.app_label}/{m._meta.model_name}": int(
+            get_model_meta(m, "offline_cache_limit", 100)
+        )
         for m in _offline_models()
         if user is None or _can_view(user, m)
     }
@@ -83,10 +85,12 @@ class OfflineModelsView(APIView):
 
     @extend_schema(summary="List models that support offline mode")
     def get(self, request) -> Response:
-        return Response({
-            "models": get_offline_model_keys(request.user),
-            "limits": get_offline_model_limits(request.user),
-        })
+        return Response(
+            {
+                "models": get_offline_model_keys(request.user),
+                "limits": get_offline_model_limits(request.user),
+            }
+        )
 
 
 class OfflineModelDataView(SnapTenantRebindMixin, APIView):
@@ -154,7 +158,8 @@ class OfflineModelDataView(SnapTenantRebindMixin, APIView):
         fields = model._meta.get_fields()
         fk_fields = [f.name for f in fields if getattr(f, "many_to_one", False)]
         m2m_fields = [
-            f.name for f in fields
+            f.name
+            for f in fields
             if getattr(f, "many_to_many", False) and not getattr(f, "auto_created", False)
         ]
         qs = model.objects.all().order_by("-pk")
@@ -169,10 +174,12 @@ class OfflineModelDataView(SnapTenantRebindMixin, APIView):
 
         labels = [str(f.verbose_name) for f in model._meta.fields]
 
-        return Response({
-            "model": f"{app_label}/{model_name}",
-            "limit": limit,
-            "count": len(data),
-            "fields": labels,
-            "objects": data,
-        })
+        return Response(
+            {
+                "model": f"{app_label}/{model_name}",
+                "limit": limit,
+                "count": len(data),
+                "fields": labels,
+                "objects": data,
+            }
+        )

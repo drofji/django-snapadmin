@@ -17,6 +17,12 @@ class TestParser:
         assert args.app_name == "catalog"
         assert args.full is False
 
+    def test_admin_only_defaults_off(self):
+        assert cli.build_parser().parse_args(["myshop"]).admin_only is False
+
+    def test_admin_only_flag(self):
+        assert cli.build_parser().parse_args(["myshop", "--admin-only"]).admin_only is True
+
     def test_full_flag(self):
         args = cli.build_parser().parse_args(["myshop", "--full"])
         assert args.full is True
@@ -53,6 +59,11 @@ class TestMain:
         assert (dest / "Dockerfile").is_file()
         out = capsys.readouterr().out
         assert "docker compose up --build" in out
+
+    def test_admin_only_generates_an_api_free_project(self, tmp_path):
+        assert cli.main(["myshop", "--path", str(tmp_path), "--admin-only"]) == 0
+        settings = (tmp_path / "myshop" / "myshop" / "settings.py").read_text(encoding="utf-8")
+        assert '"rest_framework"' not in settings
 
     def test_custom_app_name(self, tmp_path):
         cli.main(["myshop", "--path", str(tmp_path), "--app-name", "storefront"])
@@ -140,3 +151,18 @@ class TestNoDjangoAtImportTime:
         )
         assert result.returncode == 0, result.stderr
         assert "ok" in result.stdout
+
+
+def test_importing_the_main_module_does_not_run_the_cli(monkeypatch):
+    """#QA1d — ``python -m snapadmin.scaffold`` runs ``main()``; a plain import of the
+    ``__main__`` module (tooling, ``pydoc``, a test collector) must not."""
+    import importlib
+    import sys as _sys
+
+    from snapadmin.scaffold import cli as _cli
+
+    called = []
+    monkeypatch.setattr(_cli, "main", lambda *a, **k: called.append(a) or 0)
+    _sys.modules.pop("snapadmin.scaffold.__main__", None)
+    importlib.import_module("snapadmin.scaffold.__main__")
+    assert called == []

@@ -152,7 +152,7 @@ def _render_table(items: list, *, depth: int) -> list[str] | None:
     pad = _INDENT * depth
 
     def _row(values: list[str]) -> str:
-        return (pad + "  ".join(v.ljust(w) for v, w in zip(values, widths))).rstrip()
+        return (pad + "  ".join(v.ljust(w) for v, w in zip(values, widths, strict=False))).rstrip()
 
     lines = [_row(headers), _row(["─" * width for width in widths])]
     lines.extend(_row(row) for row in cells)

@@ -35,6 +35,7 @@ from snapadmin.registry import get_model_meta, is_registered
 from snapadmin.tenancy import ALL_TENANTS, get_current_tenant, is_tenant_scoped, tenant_field_name
 from snapadmin.api.serializers import (
     APITokenCreateSerializer,
+    APITokenRenameSerializer,
     APITokenSerializer,
     get_serializer_for_model,
 )
@@ -42,7 +43,7 @@ from snapadmin.api.serializers import (
 logger = get_logger(__name__)
 
 # Cache for model field introspection results to avoid repeated _meta.get_fields() calls
-_model_field_cache = {}
+_model_field_cache: dict[str, tuple[list[str], list[str]]] = {}
 
 #: Sentinel distinguishing "the client's request body did not include this
 #: field at all" from "included it, with a None/empty value" — perform_create/
@@ -102,10 +103,10 @@ class TokenModelPermission(permissions.BasePermission):
     """
 
     _action_map = {
-        "list":    "view",
+        "list": "view",
         "retrieve": "view",
-        "create":  "add",
-        "update":  "change",
+        "create": "add",
+        "update": "change",
         "partial_update": "change",
         "destroy": "delete",
         # Read-only custom actions: fetch_by is a POST only because its value
@@ -126,7 +127,7 @@ class TokenModelPermission(permissions.BasePermission):
         return verb
 
     def has_permission(self, request: Request, view) -> bool:
-        app_label  = view.kwargs.get("app_label", "")
+        app_label = view.kwargs.get("app_label", "")
         model_name = view.kwargs.get("model_name", "")
         token = getattr(request, "auth", None)
 
@@ -139,7 +140,11 @@ class TokenModelPermission(permissions.BasePermission):
             # drift out of sync with what the action actually declares; this
             # outer gate only confirms a token's allowed_models scope covers
             # the model at all, same as every other action.
-            return token.can_access_model(app_label, model_name) if isinstance(token, APIToken) else True
+            return (
+                token.can_access_model(app_label, model_name)
+                if isinstance(token, APIToken)
+                else True
+            )
 
         if view.action is None:
             # The route has no handler for this HTTP method (a GET on the
@@ -150,9 +155,7 @@ class TokenModelPermission(permissions.BasePermission):
         if action_str is None:
             return False
         if isinstance(token, APIToken):
-            return token_has_permission(
-                token, request.user, app_label, model_name, action_str
-            )
+            return token_has_permission(token, request.user, app_label, model_name, action_str)
 
         # Non-token authentication (session, JWT via
         # SNAPADMIN_API_AUTHENTICATION_CLASSES): plain Django model permissions —
@@ -173,8 +176,9 @@ class APITokenViewSet(
 ):
     """Self-service CRUD for the caller's own API tokens (``/api/tokens/``).
 
-    List, create, delete, rotate and deactivate — a token's other fields
-    cannot be edited (no PUT/PATCH). The plaintext key is returned **once**,
+    List, create, delete, rotate, deactivate and rename. ``PATCH`` accepts
+    ``token_name`` only (#EXT1p) — any other field is a ``400``; ``PUT`` is not
+    offered, so a token's scope and expiry cannot be edited after creation. The plaintext key is returned **once**,
     in the create and rotate responses; only its hash is stored. A regular
     user manages their own tokens (``token.user == request.user``) without
     needing to be a superuser — scoped by :meth:`get_queryset` and enforced
@@ -184,6 +188,7 @@ class APITokenViewSet(
     """
 
     permission_classes = [permissions.IsAuthenticated, IsTokenOwnerOrAdmin]
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
 
     def get_queryset(self):
         if self.request.user.is_superuser:
@@ -202,6 +207,26 @@ class APITokenViewSet(
         token = serializer.save()
         output = APITokenSerializer(token)
         return Response(output.data, status=status.HTTP_201_CREATED)
+
+    @extend_schema(
+        summary="Rename a token",
+        request=APITokenRenameSerializer,
+        responses=APITokenSerializer,
+    )
+    def partial_update(self, request, *args, **kwargs):
+        token = self.get_object()
+        serializer = APITokenRenameSerializer(token, data=request.data, partial=True)
+        if "token_name" not in request.data:
+            raise ValidationError({"token_name": "This field is required."})
+        serializer.is_valid(raise_exception=True)
+        old_name = token.token_name
+        serializer.save()
+        from snapadmin import audit
+
+        audit.record_audit(
+            request, audit.UPDATE, token, {"token_name": {"old": old_name, "new": token.token_name}}
+        )
+        return Response(APITokenSerializer(token).data)
 
     @extend_schema(summary="Rotate a token's secret, keeping the row")
     @action(detail=True, methods=["post"])
@@ -473,12 +498,16 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         # a read-only or GET-only model (the read-heavy reference/lookup data
         # fetch-by exists for) could never use it at all. self.action is set
         # by DRF's ViewSetMixin.initialize_request() before this is consulted.
-        if getattr(self, "action", None) == "fetch_by" and "get" in allowed and "post" not in allowed:
+        if (
+            getattr(self, "action", None) == "fetch_by"
+            and "get" in allowed
+            and "post" not in allowed
+        ):
             allowed = sorted(set(allowed) | {"post"})
         return allowed
 
     def _get_model_class(self):
-        app_label  = self.kwargs["app_label"]
+        app_label = self.kwargs["app_label"]
         model_name = self.kwargs["model_name"]
         try:
             model = apps.get_model(app_label, model_name)
@@ -554,10 +583,12 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         field = tenant_field_name(model_class)
         supplied = serializer.validated_data.get(field, _NOT_SUPPLIED)
         if supplied is not _NOT_SUPPLIED and supplied not in (None, "") and supplied != current:
-            raise ValidationError({
-                field: f"{field!r} is assigned automatically from the request's tenant "
-                       "and cannot be set to a different value."
-            })
+            raise ValidationError(
+                {
+                    field: f"{field!r} is assigned automatically from the request's tenant "
+                    "and cannot be set to a different value."
+                }
+            )
         serializer.save(**{field: current})
 
     def perform_update(self, serializer):
@@ -629,9 +660,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             raise NotFound(f"Action '{action_name}' not found on model '{model_class.__name__}'.")
 
         if spec.detail != ("pk" in self.kwargs):
-            raise NotFound(
-                f"Action '{action_name}' is {'detail' if spec.detail else 'list'}-only."
-            )
+            raise NotFound(f"Action '{action_name}' is {'detail' if spec.detail else 'list'}-only.")
 
         method = request.method.lower()
         if method not in spec.methods:
@@ -696,14 +725,17 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         reveals.
         """
         user = self.request.user
-        fields = set() if user_can_view_pii(user) else set(
-            get_masked_fields(model_class._meta.app_label, model_class._meta.model_name)
+        fields = (
+            set()
+            if user_can_view_pii(user)
+            else set(get_masked_fields(model_class._meta.app_label, model_class._meta.model_name))
         )
         permissions = get_model_meta(model_class, "api_field_permissions", {}) or {}
         fields |= {
             field
             for field, rule in permissions.items()
-            if isinstance(rule, dict) and rule.get("read")
+            if isinstance(rule, dict)
+            and rule.get("read")
             and not user_can_access_field(user, model_class, field, write=False)
         }
         return fields
@@ -751,14 +783,17 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         masked_fields = self._masked_fields_for_request(model_class)
         if masked_fields:
             if self.search_fields:
-                self.search_fields = tuple(f for f in self.search_fields if f not in masked_fields) or None
+                self.search_fields = (
+                    tuple(f for f in self.search_fields if f not in masked_fields) or None
+                )
             # A masked field must not be a valid `?ordering=` term either, or a
             # caller could infer its raw value from the sort order. Only
             # overridden when there's actually something to exclude — leave
             # DRF's own default (every serializer field) alone otherwise, so
             # ordering by e.g. a many-to-many or method field is unaffected.
             self.ordering_fields = [
-                name for name, _label in OrderingFilter().get_default_valid_fields(
+                name
+                for name, _label in OrderingFilter().get_default_valid_fields(
                     qs, self, {"request": self.request}
                 )
                 if name not in masked_fields
@@ -778,11 +813,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         cache_key = f"{model_class._meta.app_label}.{model_class._meta.model_name}"
         if cache_key not in _model_field_cache:
             fields = model_class._meta.get_fields()
-            fk_fields = [
-                f.name
-                for f in fields
-                if hasattr(f, "many_to_one") and f.many_to_one
-            ]
+            fk_fields = [f.name for f in fields if hasattr(f, "many_to_one") and f.many_to_one]
             m2m_fields = [
                 f.name
                 for f in fields
@@ -805,13 +836,15 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         # (SNAPADMIN_ANALYTICS_DB_ALIAS). Only list/retrieve are routed: the
         # get_object() lookups behind update/partial_update/destroy must stay on
         # the primary so replication lag can never stale or drop a write.
-        if getattr(self, "action", None) in ("list", "retrieve", "count", "export") and hasattr(qs, "using"):
+        if getattr(self, "action", None) in ("list", "retrieve", "count", "export") and hasattr(
+            qs, "using"
+        ):
             qs = route_read(qs)
 
         return qs
 
     def get_serializer_class(self):
-        app_label  = self.kwargs.get("app_label", "")
+        app_label = self.kwargs.get("app_label", "")
         model_name = self.kwargs.get("model_name", "")
         try:
             return get_serializer_for_model(app_label, model_name)
@@ -1012,9 +1045,14 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         """
         model_class = self._get_model_class()
 
-        if get_model_meta(model_class, "es_storage_mode", EsStorageMode.DB_ONLY) == EsStorageMode.ES_ONLY:
+        if (
+            get_model_meta(model_class, "es_storage_mode", EsStorageMode.DB_ONLY)
+            == EsStorageMode.ES_ONLY
+        ):
             return Response(
-                {"detail": f"{model_class._meta.label} is ES_ONLY — fetch-by needs a DB column to index."},
+                {
+                    "detail": f"{model_class._meta.label} is ES_ONLY — fetch-by needs a DB column to index."
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1027,13 +1065,17 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             )
         if not (field.unique or field.db_index):
             return Response(
-                {"detail": f"{field_name!r} is not unique=True or db_index=True on "
-                           f"{model_class._meta.label} — fetch-by refuses an unindexed scan."},
+                {
+                    "detail": f"{field_name!r} is not unique=True or db_index=True on "
+                    f"{model_class._meta.label} — fetch-by refuses an unindexed scan."
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
         if field_name in self._masked_fields_for_request(model_class):
             return Response(
-                {"detail": f"{field_name!r} is a masked field and cannot be used as a fetch-by key."},
+                {
+                    "detail": f"{field_name!r} is a masked field and cannot be used as a fetch-by key."
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1046,8 +1088,10 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         max_values = int(get_setting("SNAPADMIN_FETCH_BY_MAX_VALUES", 10000) or 0)
         if max_values > 0 and len(values) > max_values:
             return Response(
-                {"detail": f"{len(values)} values exceeds SNAPADMIN_FETCH_BY_MAX_VALUES "
-                           f"({max_values})."},
+                {
+                    "detail": f"{len(values)} values exceeds SNAPADMIN_FETCH_BY_MAX_VALUES "
+                    f"({max_values})."
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -1058,7 +1102,8 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         def stream():
             source = (
                 queryset.iterator(chunk_size=chunk_size)
-                if hasattr(queryset, "iterator") else iter(queryset)
+                if hasattr(queryset, "iterator")
+                else iter(queryset)
             )
             for obj in source:
                 data = serializer_class(obj, context={"request": request}).data
@@ -1100,43 +1145,45 @@ class ModelSchemaView(SnapAPIAuthMixin, APIView):
             if not is_registered(model):
                 continue
 
-            app_label  = model._meta.app_label
+            app_label = model._meta.app_label
             model_name = model.__name__
 
             if isinstance(token, APIToken) and not token.can_access_model(app_label, model_name):
                 continue
 
             excluded = set(get_model_meta(model, "api_exclude_fields", []) or [])
-            results.append({
-                "app_label":  app_label,
-                "model_name": model_name,
-                "verbose_name": str(model._meta.verbose_name),
-                "verbose_name_plural": str(model._meta.verbose_name_plural),
-                "endpoint": request.build_absolute_uri(
-                    f"/api/models/{app_label}/{model_name}/"
-                ),
-                "fields": [
-                    {
-                        "name": f.name,
-                        "type": f.__class__.__name__,
-                    }
-                    for f in model._meta.get_fields()
-                    if hasattr(f, "name") and f.name not in excluded
-                ],
-                "actions": [
-                    {
-                        "name": spec.name,
-                        "detail": spec.detail,
-                        "methods": sorted(spec.methods),
-                        "url": request.build_absolute_uri(
-                            f"/api/models/{app_label}/{model_name}/{{pk}}/{spec.name}/"
-                            if spec.detail
-                            else f"/api/models/{app_label}/{model_name}/{spec.name}/"
-                        ),
-                    }
-                    for spec in iter_snap_actions(model)
-                ],
-            })
+            results.append(
+                {
+                    "app_label": app_label,
+                    "model_name": model_name,
+                    "verbose_name": str(model._meta.verbose_name),
+                    "verbose_name_plural": str(model._meta.verbose_name_plural),
+                    "endpoint": request.build_absolute_uri(
+                        f"/api/models/{app_label}/{model_name}/"
+                    ),
+                    "fields": [
+                        {
+                            "name": f.name,
+                            "type": f.__class__.__name__,
+                        }
+                        for f in model._meta.get_fields()
+                        if hasattr(f, "name") and f.name not in excluded
+                    ],
+                    "actions": [
+                        {
+                            "name": spec.name,
+                            "detail": spec.detail,
+                            "methods": sorted(spec.methods),
+                            "url": request.build_absolute_uri(
+                                f"/api/models/{app_label}/{model_name}/{{pk}}/{spec.name}/"
+                                if spec.detail
+                                else f"/api/models/{app_label}/{model_name}/{spec.name}/"
+                            ),
+                        }
+                        for spec in iter_snap_actions(model)
+                    ],
+                }
+            )
 
         return Response({"models": results, "count": len(results)})
 

@@ -192,7 +192,10 @@ def iter_input_rows(file_path: str, import_format: str) -> Iterator[dict]:
 
 
 def resolve_column_map(
-    model, header: list[str], *, explicit: dict[str, str] | None = None,
+    model,
+    header: list[str],
+    *,
+    explicit: dict[str, str] | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """Return ``(column -> field_name, unmapped_columns)`` for ``header``.
 
@@ -229,7 +232,10 @@ def resolve_column_map(
 
 
 def resolve_natural_key(
-    model, *, explicit: str | tuple[str, ...] | list[str] | None, mapped_field_names: set[str],
+    model,
+    *,
+    explicit: str | tuple[str, ...] | list[str] | None,
+    mapped_field_names: set[str],
 ) -> tuple[str, ...] | None:
     """Resolve the duplicate-detection key — rule 2.
 
@@ -296,8 +302,7 @@ def check_write_surface(model, field_names: set[str], *, requested_by=None) -> N
     excluded_hit = sorted(field_names & excluded)
     if excluded_hit:
         raise SnapImportError(
-            f"Column(s) target excluded field(s) on {model._meta.label}: "
-            f"{', '.join(excluded_hit)}."
+            f"Column(s) target excluded field(s) on {model._meta.label}: {', '.join(excluded_hit)}."
         )
 
     allowlist = get_model_meta(model, "api_write_fields", None)
@@ -343,7 +348,9 @@ def _build_field_values(model, column_map: dict[str, str], row: dict) -> dict[st
 
 
 def _natural_key_values(
-    natural_key: tuple[str, ...], column_map: dict[str, str], row: dict,
+    natural_key: tuple[str, ...],
+    column_map: dict[str, str],
+    row: dict,
 ) -> dict[str, Any] | None:
     """The natural key's raw column values for one ``row``, or ``None`` if the
     row does not carry every key column (nothing to dedupe this row against)."""
@@ -364,8 +371,12 @@ def _message_dict(exc: ValidationError) -> dict[str, list[str]]:
 
 
 def _process_row(
-    model, column_map: dict[str, str], natural_key: tuple[str, ...] | None,
-    on_conflict: str, row_number: int, row: dict,
+    model,
+    column_map: dict[str, str],
+    natural_key: tuple[str, ...] | None,
+    on_conflict: str,
+    row_number: int,
+    row: dict,
 ) -> dict:
     """Process one row to completion. Never raises — every failure mode
     becomes a ``"failed"`` report entry so one bad row can't abort the run.
@@ -385,10 +396,14 @@ def _process_row(
             if existing is not None:
                 if on_conflict == SnapImportJob.OnConflict.FAIL:
                     return {
-                        "row": row_number, "action": "failed", "pk": existing.pk,
-                        "errors": {"__all__": [
-                            f"Duplicate key {key_values!r} matches existing pk={existing.pk!r}."
-                        ]},
+                        "row": row_number,
+                        "action": "failed",
+                        "pk": existing.pk,
+                        "errors": {
+                            "__all__": [
+                                f"Duplicate key {key_values!r} matches existing pk={existing.pk!r}."
+                            ]
+                        },
                     }
                 if on_conflict == SnapImportJob.OnConflict.SKIP:
                     return {"row": row_number, "action": "skipped", "pk": existing.pk, "errors": {}}
@@ -405,7 +420,9 @@ def _process_row(
                 # check_write_surface already refused a column mapped to the
                 # tenant field itself — this is the only door a new row's
                 # tenant is ever assigned through (#FUT1b).
-                values[model._meta.get_field(tenant_field_name(model)).attname] = get_current_tenant()
+                values[model._meta.get_field(tenant_field_name(model)).attname] = (
+                    get_current_tenant()
+                )
             instance = model(**values)
             instance.full_clean()
             instance.save()
@@ -413,7 +430,12 @@ def _process_row(
     except ValidationError as exc:
         return {"row": row_number, "action": "failed", "pk": None, "errors": _message_dict(exc)}
     except (ValueError, TypeError, IntegrityError) as exc:
-        return {"row": row_number, "action": "failed", "pk": None, "errors": {"__all__": [str(exc)]}}
+        return {
+            "row": row_number,
+            "action": "failed",
+            "pk": None,
+            "errors": {"__all__": [str(exc)]},
+        }
 
 
 def _tally(job, entry: dict) -> None:
@@ -460,10 +482,15 @@ def _publish_report(job) -> None:
 
 
 def start_import(
-    model, *, file_path: str, import_format: str | None = None,
+    model,
+    *,
+    file_path: str,
+    import_format: str | None = None,
     column_map: dict[str, str] | None = None,
     natural_key: str | tuple[str, ...] | list[str] | None = None,
-    on_conflict: str = "fail", requested_by=None, resume: bool = False,
+    on_conflict: str = "fail",
+    requested_by=None,
+    resume: bool = False,
     tenant: Any = None,
 ):
     """Create (or, with ``resume``, reuse) a :class:`SnapImportJob` for ``model``.
@@ -489,8 +516,9 @@ def start_import(
 
     if resume:
         existing = (
-            SnapImportJob.objects
-            .filter(app_label=model._meta.app_label, model=model.__name__, source_name=source_name)
+            SnapImportJob.objects.filter(
+                app_label=model._meta.app_label, model=model.__name__, source_name=source_name
+            )
             .exclude(status=SnapImportJob.Status.COMPLETED)
             .order_by("-created_at")
             .first()
@@ -516,9 +544,7 @@ def start_import(
         import_format=fmt,
         source_name=source_name,
         column_map=column_map or {},
-        natural_key=(
-            [natural_key] if isinstance(natural_key, str) else list(natural_key or [])
-        ),
+        natural_key=([natural_key] if isinstance(natural_key, str) else list(natural_key or [])),
         on_conflict=on_conflict,
         requested_by=requested_by,
         tenant_id=tenant_id,
@@ -538,11 +564,9 @@ def run_import_job(job, *, file_path: str, chunk_size: int | None = None, on_pro
     from snapadmin.models import SnapImportJob
 
     Status = SnapImportJob.Status
-    claimed = (
-        SnapImportJob.objects
-        .filter(pk=job.pk, status__in=[Status.PENDING, Status.FAILED])
-        .update(status=Status.PROCESSING)
-    )
+    claimed = SnapImportJob.objects.filter(
+        pk=job.pk, status__in=[Status.PENDING, Status.FAILED]
+    ).update(status=Status.PROCESSING)
     if not claimed:
         logger.info("snapadmin.import.skipped", job=str(job.pk))
         return {"skipped": True, "reason": "already processing or finished"}
@@ -555,19 +579,28 @@ def run_import_job(job, *, file_path: str, chunk_size: int | None = None, on_pro
 
     try:
         with use_tenant(job.tenant_id or None):
-            return _run(job, file_path=file_path, chunk_size=chunk_size or import_chunk_size(),
-                        on_progress=on_progress)
+            return _run(
+                job,
+                file_path=file_path,
+                chunk_size=chunk_size or import_chunk_size(),
+                on_progress=on_progress,
+            )
     except Exception as exc:
         logger.exception("snapadmin.import.failed", job=str(job.pk))
         job.status = Status.FAILED
         job.error = str(exc)
         job.finished_at = timezone.now()
         job.save(update_fields=["status", "error", "finished_at"])
-        return {"errors": [str(exc)], "created": job.created_count, "updated": job.updated_count,
-                "skipped": job.skipped_count, "failed": job.failed_count}
+        return {
+            "errors": [str(exc)],
+            "created": job.created_count,
+            "updated": job.updated_count,
+            "skipped": job.skipped_count,
+            "failed": job.failed_count,
+        }
 
 
-def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:
+def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:  # noqa: C901 - refactor tracked as #QA1c-cx
     from snapadmin.models import SnapImportJob
 
     Status = SnapImportJob.Status
@@ -577,17 +610,19 @@ def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:
     if not header:
         raise SnapImportError(f"{file_path} has no header row (or is empty) — nothing to import.")
 
-    column_map, unmapped_columns = resolve_column_map(model, header, explicit=job.column_map or None)
+    column_map, unmapped_columns = resolve_column_map(
+        model, header, explicit=job.column_map or None
+    )
     if not column_map:
-        raise SnapImportError(
-            f"No column in {file_path} maps to a field on {model._meta.label}."
-        )
+        raise SnapImportError(f"No column in {file_path} maps to a field on {model._meta.label}.")
     mapped_field_names = set(column_map.values())
 
     check_write_surface(model, mapped_field_names, requested_by=job.requested_by)
 
     explicit_key = tuple(job.natural_key) if job.natural_key else None
-    natural_key = resolve_natural_key(model, explicit=explicit_key, mapped_field_names=mapped_field_names)
+    natural_key = resolve_natural_key(
+        model, explicit=explicit_key, mapped_field_names=mapped_field_names
+    )
     if natural_key:
         missing = [name for name in natural_key if name not in mapped_field_names]
         if missing:
@@ -663,7 +698,12 @@ def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:
                 for row in chunk_rows:
                     row_number += 1
                     entry = _process_row(
-                        model, column_map, natural_key, job.on_conflict, row_number, row,
+                        model,
+                        column_map,
+                        natural_key,
+                        job.on_conflict,
+                        row_number,
+                        row,
                     )
                     chunk_entries.append(entry)
                     _tally(job, entry)
@@ -675,10 +715,16 @@ def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:
                 # ordering, applied here at chunk instead of line grain.
                 _write_lines(report_handle, chunk_entries)
                 job.report_cursor_bytes = report_handle.tell()
-                job.save(update_fields=[
-                    "processed_rows", "created_count", "updated_count",
-                    "skipped_count", "failed_count", "report_cursor_bytes",
-                ])
+                job.save(
+                    update_fields=[
+                        "processed_rows",
+                        "created_count",
+                        "updated_count",
+                        "skipped_count",
+                        "failed_count",
+                        "report_cursor_bytes",
+                    ]
+                )
 
             if on_progress:
                 on_progress(job)
@@ -689,13 +735,21 @@ def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:
 
         if cancelled:
             logger.info("snapadmin.import.cancelled", job=str(job.pk), rows=job.processed_rows)
-            return {"cancelled": True, "created": job.created_count, "updated": job.updated_count,
-                    "skipped": job.skipped_count, "failed": job.failed_count}
+            return {
+                "cancelled": True,
+                "created": job.created_count,
+                "updated": job.updated_count,
+                "skipped": job.skipped_count,
+                "failed": job.failed_count,
+            }
 
         summary = {
-            "created": job.created_count, "updated": job.updated_count,
-            "skipped": job.skipped_count, "failed": job.failed_count,
-            "total": job.processed_rows, "unmapped_columns": unmapped_columns,
+            "created": job.created_count,
+            "updated": job.updated_count,
+            "skipped": job.skipped_count,
+            "failed": job.failed_count,
+            "total": job.processed_rows,
+            "unmapped_columns": unmapped_columns,
         }
         _write_lines(report_handle, [{"summary": summary}])
         job.report_cursor_bytes = report_handle.tell()
@@ -710,8 +764,12 @@ def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:
     if on_progress:
         on_progress(job)
     logger.info(
-        "snapadmin.import.completed", job=str(job.pk), rows=job.processed_rows,
-        created=job.created_count, updated=job.updated_count,
-        skipped=job.skipped_count, failed=job.failed_count,
+        "snapadmin.import.completed",
+        job=str(job.pk),
+        rows=job.processed_rows,
+        created=job.created_count,
+        updated=job.updated_count,
+        skipped=job.skipped_count,
+        failed=job.failed_count,
     )
     return summary

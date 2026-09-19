@@ -20,6 +20,7 @@ from enum import Enum
 
 # --- Validators ---
 
+
 @deconstructible
 class SnapPhoneValidator:
     """Validates phone numbers in E.164 or common national formats.
@@ -74,6 +75,7 @@ class SnapColorValidator:
 
 # --- Enums ---
 
+
 class FileExtensionEnum(str, Enum):
     PDF = "pdf"
     DOCX = "docx"
@@ -94,6 +96,7 @@ class FileEncodingEnum(str, Enum):
 
 # --- Validators ---
 
+
 @deconstructible
 class SnapFileValidator:
     """
@@ -104,21 +107,27 @@ class SnapFileValidator:
     configuration tuple so Django does not generate spurious duplicate
     migrations when the model definition is unchanged.
     """
-    def __init__(
-            self,
-            allowed_extensions: typing.List[typing.Union[FileExtensionEnum, str]] = None,
-            allowed_encodings: typing.List[typing.Union[FileEncodingEnum, str]] = None,
-            max_size_bytes: int = None,
-    ):
-        self.allowed_extensions = [
-            ext.value.lower() if isinstance(ext, FileExtensionEnum) else ext.lower()
-            for ext in allowed_extensions
-        ] if allowed_extensions else None
 
-        self.allowed_encodings = [
-            enc.value if isinstance(enc, FileEncodingEnum) else enc
-            for enc in allowed_encodings
-        ] if allowed_encodings else None
+    def __init__(
+        self,
+        allowed_extensions: typing.List[typing.Union[FileExtensionEnum, str]] = None,
+        allowed_encodings: typing.List[typing.Union[FileEncodingEnum, str]] = None,
+        max_size_bytes: int = None,
+    ):
+        self.allowed_extensions = (
+            [
+                ext.value.lower() if isinstance(ext, FileExtensionEnum) else ext.lower()
+                for ext in allowed_extensions
+            ]
+            if allowed_extensions
+            else None
+        )
+
+        self.allowed_encodings = (
+            [enc.value if isinstance(enc, FileEncodingEnum) else enc for enc in allowed_encodings]
+            if allowed_encodings
+            else None
+        )
 
         self.max_size_bytes = max_size_bytes
 
@@ -128,25 +137,25 @@ class SnapFileValidator:
             if ext not in self.allowed_extensions:
                 raise ValidationError(
                     _("File extension '%(ext)s' is not allowed. Allowed: %(allowed)s"),
-                    params={'ext': ext, 'allowed': ", ".join(self.allowed_extensions)}
+                    params={'ext': ext, 'allowed': ", ".join(self.allowed_extensions)},
                 )
 
         if self.max_size_bytes and file.size > self.max_size_bytes:
             raise ValidationError(
                 _("File size is %(size)s bytes. Max allowed is %(max_size)s bytes."),
-                params={'size': file.size, 'max_size': self.max_size_bytes}
+                params={'size': file.size, 'max_size': self.max_size_bytes},
             )
 
         if self.allowed_encodings:
             try:
                 content = file.read(1024 * 1024)
                 file.seek(0)
-            except Exception:
+            except Exception as exc:
                 # Only the actual I/O risk (reading/rewinding the upload) is
                 # caught here — a genuinely invalid encoding is a normal,
                 # expected outcome of the loop below and must not be swallowed
                 # into this generic message.
-                raise ValidationError(_("Could not verify file encoding."))
+                raise ValidationError(_("Could not verify file encoding.")) from exc
 
             is_valid = False
             for enc in self.allowed_encodings:
@@ -160,7 +169,7 @@ class SnapFileValidator:
             if not is_valid:
                 raise ValidationError(
                     _("Invalid encoding. Allowed: %(encodings)s"),
-                    params={'encodings': ", ".join(self.allowed_encodings)}
+                    params={'encodings': ", ".join(self.allowed_encodings)},
                 )
 
     def __eq__(self, other):
@@ -177,8 +186,10 @@ class SnapFileValidator:
         )
 
     def __hash__(self):
-        return hash((
-            tuple(self.allowed_extensions or []),
-            tuple(self.allowed_encodings or []),
-            self.max_size_bytes,
-        ))
+        return hash(
+            (
+                tuple(self.allowed_extensions or []),
+                tuple(self.allowed_encodings or []),
+                self.max_size_bytes,
+            )
+        )

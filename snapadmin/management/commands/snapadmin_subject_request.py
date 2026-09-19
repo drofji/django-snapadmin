@@ -82,37 +82,47 @@ def _identifier_fingerprint(value: str) -> str:
 
 
 class Command(BaseCommand):
-    help = "GDPR subject-access request: export or delete everything reachable from one data subject."
+    help = (
+        "GDPR subject-access request: export or delete everything reachable from one data subject."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument("action", choices=["export", "delete"])
         parser.add_argument(
-            "--model", required=True,
+            "--model",
+            required=True,
             help="The subject model, 'app_label.ModelName' (is_data_subject=True), e.g. demo.Customer",
         )
         parser.add_argument(
-            "--identifier", required=True,
+            "--identifier",
+            required=True,
             help="The raw value of the subject model's subject_identifier field (e.g. an email address)",
         )
         parser.add_argument(
-            "--user", required=True,
+            "--user",
+            required=True,
             help="Username of the operator running this request — checked for "
-                 "snapadmin.view_raw_pii and recorded in the audit trail",
+            "snapadmin.view_raw_pii and recorded in the audit trail",
         )
         parser.add_argument(
-            "--format", choices=["json", "csv"], default="json",
+            "--format",
+            choices=["json", "csv"],
+            default="json",
             help="Export file format (default: json). Ignored for 'delete'.",
         )
         parser.add_argument(
-            "--recipient", action="append", default=[],
+            "--recipient",
+            action="append",
+            default=[],
             help="An age or SSH public key to encrypt the export bundle to. May be "
-                 "repeated; any one matching identity decrypts independently. "
-                 "Ignored for 'delete'.",
+            "repeated; any one matching identity decrypts independently. "
+            "Ignored for 'delete'.",
         )
         parser.add_argument(
-            "--confirm", action="store_true",
+            "--confirm",
+            action="store_true",
             help="Actually delete. Without it, 'delete' only previews what would "
-                 "be removed. Ignored for 'export'.",
+            "be removed. Ignored for 'export'.",
         )
 
     def handle(self, *args, **options):
@@ -126,8 +136,12 @@ class Command(BaseCommand):
         try:
             subject_model = apps.get_model(app_label, model_name)
         except LookupError as exc:
-            raise CommandError(f"--model {options['model']!r} does not resolve to an installed model.") from exc
-        if not (is_registered(subject_model) and get_model_meta(subject_model, "is_data_subject", False)):
+            raise CommandError(
+                f"--model {options['model']!r} does not resolve to an installed model."
+            ) from exc
+        if not (
+            is_registered(subject_model) and get_model_meta(subject_model, "is_data_subject", False)
+        ):
             raise CommandError(
                 f"{options['model']} does not declare is_data_subject = True — it is not a "
                 "valid subject-access entry point."
@@ -136,11 +150,13 @@ class Command(BaseCommand):
         operator = self._resolve_operator(options["user"])
         identifier = options["identifier"]
 
-        self.stderr.write(self.style.WARNING(
-            "This command reaches only the SnapAdmin registry — it cannot see or touch a "
-            "backup bundle, an Elasticsearch copy this model does not mirror, or any "
-            "third-party store outside SnapAdmin."
-        ))
+        self.stderr.write(
+            self.style.WARNING(
+                "This command reaches only the SnapAdmin registry — it cannot see or touch a "
+                "backup bundle, an Elasticsearch copy this model does not mirror, or any "
+                "third-party store outside SnapAdmin."
+            )
+        )
 
         matches = self._collect_matches(identifier)
         if not matches:
@@ -149,11 +165,16 @@ class Command(BaseCommand):
 
         if options["action"] == "export":
             self._run_export(
-                matches, identifier=identifier, operator=operator,
-                export_format=options["format"], recipients=options["recipient"],
+                matches,
+                identifier=identifier,
+                operator=operator,
+                export_format=options["format"],
+                recipients=options["recipient"],
             )
         else:
-            self._run_delete(matches, identifier=identifier, operator=operator, confirm=options["confirm"])
+            self._run_delete(
+                matches, identifier=identifier, operator=operator, confirm=options["confirm"]
+            )
 
     # ------------------------------------------------------------------
 
@@ -198,7 +219,9 @@ class Command(BaseCommand):
     # Export
     # ------------------------------------------------------------------
 
-    def _run_export(self, matches: dict, *, identifier: str, operator, export_format: str, recipients: list[str]) -> None:
+    def _run_export(
+        self, matches: dict, *, identifier: str, operator, export_format: str, recipients: list[str]
+    ) -> None:
         from django.utils import timezone
 
         from snapadmin.exporting import export_file_name, get_export_storage, run_export_job
@@ -226,17 +249,27 @@ class Command(BaseCommand):
             job.refresh_from_db()
             if job.status != SnapExportJob.Status.COMPLETED:
                 raise CommandError(f"Export of {model._meta.label} failed: {job.error}")
-            manifest["files"].append({
-                "model": model._meta.label,
-                "row_count": len(rows),
-                "file": export_file_name(job),
-                "format": export_format,
-            })
-            self.stdout.write(self.style.SUCCESS(f"  EXPORTED {model._meta.label}: {len(rows)} row(s)"))
+            manifest["files"].append(
+                {
+                    "model": model._meta.label,
+                    "row_count": len(rows),
+                    "file": export_file_name(job),
+                    "format": export_format,
+                }
+            )
+            self.stdout.write(
+                self.style.SUCCESS(f"  EXPORTED {model._meta.label}: {len(rows)} row(s)")
+            )
 
-        manifest_name = f"sar_manifest_{_identifier_fingerprint(identifier)}_{uuid.uuid4().hex}.json"
-        actual_name = storage.save(manifest_name, _as_content_file(json.dumps(manifest, indent=2, sort_keys=True)))
-        manifest["files"].append({"model": None, "row_count": None, "file": actual_name, "format": "json"})
+        manifest_name = (
+            f"sar_manifest_{_identifier_fingerprint(identifier)}_{uuid.uuid4().hex}.json"
+        )
+        actual_name = storage.save(
+            manifest_name, _as_content_file(json.dumps(manifest, indent=2, sort_keys=True))
+        )
+        manifest["files"].append(
+            {"model": None, "row_count": None, "file": actual_name, "format": "json"}
+        )
 
         if recipients:
             self._encrypt_bundle(storage, manifest, recipients)
@@ -265,9 +298,11 @@ class Command(BaseCommand):
                 encrypt_stream(reader, writer, recipients)
             storage.delete(name)
             entry["file"] = encrypted_name
-        self.stdout.write(self.style.SUCCESS(
-            f"  Encrypted to {len(recipients)} recipient(s) — plaintext removed."
-        ))
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"  Encrypted to {len(recipients)} recipient(s) — plaintext removed."
+            )
+        )
 
     # ------------------------------------------------------------------
     # Deletion
@@ -287,7 +322,9 @@ class Command(BaseCommand):
             else:
                 db_matches[model] = rows
 
-        report: dict[str, int] = {model._meta.label: len(rows) for model, rows in es_matches.items()}
+        report: dict[str, int] = {
+            model._meta.label: len(rows) for model, rows in es_matches.items()
+        }
         collector = None
         if db_matches:
             first_model = next(iter(db_matches))
@@ -297,14 +334,16 @@ class Command(BaseCommand):
                 # call — one call per matched model, accumulating into the
                 # same collector, mirrors how QuerySet.delete() itself walks
                 # a mixed deletion graph internally.
-                for model, rows in db_matches.items():
+                for rows in db_matches.values():
                     collector.collect(rows)
             except ProtectedError as exc:
                 blockers = sorted({obj._meta.label for obj in exc.protected_objects})
-                self.stdout.write(self.style.ERROR(
-                    "REFUSED — deleting these rows is blocked by a protected relation: "
-                    + ", ".join(blockers)
-                ))
+                self.stdout.write(
+                    self.style.ERROR(
+                        "REFUSED — deleting these rows is blocked by a protected relation: "
+                        + ", ".join(blockers)
+                    )
+                )
                 self.stdout.write(
                     "Nothing was deleted. Resolve the blocking rows manually (delete or "
                     "reassign them) before retrying."
@@ -330,7 +369,11 @@ class Command(BaseCommand):
             EsQuerySet(model, rows).delete()
 
         self._record_deletion_audit(operator, identifier, report)
-        self.stdout.write(self.style.SUCCESS(f"\nDeleted {sum(report.values())} row(s) across {len(report)} model(s)."))
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"\nDeleted {sum(report.values())} row(s) across {len(report)} model(s)."
+            )
+        )
 
     def _record_deletion_audit(self, operator, identifier: str, report: dict[str, int]) -> None:
         from snapadmin.models import SnapadminAuditLog
@@ -355,7 +398,7 @@ def _subject_path_for(model) -> str:
     from snapadmin.registry import get_model_meta
 
     path = get_model_meta(model, "subject_path", None)
-    if not path:  # pragma: no cover - guarded by _collect_matches's own filter
+    if not path:  # _collect_matches filters these out first; kept as a loud guard
         raise ImproperlyConfigured(f"{model._meta.label} has no subject_path.")
     return path
 

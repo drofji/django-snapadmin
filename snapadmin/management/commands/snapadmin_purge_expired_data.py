@@ -72,19 +72,25 @@ class Command(BaseCommand):
             try:
                 count = model.purge_expired(now=now, dry_run=dry_run)
                 if dry_run:
-                    self.stdout.write(f"  DRY RUN {label}: {count} records would be deleted ({rule})")
+                    self.stdout.write(
+                        f"  DRY RUN {label}: {count} records would be deleted ({rule})"
+                    )
                 else:
-                    self.stdout.write(self.style.SUCCESS(f"  DELETED {label}: {count} records ({rule})"))
+                    self.stdout.write(
+                        self.style.SUCCESS(f"  DELETED {label}: {count} records ({rule})")
+                    )
                     total += count
                     # Due rows a PROTECT/RESTRICT foreign key still holds (#EXT2a):
                     # kept for the next run, reported so the run never quietly
                     # does less than it says.
                     skipped = getattr(count, "skipped_protected", 0)
                     if skipped:
-                        self.stdout.write(self.style.WARNING(
-                            f"  SKIPPED {label}: {skipped} records kept — still referenced "
-                            "by a PROTECT/RESTRICT foreign key; retried on the next run"
-                        ))
+                        self.stdout.write(
+                            self.style.WARNING(
+                                f"  SKIPPED {label}: {skipped} records kept — still referenced "
+                                "by a PROTECT/RESTRICT foreign key; retried on the next run"
+                            )
+                        )
             except Exception as exc:
                 self.stdout.write(self.style.ERROR(f"  ERROR {label}: {exc}"))
 
@@ -98,9 +104,15 @@ class Command(BaseCommand):
             try:
                 count = SnapadminAuditLog.purge_expired(now=now, dry_run=dry_run)
                 if dry_run:
-                    self.stdout.write(f"  DRY RUN {label}: {count} records would be deleted (older than {audit_retention_days} days)")
+                    self.stdout.write(
+                        f"  DRY RUN {label}: {count} records would be deleted (older than {audit_retention_days} days)"
+                    )
                 else:
-                    self.stdout.write(self.style.SUCCESS(f"  DELETED {label}: {count} records (older than {audit_retention_days} days)"))
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            f"  DELETED {label}: {count} records (older than {audit_retention_days} days)"
+                        )
+                    )
                     total += count
             except Exception as exc:
                 self.stdout.write(self.style.ERROR(f"  ERROR {label}: {exc}"))

@@ -105,7 +105,7 @@ class JsonKeyPathFilter(django_filters.CharFilter):
         super().__init__(**kwargs)
 
     def filter(self, qs: QuerySet, value: str | None) -> QuerySet:
-        if value in EMPTY_VALUES:
+        if value is None or value in EMPTY_VALUES:
             return qs
         values = [part.strip() for part in value.split(",") if part.strip()]
         if not values:
@@ -117,10 +117,7 @@ class JsonKeyPathFilter(django_filters.CharFilter):
 
     def _q_for_value(self, value: str) -> Q:
         """Scalar-exact OR native list-membership for one value."""
-        return (
-            Q(**{self.lookup_field: value})
-            | Q(**{f"{self.lookup_field}__contains": [value]})
-        )
+        return Q(**{self.lookup_field: value}) | Q(**{f"{self.lookup_field}__contains": [value]})
 
     def _native_filter(self, qs: QuerySet, values: list[str]) -> QuerySet:
         # Native JSON containment (PostgreSQL/MySQL): return one lazy queryset so
@@ -144,8 +141,7 @@ class JsonKeyPathFilter(django_filters.CharFilter):
 
     def _scan_cap(self) -> int:
         return (
-            get_setting("SNAPADMIN_API_JSON_FILTER_SCAN_CAP", None)
-            or _JSON_FILTER_SCAN_CAP_DEFAULT
+            get_setting("SNAPADMIN_API_JSON_FILTER_SCAN_CAP", None) or _JSON_FILTER_SCAN_CAP_DEFAULT
         )
 
     def _python_membership_pks(self, qs: QuerySet, values: list[str]) -> set:
@@ -181,7 +177,9 @@ def _text_filter_for_lookup(name: str, lookup: str) -> tuple[str, django_filters
         # A CharFilter would forward the raw string ("true"/"false") to Django's
         # isnull lookup, which only accepts a bool -> ValueError -> HTTP 500. Map it
         # to a BooleanFilter so ?field__isnull=true/false parses to a real bool.
-        return f"{name}__isnull", django_filters.BooleanFilter(field_name=name, lookup_expr="isnull")
+        return f"{name}__isnull", django_filters.BooleanFilter(
+            field_name=name, lookup_expr="isnull"
+        )
     return f"{name}__{lookup}", django_filters.CharFilter(field_name=name, lookup_expr=lookup)
 
 
@@ -208,9 +206,13 @@ def _resolve_text_lookups(
     return _TEXT_LOOKUPS_DEFAULT
 
 
-def _build_filters_for_model(model_class: type[django_models.Model]) -> dict[str, django_filters.Filter]:
+def _build_filters_for_model(
+    model_class: type[django_models.Model],
+) -> dict[str, django_filters.Filter]:
     filters: dict[str, django_filters.Filter] = {}
-    model_lookups: dict[str, list[str]] = get_model_meta(model_class, "api_filter_lookups", None) or {}
+    model_lookups: dict[str, list[str]] = (
+        get_model_meta(model_class, "api_filter_lookups", None) or {}
+    )
 
     for field in model_class._meta.get_fields():
         if not hasattr(field, "column"):
@@ -243,15 +245,18 @@ def _build_filters_for_model(model_class: type[django_models.Model]) -> dict[str
         elif isinstance(field, django_models.BooleanField):
             filters[name] = django_filters.BooleanFilter(lookup_expr="exact")
 
-        elif isinstance(field, (
-            django_models.IntegerField,
-            django_models.BigIntegerField,
-            django_models.SmallIntegerField,
-            django_models.PositiveIntegerField,
-            django_models.PositiveSmallIntegerField,
-            django_models.FloatField,
-            django_models.DecimalField,
-        )):
+        elif isinstance(
+            field,
+            (
+                django_models.IntegerField,
+                django_models.BigIntegerField,
+                django_models.SmallIntegerField,
+                django_models.PositiveIntegerField,
+                django_models.PositiveSmallIntegerField,
+                django_models.FloatField,
+                django_models.DecimalField,
+            ),
+        ):
             filters[name] = django_filters.NumberFilter(lookup_expr="exact")
             filters[f"{name}__gte"] = django_filters.NumberFilter(
                 field_name=name, lookup_expr="gte"
@@ -283,9 +288,7 @@ def _build_filters_for_model(model_class: type[django_models.Model]) -> dict[str
             filters[f"{name}_id"] = django_filters.NumberFilter(
                 field_name=f"{name}_id", lookup_expr="exact"
             )
-            filters[f"{name}_id__in"] = _NumberInFilter(
-                field_name=f"{name}_id", lookup_expr="in"
-            )
+            filters[f"{name}_id__in"] = _NumberInFilter(field_name=f"{name}_id", lookup_expr="in")
             filters[f"{name}_id__isnull"] = django_filters.BooleanFilter(
                 field_name=f"{name}_id", lookup_expr="isnull"
             )
@@ -294,7 +297,9 @@ def _build_filters_for_model(model_class: type[django_models.Model]) -> dict[str
             # JSON columns get no filter by default — only the key-paths explicitly
             # declared in the model's api_json_filters are exposed as query params,
             # e.g. api_json_filters = {"payload": ["a.b"]} -> ?payload__a__b=value.
-            json_filters: dict[str, list[str]] = get_model_meta(model_class, "api_json_filters", None) or {}
+            json_filters: dict[str, list[str]] = (
+                get_model_meta(model_class, "api_json_filters", None) or {}
+            )
             for key_path in json_filters.get(name, []):
                 param_name = f"{name}__{key_path.replace('.', '__')}"
                 filters[param_name] = JsonKeyPathFilter(json_field_name=name, key_path=key_path)
@@ -361,7 +366,8 @@ class SnapAdminFilterBackend(DjangoFilterBackend):
         hidden |= {
             field
             for field, rule in permissions.items()
-            if isinstance(rule, dict) and rule.get("read")
+            if isinstance(rule, dict)
+            and rule.get("read")
             and not user_can_access_field(user, model_class, field, write=False)
         }
         if not hidden:
@@ -406,5 +412,6 @@ def get_api_filter_backends() -> list[type[BaseFilterBackend]]:
         return [SnapAdminFilterBackend, SearchFilter, OrderingFilter]
     if isinstance(configured, (str, type)):
         configured = [configured]
-    return [import_string(backend) if isinstance(backend, str) else backend
-            for backend in configured]
+    return [
+        import_string(backend) if isinstance(backend, str) else backend for backend in configured
+    ]

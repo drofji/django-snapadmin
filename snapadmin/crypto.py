@@ -33,6 +33,7 @@ through either backend — ``manage.py snapadmin_age_keygen`` is the CLI in
 front of it, writing the private key to a git-ignored ``.age/`` directory
 rather than ever printing it.
 """
+
 from __future__ import annotations
 
 import functools
@@ -40,7 +41,8 @@ import hashlib
 import shutil
 import subprocess
 from pathlib import Path
-from typing import BinaryIO, Sequence
+from types import ModuleType
+from typing import Any, BinaryIO, Sequence
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -69,7 +71,7 @@ class AgeError(Exception):
 
 
 @functools.lru_cache(maxsize=1)
-def _load_pyrage():
+def _load_pyrage() -> ModuleType:
     """Return the imported ``pyrage`` package, imported lazily and cached.
 
     Mirrors ``sanitize._load_nh3()`` / ``exporting._load_openpyxl()``: the
@@ -139,8 +141,7 @@ def resolve_backend(configured: str, binary_path: str = "") -> str:
             "`brew install age` on macOS)."
         )
     raise ImproperlyConfigured(
-        f"SNAPADMIN_BACKUP_AGE_BACKEND={configured!r} is not one of "
-        f"{BACKENDS!r}."
+        f"SNAPADMIN_BACKUP_AGE_BACKEND={configured!r} is not one of {BACKENDS!r}."
     )
 
 
@@ -175,7 +176,7 @@ def _generate_keypair_binary() -> tuple[str, str]:
             "Debian/Ubuntu, `brew install age` on macOS), or set backend='pyrage' to "
             "generate with the pyrage library instead."
         )
-    process = subprocess.run([keygen_path], capture_output=True)
+    process = subprocess.run([keygen_path], capture_output=True)  # noqa: S603 - argv list, no shell
     if process.returncode != 0:
         raise AgeError(f"`age-keygen` failed: {process.stderr.decode(errors='replace').strip()}")
     return _parse_age_keygen_output(process.stdout.decode("utf-8", errors="replace"))
@@ -239,7 +240,8 @@ def fingerprint(recipient: str) -> str:
 # pyrage backend
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _parse_recipient_pyrage(value: str):
+
+def _parse_recipient_pyrage(value: str) -> Any:  # a pyrage recipient; pyrage ships no types
     pyrage = _load_pyrage()
     value = value.strip()
     if value.startswith("age1"):
@@ -251,12 +253,11 @@ def _parse_recipient_pyrage(value: str):
         return pyrage.ssh.Recipient.from_str(value)
     except Exception as exc:
         raise AgeError(
-            f"Invalid recipient {value!r}: not a valid age (age1…) or SSH "
-            f"public key ({exc})."
+            f"Invalid recipient {value!r}: not a valid age (age1…) or SSH public key ({exc})."
         ) from exc
 
 
-def _parse_identity_pyrage(identity_path: str):
+def _parse_identity_pyrage(identity_path: str) -> Any:  # a pyrage identity; pyrage ships no types
     pyrage = _load_pyrage()
     raw = Path(identity_path).read_bytes()
     try:
@@ -269,9 +270,7 @@ def _parse_identity_pyrage(identity_path: str):
             try:
                 return pyrage.x25519.Identity.from_str(line)
             except Exception as exc:
-                raise AgeError(
-                    f"Invalid age identity in {identity_path!r}: {exc}"
-                ) from exc
+                raise AgeError(f"Invalid age identity in {identity_path!r}: {exc}") from exc
     try:
         return pyrage.ssh.Identity.from_buffer(raw)
     except Exception as exc:
@@ -306,11 +305,12 @@ def _decrypt_pyrage(reader: BinaryIO, writer: BinaryIO, identity_path: str) -> N
 # binary backend
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _run_age(command: list[str], reader: BinaryIO, writer: BinaryIO) -> None:
     # Streamed straight through, same shape as the existing pg_dump invocation
     # in backup.py: an argument list (never shell=True, so no shell-injection
     # surface) with the OS pipe wired directly into stdin/stdout.
-    process = subprocess.run(command, stdin=reader, stdout=writer, stderr=subprocess.PIPE)
+    process = subprocess.run(command, stdin=reader, stdout=writer, stderr=subprocess.PIPE)  # noqa: S603 - argv list, no shell
     if process.returncode != 0:
         raise AgeError(f"`age` failed: {process.stderr.decode(errors='replace').strip()}")
 
@@ -335,6 +335,7 @@ def _decrypt_binary(
 # ─────────────────────────────────────────────────────────────────────────────
 # Public entry points
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def encrypt_stream(
     reader: BinaryIO,

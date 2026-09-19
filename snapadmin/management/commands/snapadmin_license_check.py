@@ -44,7 +44,11 @@ def _cve_note() -> dict:
     """A truthful vulnerability-scan line — never a fabricated 'no known vulnerabilities'."""
     for module, tool in (("pip_audit", "pip-audit"), ("safety", "safety")):
         if importlib.util.find_spec(module) is not None:
-            return {"scanner": tool, "ran": False, "note": f"{tool} is installed — run `{tool}` to scan for CVEs."}
+            return {
+                "scanner": tool,
+                "ran": False,
+                "note": f"{tool} is installed — run `{tool}` to scan for CVEs.",
+            }
     return {
         "scanner": None,
         "ran": False,
@@ -56,14 +60,18 @@ class Command(BaseCommand):
     help = "Audit the licences of installed SnapAdmin dependencies for commercial usability."
 
     def add_arguments(self, parser):
-        parser.add_argument("--json", action="store_true", dest="as_json", help="Emit JSON (for CI).")
+        parser.add_argument(
+            "--json", action="store_true", dest="as_json", help="Emit JSON (for CI)."
+        )
         parser.add_argument(
             "--critical-only",
             action="store_true",
             dest="critical_only",
             help="Show only non-permissive (🟡/🔴) licences.",
         )
-        parser.add_argument("--verbose", action="store_true", help="Include uncurated deps and notes.")
+        parser.add_argument(
+            "--verbose", action="store_true", help="Include uncurated deps and notes."
+        )
         parser.add_argument(
             "--compatible-with",
             dest="compatible_with",
@@ -78,10 +86,16 @@ class Command(BaseCommand):
             self._render_compatibility(statuses, options["compatible_with"], options["as_json"])
             return
 
-        shown = [s for s in statuses if not options["critical_only"] or s.info.tier is not Tier.PERMISSIVE]
+        shown = [
+            s
+            for s in statuses
+            if not options["critical_only"] or s.info.tier is not Tier.PERMISSIVE
+        ]
 
         if options["as_json"]:
-            self.stdout.write(json.dumps(self._payload(shown, statuses, options["verbose"]), indent=2))
+            self.stdout.write(
+                json.dumps(self._payload(shown, statuses, options["verbose"]), indent=2)
+            )
             return
 
         self._render_text(shown, statuses, options["verbose"])
@@ -137,11 +151,17 @@ class Command(BaseCommand):
 
         verdict = commercial_verdict(statuses)
         if verdict["commercial_ok"]:
-            self.stdout.write(self.style.SUCCESS("\nCommercial compatibility: ✓ OK — installed licences are proprietary-safe"))
+            self.stdout.write(
+                self.style.SUCCESS(
+                    "\nCommercial compatibility: ✓ OK — installed licences are proprietary-safe"
+                )
+            )
         else:
-            self.stdout.write(self.style.WARNING(
-                "\nCommercial compatibility: ⚠ review — " + ", ".join(verdict["concerns"])
-            ))
+            self.stdout.write(
+                self.style.WARNING(
+                    "\nCommercial compatibility: ⚠ review — " + ", ".join(verdict["concerns"])
+                )
+            )
 
         if verbose:
             uncurated = audit_uncurated()
@@ -155,12 +175,16 @@ class Command(BaseCommand):
         self.stdout.write("\nVulnerability scan: " + _cve_note()["note"])
 
         age_days, stale = curated_staleness()
-        self.stdout.write(f"Curated data last reviewed: {CURATED_REVIEWED_ON.isoformat()} ({age_days} days ago)")
+        self.stdout.write(
+            f"Curated data last reviewed: {CURATED_REVIEWED_ON.isoformat()} ({age_days} days ago)"
+        )
         if stale:
-            self.stdout.write(self.style.WARNING(
-                f"⚠ Curated licence data is over {age_days} days old — re-verify it against "
-                "pyproject.toml and each package's own licence metadata."
-            ))
+            self.stdout.write(
+                self.style.WARNING(
+                    f"⚠ Curated licence data is over {age_days} days old — re-verify it against "
+                    "pyproject.toml and each package's own licence metadata."
+                )
+            )
 
     def _write_row(self, status: PackageStatus, width: int):
         info = status.info
@@ -180,12 +204,17 @@ class Command(BaseCommand):
             rows.append((status.info.package, status.info.spdx, verdict))
 
         if as_json:
-            self.stdout.write(json.dumps(
-                {"target": target, "packages": [
-                    {"package": p, "license": lic, "compatible": v} for p, lic, v in rows
-                ]},
-                indent=2,
-            ))
+            self.stdout.write(
+                json.dumps(
+                    {
+                        "target": target,
+                        "packages": [
+                            {"package": p, "license": lic, "compatible": v} for p, lic, v in rows
+                        ],
+                    },
+                    indent=2,
+                )
+            )
             return
 
         self.stdout.write(f"📋 Compatibility with a project licensed {target} (advisory):\n")

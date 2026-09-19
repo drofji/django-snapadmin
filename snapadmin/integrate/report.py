@@ -54,7 +54,9 @@ def render_text(steps: list[Step], project: ProjectContext) -> str:
                     lines.append(f"    {step.note}")
         lines.append("")
 
-    lines.append("This command only reports and prints snippets — it changes nothing. Review, then paste.")
+    lines.append(
+        "This command only reports and prints snippets — it changes nothing. Review, then paste."
+    )
     return "\n".join(lines)
 
 

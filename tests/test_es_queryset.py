@@ -247,15 +247,36 @@ class TestEsQuerySetDelete:
         assert count == 1
 
     @pytest.mark.django_db
-    def test_delete_es_only_es_error_is_swallowed(self):
+    def test_delete_es_only_es_error_is_raised_not_counted_as_deleted(self):
+        """ES_ONLY has no other copy: a failed delete used to be swallowed and
+        reported as done — which a GDPR subject-access erasure then printed as
+        "Deleted N row(s)". It now raises, so the caller sees the failure."""
         from demo.apps.shop.models import SearchLog
+        from snapadmin.es.errors import SnapEsUnavailable
         hit = SimpleNamespace(pk=42)
         qs = EsQuerySet(SearchLog, [hit])
         mock_es = MagicMock()
         mock_es.delete.side_effect = Exception("ES error")
         with patch.object(SearchLog, "get_es_client", return_value=mock_es):
-            count, _ = qs.delete()
-        assert count == 1
+            with pytest.raises(SnapEsUnavailable, match="still stored"):
+                qs.delete()
+
+    @pytest.mark.django_db
+    def test_a_dual_search_result_deletes_the_database_rows(self):
+        """A DUAL model's ES search returns an EsQuerySet naming DB rows. Its
+        delete() used to touch nothing and report every row as deleted."""
+        from decimal import Decimal
+        from demo.apps.shop.models import Product
+        keep = Product.objects.create(name="Keep", price=Decimal("1.00"))
+        gone = Product.objects.create(name="Gone", price=Decimal("1.00"))
+        qs = EsQuerySet(Product, [SimpleNamespace(pk=gone.pk)])
+
+        count, detail = qs.delete()
+
+        assert count >= 1
+        assert detail.get(Product._meta.label) == 1
+        assert not Product.objects.filter(pk=gone.pk).exists()
+        assert Product.objects.filter(pk=keep.pk).exists()
 
 
 class TestEsManagerGetQueryset:

@@ -23,6 +23,8 @@ the `0.x` beta series.
 - A REST viewset action missing from the permission map is refused instead of falling back to
   `view`; map a project's own with `SNAPADMIN_API_ACTION_PERMISSIONS`.
 - An `ES_ONLY` retention purge that fails raises `SnapPurgeError` instead of returning `0`.
+- `EsQuerySet.delete()` on an `ES_ONLY` model raises `SnapEsUnavailable` when Elasticsearch cannot
+  delete, instead of counting the documents as deleted (a GDPR erasure no longer reports success).
 - The SFTP backup location in the run summary and `db_backup_stored` is the directory the server
   resolved, so a relative `SNAPADMIN_BACKUP_SFTP_DIR` now reports the full path from the login
   directory.
@@ -32,6 +34,9 @@ the `0.x` beta series.
   per-table row count; an alias pointing at `default`'s database is refused.
 - `SNAPADMIN_PURGE_EXTERNAL = True` lets an external cron satisfy `snapadmin.W012`.
 - Snap fields accept a positional `verbose_name`, like Django fields.
+- `PATCH /api/tokens/<id>/` renames a token (name only; other fields are a `400`).
+- The sdist carries the test suite (and the demo, docs and `pytest.ini` it needs); the wheel does not.
+- `snapadmin-new --admin-only` generates an admin-only project (no REST API / GraphQL).
 - System checks `snapadmin.W023` (backups configured but disabled), `W024` (`env` part with no env
   file) and `W025` (masked fields behind a hand-written admin that does not mask).
 - `SnapModel.purge_expired()` returns `SnapPurgeResult`, an `int` with `skipped_protected`.
@@ -45,9 +50,19 @@ the `0.x` beta series.
 ### Fixed
 - A due row held by a `PROTECT`/`RESTRICT` foreign key no longer aborts the model's retention purge,
   and no longer loses its `data_retention_files` while the row stays.
+- `PIIMaskingSerializerMixin` / `FieldPermissionSerializerMixin` mask and gate on a hand-built
+  `ModelSerializer` too (they read `Meta.model`); before, they returned every field raw there.
+- Deleting an ES search result of a `DUAL` model deletes the database rows; it used to delete
+  nothing while reporting every row deleted.
+- Restore and snapshot refuse unknown parts; the digest/health-alert tasks always return a `status`.
 - `delete_pks_from_es()` treats a `failures` list in the Elasticsearch answer as a failed delete.
 - A masked changelist column keeps the field's `verbose_name`.
 - Generated `ModelAdmin` classes report the model's module as `__module__`.
+
+### Security
+- `formatted_id` escapes a non-integer primary key instead of rendering it as markup (stored XSS).
+- Alert webhooks accept only `http`/`https` URLs.
+- `snapadmin_restore` escapes the database name in the SQL it sends to `psql`.
 
 ### Deprecated
 - `SnapModel.admin_sections` — never read; setting it raises `snapadmin.W026`.

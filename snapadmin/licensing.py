@@ -120,7 +120,10 @@ _CURATED: tuple[LicenseInfo, ...] = (
     LicenseInfo("django-extra-settings", "MIT", extra="extra-settings"),
     LicenseInfo("openpyxl", "MIT", extra="xlsx"),
     LicenseInfo(
-        "django-admin-autocomplete-filter", "LGPL-3.0", extra="autocomplete-filter", guidance=_LGPL_NOTE
+        "django-admin-autocomplete-filter",
+        "LGPL-3.0",
+        extra="autocomplete-filter",
+        guidance=_LGPL_NOTE,
     ),
     LicenseInfo("paramiko", "LGPL-2.1", extra="backup", guidance=_LGPL_NOTE),
     LicenseInfo("pyrage", "MIT", extra="age"),
@@ -177,7 +180,11 @@ def _installed_version(name: str) -> str | None:
 def scan_curated() -> list[PackageStatus]:
     """Every curated package with its installed status/version, in declaration order."""
     return [
-        PackageStatus(info=info, installed=(version := _installed_version(info.package)) is not None, version=version)
+        PackageStatus(
+            info=info,
+            installed=(version := _installed_version(info.package)) is not None,
+            version=version,
+        )
         for info in _CURATED
     ]
 

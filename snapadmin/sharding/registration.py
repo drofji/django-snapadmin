@@ -180,7 +180,10 @@ def _build_explicit_shards(shards_raw: dict[str, Any]) -> dict[str, ShardConfig]
         replicas = tuple(spec.get("REPLICAS") or [])
         value_range = _validate_range(name, spec.get("RANGE"))
         shards[name] = ShardConfig(
-            name=name, primary_dsn=spec["PRIMARY"], replica_dsns=replicas, value_range=value_range,
+            name=name,
+            primary_dsn=spec["PRIMARY"],
+            replica_dsns=replicas,
+            value_range=value_range,
         )
     return shards
 
@@ -277,7 +280,7 @@ def configure_sharding() -> None:
         aliases: dict[str, dict[str, str]] = {}
         for shard in shards.values():
             aliases[shard.primary_alias] = parse_dsn(shard.primary_dsn)
-            for alias, dsn in zip(shard.replica_aliases, shard.replica_dsns):
+            for alias, dsn in zip(shard.replica_aliases, shard.replica_dsns, strict=True):
                 aliases[alias] = parse_dsn(dsn)
     except ImproperlyConfigured as exc:
         logger.error("snap_sharding_misconfigured", error=str(exc))

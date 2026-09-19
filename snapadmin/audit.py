@@ -172,12 +172,14 @@ def diff_rows(changes: dict | None) -> list[dict]:
             old, new = diff.get("old"), diff.get("new")
         else:
             old, new = None, diff
-        rows.append({
-            "field": str(field),
-            "old": display_value(old),
-            "new": display_value(new),
-            "changed": old != new,
-        })
+        rows.append(
+            {
+                "field": str(field),
+                "old": display_value(old),
+                "new": display_value(new),
+                "changed": old != new,
+            }
+        )
     return rows
 
 
@@ -258,5 +260,5 @@ def record_audit(request, action: str, instance, changes: dict | None = None) ->
             object_repr=str(instance)[:255],
             changes=changes or None,
         )
-    except Exception:  # pragma: no cover - defensive; exercised via monkeypatch
+    except Exception:  # fail-safe by contract — see the docstring; pinned by a test
         logger.exception("snapadmin.audit.record_failed", action=action)

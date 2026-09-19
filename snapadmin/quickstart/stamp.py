@@ -64,7 +64,10 @@ def write_stamp(demo_dir: Path | str, version: str, files: Iterable[str]) -> Pat
     demo_dir = Path(demo_dir)
     manifest = sorted({str(name).replace("\\", "/") for name in files} - {STAMP_NAME})
     path = stamp_path(demo_dir)
-    path.write_text(json.dumps({"version": _normalise(version), "files": manifest}, indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps({"version": _normalise(version), "files": manifest}, indent=2) + "\n",
+        encoding="utf-8",
+    )
     return path
 
 
@@ -90,7 +93,9 @@ def orphaned_files(demo_dir: Path | str, current: Iterable[str]) -> list[Path]:
     return sorted(orphans)
 
 
-def find_demo_tree(start: Path | str | None = None, *, max_parents: int = DEFAULT_MAX_PARENTS) -> Path | None:
+def find_demo_tree(
+    start: Path | str | None = None, *, max_parents: int = DEFAULT_MAX_PARENTS
+) -> Path | None:
     """The nearest stamped demo tree at or above ``start`` (default: the current directory).
 
     Checks each directory and its ``demo/`` child, because the demo is run both from inside the

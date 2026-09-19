@@ -351,3 +351,25 @@ class TestDeleteEsOnly:
         out = cmd.stdout.getvalue()
         assert f"DELETED {model._meta.label}: 1 row" in out
         assert deleted["hits"] == [row]
+
+
+class TestSubjectPathGuard:
+    """F8 / #RM1a — ``_subject_path_for`` refuses a model with no
+    ``subject_path`` loudly rather than building a query from ``None``. Its
+    callers filter such models out first, so the guard is defensive; it is
+    pinned directly instead of hidden behind a coverage pragma."""
+
+    def test_a_model_without_a_subject_path_is_refused(self):
+        from django.core.exceptions import ImproperlyConfigured
+
+        from demo.apps.shop.models import Category
+        from snapadmin.management.commands.snapadmin_subject_request import _subject_path_for
+
+        with pytest.raises(ImproperlyConfigured, match="demo.Category has no subject_path"):
+            _subject_path_for(Category)
+
+    def test_a_declared_path_is_returned(self):
+        from demo.apps.shop.models import AuditLog
+        from snapadmin.management.commands.snapadmin_subject_request import _subject_path_for
+
+        assert _subject_path_for(AuditLog) == "user_email"

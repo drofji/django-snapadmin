@@ -18,11 +18,24 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--path", default=".", help="Project root (default: current directory).")
     parser.add_argument("--settings", help="Path to settings.py (auto-detected if omitted).")
     parser.add_argument("--urls", help="Path to the root urls.py (auto-detected if omitted).")
-    parser.add_argument("--url-prefix", dest="url_prefix", default="", help="URL prefix for the SnapAdmin routes, e.g. api/.")
-    parser.add_argument("--extras", help="Comma-separated extras for the install line, e.g. elasticsearch,celery.")
-    parser.add_argument("--api", action="store_true", help="Also check the REST framework configuration.")
-    parser.add_argument("--graphql", action="store_true", help="Also check the GraphQL configuration.")
-    parser.add_argument("--json", action="store_true", dest="as_json", help="Emit the report as JSON.")
+    parser.add_argument(
+        "--url-prefix",
+        dest="url_prefix",
+        default="",
+        help="URL prefix for the SnapAdmin routes, e.g. api/.",
+    )
+    parser.add_argument(
+        "--extras", help="Comma-separated extras for the install line, e.g. elasticsearch,celery."
+    )
+    parser.add_argument(
+        "--api", action="store_true", help="Also check the REST framework configuration."
+    )
+    parser.add_argument(
+        "--graphql", action="store_true", help="Also check the GraphQL configuration."
+    )
+    parser.add_argument(
+        "--json", action="store_true", dest="as_json", help="Emit the report as JSON."
+    )
     return parser
 
 

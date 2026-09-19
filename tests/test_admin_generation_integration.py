@@ -238,3 +238,78 @@ class TestTokenAdminRegistration:
 
         assert ErrorEvent in admin.site._registry
         assert SnapadminAuditLog in admin.site._registry
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #QA1d — generated-admin branches no test reached
+# ─────────────────────────────────────────────────────────────────────────────
+
+class _SearchableKeyModel(SnapModel):
+    id = snapfields.snap_field(models.BigAutoField(primary_key=True), searchable=True)
+    title = snapfields.SnapCharField(max_length=20)
+
+    class Meta:
+        app_label = "demo"
+        abstract = True
+
+
+class _HiddenRichTextModel(SnapModel):
+    body = snapfields.SnapTextField(wysiwyg=True, show_in_list=False)
+
+    class Meta:
+        app_label = "demo"
+        abstract = True
+
+
+class TestGeneratedAdminBranches:
+    def test_a_searchable_primary_key_is_listed_once_in_search_fields(self):
+        _form, _list, search, *_ = _SearchableKeyModel.get_admin_fields()
+
+        assert search.count("id") == 1
+
+    def test_a_rich_text_field_hidden_from_the_list_gets_no_display_method(self):
+        _form, list_display, *_ = _HiddenRichTextModel.get_admin_fields()
+
+        assert "safe_html_body" not in list_display
+        assert "safe_html_body" not in _HiddenRichTextModel._admin_generated_overrides
+
+    @pytest.mark.django_db
+    def test_a_row_whose_every_field_is_masked_disappears_from_the_form(self, rf):
+        from django.contrib.auth import get_user_model
+        from demo.apps.shop.models import Category
+
+        staff = get_user_model().objects.create_user("rowmask", password="x", is_staff=True)
+        request = rf.get("/")
+        request.user = staff
+        with override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Category": ["slug", "is_active"]}):
+            fieldsets = admin.site._registry[Category].get_fieldsets(request)
+
+        shown = [f for _name, opts in fieldsets for f in opts["fields"]]
+        flat = {x for f in shown for x in (f if isinstance(f, tuple) else (f,))}
+        assert {"slug", "is_active"}.isdisjoint(flat)
+        assert "name" in flat
+
+    @pytest.mark.django_db
+    def test_without_unfold_rows_get_no_unfold_row_class(self, rf, monkeypatch):
+        from django.contrib.auth import get_user_model
+        from demo.apps.shop.models import Category
+        from snapadmin import admin_gen
+
+        monkeypatch.setattr(admin_gen, "UNFOLD_INSTALLED", False)
+        request = rf.get("/")
+        request.user = get_user_model().objects.create_superuser("nounfold", password="x")
+
+        fieldsets = admin.site._registry[Category].get_fieldsets(request)
+
+        assert all("snap-field-row" not in opts.get("classes", ()) for _n, opts in fieldsets)
+
+    @pytest.mark.django_db
+    def test_registering_another_app_leaves_this_one_alone(self):
+        from demo.apps.shop.models import Tag
+
+        original = admin.site._registry.pop(Tag)
+        try:
+            SnapModel.register_all_admins(app_label="some_other_app")
+            assert Tag not in admin.site._registry
+        finally:
+            admin.site._registry[Tag] = original

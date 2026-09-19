@@ -84,7 +84,7 @@ def extract_demo(
                 raise QuickstartError(f"Unsafe path in archive: {member.name}")
             planned.append((member, rel, target))
 
-        manifest = [rel[len(_DEMO_PREFIX):] for member, rel, _ in planned if member.isfile()]
+        manifest = [rel[len(_DEMO_PREFIX) :] for member, rel, _ in planned if member.isfile()]
         existing = [t for m, _, t in planned if m.isfile() and t.exists()]
         orphans = stamp_mod.orphaned_files(demo_dir, manifest)
         if (existing or orphans) and not assume_yes and not confirm(existing, orphans):

@@ -123,6 +123,6 @@ def __getattr__(name: str):
     """
     if name == "SnapDynamicPagination":
         cls = _build_snap_dynamic_pagination()
-        globals()[name] = cls          # subsequent lookups skip __getattr__
+        globals()[name] = cls  # subsequent lookups skip __getattr__
         return cls
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

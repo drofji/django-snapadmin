@@ -146,4 +146,5 @@ def get_model_meta(model: type, name: str, default: Any = None) -> Any:
     # there — only later, once a model is fully built and Django is already
     # configured — so the import carries none of that risk.
     from snapadmin.conf import get_setting
+
     return get_setting(f"SNAPADMIN_{name.upper()}", default)

@@ -561,6 +561,7 @@ docker compose up --build</code></pre>
       <tr><td><code>--path DIR</code></td><td>Directory to create the project in (default: the current directory).</td></tr>
       <tr><td><code>--app-name NAME</code></td><td>Name of the app carrying the worked <code>SnapModel</code> example (default: <code>catalog</code>).</td></tr>
       <tr><td><code>--full</code></td><td>Also write a <code>Dockerfile</code>, <code>docker-compose.yml</code> and the Postgres/Redis/Elasticsearch wiring.</td></tr>
+      <tr><td><code>--admin-only</code></td><td>Generate the admin alone: no REST API or GraphQL apps, both switches off, a base-install <code>requirements.txt</code>, and (with <code>--full</code>) a container health check on <code>/admin/login/</code> instead of the API's <code>/api/health/</code>. The default project serves all three surfaces — token-authenticated and permission-gated, never anonymous — because showing them from one model is what it is for; <code>--admin-only</code> is the library's own 1.0 default, for a project that never wants an API.</td></tr>
     </tbody>
   </table>
 
@@ -1910,6 +1911,7 @@ token = APIToken.create_for_user(
   <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/tokens/</span><span class="endpoint-desc">Create a new token</span></div>
   <div class="endpoint-row"><span class="method get">GET</span><span class="endpoint-path">/api/tokens/{id}/</span><span class="endpoint-desc">Retrieve a token</span></div>
   <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/tokens/{id}/rotate/</span><span class="endpoint-desc">Replace the secret in place — same row, id, scopes and history; the new raw key is returned once</span></div>
+  <div class="endpoint-row"><span class="method patch">PATCH</span><span class="endpoint-path">/api/tokens/{id}/</span><span class="endpoint-desc">Rename — <code>{"token_name": "…"}</code> only; any other field is a <code>400</code> naming it (scope and expiry changes mean a new token). Audited. No <code>PUT</code>.</span></div>
   <div class="endpoint-row"><span class="method post">POST</span><span class="endpoint-path">/api/tokens/{id}/deactivate/</span><span class="endpoint-desc">Flip <code>is_active</code> off — the recommended revocation path</span></div>
   <div class="endpoint-row"><span class="method delete">DELETE</span><span class="endpoint-path">/api/tokens/{id}/</span><span class="endpoint-desc">Delete a token outright (administrators; prefer deactivate for routine revocation)</span></div>
   <p>A regular user manages their own tokens — list, create, retrieve, rotate, deactivate, delete —
@@ -4046,6 +4048,39 @@ SNAPADMIN_APP_LABELS  = {"auth": "Administration"}  # rename a group heading</co
   </div>
   </details>
 
+  <h3 id="module-permissions">🧩 Module-level permissions — a recipe, not a subsystem</h3>
+  <p>A project that grants staff rights per business <em>module</em> ("Helpdesk", with
+  sub-packages an administrator assigns) does not need a permission model above Django's: Django's
+  groups and custom permissions already are that layer, and every SnapAdmin surface already checks
+  Django permissions. SnapAdmin deliberately does not ship a second, parallel system — two
+  permission models that can disagree are a security bug waiting to happen. The recipe:</p>
+  <pre><code># helpdesk/models.py — one permission-only model per module: no table, just codenames
+class HelpdeskModule(models.Model):
+    class Meta:
+        managed = False
+        default_permissions = ()          # no add/change/delete/view for a table that isn't there
+        permissions = [
+            ("use_helpdesk", "Can use the Helpdesk module"),
+            ("helpdesk_tickets", "Helpdesk: tickets"),          # one per sub-package
+            ("helpdesk_knowledge_base", "Helpdesk: knowledge base"),
+        ]
+
+# A data migration (or the admin) creates one Group per role and assigns the codenames:
+#   "Helpdesk agent" → use_helpdesk + helpdesk_tickets
+#   "Helpdesk lead"  → everything above + helpdesk_knowledge_base</code></pre>
+  <ul>
+    <li><strong>Your own views:</strong> <code>@permission_required("helpdesk.helpdesk_tickets")</code>
+      or <code>request.user.has_perm(...)</code> — plain Django.</li>
+    <li><strong>A generated REST action:</strong> <code>@snap_action(permission="helpdesk.helpdesk_tickets")</code>
+      gates it on the module permission instead of the model's own.</li>
+    <li><strong>A field inside a model:</strong> <a href="#field-permissions"><code>api_field_permissions</code></a>
+      names the module permission per field and side.</li>
+    <li><strong>The admin:</strong> override <code>has_view_permission</code>/<code>has_change_permission</code>
+      through <code>admin_overrides</code> to require the module permission as well as the model's.</li>
+    <li><strong>API tokens</strong> stay AND-ed with their owner's permissions, so a token can never
+      reach a module its user is not in.</li>
+  </ul>
+
   <h3 id="audit-trail">Unalterable audit trail <span class="badge">DORA / ISO 27001</span></h3>
   <p>Django's built-in <code>LogEntry</code> is minimal and editable straight from the DB. SnapAdmin
   records a richer, append-only <code>SnapadminAuditLog</code> for every admin create/update/delete —
@@ -4876,11 +4911,11 @@ class Invoice(snap_models.SnapModel):
   <table>
     <thead><tr><th>Measurement</th><th>Value</th><th>Command that produced it</th></tr></thead>
     <tbody>
-      <tr><td>Tests collected</td><td><strong>5,053 tests</strong> across <strong>153 files</strong></td><td><code>pytest --collect-only -q</code></td></tr>
-      <tr><td>The everyday run</td><td>5,035 passed, 6 skipped, 12 deselected, <strong>~43 s</strong></td><td><code>pytest</code></td></tr>
-      <tr><td>Line coverage of <code>snapadmin/</code></td><td><strong>100%</strong> — 11,349 statements, 0 missing</td><td><code>pytest --cov=snapadmin --cov-fail-under=100</code></td></tr>
-      <tr><td>Branch coverage of <code>snapadmin/</code></td><td><strong>99%</strong> — 3,346 branches, 60 partial <em>(measured, not gated)</em></td><td><code>pytest --cov=snapadmin --cov-branch</code></td></tr>
-      <tr><td>CI jobs per push</td><td><strong>7</strong> — a 6-way Python × Django matrix, plus one real-services job</td><td><code>.github/workflows/test.yml</code></td></tr>
+      <tr><td>Tests collected</td><td><strong>5,364 tests</strong> across <strong>160 files</strong></td><td><code>pytest --collect-only -q</code></td></tr>
+      <tr><td>The everyday run</td><td>5,357 passed, 6 skipped, 12 deselected, <strong>~45 s</strong></td><td><code>pytest</code></td></tr>
+      <tr><td>Line coverage of <code>snapadmin/</code></td><td><strong>100%</strong> — 11,702 statements, 0 missing</td><td><code>pytest --cov=snapadmin --cov-branch --cov-fail-under=100</code></td></tr>
+      <tr><td>Branch coverage of <code>snapadmin/</code></td><td><strong>100%</strong> — 3,464 branches, 0 partial <em>(gated)</em></td><td><code>pytest --cov=snapadmin --cov-branch --cov-fail-under=100</code></td></tr>
+      <tr><td>CI jobs per push</td><td><strong>8</strong> — a 6-way Python × Django matrix, one real-services job and one static-analysis job</td><td><code>.github/workflows/test.yml</code></td></tr>
     </tbody>
   </table>
 
@@ -4891,6 +4926,12 @@ class Invoice(snap_models.SnapModel):
     SnapAdmin does not run it yet. The 6 skips are <code>tomllib</code> gates below Python 3.11 and
     backend-capability gates; the 12 deselected tests need a live Elasticsearch.
   </div>
+
+  <p id="testing-sdist"><strong>The suite ships with the source distribution.</strong> The wheel a
+  project installs carries only <code>snapadmin/</code>; the sdist also carries <code>tests/</code>,
+  the demo project it runs against, the docs it checks for truth and <code>pytest.ini</code>. Unpack
+  it and run <code>python -m pytest</code> inside to hold an installed version to the same checks
+  CI runs — without cloning the repository.</p>
 
   <h3 id="testing-method">How the tests are written</h3>
   <p>The rules below are the project's own engineering standard, applied to every change:</p>
@@ -4951,34 +4992,41 @@ class Invoice(snap_models.SnapModel):
   <p><strong>What runs:</strong> <code>pytest --cov=snapadmin --cov-report=term-missing
   --cov-fail-under=100</code>, in each of the six matrix jobs.
   <strong>What it measures:</strong> whether every executable statement in the shipped
-  <code>snapadmin/</code> package was reached by at least one test — 11,349 statements, 0 missing.
+  <code>snapadmin/</code> package was reached by at least one test — 11,702 statements, 0 missing.
   <code>demo/</code> and <code>tests/</code> are excluded, since coverage of the test suite measures
   nothing.
   <strong>What fails the build:</strong> a pull request that adds a line no test reaches.
   <strong>What a contributor does about it:</strong> write the test. Reaching for
   <code>#&nbsp;pragma: no cover</code> to silence the gate is not an option — a pragma is treated as
   a hidden gap rather than an exemption.
-  <strong>The honest exception:</strong> eighteen lines across twelve modules do carry one, each
-  with a written reason, and they fall into four groups — abstract methods whose body is only
+  <strong>The honest exception:</strong> twelve lines across nine modules do carry one, each
+  with a written reason, and they fall into three groups — abstract methods whose body is only
   <code>raise NotImplementedError</code>; <code>if TYPE_CHECKING:</code> blocks that never execute;
-  the import-time branch taken when an optional dependency is absent (which the suite does cover, by
-  re-importing the module with that dependency hidden, but not in a way the coverage counter can
-  attribute); and five defensive guards for states their callers make unreachable. That list is
-  frozen by <code>tests/test_testing_docs_truth.py</code>, so it cannot grow without a deliberate
-  change and a matching edit here. The five defensive guards are the group worth revisiting.
+  and the import-time branch taken when an optional dependency is absent (which the suite does cover,
+  by re-importing the module with that dependency hidden, but not in a way the coverage counter can
+  attribute). That list is frozen by <code>tests/test_testing_docs_truth.py</code>, so it cannot grow
+  without a deliberate change and a matching edit here. It used to be eighteen: six guards labelled
+  "defensive, unreachable" were revisited, all six were reachable — one had silently switched PII
+  masking off on a hand-written serializer — and each is now covered by a test instead.
   <strong>What it does <em>not</em> prove:</strong> that the line is correct, or that any assertion
   would notice if it changed. Coverage is a helper metric here, not the goal.</p>
 
-  <h4>Branch coverage — measured, not gated</h4>
-  <p><strong>What runs:</strong> the same command with <code>--cov-branch</code>.
+  <h4>Branch coverage — 100%, gated</h4>
+  <p><strong>What runs:</strong> the same command with <code>--cov-branch</code>, in the same CI step
+  as the line gate: <code>pytest --cov=snapadmin --cov-branch --cov-fail-under=100</code>.
   <strong>What it measures:</strong> whether each conditional was taken <em>both</em> ways. A
   <code>if x: …</code> that is only ever entered with <code>x</code> true is 100% line-covered and
   50% branch-covered.
-  <strong>Where it stands:</strong> 99% — 3,346 branches, of which 60 are partial.
-  <strong>Why it is not a gate:</strong> turning it on today would fail every build for 60 pre-existing
-  partials. The plan is to close them first and enable
-  <code>--cov-branch --cov-fail-under=100</code> afterwards; until then this page says "measured",
-  and the number is re-measured whenever the suite changes.</p>
+  <strong>Where it stands:</strong> 100% — 3,464 branches, 0 partial.
+  <strong>How it got there:</strong> 59 partial branches were closed one by one, each with a test for
+  the case it represented — never with <code># pragma: no branch</code>. Doing it found real defects,
+  not only missing tests: an ES search result whose <code>delete()</code> deleted nothing for a
+  <code>DUAL</code> model while reporting every row as deleted; an <code>ES_ONLY</code> delete that
+  counted a failed Elasticsearch call as success (which a GDPR erasure then reported as done);
+  a restore that logged an unknown part as applied; two tasks that could return no
+  <code>status</code> at all. Branches that could never be taken were removed rather than tested.
+  <strong>What fails the build:</strong> a pull request that adds a conditional one of whose sides
+  no test takes.</p>
 
   <h4>Random test order, on every single run</h4>
   <p><strong>What runs:</strong> <code>pytest-randomly</code> is a dev dependency and needs no flag —
@@ -5037,6 +5085,24 @@ class Invoice(snap_models.SnapModel):
   proves one interpreter and nothing more.</strong>
   <strong>Release gate:</strong> the tag-triggered publish workflow calls this same workflow, so a
   release cannot reach PyPI on a red matrix.</p>
+
+  <h4>Static analysis — Ruff and mypy</h4>
+  <p><strong>What runs:</strong> the <code>static-analysis</code> job — <code>ruff check snapadmin</code>
+  (pyflakes, pycodestyle, bugbear, complexity, and bandit's security rules over the whole package,
+  backups, crypto, encryption, the API and sharding included), <code>ruff format --check snapadmin</code>,
+  and <code>mypy</code> over <code>snapadmin/</code> with the Django plugin.
+  <strong>What fails the build:</strong> any Ruff finding or unformatted file — the package is clean
+  under both, so they are blocking. mypy is <strong>advisory</strong>: it reports on every push but
+  does not fail the job while its backlog in the dynamic admin/field mixins is worked down; the modules
+  where a wrong type costs most — <code>encryption/</code>, <code>crypto.py</code>,
+  <code>sharding/</code> — already run under raised strictness (every function annotated, untyped
+  bodies checked) and are clean.
+  <strong>What a contributor does about a finding:</strong> fix it. A suppression is local, names its
+  rule and says why (<code># noqa: S603 - argv list, no shell</code>); a bare or blanket one is not
+  accepted. The first pass paid for itself: it found an unescaped primary key rendered as markup in the
+  changelist, a database name interpolated into SQL, and a webhook transport that would have followed
+  <code>file:</code> URLs.
+  <strong>Locally:</strong> <code>ruff check snapadmin &amp;&amp; ruff format --check snapadmin &amp;&amp; PYTHONPATH=. mypy</code>.</p>
 
   <h4>Real PostgreSQL and a live Elasticsearch</h4>
   <p><strong>What runs:</strong> a seventh job, one combination only (Python 3.12 · Django 5.2), with
@@ -5147,20 +5213,10 @@ SNAPADMIN_TEST_ES_URL=http://localhost:9200 pytest -m real_es</code></pre>
         <td>Planned. No Playwright, no Cypress</td>
       </tr>
       <tr>
-        <td><strong>Lint, format, type and security static analysis in CI</strong></td>
-        <td>Ruff for linting and formatting, mypy over <code>snapadmin/</code> for type checking, and a
-        security-oriented static pass. Both Ruff and mypy are planned as <strong>advisory first</strong>
-        — reporting without failing the build — and become blocking per module once that module's
-        backlog is clean, so a large existing codebase can adopt them without a single unreviewable
-        commit. Suppressing a warning to silence it, rather than fixing it or explaining it in the
-        narrowest possible scope, is prohibited.</td>
-        <td>Planned. <code>black</code> and <code>flake8</code> are dev dependencies, but <strong>no CI job runs either</strong></td>
-      </tr>
-      <tr>
-        <td><strong>A branch-coverage gate</strong></td>
-        <td>Adding <code>--cov-branch --cov-fail-under=100</code> to the same command the line gate
-        already uses, so that a half-tested conditional fails the build the way an untested line does.</td>
-        <td>Measured at 99% (60 partial branches), not enforced</td>
+        <td><strong>A blocking type-check gate</strong></td>
+        <td>mypy runs on every push but is advisory: the dynamic admin/field mixins still carry a
+        backlog of findings. It becomes blocking once that backlog is worked down, module by module.</td>
+        <td>Advisory; strict and clean on <code>encryption/</code>, <code>crypto.py</code>, <code>sharding/</code></td>
       </tr>
     </tbody>
   </table>

@@ -71,18 +71,23 @@ class SnapAdminConfig(AppConfig):
         post_migrate.connect(sync_es_mappings, sender=self)
 
         from snapadmin.models import connect_es_delete_receivers
+
         connect_es_delete_receivers()
 
         install_nested_apps()
 
         from snapadmin.sharding.registration import configure_sharding
+
         configure_sharding()
 
         from snapadmin.checks import register_checks
+
         register_checks()
 
         from snapadmin.extra_settings_admin import apply_unfold_styling
+
         apply_unfold_styling()
 
         from snapadmin.auth_admin import apply_unfold_auth_admin
+
         apply_unfold_auth_admin()

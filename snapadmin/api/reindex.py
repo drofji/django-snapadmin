@@ -43,8 +43,10 @@ class ESReindexView(SnapAPIAuthMixin, APIView):
         # exist so it never advertises itself on a default install.
         if not reindex_api_enabled():
             return Response(
-                {"detail": "The ES reindex API is disabled. "
-                           "Set SNAPADMIN_REINDEX_API_ENABLED = True to enable it."},
+                {
+                    "detail": "The ES reindex API is disabled. "
+                    "Set SNAPADMIN_REINDEX_API_ENABLED = True to enable it."
+                },
                 status=status.HTTP_404_NOT_FOUND,
             )
 
@@ -57,9 +59,11 @@ class ESReindexView(SnapAPIAuthMixin, APIView):
                 from snapadmin.tasks import run_es_reindex
             except ImportError:
                 return Response(
-                    {"detail": "Async reindex requires Celery. Install it with "
-                               "`pip install django-snapadmin[celery]` and configure a broker "
-                               "(CELERY_BROKER_URL), or unset SNAPADMIN_REINDEX_API_ASYNC."},
+                    {
+                        "detail": "Async reindex requires Celery. Install it with "
+                        "`pip install django-snapadmin[celery]` and configure a broker "
+                        "(CELERY_BROKER_URL), or unset SNAPADMIN_REINDEX_API_ASYNC."
+                    },
                     status=status.HTTP_503_SERVICE_UNAVAILABLE,
                 )
             result = run_es_reindex.delay(chunk_size=chunk_size)

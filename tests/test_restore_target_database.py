@@ -289,3 +289,46 @@ def test_plan_restore_defaults_to_default(two_databases, tmp_path):
     lines = plan_restore(resolved, ["db"])
 
     assert any(line.endswith(f"would replace database {str(live)!r}") for line in lines)
+
+
+class TestTerminateStatementQuotesTheDatabaseName:
+    """A database name is configuration, not user input — but a name holding a
+    quote must still produce valid SQL rather than a broken (or altered)
+    statement: the literal is escaped the standard SQL way."""
+
+    def test_a_quote_in_the_name_is_doubled(self, tmp_path, monkeypatch):
+        calls = _fake_postgres(monkeypatch)
+        gz = tmp_path / "dump.sql.gz"
+        with gzip.open(gz, "wb") as f:
+            f.write(b"x")
+        databases = {"default": {"ENGINE": "django.db.backends.postgresql", "NAME": "o'brien"}}
+        with use_databases(databases):
+            restore_db(gz)
+
+        [terminate] = [c for c in calls if c[0] == "psql" and "pg_terminate_backend" in c[-1]]
+        assert "datname = 'o''brien'" in terminate[-1]
+
+
+class TestUnknownPartsAreRefused:
+    """#QA1d — ``plan_restore``/``perform_restore`` are public and take a list.
+    A part this version does not restore used to be left out of the plan
+    silently and, in ``perform_restore``, logged as applied though nothing was."""
+
+    def test_the_plan_refuses_it(self, two_databases, tmp_path):
+        _live, _drill, local = two_databases
+        run_backup(["local"])
+        resolved = resolve_source(_manifest(local), tmp_path / "work", get_backup_config())
+        resolved.manifest["parts"]["mystery"] = {"filename": "x"}
+
+        with pytest.raises(RestoreError, match=r"Unknown part\(s\) \['mystery'\]"):
+            plan_restore(resolved, ["db", "mystery"])
+
+    def test_the_restore_refuses_it_before_touching_anything(self, two_databases, tmp_path):
+        live, _drill, local = two_databases
+        run_backup(["local"])
+        before = live.read_bytes()
+        resolved = resolve_source(_manifest(local), tmp_path / "work", get_backup_config())
+
+        with pytest.raises(RestoreError, match="Unknown part"):
+            perform_restore(resolved, ["db", "mystery"], get_backup_config())
+        assert live.read_bytes() == before

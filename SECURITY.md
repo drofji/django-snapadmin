@@ -193,6 +193,11 @@ Key protections:
   available for administrators who want it gone outright. A regular user manages their own tokens —
   list, rotate, deactivate — without needing to be a superuser; a superuser sees and manages every
   token.
+- **Rename is the one edit a token accepts.** `PATCH /api/tokens/<id>/` changes `token_name`
+  only; any other field in the body is a `400` naming it rather than being ignored, so a client
+  cannot believe it narrowed or widened a token's scope, or moved its expiry, through a rename. The
+  rename is audited. The owner FK stays the single ownership concept — tenancy for tokens is out of
+  scope.
 - **No token admin for an API that is off.** `register_all_admins()` offers the `APIToken` admin only
   while an API that accepts tokens is enabled (`SNAPADMIN_REST_API_ENABLED` or
   `SNAPADMIN_GRAPHQL_ENABLED`), so an install with both off is not handed a screen for minting
@@ -309,6 +314,9 @@ Key protections:
   masker, so a broken rule degrades to *more* masking, never to raw data — and so does a `pattern`
   that matches nothing in a non-empty value, which used to hand the value back unchanged. The
   built-in e-mail mask no longer reveals a one- or two-character local part (`***@domain`).
+- **The serializer mixins work on a hand-built serializer.** `PIIMaskingSerializerMixin` and
+  `FieldPermissionSerializerMixin` resolve the model from `Meta.model` when SnapAdmin did not build
+  the class; before, a project's own `ModelSerializer` using them returned every field raw.
 - **A hand-written admin that does not mask is reported (`snapadmin.W025`)** — changelist masking
   lives in `PIIMaskingAdminMixin`, which generated admins get automatically. A model a project
   registers with its own `ModelAdmin` (a custom user model is the usual case) showed its masked
@@ -438,6 +446,11 @@ Key protections:
   nothing scheduled to enforce it. A project running the management command from an external
   scheduler declares it with `SNAPADMIN_PURGE_EXTERNAL = True`, which keeps retention on and the
   warning quiet.
+- **A GDPR erasure never reports a deletion it did not achieve.** `EsQuerySet.delete()` on an
+  `ES_ONLY` model used to swallow an Elasticsearch error and count the documents as deleted, so
+  `snapadmin_subject_request delete` printed success while the subject's data stayed searchable. It
+  now raises `SnapEsUnavailable` and the command stops with the error. A `DUAL` search result's
+  `delete()` now deletes the database rows instead of silently deleting nothing.
 - **A failed Elasticsearch purge is a failure, not "nothing was due".** An `ES_ONLY` model's purge
   query failing, or `delete_by_query` answering with a `failures` list, raises `SnapPurgeError` — the
   run reports the model as failed instead of returning `0` while every expired document stays
@@ -703,7 +716,14 @@ Key protections:
   server is your whole database in someone else's hands; encryption costs one setting.
 - Restrict who has `is_staff` / model permissions — SnapAdmin honours standard Django auth.
 
+
 ## Supply chain
+
+- **Static security analysis on every push.** Ruff's bandit rule set (`S`) runs over the whole
+  package — backups, crypto, encryption, the API and sharding included — as a blocking CI step. Every
+  suppression is local and states why the finding is a false positive. Its first run found and fixed
+  an unescaped primary key in `formatted_id` (stored XSS), a database name interpolated into SQL in
+  `snapadmin_restore`, and a webhook transport that would have followed `file:` URLs.
 
 The **base install carries only permissive licences (MIT / BSD / Apache-2.0)** and is safe for
 commercial and proprietary use. Anything copyleft or commercially-restricted is an **opt-in extra**,

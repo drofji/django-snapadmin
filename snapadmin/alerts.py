@@ -78,6 +78,7 @@ USER_AGENT = "django-snapadmin"
 # The alert payload
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class Alert:
     """One alert, rendered per channel.
@@ -126,6 +127,7 @@ class DeliveryResult:
 # Secret handling
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def mask_webhook_url(url: str) -> str:
     """Reduce a webhook URL to ``scheme://host/…`` — the secret is the path.
 
@@ -139,7 +141,7 @@ def mask_webhook_url(url: str) -> str:
         return ""
     try:
         parts = urlsplit(url)
-    except ValueError:  # pragma: no cover - urlsplit only raises on IPv6 junk
+    except ValueError:  # urlsplit raises on a malformed IPv6 host
         return "…"
     if not parts.scheme or not parts.hostname:
         return "…"
@@ -153,6 +155,7 @@ def mask_webhook_url(url: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # Channels
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 class AlertChannel:
     """Base class for a delivery transport.
@@ -234,8 +237,11 @@ class SlackChannel(WebhookChannel):
     def body(self, alert: Alert) -> str:
         # Slack renders "mrkdwn": single asterisks are bold.
         text = "\n".join(
-            [f"*{alert.subject}*", *([alert.summary] if alert.summary else []),
-             *(f"• {line}" for line in alert.lines)]
+            [
+                f"*{alert.subject}*",
+                *([alert.summary] if alert.summary else []),
+                *(f"• {line}" for line in alert.lines),
+            ]
         )
         return _truncate(text, self.max_body_length)
 
@@ -252,8 +258,11 @@ class DiscordChannel(WebhookChannel):
 
     def body(self, alert: Alert) -> str:
         text = "\n".join(
-            [f"**{alert.subject}**", *([alert.summary] if alert.summary else []),
-             *(f"• {line}" for line in alert.lines)]
+            [
+                f"**{alert.subject}**",
+                *([alert.summary] if alert.summary else []),
+                *(f"• {line}" for line in alert.lines),
+            ]
         )
         return _truncate(text, self.max_body_length)
 
@@ -370,14 +379,19 @@ def _truncate(text: str, limit: int | None) -> str:
 # Transport
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def post_json(url: str, payload: Mapping[str, Any], *, timeout: float) -> int:
     """POST ``payload`` as JSON and return the HTTP status code.
 
     Raises ``urllib.error.URLError``/``HTTPError`` on a transport failure and
     ``AlertDeliveryError`` on a non-2xx response — ``dispatch()`` catches both.
     """
+    if urlsplit(url).scheme not in ("http", "https"):
+        # urllib would otherwise follow file:, ftp: or a custom handler; a
+        # webhook is an HTTP endpoint, anything else is a misconfiguration.
+        raise AlertDeliveryError("webhook URL must use http or https")
     data = json.dumps(payload).encode("utf-8")
-    request = urllib_request.Request(
+    request = urllib_request.Request(  # noqa: S310 - scheme restricted to http(s) above
         url,
         data=data,
         headers={"Content-Type": "application/json", "User-Agent": USER_AGENT},
@@ -398,6 +412,7 @@ class AlertDeliveryError(Exception):
 # Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _webhook_entries() -> list[Mapping[str, Any]]:
     """The raw ``SNAPADMIN_ALERT_WEBHOOKS`` entries, tolerating a bad setting."""
     configured = get_setting("SNAPADMIN_ALERT_WEBHOOKS", None) or []
@@ -410,8 +425,9 @@ def _webhook_entries() -> list[Mapping[str, Any]]:
 def _default_timeout() -> float:
     """``SNAPADMIN_ALERT_WEBHOOK_TIMEOUT``, falling back to the 5s default."""
     try:
-        return float(get_setting("SNAPADMIN_ALERT_WEBHOOK_TIMEOUT",
-                                  DEFAULT_WEBHOOK_TIMEOUT_SECONDS))
+        return float(
+            get_setting("SNAPADMIN_ALERT_WEBHOOK_TIMEOUT", DEFAULT_WEBHOOK_TIMEOUT_SECONDS)
+        )
     except (TypeError, ValueError):
         logger.warning("alert_webhook_timeout_invalid")
         return DEFAULT_WEBHOOK_TIMEOUT_SECONDS
@@ -505,6 +521,7 @@ def build_channels(
 # Delivery
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def send_email_alert(
     *,
     subject: str,
@@ -573,6 +590,7 @@ def _error_detail(exc: Exception) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # Cooldown (shared by every alert entry point, never per channel)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def arm_cooldown(cache_key: str, *, minutes: int) -> str | None:
     """Claim the cooldown window, returning a token, or ``None`` if it is held.

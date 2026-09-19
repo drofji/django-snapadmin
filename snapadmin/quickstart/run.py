@@ -42,9 +42,9 @@ def run_demo(
         try:
             runner(cmd, cwd=workdir, check=True)
         except subprocess.CalledProcessError as exc:
-            raise QuickstartError(f"{description} failed (exit {exc.returncode}).")
+            raise QuickstartError(f"{description} failed (exit {exc.returncode}).") from exc
         except FileNotFoundError as exc:
-            raise QuickstartError(f"{description} failed — command not found: {exc}")
+            raise QuickstartError(f"{description} failed — command not found: {exc}") from exc
 
     if not skip_install:
         _run(

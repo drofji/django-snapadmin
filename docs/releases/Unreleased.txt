@@ -12,7 +12,7 @@ Every release carries a `Breaking` heading, including a pre-release. If nothing 
 Breaking
 --------
 
-Six entries from the second round of production field reports. Each is a deliberate change of
+Seven entries from the second round of production field reports and the quality work behind them. Each is a deliberate change of
 something that was silently wrong; each comes with a one-line way back.
 
 * **``snapadmin.E027`` can stop ``manage.py check``.** It fires when ``SnapModel``'s own
@@ -42,6 +42,11 @@ something that was silently wrong; each comes with a one-line way back.
   ``0``. The task and the management command already report a raising model under ``errors`` /
   ``ERROR``, so a failed purge stops being reported as a clean one. Code calling
   ``purge_expired()`` directly on an ``ES_ONLY`` model should expect the exception.
+* **``EsQuerySet.delete()`` on an ``ES_ONLY`` model raises ``SnapEsUnavailable`` when
+  Elasticsearch cannot delete** instead of counting the documents as deleted. A GDPR subject-access
+  erasure (``snapadmin_subject_request delete``) used to print "Deleted N row(s)" after such a
+  failure; it now stops with the error. Code calling ``delete()`` on an ES search result directly
+  should expect the exception.
 * **The SFTP location in the backup summary and in ``db_backup_stored`` is the directory the server
   resolved**, not the configured string. With a relative ``SNAPADMIN_BACKUP_SFTP_DIR`` the reported
   path therefore now starts at the login directory (``sftp://host:22/home/backup/backups/...``
@@ -60,8 +65,19 @@ Added
 * **``SNAPADMIN_PURGE_EXTERNAL = True``** declares that an external scheduler (cron, a Kubernetes
   CronJob) runs ``manage.py snapadmin_purge_expired_data``, so ``snapadmin.W012`` stops asking for a
   Celery Beat entry. Before, following the warning's own advice kept the warning forever.
+* **Renaming an API token** — ``PATCH /api/tokens/<id>/`` with ``{"token_name": "…"}``, for the
+  owner or a superuser, audited. Any other field in the body is a ``400`` naming it: scope and
+  expiry are fixed at creation, and a change to them means a new token.
 * **``SNAPADMIN_TOKEN_ADMIN_ENABLED``** — see Breaking.
 * **``SNAPADMIN_API_ACTION_PERMISSIONS``** — see Breaking.
+* **The test suite ships in the sdist** (never the wheel), with the demo project, docs and
+  ``pytest.ini`` it runs against: unpack the source distribution and run ``python -m pytest``
+  inside to hold an installed version to the checks CI runs. Verified: the full suite passes from
+  an unpacked sdist.
+* **``snapadmin-new --admin-only``** generates the admin alone — no REST API or GraphQL apps, both
+  switches off, a base-install ``requirements.txt``, and a ``--full`` health check that does not
+  depend on the API. The default project still serves all three surfaces (token-authenticated,
+  permission-gated), since showing them from one model is what the generator is for.
 * **The demo project wires a restore drill** (``RESTORE_DRILL_DB_NAME`` adds a ``restore_drill``
   alias) and shows ``admin_list_display_pk = False`` on its ``Tag`` model.
 * **``admin_list_display_pk``** on ``SnapModel`` — see Breaking.
@@ -104,6 +120,23 @@ Fixed
   run, a fully due subtree goes leaves first, files go only with rows actually deleted, and the kept
   rows are reported: ``SnapPurgeResult.skipped_protected``, a ``SKIPPED`` line in
   ``snapadmin_purge_expired_data``, and a ``skipped_protected`` map in the Celery task's summary.
+* **Deleting an Elasticsearch search result of a ``DUAL`` model deletes the rows.** ``snap_search``
+  / ``es_search`` return an ``EsQuerySet`` for ``DUAL`` models too; its ``delete()`` used to remove
+  nothing and report every row as deleted. It now deletes them from the database (the mirror is
+  cleared by the existing ``post_delete`` receiver) and returns Django's own counts.
+* **``snapadmin_restore`` and ``take_snapshot`` refuse a part they cannot handle** instead of
+  skipping it — ``perform_restore`` used to log such a part as applied.
+* **``send_error_digest`` / ``send_health_alert`` always return a ``status``.** An unrecognised
+  reason used to fall through and return ``None``, invisible to a ``status != "ok"`` monitoring
+  rule; it is now a ``partial`` naming the reason.
+* **Swallowed exceptions are logged.** Four ``except: pass`` sites (the dashboard's model counts and
+  Elasticsearch ping, the diagnostics token count, Django's inline history entry) now log what they
+  swallowed, so a failure there is diagnosable instead of invisible.
+* **PII masking and ``api_field_permissions`` no longer switch off on a hand-built serializer.**
+  ``PIIMaskingSerializerMixin`` and ``FieldPermissionSerializerMixin`` read the model only from the
+  ``_snap_model`` attribute SnapAdmin sets on the serializers it generates; a project's own
+  ``ModelSerializer`` mixing them in never had it, and the mixins then returned every field raw —
+  behind a coverage pragma that called the path unreachable. They now fall back to ``Meta.model``.
 * **``delete_pks_from_es()`` reports a partial failure.** A ``delete_by_query`` answer carrying a
   ``failures`` list now returns ``False`` (so ``DUAL`` purges raise ``SnapPurgeError``) instead of
   counting as a cleared mirror.
@@ -114,6 +147,19 @@ Fixed
   place.
 * **The demo project schedules its backup task only while backups are on**, so it no longer
   exhibits the very state ``snapadmin.W023`` reports.
+
+Security
+--------
+
+Found by the new static-analysis pass (Ruff's bandit rules), each fixed with a regression test:
+
+* **``formatted_id`` escaped a non-integer primary key into the changelist as markup.** A
+  character primary key is data — possibly user-supplied — and was rendered through
+  ``mark_safe``, a stored-XSS path for any changelist using that column. It is now escaped.
+* **Alert webhooks refuse any scheme but ``http``/``https``.** ``urllib`` would otherwise also follow
+  ``file:``, ``ftp:`` or a custom handler for a misconfigured ``SNAPADMIN_ALERT_WEBHOOKS`` entry.
+* **``snapadmin_restore`` quotes the database name in the SQL it sends to ``psql``.** A name
+  containing a quote produced invalid (or different) SQL; it is now escaped as an SQL literal.
 
 Deprecated
 ----------

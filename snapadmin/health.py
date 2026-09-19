@@ -133,7 +133,12 @@ def send_health_alert(*, force: bool = False) -> dict:
     )
     if not channels:
         logger.warning("health_alert_no_recipients", failing=",".join(failing_names))
-        return {"sent": False, "reason": "no_recipients", "checked": checked, "failing": len(failing)}
+        return {
+            "sent": False,
+            "reason": "no_recipients",
+            "checked": checked,
+            "failing": len(failing),
+        }
     # Always attempt to arm the cooldown (``cache.add`` is atomic and a no-op when
     # the key already exists). ``force`` still sends when the window hasn't elapsed,
     # but arming here means a forced send also suppresses the next scheduled run

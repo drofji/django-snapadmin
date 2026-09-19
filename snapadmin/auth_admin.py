@@ -66,6 +66,7 @@ def apply_unfold_auth_admin() -> list[str]:
 
     from django.contrib import admin
     from django.contrib.auth import get_user_model
+
     # Importing this module is what registers User/Group on the admin site. Admin
     # autodiscovery normally does it, but that runs inside
     # ``django.contrib.admin``'s own ``ready()`` — so it has only happened by now
@@ -81,11 +82,15 @@ def apply_unfold_auth_admin() -> list[str]:
     # add-form flow and the fieldsets; Unfold contributes templates and widgets.
     upgraded = []
     for model, base_admin, extra_attrs in (
-        (get_user_model(), BaseUserAdmin, {
-            "form": UserChangeForm,
-            "add_form": UserCreationForm,
-            "change_password_form": AdminPasswordChangeForm,
-        }),
+        (
+            get_user_model(),
+            BaseUserAdmin,
+            {
+                "form": UserChangeForm,
+                "add_form": UserCreationForm,
+                "change_password_form": AdminPasswordChangeForm,
+            },
+        ),
         (Group, BaseGroupAdmin, {}),
     ):
         registered = admin.site._registry.get(model)

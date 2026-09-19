@@ -51,6 +51,7 @@ class _ForcedRoutingContext(AbstractContextManager):
 
     def __call__(self, func: _F) -> _F:
         if inspect.iscoroutinefunction(func):
+
             @functools.wraps(func)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
                 with self._new():
@@ -107,9 +108,8 @@ class snap_master_only(_ForcedRoutingContext):
         self._token = state.set_master_forced(True)
         return self
 
-    def __exit__(self, *exc_info: Any) -> bool:
+    def __exit__(self, *exc_info: Any) -> None:
         state.reset_master_forced(self._token)
-        return False
 
 
 class snap_target(_ForcedRoutingContext):
@@ -146,6 +146,5 @@ class snap_target(_ForcedRoutingContext):
         self._token = state.set_forced_target(self._shard, self._replica)
         return self
 
-    def __exit__(self, *exc_info: Any) -> bool:
+    def __exit__(self, *exc_info: Any) -> None:
         state.reset_forced_target(self._token)
-        return False

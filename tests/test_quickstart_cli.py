@@ -165,3 +165,18 @@ class TestDunderMain:
         with pytest.raises(SystemExit) as exc:
             runpy.run_module("snapadmin.quickstart", run_name="__main__")
         assert exc.value.code == 0
+
+
+def test_importing_the_main_module_does_not_run_the_cli(monkeypatch):
+    """#QA1d — ``python -m snapadmin.quickstart`` runs ``main()``; a plain import of the
+    ``__main__`` module (tooling, ``pydoc``, a test collector) must not."""
+    import importlib
+    import sys as _sys
+
+    from snapadmin.quickstart import cli as _cli
+
+    called = []
+    monkeypatch.setattr(_cli, "main", lambda *a, **k: called.append(a) or 0)
+    _sys.modules.pop("snapadmin.quickstart.__main__", None)
+    importlib.import_module("snapadmin.quickstart.__main__")
+    assert called == []

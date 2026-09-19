@@ -131,6 +131,37 @@ class TestGeneratedProjectMinimal:
         _assert_admin_responds(dest, "genminimal2")
 
 
+_ADMIN_ONLY_PROBE = """
+import django
+django.setup()
+from django.test import Client
+
+client = Client(SERVER_NAME="127.0.0.1")
+r = client.get("/admin/login/")
+assert r.status_code == 200, f"/admin/login/ -> {r.status_code}"
+r = client.get("/api/schema/")
+assert r.status_code == 404, f"/api/schema/ -> {r.status_code} (the API should be off)"
+print("ADMIN_ONLY_OK")
+"""
+
+
+class TestGeneratedProjectAdminOnly:
+    def test_check_migrate_admin_responds_and_the_api_is_off(self, tmp_path):
+        assert cli.main(["genadmin", "--path", str(tmp_path), "--admin-only"]) == 0
+        dest = tmp_path / "genadmin"
+        _check_and_migrate(dest)
+        result = subprocess.run(
+            [sys.executable, "-c", _ADMIN_ONLY_PROBE],
+            cwd=dest,
+            env=_subprocess_env({"DJANGO_SETTINGS_MODULE": "genadmin.settings"}),
+            capture_output=True,
+            text=True,
+            timeout=_TIMEOUT,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "ADMIN_ONLY_OK" in result.stdout
+
+
 class TestGeneratedProjectFull:
     def test_check_migrate_and_admin_responds(self, tmp_path):
         """--full still falls back to SQLite with no Postgres/Redis/ES services running —

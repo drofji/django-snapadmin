@@ -23,7 +23,16 @@ from snapadmin.quickstart import (
     wizard,
 )
 
-_CONFIG_FLAG_KEYS = ("mode", "database", "db_host", "db_port", "db_user", "db_password", "db_name", "admin_password")
+_CONFIG_FLAG_KEYS = (
+    "mode",
+    "database",
+    "db_host",
+    "db_port",
+    "db_user",
+    "db_password",
+    "db_name",
+    "admin_password",
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -31,29 +40,77 @@ def build_parser() -> argparse.ArgumentParser:
         prog="snapadmin-demo",
         description="Download and run the SnapAdmin demo — no existing project required.",
     )
-    parser.add_argument("--version", help="Release version to download (default: the installed django-snapadmin version).")
-    parser.add_argument("--path", default=".", help="Directory to extract demo/ into (default: the current directory).")
-    parser.add_argument("--skip-install", action="store_true", help="Do not pip-install the demo requirements.")
-    parser.add_argument("--no-serve", action="store_true", help="Prepare everything but do not start the server.")
-    parser.add_argument("--clear-cache", action="store_true", help="Delete the cached downloads before running.")
-    parser.add_argument("-y", "--yes", action="store_true", help="Assume yes — replace existing demo files without asking.")
+    parser.add_argument(
+        "--version",
+        help="Release version to download (default: the installed django-snapadmin version).",
+    )
+    parser.add_argument(
+        "--path",
+        default=".",
+        help="Directory to extract demo/ into (default: the current directory).",
+    )
+    parser.add_argument(
+        "--skip-install", action="store_true", help="Do not pip-install the demo requirements."
+    )
+    parser.add_argument(
+        "--no-serve", action="store_true", help="Prepare everything but do not start the server."
+    )
+    parser.add_argument(
+        "--clear-cache", action="store_true", help="Delete the cached downloads before running."
+    )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Assume yes — replace existing demo files without asking.",
+    )
 
     config_group = parser.add_argument_group("configuration")
-    config_group.add_argument("--interactive", action="store_true", help="Configure the demo through an interactive wizard.")
-    config_group.add_argument("--load-config", metavar="FILE", help="Load a saved configuration (.ini).")
-    config_group.add_argument("--save-config", metavar="FILE", help="Save the resolved configuration to a file (.ini).")
+    config_group.add_argument(
+        "--interactive",
+        action="store_true",
+        help="Configure the demo through an interactive wizard.",
+    )
+    config_group.add_argument(
+        "--load-config", metavar="FILE", help="Load a saved configuration (.ini)."
+    )
+    config_group.add_argument(
+        "--save-config", metavar="FILE", help="Save the resolved configuration to a file (.ini)."
+    )
     config_group.add_argument("--mode", choices=["runserver", "docker"], help="Run mode.")
-    config_group.add_argument("--database", choices=["sqlite", "postgresql"], help="Database backend.")
+    config_group.add_argument(
+        "--database", choices=["sqlite", "postgresql"], help="Database backend."
+    )
     config_group.add_argument("--db-host", dest="db_host", help="PostgreSQL host.")
     config_group.add_argument("--db-port", dest="db_port", help="PostgreSQL port.")
     config_group.add_argument("--db-user", dest="db_user", help="PostgreSQL user.")
     config_group.add_argument("--db-password", dest="db_password", help="PostgreSQL password.")
     config_group.add_argument("--db-name", dest="db_name", help="PostgreSQL database name.")
-    config_group.add_argument("--admin-password", dest="admin_password", help="Demo superuser password.")
-    config_group.add_argument("--elasticsearch", dest="elasticsearch", action="store_true", default=None, help="Enable Elasticsearch.")
-    config_group.add_argument("--no-elasticsearch", dest="elasticsearch", action="store_false", help="Disable Elasticsearch.")
-    config_group.add_argument("--debug", action="store_true", help="Enable Django debug mode in the generated .env.")
-    config_group.add_argument("--no-secret-key", dest="no_secret_key", action="store_true", help="Do not auto-generate a SECRET_KEY.")
+    config_group.add_argument(
+        "--admin-password", dest="admin_password", help="Demo superuser password."
+    )
+    config_group.add_argument(
+        "--elasticsearch",
+        dest="elasticsearch",
+        action="store_true",
+        default=None,
+        help="Enable Elasticsearch.",
+    )
+    config_group.add_argument(
+        "--no-elasticsearch",
+        dest="elasticsearch",
+        action="store_false",
+        help="Disable Elasticsearch.",
+    )
+    config_group.add_argument(
+        "--debug", action="store_true", help="Enable Django debug mode in the generated .env."
+    )
+    config_group.add_argument(
+        "--no-secret-key",
+        dest="no_secret_key",
+        action="store_true",
+        help="Do not auto-generate a SECRET_KEY.",
+    )
     return parser
 
 
@@ -64,7 +121,9 @@ def _config_from_args(args: argparse.Namespace) -> dict | None:
     if args.interactive:
         return wizard.run_wizard()
 
-    config: dict = {key: getattr(args, key) for key in _CONFIG_FLAG_KEYS if getattr(args, key) is not None}
+    config: dict = {
+        key: getattr(args, key) for key in _CONFIG_FLAG_KEYS if getattr(args, key) is not None
+    }
     if args.elasticsearch is not None:
         config["elasticsearch"] = args.elasticsearch
     if args.debug:
@@ -90,7 +149,9 @@ def _report_existing_tree(demo_dir: Path, version: str) -> None:
     elif previous:
         print(f"Refreshing the existing demo tree at {demo_dir}: v{previous} → v{version}.")
     else:
-        print(f"Refreshing the existing demo tree at {demo_dir} (unstamped — version unknown) → v{version}.")
+        print(
+            f"Refreshing the existing demo tree at {demo_dir} (unstamped — version unknown) → v{version}."
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -103,7 +164,9 @@ def main(argv: list[str] | None = None) -> int:
         archive = fetch.download_demo(version, clear_cache=args.clear_cache)
         _report_existing_tree(Path(args.path).resolve() / "demo", version)
         print("Extracting demo/ …")
-        demo_dir = extract.extract_demo(archive, Path(args.path), version=version, assume_yes=args.yes)
+        demo_dir = extract.extract_demo(
+            archive, Path(args.path), version=version, assume_yes=args.yes
+        )
 
         if config is not None:
             env_path = wizard.write_env(config, demo_dir / ".env")

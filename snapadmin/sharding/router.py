@@ -226,8 +226,10 @@ class SnapAdminRouter:
                     f"failing writes over to replica {alias!r}."
                 )
                 logger.error(
-                    "snap_shard_failover", shard=shard.name,
-                    primary=shard.primary_alias, promoted=alias,
+                    "snap_shard_failover",
+                    shard=shard.name,
+                    primary=shard.primary_alias,
+                    promoted=alias,
                 )
                 warnings.warn(message, UserWarning, stacklevel=3)
                 return alias
@@ -252,17 +254,17 @@ class SnapAdminRouter:
             warnings.warn(
                 f"SnapAdmin: every replica for shard {shard.name!r} is down — "
                 "falling back to primary for reads.",
-                UserWarning, stacklevel=3,
+                UserWarning,
+                stacklevel=3,
             )
             return shard.primary_alias
 
         selection = get_sharding_config().get("REPLICA_SELECTION", "round_robin")
         if selection == "random":
-            return random.choice(list(live))
+            return random.choice(list(live))  # noqa: S311 - load balancing, not security
         if selection == "first_available":
-            for alias in shard.replica_aliases:
-                if alias in live:
-                    return alias
+            # `live` is a non-empty subset of replica_aliases, so this always finds one.
+            return next(alias for alias in shard.replica_aliases if alias in live)
         return _round_robin_pick(shard.name, shard.replica_aliases, live)
 
     def db_for_write(self, model: type[Model], **hints: Any) -> str | None:
@@ -293,12 +295,12 @@ class SnapAdminRouter:
             shard = self._require_shard(shard_name)
             return self._read_alias(shard) if use_replica else shard.primary_alias
 
-        shard = self._shard_for(model, hints)
-        if shard is None:
+        routed = self._shard_for(model, hints)
+        if routed is None:
             return None
         if state.is_master_forced():
-            return shard.primary_alias
-        return self._read_alias(shard)
+            return routed.primary_alias
+        return self._read_alias(routed)
 
     def allow_relation(self, obj1: Model, obj2: Model, **hints: Any) -> bool | None:
         if not is_sharding_enabled():
@@ -311,10 +313,7 @@ class SnapAdminRouter:
         # objects on different databases. `None` leaves Django's default in
         # place for everyone else, matching how both routing methods already
         # bow out for an un-opted-in model.
-        if (
-            _shard_key_field(type(obj1)) is None
-            and _shard_key_field(type(obj2)) is None
-        ):
+        if _shard_key_field(type(obj1)) is None and _shard_key_field(type(obj2)) is None:
             return None
         # Cross-shard relations are the project's own concern to manage (a
         # ForeignKey does not enforce referential integrity across separate

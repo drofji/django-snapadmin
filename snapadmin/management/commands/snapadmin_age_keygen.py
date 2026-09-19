@@ -145,10 +145,12 @@ class Command(BaseCommand):
         root = project_root()
 
         if ensure_gitignore_excludes_age(root):
-            self.stdout.write(self.style.WARNING(
-                f"No .gitignore rule covered {AGE_DIR_NAME}/ — added one at "
-                f"{root / '.gitignore'}."
-            ))
+            self.stdout.write(
+                self.style.WARNING(
+                    f"No .gitignore rule covered {AGE_DIR_NAME}/ — added one at "
+                    f"{root / '.gitignore'}."
+                )
+            )
         else:
             self.stdout.write(f"{AGE_DIR_NAME}/ is already covered by .gitignore.")
 
@@ -174,8 +176,10 @@ class Command(BaseCommand):
         self.stdout.write("Add the line below to SNAPADMIN_BACKUP_AGE_RECIPIENTS:")
         self.stdout.write(f"  {recipient}")
         self.stdout.write("")
-        self.stdout.write(self.style.WARNING(
-            "IMPORTANT: move the private key file to a secure location (a password "
-            f"manager, a secrets vault, an encrypted volume) and then delete {age_dir}/ "
-            "— it is a convenience for generation, never a place to keep a private key."
-        ))
+        self.stdout.write(
+            self.style.WARNING(
+                "IMPORTANT: move the private key file to a secure location (a password "
+                f"manager, a secrets vault, an encrypted volume) and then delete {age_dir}/ "
+                "— it is a convenience for generation, never a place to keep a private key."
+            )
+        )

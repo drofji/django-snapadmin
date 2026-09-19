@@ -306,6 +306,7 @@ class Keyset:
 # Settings access
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def encryption_settings() -> Mapping[str, Any]:
     """The ``SNAPADMIN_ENCRYPTION`` dict, or an empty mapping when unset."""
     # Spelled out rather than passed as SETTING_NAME: the documentation
@@ -342,6 +343,7 @@ def configured_key_file() -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # Parsing
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _parse_entries(text: str, source: KeySource) -> list[EncryptionKey]:
     """Parse ``id:key`` entries separated by commas or newlines.
@@ -381,7 +383,9 @@ def _keys_from_mappings(entries: Sequence[Any], source: KeySource) -> list[Encry
                 f"{SETTING_NAME}: a key in the {source.value} configuration has no 'key' "
                 "entry (the base64url material)."
             )
-        keys.append(EncryptionKey.from_encoded(str(entry.get("id") or DEFAULT_KEY_ID), entry["key"]))
+        keys.append(
+            EncryptionKey.from_encoded(str(entry.get("id") or DEFAULT_KEY_ID), entry["key"])
+        )
     return keys
 
 
@@ -396,6 +400,7 @@ def _strip_quotes(value: str) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # Resolution
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _from_provider(dotted_path: str) -> Keyset:
     try:
@@ -420,7 +425,9 @@ def _from_provider(dotted_path: str) -> Keyset:
             "that resolves to nothing is a misconfigured secret store, not an "
             "unconfigured project."
         )
-    return Keyset.build(_keys_from_mappings(produced, KeySource.PROVIDER), source=KeySource.PROVIDER)
+    return Keyset.build(
+        _keys_from_mappings(produced, KeySource.PROVIDER), source=KeySource.PROVIDER
+    )
 
 
 def _from_file(path: str) -> Keyset:

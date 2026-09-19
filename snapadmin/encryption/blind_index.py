@@ -52,7 +52,7 @@ import hashlib
 import hmac
 import unicodedata
 
-from snapadmin.encryption.keys import KEY_BYTES, EncryptionKey, Keyset, require_keyset
+from snapadmin.encryption.keys import EncryptionKey, Keyset, require_keyset
 
 #: Length of the derived index key and of the HMAC, in bytes.
 INDEX_BYTES = 32

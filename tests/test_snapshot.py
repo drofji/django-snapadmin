@@ -385,3 +385,32 @@ class TestRestoreThenRollback:
             rollback_out = StringIO()
             call_command("snapadmin_rollback", "--confirm", stdout=rollback_out)
         assert sqlite_db.read_bytes() == b"corrupted-before-restore"
+
+
+class TestSnapshotOfPartsThatHaveNothingToSave:
+    """#QA1d — a requested part with nothing behind it (no MEDIA_ROOT, no env
+    file) is left out of the snapshot, not recorded as an empty part."""
+
+    def test_missing_media_and_env_are_left_out(self, tmp_path, sqlite_db, settings, age_keypair):
+        _identity_path, recipient = age_keypair
+        settings.MEDIA_ROOT = str(tmp_path / "no-such-media")
+        with _BackupEnv(
+            tmp_path,
+            SNAPADMIN_BACKUP_AGE_RECIPIENTS=[recipient],
+            SNAPADMIN_BACKUP_ENV_FILE=str(tmp_path / "no-such.env"),
+        ) as env:
+            snapshot_id = take_snapshot(["db", "media", "env"], env.config())
+            _run_dir, manifest = load_snapshot_manifest(snapshot_id, env.config())
+
+        assert set(manifest["parts"]) == {"db"}
+
+
+def test_an_unknown_part_is_refused_before_anything_is_written(tmp_path, sqlite_db):
+    """#QA1d — ``take_snapshot`` is public; a part it cannot save used to be
+    skipped silently, leaving the restore without the safety net it asked for."""
+    from snapadmin.snapshot import SnapshotError, snapshot_dir
+
+    with _BackupEnv(tmp_path) as env:
+        with pytest.raises(SnapshotError, match=r"unknown part\(s\) \['mystery'\]"):
+            take_snapshot(["db", "mystery"], env.config())
+        assert not snapshot_dir(env.config()).exists() or not any(snapshot_dir(env.config()).iterdir())

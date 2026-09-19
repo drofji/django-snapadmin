@@ -1400,3 +1400,24 @@ class TestSnapFunctionFieldDisplayWithoutUnfold:
 
         assert rendered == "computed-value"
         assert isinstance(rendered, str)
+
+
+class TestBranchClosuresInFields:
+    """#QA1d — cases in ``snapadmin.fields`` no test reached."""
+
+    def test_stripping_the_auto_validator_leaves_a_field_without_validators_alone(self):
+        from snapadmin.fields import _strip_auto_validator
+
+        deconstructed = ("name", "path", [], {"max_length": 5})
+
+        assert _strip_auto_validator(deconstructed, object()) == deconstructed
+
+    def test_the_blind_index_attribute_on_the_class_is_the_descriptor(self):
+        """Class access (``Model.field_bi``) has no instance to derive from."""
+        from unittest.mock import MagicMock
+
+        from snapadmin.fields import _BlindIndexAttribute
+
+        descriptor = _BlindIndexAttribute(MagicMock(attname="email_bi"))
+
+        assert descriptor.__get__(None, object) is descriptor

@@ -56,7 +56,9 @@ class ReindexError(Exception):
     """Raised by ``snapadmin.run_es_reindex`` when every attempted model failed."""
 
 
-def _record_outcome(task_name: str, summary: dict, status: str, *, failed: list | None = None) -> dict:
+def _record_outcome(
+    task_name: str, summary: dict, status: str, *, failed: list | None = None
+) -> dict:
     """Attach the shared ``status``/``failed`` keys to a task's summary dict
     and log it with the marker/level the outcome convention (module
     docstring above) prescribes. ``results`` is excluded from the log line —
@@ -88,7 +90,9 @@ def purge_expired_tokens(self):
 
     logger.info("expired_tokens_purged", count=count, cutoff=cutoff.isoformat())
     return _record_outcome(
-        "purge_expired_tokens", {"deleted": count, "cutoff": cutoff.isoformat()}, "ok",
+        "purge_expired_tokens",
+        {"deleted": count, "cutoff": cutoff.isoformat()},
+        "ok",
     )
 
 
@@ -186,12 +190,16 @@ def purge_expired_data(self):
             errors[label] = "; ".join(export_purge["failed"])
             logger.error("purge_expired_data_error", model=label, error=errors[label])
         else:
-            count = sum(export_purge["jobs_deleted"].values()) + export_purge["orphan_files_deleted"]
+            count = (
+                sum(export_purge["jobs_deleted"].values()) + export_purge["orphan_files_deleted"]
+            )
             summary[label] = count
             logger.info("purge_expired_data_deleted", model=label, count=count)
 
     result = {
-        "purged": summary, "total": sum(summary.values()), "errors": errors,
+        "purged": summary,
+        "total": sum(summary.values()),
+        "errors": errors,
         "skipped_protected": skipped_protected,
         "export_jobs": export_purge,
     }
@@ -233,6 +241,9 @@ def send_error_digest(self, hours: int = 24):
     if reason == "delivery_failed":
         _log_task_failure("send_error_digest", **summary)
         raise AlertDeliveryError(f"Error digest could not be delivered to any channel: {summary}")
+    # A reason this task does not know: never return None past the outcome
+    # convention — report it, so a `status != "ok"` monitoring rule sees it.
+    return _record_outcome("send_error_digest", summary, "partial", failed=[str(reason)])
 
 
 @shared_task(bind=True, name="snapadmin.run_export", acks_late=True)
@@ -315,6 +326,8 @@ def send_health_alert(self):
     if reason == "delivery_failed":
         _log_task_failure("send_health_alert", **summary)
         raise AlertDeliveryError(f"Health alert could not be delivered to any channel: {summary}")
+    # A reason this task does not know: report it rather than return None.
+    return _record_outcome("send_health_alert", summary, "partial", failed=[str(reason)])
 
 
 @shared_task(bind=True, name="snapadmin.run_db_backups")

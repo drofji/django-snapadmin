@@ -1,6 +1,2 @@
-# The generated settings.py mounts the REST API, Swagger and GraphQL, and lists
-# rest_framework / drf_spectacular / django_filters / graphene_django in INSTALLED_APPS.
-# Those live behind the [api] and [graphql] extras, so a bare "django-snapadmin" here
-# would give you a project that cannot start. Drop an extra if you drop its surface.
-django-snapadmin[api,graphql]>=$snapadmin_version
+$snapadmin_requirement
 $full_requirements_extra

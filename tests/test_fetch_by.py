@@ -220,3 +220,61 @@ class TestFetchByMasking:
         )
         assert r.status_code == 200
         assert {row["code"] for row in _ndjson_rows(r)} == {"USD"}
+
+
+@pytest.mark.django_db
+@override_settings(SNAPADMIN_QUERY_BACKEND_HEADER=False)
+def test_the_backend_header_can_be_switched_off_for_fetch_by(rates_client, rates):
+    """#QA1d — the header toggle applies to fetch-by as it does to list."""
+    r = rates_client.post(
+        "/api/models/demo/ExchangeRate/fetch-by/",
+        {"field": "code", "values": ["USD"]},
+        format="json",
+    )
+    assert r.status_code == 200
+    assert "X-Snap-Query-Backend" not in r
+
+
+@pytest.mark.django_db
+def test_a_masked_model_with_no_search_fields_still_lists(regular_user):
+    """#QA1d — masked fields strip themselves out of ``search_fields`` and
+    ``ordering``; a model with no searchable field has nothing to strip, and
+    ordering by the masked column is still refused as a sort key."""
+    from demo.apps.shop.models import Customer, CustomerProfile
+
+    first = CustomerProfile.objects.create(customer=Customer.objects.create(
+        first_name="A", last_name="A", email="a@example.com"), tax_id="ZZZ")
+    second = CustomerProfile.objects.create(customer=Customer.objects.create(
+        first_name="B", last_name="B", email="b@example.com"), tax_id="AAA")
+    client = _client_with_permission(regular_user, "view_customerprofile")
+
+    unordered = client.get("/api/models/demo/CustomerProfile/")
+    by_masked = client.get("/api/models/demo/CustomerProfile/?ordering=tax_id")
+    by_masked_desc = client.get("/api/models/demo/CustomerProfile/?ordering=-tax_id")
+
+    assert by_masked.status_code == 200
+    default_ids = [row["id"] for row in unordered.json()["results"]]
+    assert sorted(default_ids) == sorted([first.pk, second.pk])
+    # The masked column is ignored as a sort key in both directions.
+    assert [row["id"] for row in by_masked.json()["results"]] == default_ids
+    assert [row["id"] for row in by_masked_desc.json()["results"]] == default_ids
+
+
+@pytest.mark.django_db
+@override_settings(SNAPADMIN_MASKED_FIELDS={"demo.SearchLog": ["query"]})
+def test_an_es_only_list_with_a_masked_field_has_no_db_search_fields_to_strip(regular_user):
+    """#QA1d — on the ES_ONLY path ES already ran the search, so there are no DB
+    ``search_fields`` to strip the masked field from; the listing still works and
+    the masked column is still refused as a sort key."""
+    from unittest.mock import patch
+
+    from demo.apps.shop.models import SearchLog
+    from snapadmin.models import EsQuerySet
+
+    client = _client_with_permission(regular_user, "view_searchlog")
+    with patch.object(SearchLog, "es_search", return_value=EsQuerySet(SearchLog, [])) as search:
+        r = client.get("/api/models/demo/SearchLog/?ordering=query")
+
+    assert r.status_code == 200
+    assert r.json()["results"] == []
+    search.assert_called_once()

@@ -63,16 +63,29 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
 
-if TYPE_CHECKING:  # pragma: no cover - typing only
-    from django.contrib.auth.base_user import AbstractBaseUser
-    from django.contrib.auth.models import AnonymousUser
 
-    UserLike = AbstractBaseUser | AnonymousUser | None
+class PermissionUser(Protocol):
+    """What the permission checks actually use from a user object.
+
+    Django's ``AbstractBaseUser`` defines neither ``is_superuser`` nor
+    ``has_perm`` (``PermissionsMixin`` does); ``AnonymousUser`` defines both. A
+    structural type states the real requirement instead of a base class that
+    does not carry it.
+    """
+
+    is_active: bool
+    is_superuser: bool
+
+    def has_perm(self, perm: str, obj: object = ...) -> bool: ...
+
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    UserLike = PermissionUser | None
 
 logger = get_logger(__name__)
 
@@ -320,7 +333,7 @@ def _has_nested_quantifier(pattern: str) -> bool:
         elif char == ")":
             inner = quantified
             outer = stack.pop() if stack else False
-            if pattern[index + 1: index + 2] in ("*", "+", "{"):
+            if pattern[index + 1 : index + 2] in ("*", "+", "{"):
                 if inner:
                     return True
                 quantified = True
@@ -490,7 +503,9 @@ def mask_field(
     ``permission`` hand that user the raw value for this field; omitted, the
     value is always masked.
     """
-    if user is not None and user_can_view_pii(user, field, app_label=app_label, model_name=model_name):
+    if user is not None and user_can_view_pii(
+        user, field, app_label=app_label, model_name=model_name
+    ):
         return value
     return apply_masking_rule(value, get_masking_rules(app_label, model_name).get(str(field)))
 
@@ -521,7 +536,10 @@ def mask_changes(
         return changes
     return {
         field: (
-            {side: mask_field(app_label, model_name, field, value, user) for side, value in diff.items()}
+            {
+                side: mask_field(app_label, model_name, field, value, user)
+                for side, value in diff.items()
+            }
             if field in masked_names and isinstance(diff, dict)
             else diff
         )

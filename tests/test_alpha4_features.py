@@ -291,6 +291,14 @@ class TestQueryBackendHeader:
         r = auth_client.get("/api/models/demo/Product/")
         assert "X-Snap-Query-Backend" not in r
 
+    @override_settings(SNAPADMIN_QUERY_BACKEND_HEADER=False)
+    @pytest.mark.parametrize("route", ["count/", "export/"])
+    def test_header_suppressed_on_count_and_export(self, auth_client, product, route):
+        """#QA1d — the toggle covers every read action, not only the list."""
+        r = auth_client.get(f"/api/models/demo/Product/{route}")
+        assert r.status_code == 200
+        assert "X-Snap-Query-Backend" not in r
+
     def test_header_reports_db_when_es_fallback_ran(self, auth_client, product):
         # Routing chooses ES, but the client blows up → es_search falls back to
         # the DB internally; the header must say "database", not "elasticsearch".

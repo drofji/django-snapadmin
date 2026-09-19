@@ -6,12 +6,12 @@ Custom DRF authentication backend for SnapAdmin API Tokens.
 
 import logging
 
-from django.contrib.auth.base_user import AbstractBaseUser
 from django.utils.module_loading import import_string
 from rest_framework import authentication, exceptions
 
 from snapadmin.api.exceptions import DjangoValidationErrorMixin
 from snapadmin.conf import get_setting
+from snapadmin.masking import PermissionUser
 from snapadmin.models import APIToken, hash_token_key
 from snapadmin.tenancy import SnapTenantRebindMixin
 
@@ -37,10 +37,7 @@ def get_api_authentication_classes() -> list[type]:
     configured = get_setting("SNAPADMIN_API_AUTHENTICATION_CLASSES", None)
     if configured is None:
         return [APITokenAuthentication]
-    return [
-        import_string(entry) if isinstance(entry, str) else entry
-        for entry in configured
-    ]
+    return [import_string(entry) if isinstance(entry, str) else entry for entry in configured]
 
 
 class SnapAPIAuthMixin(DjangoValidationErrorMixin, SnapTenantRebindMixin):
@@ -85,25 +82,27 @@ class APITokenAuthentication(authentication.BaseAuthentication):
         if len(auth_header) == 1:
             raise exceptions.AuthenticationFailed("Invalid token header: no token key provided.")
         if len(auth_header) > 2:
-            raise exceptions.AuthenticationFailed("Invalid token header: spaces are not allowed in token keys.")
+            raise exceptions.AuthenticationFailed(
+                "Invalid token header: spaces are not allowed in token keys."
+            )
 
         try:
             token_key = auth_header[1].decode("utf-8")
         except UnicodeDecodeError:
-            raise exceptions.AuthenticationFailed("Invalid token header: token key contained invalid characters.")
+            raise exceptions.AuthenticationFailed(
+                "Invalid token header: token key contained invalid characters."
+            ) from None
 
         return self._validate_token(token_key)
 
     def _validate_token(self, token_key: str):
         # The raw key is never stored; look it up by its SHA-256 digest.
         try:
-            token = (
-                APIToken.objects
-                .select_related("user")
-                .get(token_digest=hash_token_key(token_key))
+            token = APIToken.objects.select_related("user").get(
+                token_digest=hash_token_key(token_key)
             )
         except APIToken.DoesNotExist:
-            raise exceptions.AuthenticationFailed("Invalid token.")
+            raise exceptions.AuthenticationFailed("Invalid token.") from None
 
         if not token.is_active:
             raise exceptions.AuthenticationFailed("Token has been disabled.")
@@ -129,7 +128,7 @@ class APITokenAuthentication(authentication.BaseAuthentication):
 
 def token_has_permission(
     token: APIToken,
-    user: AbstractBaseUser,
+    user: PermissionUser,
     app_label: str,
     model_name: str,
     action: str,

@@ -46,9 +46,7 @@ class SnapErrorMonitorMiddleware:
         # 5xx responses produced without an exception (e.g. a view returning
         # HttpResponseServerError directly). Exceptions were already recorded
         # in process_exception — the flag prevents double counting.
-        if response.status_code >= 500 and not getattr(
-            request, "_snapadmin_error_recorded", False
-        ):
+        if response.status_code >= 500 and not getattr(request, "_snapadmin_error_recorded", False):
             record_error(request=request, status_code=response.status_code)
         return response
 

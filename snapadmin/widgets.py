@@ -14,6 +14,7 @@ from django.utils.safestring import mark_safe
 from django.utils.encoding import force_str
 import json
 
+
 class SmartModelSelectorWidget(forms.Widget):
     template_name = "snapadmin/widgets/smart_model_selector.html"
 
@@ -25,14 +26,16 @@ class SmartModelSelectorWidget(forms.Widget):
         for app_config in apps.get_app_configs():
             models = []
             for model in app_config.get_models():
-                models.append({
-                    "label": force_str(model._meta.verbose_name).capitalize(),
-                    "value": f"{app_config.label}.{model.__name__}"
-                })
+                models.append(
+                    {
+                        "label": force_str(model._meta.verbose_name).capitalize(),
+                        "value": f"{app_config.label}.{model.__name__}",
+                    }
+                )
             if models:
                 all_models[app_config.label] = {
                     "label": force_str(app_config.verbose_name),
-                    "models": models
+                    "models": models,
                 }
 
         current_values = []
@@ -53,7 +56,7 @@ class SmartModelSelectorWidget(forms.Widget):
 
     def render(self, name, value, attrs=None, renderer=None):
         context = self.get_context(name, value, attrs)
-        return mark_safe(render_to_string(self.template_name, context))
+        return mark_safe(render_to_string(self.template_name, context))  # noqa: S308 - autoescaped template
 
     def value_omitted_from_data(self, data, files, name):
         # An empty/missing/unparseable submission is treated as "no change" rather
@@ -83,6 +86,4 @@ class SmartModelSelectorWidget(forms.Widget):
 
     class Media:
         js = ["snapadmin/js/model_selector.js"]
-        css = {
-            "all": ["snapadmin/css/admin.css"]
-        }
+        css = {"all": ["snapadmin/css/admin.css"]}

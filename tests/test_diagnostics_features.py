@@ -653,3 +653,12 @@ class TestFeaturesInCommand:
         payload = json.loads(self._run(as_json=True, sections=["features"]))
         assert "features" in payload
         assert isinstance(payload["features"]["rest_api"], bool)
+
+
+def test_verbose_with_no_details_adds_no_details_key(monkeypatch):
+    """#QA1d — every capability off and none with a detail string: verbose must
+    not add an empty ``details`` map."""
+    monkeypatch.setattr(
+        features_collector, "_capabilities", lambda: [("backups", False, ""), ("api", False, "")]
+    )
+    assert features_collector.collect(verbose=True) == {"backups": False, "api": False}

@@ -17,6 +17,7 @@ If the snapshot itself fails, the caller (``snapadmin_restore``) must abort the 
 rather than proceeding on a best-effort basis — :func:`take_snapshot` raises
 :class:`SnapshotError` instead of returning a partial result for exactly that reason.
 """
+
 from __future__ import annotations
 
 import json
@@ -67,6 +68,11 @@ def take_snapshot(parts: list[str], config: BackupConfig | None = None) -> str:
     recipients are configured, since a plaintext rollback snapshot containing
     ``env`` would quietly undo the backup layer's own encryption guarantee.
     """
+    unknown = sorted(set(parts) - {"db", "media", "env"})
+    if unknown:
+        # Refused before a directory is made: silently skipping a part the
+        # caller asked to protect would leave the restore without its safety net.
+        raise SnapshotError(f"Cannot snapshot unknown part(s) {unknown}.")
     config = config or get_backup_config()
     stamp = timezone.now().strftime("%Y%m%d-%H%M%S")
     root = snapshot_dir(config)
@@ -77,13 +83,17 @@ def take_snapshot(parts: list[str], config: BackupConfig | None = None) -> str:
     try:
         for part in parts:
             if part == "db":
-                dump = create_encrypted_db_dump(run_dir, config) if config.age_recipients else create_db_dump(run_dir)
+                dump = (
+                    create_encrypted_db_dump(run_dir, config)
+                    if config.age_recipients
+                    else create_db_dump(run_dir)
+                )
                 produced["db"] = dump
             elif part == "media":
                 media = create_media_bundle(run_dir, config, stamp)
                 if media is not None:
                     produced["media"] = media
-            elif part == "env":
+            else:  # "env" — unknown names were refused above
                 env = create_env_bundle(run_dir, config, stamp)
                 if env is not None:
                     produced["env"] = env
@@ -125,16 +135,20 @@ def list_snapshots(config: BackupConfig | None = None) -> list[dict]:
             manifest = json.loads(manifest_path.read_text())
         except (OSError, ValueError):
             continue
-        result.append({
-            "id": entry.name,
-            "timestamp": manifest.get("timestamp", entry.name),
-            "parts": sorted(manifest.get("parts", {})),
-            "encrypted": bool(manifest.get("encrypted")),
-        })
+        result.append(
+            {
+                "id": entry.name,
+                "timestamp": manifest.get("timestamp", entry.name),
+                "parts": sorted(manifest.get("parts", {})),
+                "encrypted": bool(manifest.get("encrypted")),
+            }
+        )
     return result
 
 
-def load_snapshot_manifest(snapshot_id: str, config: BackupConfig | None = None) -> tuple[Path, dict]:
+def load_snapshot_manifest(
+    snapshot_id: str, config: BackupConfig | None = None
+) -> tuple[Path, dict]:
     config = config or get_backup_config()
     root = snapshot_dir(config)
     run_dir = root / snapshot_id

@@ -54,7 +54,7 @@ def forward(command: str, argv: list[str], *, start: Path | None = None) -> int:
             "To try SnapAdmin without a project of your own, run: snapadmin-demo\n"
         )
         return 2
-    return subprocess.call(
+    return subprocess.call(  # noqa: S603 - argv list, no shell
         [sys.executable, str(manage_py), command, *argv],
         cwd=str(manage_py.parent),
     )

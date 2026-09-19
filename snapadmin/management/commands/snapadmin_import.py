@@ -27,7 +27,11 @@ from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand, CommandError
 
 from snapadmin.importing import (
-    SnapImportError, export_dir, import_chunk_size, run_import_job, start_import,
+    SnapImportError,
+    export_dir,
+    import_chunk_size,
+    run_import_job,
+    start_import,
 )
 from snapadmin.registry import is_registered
 
@@ -37,58 +41,72 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "--model", required=True,
+            "--model",
+            required=True,
             help="Target model, as app_label.ModelName (e.g. demo.Product).",
         )
         parser.add_argument("--file", required=True, help="Path to the CSV or NDJSON input file.")
         parser.add_argument(
-            "--format", choices=["csv", "json"], default=None,
+            "--format",
+            choices=["csv", "json"],
+            default=None,
             help="Input format. Inferred from --file's extension when omitted "
-                 "(.csv -> csv; .json/.ndjson/.jsonl -> json).",
+            "(.csv -> csv; .json/.ndjson/.jsonl -> json).",
         )
         parser.add_argument(
-            "--map", default=None,
+            "--map",
+            default=None,
             help='Explicit header -> field-name overrides, as JSON: \'{"CSV Header": "field_name"}\'. '
-                 "Wins over header-name matching wherever a header is named here.",
+            "Wins over header-name matching wherever a header is named here.",
         )
         parser.add_argument(
-            "--natural-key", default=None,
+            "--natural-key",
+            default=None,
             help="Comma-separated field name(s) that identify a duplicate row. Defaults to the "
-                 "model's first unique=True field, or the primary key if the file carries it.",
+            "model's first unique=True field, or the primary key if the file carries it.",
         )
         parser.add_argument(
-            "--on-conflict", choices=["fail", "skip", "update"], default="fail",
+            "--on-conflict",
+            choices=["fail", "skip", "update"],
+            default="fail",
             help="What to do on a duplicate-key hit (default: fail — reported per-row, never "
-                 "a silent overwrite).",
+            "a silent overwrite).",
         )
         parser.add_argument(
-            "--chunk-size", type=int, default=None,
+            "--chunk-size",
+            type=int,
+            default=None,
             help=f"Rows per checkpoint (default: SNAPADMIN_IMPORT_CHUNK_SIZE, "
-                 f"currently {import_chunk_size()}).",
+            f"currently {import_chunk_size()}).",
         )
         parser.add_argument(
-            "--resume", action="store_true",
+            "--resume",
+            action="store_true",
             help="Continue the most recent unfinished/failed job for this model and file "
-                 "from its checkpoint.",
+            "from its checkpoint.",
         )
         parser.add_argument(
-            "--requested-by", default=None,
+            "--requested-by",
+            default=None,
             help="Username to attribute this run to — required to import into a column "
-                 "targeting a masked/PII field (a run with no requester has no PII access).",
+            "targeting a masked/PII field (a run with no requester has no PII access).",
         )
         parser.add_argument(
-            "--tenant", default=None,
+            "--tenant",
+            default=None,
             help="The tenant every row this run creates is assigned to — required when "
-                 "--model is tenant-scoped (snapadmin.tenancy); there is no request here "
-                 "to resolve one from. Ignored for a model that is not tenant-scoped.",
+            "--model is tenant-scoped (snapadmin.tenancy); there is no request here "
+            "to resolve one from. Ignored for a model that is not tenant-scoped.",
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args, **options):  # noqa: C901 - refactor tracked as #QA1c-cx
         try:
             app_label, model_name = options["model"].split(".", 1)
             model = apps.get_model(app_label, model_name)
         except (ValueError, LookupError):
-            raise CommandError(f"Unknown model: {options['model']} (use app_label.ModelName)")
+            raise CommandError(
+                f"Unknown model: {options['model']} (use app_label.ModelName)"
+            ) from None
         if not is_registered(model):
             raise CommandError(f"{options['model']} is not a SnapAdmin model.")
 
@@ -97,13 +115,17 @@ class Command(BaseCommand):
             try:
                 column_map = json.loads(options["map"])
             except json.JSONDecodeError as exc:
-                raise CommandError(f"--map is not valid JSON: {exc}")
+                raise CommandError(f"--map is not valid JSON: {exc}") from exc
             if not isinstance(column_map, dict):
-                raise CommandError("--map must be a JSON object, e.g. '{\"CSV Header\": \"field\"}'.")
+                raise CommandError(
+                    "--map must be a JSON object, e.g. '{\"CSV Header\": \"field\"}'."
+                )
 
         natural_key = None
         if options["natural_key"]:
-            natural_key = [name.strip() for name in options["natural_key"].split(",") if name.strip()]
+            natural_key = [
+                name.strip() for name in options["natural_key"].split(",") if name.strip()
+            ]
 
         requested_by = None
         if options["requested_by"]:
@@ -111,7 +133,7 @@ class Command(BaseCommand):
             try:
                 requested_by = User.objects.get(**{User.USERNAME_FIELD: options["requested_by"]})
             except User.DoesNotExist:
-                raise CommandError(f"No user named {options['requested_by']!r}.")
+                raise CommandError(f"No user named {options['requested_by']!r}.") from None
 
         try:
             job = start_import(
@@ -126,15 +148,17 @@ class Command(BaseCommand):
                 resume=options["resume"],
             )
         except (SnapImportError, OSError) as exc:
-            raise CommandError(str(exc))
+            raise CommandError(str(exc)) from exc
 
         def _progress(job):
             self.stdout.write(f"  {job.processed_rows}/{job.total_rows} rows processed")
             self.stdout.flush()
 
         summary = run_import_job(
-            job, file_path=options["file"],
-            chunk_size=options["chunk_size"], on_progress=_progress,
+            job,
+            file_path=options["file"],
+            chunk_size=options["chunk_size"],
+            on_progress=_progress,
         )
 
         report_path = f"{export_dir()}/{job.report_file_name}" if job.report_file_name else None
@@ -142,19 +166,25 @@ class Command(BaseCommand):
         if summary.get("skipped"):
             self.stdout.write(f"skipped ({summary['reason']})")
         elif summary.get("cancelled"):
-            self.stdout.write(self.style.WARNING(
-                f"cancelled — {summary['created']} created, {summary['updated']} updated, "
-                f"{summary['skipped']} skipped, {summary['failed']} failed so far"
-            ))
+            self.stdout.write(
+                self.style.WARNING(
+                    f"cancelled — {summary['created']} created, {summary['updated']} updated, "
+                    f"{summary['skipped']} skipped, {summary['failed']} failed so far"
+                )
+            )
         elif "errors" in summary:
             raise CommandError(f"Import failed: {summary['errors'][0]}")
         else:
             unmapped = summary.get("unmapped_columns") or []
-            suffix = f" ({len(unmapped)} unmapped column(s): {', '.join(unmapped)})" if unmapped else ""
-            self.stdout.write(self.style.SUCCESS(
-                f"{summary['created']} created, {summary['updated']} updated, "
-                f"{summary['skipped']} skipped, {summary['failed']} failed{suffix}"
-            ))
+            suffix = (
+                f" ({len(unmapped)} unmapped column(s): {', '.join(unmapped)})" if unmapped else ""
+            )
+            self.stdout.write(
+                self.style.SUCCESS(
+                    f"{summary['created']} created, {summary['updated']} updated, "
+                    f"{summary['skipped']} skipped, {summary['failed']} failed{suffix}"
+                )
+            )
             if report_path:
                 self.stdout.write(f"Report: {report_path}")
             if summary.get("failed"):

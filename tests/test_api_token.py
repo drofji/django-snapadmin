@@ -568,3 +568,88 @@ class TestTokenModelPermission:
         request._auth = None
 
         assert TokenModelPermission().has_permission(request, MagicMock()) is False
+
+
+# ── #EXT1p / #RM1f: rename — the one editable field ────────────────────────────
+
+@pytest.mark.django_db
+class TestTokenRenameEndpoint:
+    """``PATCH /api/tokens/<id>/`` changes ``token_name`` and nothing else.
+
+    Any other key in the body is a ``400`` naming it — never silently ignored, so
+    a client cannot believe it widened a token's scope, or moved its expiry,
+    through a request that only renamed it. ``PUT`` stays unsupported.
+    """
+
+    def test_rename_changes_the_name_and_keeps_the_key(self, auth_client, api_token):
+        from snapadmin.models import APIToken
+
+        r = auth_client.patch(f"/api/tokens/{api_token.pk}/", {"token_name": "CI pipeline"}, format="json")
+
+        assert r.status_code == 200, r.content
+        assert r.json()["token_name"] == "CI pipeline"
+        assert r.json()["token_key"] is None
+        refreshed = APIToken.objects.get(pk=api_token.pk)
+        assert refreshed.token_name == "CI pipeline"
+        assert refreshed.token_digest == api_token.token_digest
+
+    @pytest.mark.parametrize("field, value", [
+        ("allowed_models", ["demo.Product"]),
+        ("allowed_scopes", ["admin"]),
+        ("expiration_date", "2099-01-01T00:00:00Z"),
+        ("is_active", False),
+    ])
+    def test_any_other_field_is_refused_by_name(self, auth_client, api_token, field, value):
+        from snapadmin.models import APIToken
+
+        before = APIToken.objects.get(pk=api_token.pk)
+        r = auth_client.patch(
+            f"/api/tokens/{api_token.pk}/", {"token_name": "x", field: value}, format="json"
+        )
+
+        assert r.status_code == 400
+        assert field in r.json()
+        after = APIToken.objects.get(pk=api_token.pk)
+        assert after.token_name == before.token_name
+        assert getattr(after, field) == getattr(before, field)
+
+    def test_an_empty_name_is_refused(self, auth_client, api_token):
+        r = auth_client.patch(f"/api/tokens/{api_token.pk}/", {"token_name": ""}, format="json")
+        assert r.status_code == 400
+        assert "token_name" in r.json()
+
+    def test_a_body_without_a_name_is_refused(self, auth_client, api_token):
+        r = auth_client.patch(f"/api/tokens/{api_token.pk}/", {}, format="json")
+        assert r.status_code == 400
+        assert "token_name" in r.json()
+
+    def test_put_is_still_not_allowed(self, auth_client, api_token):
+        r = auth_client.put(f"/api/tokens/{api_token.pk}/", {"token_name": "x"}, format="json")
+        assert r.status_code == 405
+
+    def test_owner_renames_own_token_without_superuser(self, db, regular_user):
+        from snapadmin.models import APIToken
+        token = APIToken.create_for_user(regular_user, "Mine")
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Token {token.token_key}")
+        r = c.patch(f"/api/tokens/{token.pk}/", {"token_name": "Still mine"}, format="json")
+        assert r.status_code == 200
+
+    def test_non_owner_cannot_rename_others_token(self, db, regular_user, api_token):
+        from snapadmin.models import APIToken
+        other = APIToken.create_for_user(regular_user, "Not Yours")
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f"Token {other.token_key}")
+        r = c.patch(f"/api/tokens/{api_token.pk}/", {"token_name": "hijacked"}, format="json")
+        assert r.status_code in (403, 404)
+        assert APIToken.objects.get(pk=api_token.pk).token_name != "hijacked"
+
+    def test_rename_is_audited(self, auth_client, api_token):
+        from snapadmin.models import SnapadminAuditLog
+        old_name = api_token.token_name
+
+        auth_client.patch(f"/api/tokens/{api_token.pk}/", {"token_name": "Renamed"}, format="json")
+
+        entry = SnapadminAuditLog.objects.filter(model="apitoken").latest("timestamp")
+        assert entry.action == SnapadminAuditLog.Action.UPDATE
+        assert entry.changes == {"token_name": {"old": old_name, "new": "Renamed"}}

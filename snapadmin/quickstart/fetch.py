@@ -79,7 +79,9 @@ def _is_cached(archive: Path) -> bool:
     return checksum.read_text().strip() == _sha256(archive.read_bytes())
 
 
-def download_demo(version: str, *, clear_cache: bool = False, cache_dir: Path | None = None) -> Path:
+def download_demo(
+    version: str, *, clear_cache: bool = False, cache_dir: Path | None = None
+) -> Path:
     """Return the path to the cached demo tarball for ``version``, downloading it if needed."""
     cache = Path(cache_dir) if cache_dir is not None else CACHE_DIR
     if clear_cache and cache.exists():
@@ -95,10 +97,10 @@ def download_demo(version: str, *, clear_cache: bool = False, cache_dir: Path | 
         data = _http_get(url)
     except urllib.error.HTTPError as exc:
         if exc.code == 404:
-            raise TagNotFoundError(version, available_tags())
-        raise QuickstartError(f"Download failed (HTTP {exc.code}) for {url}")
+            raise TagNotFoundError(version, available_tags()) from exc
+        raise QuickstartError(f"Download failed (HTTP {exc.code}) for {url}") from exc
     except urllib.error.URLError as exc:
-        raise QuickstartError(f"Download failed: {exc.reason}")
+        raise QuickstartError(f"Download failed: {exc.reason}") from exc
 
     archive.write_bytes(data)
     _checksum_path(archive).write_text(_sha256(data))

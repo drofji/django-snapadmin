@@ -226,3 +226,16 @@ class TestTheSkipIsReported:
         assert result["purged"]["snapadmin.RetentionNode"] == 1
         assert result["skipped_protected"] == {"snapadmin.RetentionNode": 1}
         assert "snapadmin.RetentionNode" not in result["errors"]
+
+
+@pytest.mark.django_db
+def test_the_command_skips_the_audit_log_when_its_retention_is_off(settings):
+    """#QA1d — ``SNAPADMIN_AUDIT_RETENTION_DAYS = 0`` turns the audit sweep off;
+    the command must not print a line for it."""
+    settings.SNAPADMIN_AUDIT_RETENTION_DAYS = 0
+    out = StringIO()
+
+    call_command("snapadmin_purge_expired_data", stdout=out)
+
+    assert "SnapadminAuditLog" not in out.getvalue()
+    assert "Total deleted:" in out.getvalue()

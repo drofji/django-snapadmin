@@ -12,10 +12,9 @@ import types
 import typing
 from enum import Enum
 
-from django import forms
 from django.db import models
 from django.db.backends.utils import format_number
-from django.core import checks, validators
+from django.core import checks
 from django.core.exceptions import FieldDoesNotExist, FieldError, ImproperlyConfigured
 from django.db.models.expressions import Col
 from django.db.models.lookups import Lookup
@@ -32,6 +31,7 @@ from snapadmin.conf import get_setting
 # Enums
 # ===========================================================================
 
+
 class SnapFieldAttributeEnum(str, Enum):
     """SnapAdmin-specific keyword arguments accepted by every SnapField."""
 
@@ -46,11 +46,11 @@ class SnapFieldAttributeEnum(str, Enum):
     ALLOWED_ENCODINGS = "allowed_encodings"
     MAX_SIZE_BYTES = "max_size_bytes"
     AUTOCOMPLETE = "autocomplete"
-    WYSIWYG = "wysiwyg" # Added for Unfold/CKEditor integration
-    SAFE_HTML = "safe_html" # Opt out of wysiwyg HTML sanitization (trusted content)
-    AUTO_SANITIZE = "auto_sanitize" # Sanitize wysiwyg HTML on write (default: on)
-    TAB = "tab" # Added for Unfold fieldset tabs
-    ROW = "row" # Group fields in one row
+    WYSIWYG = "wysiwyg"  # Added for Unfold/CKEditor integration
+    SAFE_HTML = "safe_html"  # Opt out of wysiwyg HTML sanitization (trusted content)
+    AUTO_SANITIZE = "auto_sanitize"  # Sanitize wysiwyg HTML on write (default: on)
+    TAB = "tab"  # Added for Unfold fieldset tabs
+    ROW = "row"  # Group fields in one row
 
 
 class DjangoFieldAttributeEnum(str, Enum):
@@ -69,6 +69,7 @@ class DjangoFieldAttributeEnum(str, Enum):
 # ===========================================================================
 # Base mixin
 # ===========================================================================
+
 
 def _with_positional_verbose_name(
     verbose_name: str | Promise | None, kwargs: dict[str, object]
@@ -202,7 +203,9 @@ class SnapField:
             # empty change form with no error (see snapadmin.checks.W015).
             # An explicit per-field show_in_form= still wins — this only
             # changes what an *unset* field resolves to.
-            SnapFieldAttributeEnum.SHOW_IN_FORM: get_setting("SNAPADMIN_SHOW_IN_FORM_DEFAULT", False),
+            SnapFieldAttributeEnum.SHOW_IN_FORM: get_setting(
+                "SNAPADMIN_SHOW_IN_FORM_DEFAULT", False
+            ),
             SnapFieldAttributeEnum.SEARCHABLE: False,
             SnapFieldAttributeEnum.FILTERABLE: False,
             SnapFieldAttributeEnum.EDITABLE: True,
@@ -232,7 +235,9 @@ class SnapField:
 
     @classmethod
     def __reinitializeAutoNow(cls, **kwargs) -> dict:
-        if kwargs.get(DjangoFieldAttributeEnum.AUTO_NOW) or kwargs.get(DjangoFieldAttributeEnum.AUTO_NOW_ADD):
+        if kwargs.get(DjangoFieldAttributeEnum.AUTO_NOW) or kwargs.get(
+            DjangoFieldAttributeEnum.AUTO_NOW_ADD
+        ):
             kwargs[SnapFieldAttributeEnum.EDITABLE.value] = False
             kwargs[SnapFieldAttributeEnum.UPDATABLE.value] = False
         return kwargs
@@ -285,9 +290,10 @@ class SnapField:
 
         def deconstruct(self):
             name, path, args, kw = base_deconstruct(self)
-            if hasattr(self, "null"):
-                kw["null"] = self.null
-                kw["blank"] = self.blank
+            # Only real Django fields reach here (see the guard above), and every
+            # initialised Field carries null/blank.
+            kw["null"] = self.null
+            kw["blank"] = self.blank
             kw.pop(SnapFieldAttributeEnum.EDITABLE.value, None)
             return name, path, args, kw
 
@@ -304,14 +310,16 @@ class SnapField:
         def check(self, **kwargs):
             errors = base_check(self, **kwargs)
             if getattr(self, "required", False) and getattr(self, "null", False):
-                errors.append(checks.Error(
-                    f"{self.name!r} sets required=True but is also nullable (null=True) — contradictory.",
-                    hint="required=True already forces null=False/blank=False unless you explicitly "
-                         "override them; remove the explicit null=True, or drop required=True if the "
-                         "field should stay optional.",
-                    obj=self,
-                    id="snapadmin.E003",
-                ))
+                errors.append(
+                    checks.Error(
+                        f"{self.name!r} sets required=True but is also nullable (null=True) — contradictory.",
+                        hint="required=True already forces null=False/blank=False unless you explicitly "
+                        "override them; remove the explicit null=True, or drop required=True if the "
+                        "field should stay optional.",
+                        obj=self,
+                        id="snapadmin.E003",
+                    )
+                )
             return errors
 
         cls.check = check
@@ -322,11 +330,13 @@ class SnapField:
 #: :class:`~snapadmin.validators.SnapFileValidator` instead (see
 #: :func:`_attach_file_validator`), so :func:`snap_field` handles them apart
 #: from the generic ``setattr`` loop.
-_SNAP_FIELD_FILE_VALIDATOR_KWARGS: frozenset[str] = frozenset({
-    SnapFieldAttributeEnum.ALLOWED_EXTENSIONS.value,
-    SnapFieldAttributeEnum.ALLOWED_ENCODINGS.value,
-    SnapFieldAttributeEnum.MAX_SIZE_BYTES.value,
-})
+_SNAP_FIELD_FILE_VALIDATOR_KWARGS: frozenset[str] = frozenset(
+    {
+        SnapFieldAttributeEnum.ALLOWED_EXTENSIONS.value,
+        SnapFieldAttributeEnum.ALLOWED_ENCODINGS.value,
+        SnapFieldAttributeEnum.MAX_SIZE_BYTES.value,
+    }
+)
 
 #: Kwargs :func:`snap_field` may set — every name :meth:`SnapField._initializeSnapLogic`
 #: (or :class:`SnapFileField`/:class:`SnapImageField`'s ``__init__``) stores on a
@@ -336,21 +346,24 @@ _SNAP_FIELD_FILE_VALIDATOR_KWARGS: frozenset[str] = frozenset({
 #: wrapper. ``required`` and the three file-upload kwargs need extra handling
 #: beyond a plain ``setattr`` — see :func:`_apply_required_flag` and
 #: :func:`_attach_file_validator` — but are fully supported, not refused.
-_SNAP_FIELD_WRAPPER_KWARGS: frozenset[str] = frozenset({
-    SnapFieldAttributeEnum.SHOW_IN_LIST.value,
-    SnapFieldAttributeEnum.SHOW_IN_FORM.value,
-    SnapFieldAttributeEnum.SEARCHABLE.value,
-    SnapFieldAttributeEnum.FILTERABLE.value,
-    SnapFieldAttributeEnum.EDITABLE.value,
-    SnapFieldAttributeEnum.REQUIRED.value,
-    SnapFieldAttributeEnum.UPDATABLE.value,
-    SnapFieldAttributeEnum.AUTOCOMPLETE.value,
-    SnapFieldAttributeEnum.WYSIWYG.value,
-    SnapFieldAttributeEnum.SAFE_HTML.value,
-    SnapFieldAttributeEnum.AUTO_SANITIZE.value,
-    SnapFieldAttributeEnum.TAB.value,
-    SnapFieldAttributeEnum.ROW.value,
-} | _SNAP_FIELD_FILE_VALIDATOR_KWARGS)
+_SNAP_FIELD_WRAPPER_KWARGS: frozenset[str] = frozenset(
+    {
+        SnapFieldAttributeEnum.SHOW_IN_LIST.value,
+        SnapFieldAttributeEnum.SHOW_IN_FORM.value,
+        SnapFieldAttributeEnum.SEARCHABLE.value,
+        SnapFieldAttributeEnum.FILTERABLE.value,
+        SnapFieldAttributeEnum.EDITABLE.value,
+        SnapFieldAttributeEnum.REQUIRED.value,
+        SnapFieldAttributeEnum.UPDATABLE.value,
+        SnapFieldAttributeEnum.AUTOCOMPLETE.value,
+        SnapFieldAttributeEnum.WYSIWYG.value,
+        SnapFieldAttributeEnum.SAFE_HTML.value,
+        SnapFieldAttributeEnum.AUTO_SANITIZE.value,
+        SnapFieldAttributeEnum.TAB.value,
+        SnapFieldAttributeEnum.ROW.value,
+    }
+    | _SNAP_FIELD_FILE_VALIDATOR_KWARGS
+)
 
 #: The parity drift guard (`tests/test_fields.py::TestSnapFieldWrapperDriftGuard`)
 #: asserts ``set(SnapFieldAttributeEnum) - _SNAP_FIELD_WRAPPER_KWARGS`` equals
@@ -549,6 +562,7 @@ def snap_field(field: models.Field, **kwargs: bool | str | None) -> models.Field
 class SnapNotDatabaseField(SnapField):
     pass
 
+
 class SnapCharField(models.CharField, SnapField):
     """Django ``CharField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
@@ -560,6 +574,7 @@ class SnapCharField(models.CharField, SnapField):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
+
 
 def _sanitize_wysiwyg_pre_save_value(field: models.Field, model_instance: models.Model, value):
     """Apply the wysiwyg sanitize-on-write rule to one ``pre_save`` value.
@@ -647,6 +662,7 @@ class SnapTextField(SanitizedHtmlOnSaveMixin, models.TextField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
+
 class SnapEmailField(models.EmailField, SnapField):
     """Django ``EmailField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
@@ -654,6 +670,7 @@ class SnapEmailField(models.EmailField, SnapField):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
+
 
 class SnapSlugField(models.SlugField, SnapField):
     """Django ``SlugField`` with SnapAdmin metadata. See :class:`SnapField`."""
@@ -664,6 +681,7 @@ class SnapSlugField(models.SlugField, SnapField):
         kwargs.setdefault(DjangoFieldAttributeEnum.MAX_LENGTH.value, 50)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
+
 class SnapURLField(models.URLField, SnapField):
     """Django ``URLField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
@@ -671,6 +689,7 @@ class SnapURLField(models.URLField, SnapField):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
+
 
 class SnapUUIDField(models.UUIDField, SnapField):
     """Django ``UUIDField`` with SnapAdmin metadata. See :class:`SnapField`."""
@@ -680,6 +699,7 @@ class SnapUUIDField(models.UUIDField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
+
 class SnapIntegerField(models.IntegerField, SnapField):
     """Django ``IntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
@@ -687,6 +707,7 @@ class SnapIntegerField(models.IntegerField, SnapField):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
+
 
 class SnapPositiveIntegerField(models.PositiveIntegerField, SnapField):
     """Django ``PositiveIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
@@ -696,6 +717,7 @@ class SnapPositiveIntegerField(models.PositiveIntegerField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
+
 class SnapFloatField(models.FloatField, SnapField):
     """Django ``FloatField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
@@ -703,6 +725,7 @@ class SnapFloatField(models.FloatField, SnapField):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
+
 
 class SnapDecimalField(models.DecimalField, SnapField):
     """Django ``DecimalField`` with SnapAdmin metadata. See :class:`SnapField`."""
@@ -712,6 +735,7 @@ class SnapDecimalField(models.DecimalField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
+
 class SnapBigIntegerField(models.BigIntegerField, SnapField):
     """Django ``BigIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
@@ -719,6 +743,7 @@ class SnapBigIntegerField(models.BigIntegerField, SnapField):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
+
 
 class SnapDateField(models.DateField, SnapField):
     """Django ``DateField`` with SnapAdmin metadata. See :class:`SnapField`."""
@@ -728,6 +753,7 @@ class SnapDateField(models.DateField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
+
 class SnapDateTimeField(models.DateTimeField, SnapField):
     """Django ``DateTimeField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
@@ -735,6 +761,7 @@ class SnapDateTimeField(models.DateTimeField, SnapField):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
+
 
 class SnapTimeField(models.TimeField, SnapField):
     """Django ``TimeField`` with SnapAdmin metadata. See :class:`SnapField`."""
@@ -744,6 +771,7 @@ class SnapTimeField(models.TimeField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
+
 class SnapDurationField(models.DurationField, SnapField):
     """Django ``DurationField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
@@ -751,6 +779,7 @@ class SnapDurationField(models.DurationField, SnapField):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
+
 
 class SnapFileField(models.FileField, SnapField):
     """Django ``FileField`` with upload validation. See :class:`SnapField`."""
@@ -781,7 +810,9 @@ class SnapFileField(models.FileField, SnapField):
         # so strip the auto instance and re-emit the config as plain kwargs;
         # otherwise a reconstructed field silently loses its extension/size/
         # encoding limits and the validator list never converges.
-        name, path, args, kwargs = _strip_auto_validator(super().deconstruct(), self._snap_auto_validator)
+        name, path, args, kwargs = _strip_auto_validator(
+            super().deconstruct(), self._snap_auto_validator
+        )
         if self._snap_allowed_extensions is not None:
             kwargs["allowed_extensions"] = self._snap_allowed_extensions
         if self._snap_allowed_encodings is not None:
@@ -789,6 +820,7 @@ class SnapFileField(models.FileField, SnapField):
         if self._snap_max_size_bytes is not None:
             kwargs["max_size_bytes"] = self._snap_max_size_bytes
         return name, path, args, kwargs
+
 
 class SnapImageField(models.ImageField, SnapField):
     """Django ``ImageField`` with upload validation. See :class:`SnapField`."""
@@ -810,12 +842,15 @@ class SnapImageField(models.ImageField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
     def deconstruct(self):
-        name, path, args, kwargs = _strip_auto_validator(super().deconstruct(), self._snap_auto_validator)
+        name, path, args, kwargs = _strip_auto_validator(
+            super().deconstruct(), self._snap_auto_validator
+        )
         if self._snap_allowed_extensions is not None:
             kwargs["allowed_extensions"] = self._snap_allowed_extensions
         if self._snap_max_size_bytes is not None:
             kwargs["max_size_bytes"] = self._snap_max_size_bytes
         return name, path, args, kwargs
+
 
 class SnapBooleanField(models.BooleanField, SnapField):
     """Django ``BooleanField`` with SnapAdmin metadata. See :class:`SnapField`."""
@@ -825,6 +860,7 @@ class SnapBooleanField(models.BooleanField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
+
 class SnapJSONField(models.JSONField, SnapField):
     """Django ``JSONField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
@@ -832,6 +868,7 @@ class SnapJSONField(models.JSONField, SnapField):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
+
 
 class SnapGenericIPAddressField(models.GenericIPAddressField, SnapField):
     """Django ``GenericIPAddressField`` with SnapAdmin metadata. See :class:`SnapField`."""
@@ -841,6 +878,7 @@ class SnapGenericIPAddressField(models.GenericIPAddressField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
+
 class SnapForeignKey(models.ForeignKey, SnapField):
     """Django ``ForeignKey`` with SnapAdmin metadata. See :class:`SnapField`."""
 
@@ -848,12 +886,14 @@ class SnapForeignKey(models.ForeignKey, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(to=to, on_delete=on_delete, **self.handleDjangoKwargs(**kwargs))
 
+
 class SnapOneToOneField(models.OneToOneField, SnapField):
     """Django ``OneToOneField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
     def __init__(self, to, on_delete=models.CASCADE, **kwargs):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(to=to, on_delete=on_delete, **self.handleDjangoKwargs(**kwargs))
+
 
 class SnapManyToManyField(models.ManyToManyField, SnapField):
     """Django ``ManyToManyField`` with SnapAdmin metadata. See :class:`SnapField`."""
@@ -863,6 +903,7 @@ class SnapManyToManyField(models.ManyToManyField, SnapField):
         kwargs.pop(DjangoFieldAttributeEnum.NULL, None)
         super().__init__(to=to, **self.handleDjangoKwargs(**kwargs))
 
+
 class SnapSmallIntegerField(models.SmallIntegerField, SnapField):
     """Django ``SmallIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
@@ -870,6 +911,7 @@ class SnapSmallIntegerField(models.SmallIntegerField, SnapField):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
+
 
 class SnapPositiveSmallIntegerField(models.PositiveSmallIntegerField, SnapField):
     """Django ``PositiveSmallIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
@@ -879,6 +921,7 @@ class SnapPositiveSmallIntegerField(models.PositiveSmallIntegerField, SnapField)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
+
 class SnapPositiveBigIntegerField(models.PositiveBigIntegerField, SnapField):
     """Django ``PositiveBigIntegerField`` with SnapAdmin metadata. See :class:`SnapField`."""
 
@@ -886,6 +929,7 @@ class SnapPositiveBigIntegerField(models.PositiveBigIntegerField, SnapField):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
+
 
 class SnapRichTextField(SanitizedHtmlOnSaveMixin, models.TextField, SnapField):
     """TextField with wysiwyg=True preset - no extra argument needed."""
@@ -896,12 +940,14 @@ class SnapRichTextField(SanitizedHtmlOnSaveMixin, models.TextField, SnapField):
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
+
 class SnapPhoneField(models.CharField, SnapField):
     """CharField pre-wired with phone number validation and a sensible max_length."""
 
     def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         from snapadmin.validators import SnapPhoneValidator
+
         kwargs.setdefault(DjangoFieldAttributeEnum.MAX_LENGTH.value, 20)
         kwargs = self._initializeSnapLogic(**kwargs)
         cleaned = self.handleDjangoKwargs(**kwargs)
@@ -913,12 +959,14 @@ class SnapPhoneField(models.CharField, SnapField):
     def deconstruct(self):
         return _strip_auto_validator(super().deconstruct(), self._snap_auto_validator)
 
+
 class SnapColorField(models.CharField, SnapField):
     """CharField pre-wired with hex color validation (#RRGGBB / #RGB)."""
 
     def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         from snapadmin.validators import SnapColorValidator
+
         kwargs.setdefault(DjangoFieldAttributeEnum.MAX_LENGTH.value, 7)
         kwargs = self._initializeSnapLogic(**kwargs)
         cleaned = self.handleDjangoKwargs(**kwargs)
@@ -930,11 +978,13 @@ class SnapColorField(models.CharField, SnapField):
     def deconstruct(self):
         return _strip_auto_validator(super().deconstruct(), self._snap_auto_validator)
 
+
 # ===========================================================================
 # Encrypted fields (#CRYPT1c)
 # ===========================================================================
 
 # ── The blind index (#CRYPT1d) ───────────────────────────────────────────────
+
 
 class _BlindIndexAttribute(DeferredAttribute):
     """Descriptor that derives the blind index from the live source value.
@@ -1299,9 +1349,7 @@ class SnapEncryptedField:
         """Every index *value* could be stored under — one per key in the keyset."""
         from snapadmin.encryption import blind_index
 
-        return blind_index.index_candidates(
-            self.encode_plaintext(value), aad=self.encryption_aad()
-        )
+        return blind_index.index_candidates(self.encode_plaintext(value), aad=self.encryption_aad())
 
     # ── Lookups ─────────────────────────────────────────────────────────────
 
@@ -1314,7 +1362,8 @@ class SnapEncryptedField:
 
     def _refuse(self, name: str) -> None:
         supported = "`__isnull`" + (
-            ", `__exact` and `__in`" if self.blind_index
+            ", `__exact` and `__in`"
+            if self.blind_index
             else " (add blind_index=True for `__exact` and `__in`)"
         )
         raise FieldError(
@@ -1514,7 +1563,8 @@ class SnapEncryptedCharField(SnapEncryptedField, models.CharField, SnapField):
         # column width, and this field's column is text — there is nothing to
         # size. Everything else CharField checks still applies.
         return [
-            error for error in super().check(**kwargs)
+            error
+            for error in super().check(**kwargs)
             if not (error.id == "fields.E120" and self.max_length is None)
         ]
 
@@ -1658,8 +1708,16 @@ class SnapFunctionField(SnapNotDatabaseField):
     value is escaped otherwise.
     """
 
-    def __init__(self, func, verbose_name=None, show_in_list=True,
-                 show_in_form=True, safe_html=False, *args, **kwargs):
+    def __init__(
+        self,
+        func,
+        verbose_name=None,
+        show_in_list=True,
+        show_in_form=True,
+        safe_html=False,
+        *args,
+        **kwargs,
+    ):
         if not callable(func):
             raise ValueError("SnapFunctionField requires a callable 'func'.")
         self.func = func
@@ -1671,7 +1729,8 @@ class SnapFunctionField(SnapNotDatabaseField):
 
     def get_display_value(self, obj):
         value = self.func(obj)
-        return mark_safe(value) if self.safe_html else value
+        return mark_safe(value) if self.safe_html else value  # noqa: S308 - opt-in safe_html
+
 
 class SnapStatusBadgeFieldChoice:
     """One coloured badge variant for :class:`SnapStatusBadgeField`.
@@ -1680,8 +1739,13 @@ class SnapStatusBadgeFieldChoice:
     colours style the badge drawn for it.
     """
 
-    def __init__(self, status_string: str, text_html_color: str = "#333333",
-                 background_html_color: str = "#F5F5F5", border_html_color: str = "#A9A9A9"):
+    def __init__(
+        self,
+        status_string: str,
+        text_html_color: str = "#333333",
+        background_html_color: str = "#F5F5F5",
+        border_html_color: str = "#A9A9A9",
+    ):
         self.status_string = status_string
         self.text_html_color = text_html_color
         self.background_html_color = background_html_color
@@ -1702,6 +1766,7 @@ class SnapStatusBadgeFieldChoice:
         style_string = "; ".join(f"{k}: {v}" for k, v in styles.items())
         return format_html('<a style="{}">{}</a>', style_string, field_display)
 
+
 class SnapStatusBadgeField(SnapFunctionField):
     """Render another field's value as a coloured status badge in the changelist.
 
@@ -1720,9 +1785,15 @@ class SnapStatusBadgeField(SnapFunctionField):
     A value with no matching choice renders unstyled.
     """
 
-    def __init__(self, field_name: str | None = None,
-                 choices: typing.List[SnapStatusBadgeFieldChoice] | None = None, *,
-                 verbose_name: str = None, style_arguments: dict = None, **kwargs):
+    def __init__(
+        self,
+        field_name: str | None = None,
+        choices: typing.List[SnapStatusBadgeFieldChoice] | None = None,
+        *,
+        verbose_name: str = None,
+        style_arguments: dict = None,
+        **kwargs,
+    ):
         # Both may be written positionally: they are what the field *is*, and passing the
         # source field's name positionally is the obvious call. They used to be keyword-only,
         # so doing that failed with "missing 1 required keyword-only argument: 'field_name'" —
@@ -1748,7 +1819,9 @@ class SnapStatusBadgeField(SnapFunctionField):
         self.field_name = field_name
         self.choices = choices
         self.style_arguments = style_arguments or {}
-        super().__init__(func=self._render_badge, verbose_name=verbose_name, safe_html=True, **kwargs)
+        super().__init__(
+            func=self._render_badge, verbose_name=verbose_name, safe_html=True, **kwargs
+        )
 
     def _render_badge(self, obj) -> str:
         field_value = getattr(obj, self.field_name, "")

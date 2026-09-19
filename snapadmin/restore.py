@@ -16,6 +16,7 @@ The pre-restore snapshot (#BKP1e, ``snapadmin.snapshot``) hooks in via
 nothing about snapshots itself, keeping the two concerns independently
 testable.
 """
+
 from __future__ import annotations
 
 import gzip
@@ -88,6 +89,7 @@ def list_bundles(destination: str | None, config: BackupConfig) -> list[str]:
     """Every manifest filename available at `destination` (or the local dir if None)."""
     if destination is None:
         from snapadmin.backup import list_local
+
         names = list_local(config)
     else:
         names = LIST_FUNCTIONS[destination](config)
@@ -127,7 +129,10 @@ def resolve_source(source: str, target_dir: Path, config: BackupConfig) -> Resol
 
 
 def fetch_parts(
-    resolved: ResolvedSource, parts: list[str], target_dir: Path, config: BackupConfig,
+    resolved: ResolvedSource,
+    parts: list[str],
+    target_dir: Path,
+    config: BackupConfig,
 ) -> dict[str, Path]:
     """Fetch each requested part named in the manifest into target_dir."""
     fetched: dict[str, Path] = {}
@@ -183,7 +188,9 @@ def identity_required_message(manifest: dict) -> str:
     )
 
 
-def _decrypt_if_needed(path: Path, manifest: dict, identity_file: str, config: BackupConfig) -> Path:
+def _decrypt_if_needed(
+    path: Path, manifest: dict, identity_file: str, config: BackupConfig
+) -> Path:
     if not manifest.get("encrypted"):
         return path
     if not identity_file:
@@ -192,8 +199,11 @@ def _decrypt_if_needed(path: Path, manifest: dict, identity_file: str, config: B
     with open(path, "rb") as reader, open(out, "wb") as writer:
         try:
             crypto.decrypt_stream(
-                reader, writer, identity_file,
-                backend=config.age_backend, binary_path=config.age_binary_path,
+                reader,
+                writer,
+                identity_file,
+                backend=config.age_backend,
+                binary_path=config.age_binary_path,
             )
         except crypto.AgeError as exc:
             out.unlink(missing_ok=True)
@@ -204,6 +214,7 @@ def _decrypt_if_needed(path: Path, manifest: dict, identity_file: str, config: B
 # ─────────────────────────────────────────────────────────────────────────────
 # Applying a decrypted part to live state
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _ungzip_to(src: Path, dst: Path) -> None:
     with gzip.open(src, "rb") as reader, open(dst, "wb") as writer:
@@ -291,34 +302,69 @@ def _restore_postgres(db: dict, decrypted_path: Path, *, recreate_database: bool
     env = {**os.environ, "PGPASSWORD": str(db.get("PASSWORD") or "")}
 
     def run(args: list[str]) -> None:
-        process = subprocess.run(args, capture_output=True, env=env)
+        process = subprocess.run(args, capture_output=True, env=env)  # noqa: S603 - argv list, no shell
         if process.returncode != 0:
             raise RestoreError(f"{args[0]} failed: {process.stderr.decode(errors='replace')}")
 
     # Terminate other connections, then start from empty — a restore replaces
     # the database wholesale rather than trying to reconcile with whatever is
     # already there.
+    # The name is quoted as an SQL literal (quotes doubled — standard_conforming_strings
+    # is on by default since PostgreSQL 9.1): configuration, but a quote in it must
+    # yield valid SQL, not a different statement.
+    quoted_name = "'" + name.replace("'", "''") + "'"
     terminate_sql = (
-        f"SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-        f"WHERE datname = '{name}' AND pid <> pg_backend_pid();"
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "  # noqa: S608 - literal escaped above
+        f"WHERE datname = {quoted_name} AND pid <> pg_backend_pid();"
     )
-    run(["psql", "--no-password", "-h", host, "-p", port, "-U", user, "-d", "postgres", "-c", terminate_sql])
+    run(
+        [
+            "psql",
+            "--no-password",
+            "-h",
+            host,
+            "-p",
+            port,
+            "-U",
+            user,
+            "-d",
+            "postgres",
+            "-c",
+            terminate_sql,
+        ]
+    )
     if recreate_database:
         run(["dropdb", "--no-password", "-h", host, "-p", port, "-U", user, name])
         run(["createdb", "--no-password", "-h", host, "-p", port, "-U", user, name])
     else:
         # A drill target: emptied in place, so the role needs to own the
         # schema, not to hold CREATEDB.
-        run([
-            "psql", "--no-password", "-h", host, "-p", port, "-U", user, "-d", name,
-            "-v", "ON_ERROR_STOP=1",
-            "-c", "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;",
-        ])
+        run(
+            [
+                "psql",
+                "--no-password",
+                "-h",
+                host,
+                "-p",
+                port,
+                "-U",
+                user,
+                "-d",
+                name,
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                "DROP SCHEMA IF EXISTS public CASCADE; CREATE SCHEMA public;",
+            ]
+        )
 
     with gzip.open(decrypted_path, "rb") as sql:
-        process = subprocess.Popen(
-            ["psql", "--no-password", "-h", host, "-p", port, "-U", user, "-d", name],
-            stdin=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+        process = subprocess.Popen(  # noqa: S603 - argv list, no shell
+            # S607: psql is resolved on PATH, exactly like pg_dump in backup.py.
+            ["psql", "--no-password", "-h", host, "-p", port, "-U", user, "-d", name],  # noqa: S607
+            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=env,
         )
         shutil.copyfileobj(sql, process.stdin)
         process.stdin.close()
@@ -339,7 +385,7 @@ def table_row_counts(database: str = "default") -> dict[str, int]:
     counts: dict[str, int] = {}
     with connection.cursor() as cursor:
         for table in sorted(connection.introspection.table_names(cursor)):
-            cursor.execute(f"SELECT COUNT(*) FROM {connection.ops.quote_name(table)}")
+            cursor.execute(f"SELECT COUNT(*) FROM {connection.ops.quote_name(table)}")  # noqa: S608 - quote_name()d
             counts[table] = int(cursor.fetchone()[0])
     return counts
 
@@ -392,6 +438,7 @@ def restore_env(decrypted_path: Path, env_file: str) -> None:
 # Planning and orchestration
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def select_parts(manifest: dict, *, only: list[str] | None, skip: list[str] | None) -> list[str]:
     """Which parts (present in the manifest) a restore run will touch.
 
@@ -412,7 +459,24 @@ def select_parts(manifest: dict, *, only: list[str] | None, skip: list[str] | No
     return selected
 
 
-def plan_restore(resolved: ResolvedSource, parts: list[str], database: str = "default") -> list[str]:
+def _reject_unknown_parts(parts: list[str]) -> None:
+    """Refuse a part this version cannot restore, before anything is fetched.
+
+    ``select_parts`` only ever yields members of :data:`RESTORE_PARTS`, but
+    :func:`plan_restore` and :func:`perform_restore` are public and take a list:
+    an unknown name used to be silently left out of the plan and, worse, logged
+    as ``restore_part_applied`` without anything having been applied.
+    """
+    unknown = sorted(set(parts) - set(RESTORE_PARTS))
+    if unknown:
+        raise RestoreError(
+            f"Unknown part(s) {unknown}; this version restores {list(RESTORE_PARTS)}."
+        )
+
+
+def plan_restore(
+    resolved: ResolvedSource, parts: list[str], database: str = "default"
+) -> list[str]:
     """Human-readable lines describing what --confirm would do. Touches nothing."""
     manifest = resolved.manifest
     lines = [
@@ -420,11 +484,16 @@ def plan_restore(resolved: ResolvedSource, parts: list[str], database: str = "de
         f"snapadmin {manifest.get('snapadmin_version')} / Django {manifest.get('django_version')} "
         f"/ engine {manifest.get('db_engine')}",
         f"Encrypted: {'yes' if manifest.get('encrypted') else 'no'}"
-        + (f" ({len(manifest.get('recipients') or [])} recipient(s))" if manifest.get("encrypted") else ""),
+        + (
+            f" ({len(manifest.get('recipients') or [])} recipient(s))"
+            if manifest.get("encrypted")
+            else ""
+        ),
     ]
     warning = check_version_compatibility(manifest)
     if warning:
         lines.append(f"WARNING: {warning}")
+    _reject_unknown_parts(parts)
     for part in parts:
         entry = manifest["parts"][part]
         if part == "db":
@@ -433,7 +502,7 @@ def plan_restore(resolved: ResolvedSource, parts: list[str], database: str = "de
             lines.append(f"  db: {entry['filename']} -> would replace database {db_name!r}{alias}")
         elif part == "media":
             lines.append(f"  media: {entry['filename']} -> would extract into MEDIA_ROOT")
-        elif part == "env":
+        else:  # "env" — the only other member of RESTORE_PARTS, checked above
             lines.append(f"  env: {entry['filename']} -> would OVERWRITE the configured .env file")
     if not parts:
         lines.append("  (nothing selected)")
@@ -484,6 +553,7 @@ def perform_restore(
     is verified (:func:`verify_restored_database`) and the ``db`` result names
     its table and row totals.
     """
+    _reject_unknown_parts(parts)
     if database != "default" and any(part != "db" for part in parts):
         raise RestoreError(
             f"Restoring into {database!r}: only the 'db' part can go to another "
@@ -516,7 +586,7 @@ def perform_restore(
             elif part == "media":
                 count = restore_media(decrypted)
                 results["media"] = f"restored ({count} files)"
-            elif part == "env":
+            else:  # "env" — the only other member of RESTORE_PARTS, checked above
                 restore_env(decrypted, config.env_file)
                 results["env"] = "restored"
             logger.info("restore_part_applied", part=part)

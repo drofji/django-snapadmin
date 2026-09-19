@@ -21,7 +21,9 @@ def _truthy(value: object) -> bool:
     return str(value).strip().lower() in {"true", "1", "yes", "y"}
 
 
-def _choose(input_fn: Callable[[str], str], label: str, options: list[tuple[str, str]], default: str) -> str:
+def _choose(
+    input_fn: Callable[[str], str], label: str, options: list[tuple[str, str]], default: str
+) -> str:
     print(f"{label}:")
     for key, value in options:
         print(f"  [{key}] {value}")
@@ -44,7 +46,9 @@ def run_wizard(
 ) -> dict:
     """Collect a demo configuration interactively."""
     print("🚀 SnapAdmin Demo Configuration Wizard\n")
-    config: dict = {"mode": _choose(input_fn, "Run mode", [("1", "runserver"), ("2", "docker")], "1")}
+    config: dict = {
+        "mode": _choose(input_fn, "Run mode", [("1", "runserver"), ("2", "docker")], "1")
+    }
 
     if config["mode"] == "runserver":
         config["database"] = _choose(
@@ -84,7 +88,9 @@ def env_lines(config: dict) -> list[str]:
     else:
         lines.append("POSTGRES_HOST=")  # empty → the demo falls back to SQLite
 
-    lines.append(f"ELASTICSEARCH_ENABLED={'True' if _truthy(config.get('elasticsearch', False)) else 'False'}")
+    lines.append(
+        f"ELASTICSEARCH_ENABLED={'True' if _truthy(config.get('elasticsearch', False)) else 'False'}"
+    )
     if config.get("admin_password"):
         lines.append(f"SNAPADMIN_SEED_ADMIN_PASSWORD={config['admin_password']}")
     return lines

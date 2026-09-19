@@ -16,9 +16,12 @@ from django.db.models import Q
 from django.utils import timezone
 
 from snapadmin.conf import get_setting
+from snapadmin.logging_config import get_logger
 from snapadmin.diagnostics.registry import register
 from snapadmin.models import EsStorageMode
 from snapadmin.registry import get_model_meta, is_registered
+
+logger = get_logger(__name__)
 
 #: Capability name -> the ``SnapModel`` attribute whose presence means the capability is
 #: *reachable at all* for a model, regardless of whether it is actually turned on. Each is
@@ -58,7 +61,9 @@ def _inactive_capabilities(model: type) -> str:
     dicts into one aligned table, and a nested list value on even one item would fall it back to
     the far noisier per-item rendering (see ``diagnostics/render.py``'s ``_render_table``).
     """
-    return ", ".join(name for name, marker in _DOOR_CAPABILITY_MARKERS if not hasattr(model, marker))
+    return ", ".join(
+        name for name, marker in _DOOR_CAPABILITY_MARKERS if not hasattr(model, marker)
+    )
 
 
 def _model_items(masked: set) -> list[dict]:
@@ -104,6 +109,8 @@ def collect(*, verbose: bool) -> dict:
     }
     try:
         data["tokens"] = _token_counts()
-    except Exception:
-        pass
+    except Exception as exc:
+        # The token table may not exist yet (before migrate); the rest of the
+        # inventory is still worth reporting, so the section is left out.
+        logger.warning("inventory_token_counts_unavailable", error=str(exc))
     return data

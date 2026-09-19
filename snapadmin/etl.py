@@ -64,8 +64,13 @@ class StaleSyncAbort(Exception):
     """
 
     def __init__(
-        self, model: type[SnapModel], *, total: int, stale: int,
-        fraction: float, max_fraction: float,
+        self,
+        model: type[SnapModel],
+        *,
+        total: int,
+        stale: int,
+        fraction: float,
+        max_fraction: float,
     ) -> None:
         self.model = model
         self.total = total
@@ -153,8 +158,7 @@ def upsert_from_source(
     for batch in _batched(rows, batch_size):
         if resolved_update_fields is None:
             resolved_update_fields = [
-                key for key in batch[0]
-                if key not in unique_fields and key not in (pk_name, "pk")
+                key for key in batch[0] if key not in unique_fields and key not in (pk_name, "pk")
             ]
         create_kwargs = {
             "update_conflicts": True,
@@ -178,17 +182,19 @@ def upsert_from_source(
     )
 
     reindex_summary = None
-    mirrors_to_es = (
-        storage_mode == EsStorageMode.DUAL
-        or getattr(model, "es_index_enabled", False)
-    )
-    if reindex and processed and mirrors_to_es and getattr(settings, "ELASTICSEARCH_ENABLED", False):
+    mirrors_to_es = storage_mode == EsStorageMode.DUAL or getattr(model, "es_index_enabled", False)
+    if (
+        reindex
+        and processed
+        and mirrors_to_es
+        and getattr(settings, "ELASTICSEARCH_ENABLED", False)
+    ):
         reindex_summary = model.es_reindex_all(chunk_size=batch_size)
 
     return {"processed": processed, "batches": batches, "reindex": reindex_summary}
 
 
-def stale_sync(
+def stale_sync(  # noqa: C901 - refactor tracked as #QA1c-cx
     model: type[SnapModel],
     seen_keys: Iterable | None = None,
     *,
@@ -271,17 +277,11 @@ def stale_sync(
             ES_ONLY model.
     """
     if strategy not in ("keyset", "last_seen"):
-        raise ValueError(
-            f"stale_sync strategy must be 'keyset' or 'last_seen'; got {strategy!r}."
-        )
+        raise ValueError(f"stale_sync strategy must be 'keyset' or 'last_seen'; got {strategy!r}.")
     if on_exceed not in ("raise", "skip"):
-        raise ValueError(
-            f"stale_sync on_exceed must be 'raise' or 'skip'; got {on_exceed!r}."
-        )
+        raise ValueError(f"stale_sync on_exceed must be 'raise' or 'skip'; got {on_exceed!r}.")
     if not 0 < max_fraction <= 1:
-        raise ValueError(
-            f"stale_sync max_fraction must be in (0, 1]; got {max_fraction!r}."
-        )
+        raise ValueError(f"stale_sync max_fraction must be in (0, 1]; got {max_fraction!r}.")
     if strategy == "keyset":
         if not key_field:
             raise ValueError(
@@ -301,16 +301,18 @@ def stale_sync(
 
     storage_mode = getattr(model, "es_storage_mode", EsStorageMode.DB_ONLY)
     if storage_mode == EsStorageMode.ES_ONLY:
-        raise ValueError(
-            "stale_sync targets the database table; ES_ONLY models have none."
-        )
+        raise ValueError("stale_sync targets the database table; ES_ONLY models have none.")
 
     base = model._default_manager.all() if queryset is None else queryset
 
     total = base.count()
     result = {
-        "total": total, "stale": 0, "deleted": 0, "fraction": 0.0,
-        "dry_run": dry_run, "aborted": False,
+        "total": total,
+        "stale": 0,
+        "deleted": 0,
+        "fraction": 0.0,
+        "dry_run": dry_run,
+        "aborted": False,
     }
     if total == 0:
         return result
@@ -337,8 +339,12 @@ def stale_sync(
         if on_exceed == "skip":
             result["aborted"] = True
             logger.warning(
-                "etl_stale_sync_aborted", model=model._meta.label,
-                total=total, stale=stale, fraction=fraction, max_fraction=max_fraction,
+                "etl_stale_sync_aborted",
+                model=model._meta.label,
+                total=total,
+                stale=stale,
+                fraction=fraction,
+                max_fraction=max_fraction,
             )
             return result
         raise StaleSyncAbort(
@@ -347,17 +353,19 @@ def stale_sync(
 
     if not stale or dry_run:
         logger.info(
-            "etl_stale_sync", model=model._meta.label,
-            total=total, stale=stale, deleted=0, dry_run=dry_run,
+            "etl_stale_sync",
+            model=model._meta.label,
+            total=total,
+            stale=stale,
+            deleted=0,
+            dry_run=dry_run,
         )
         return result
 
     # For a mirrored model, capture the pks before the bulk SQL DELETE (which
     # never fires Model.delete()) so the ES mirror can be cleared in one bulk
     # call afterwards — same no-2PC contract as SnapModel.purge_expired().
-    mirrors_to_es = (
-        storage_mode == EsStorageMode.DUAL or getattr(model, "es_index_enabled", False)
-    )
+    mirrors_to_es = storage_mode == EsStorageMode.DUAL or getattr(model, "es_index_enabled", False)
     pks = list(stale_qs.values_list("pk", flat=True)) if mirrors_to_es else []
 
     with suppress_es_delete_receiver():
@@ -373,7 +381,11 @@ def stale_sync(
         )
 
     logger.info(
-        "etl_stale_sync", model=model._meta.label,
-        total=total, stale=stale, deleted=deleted, dry_run=False,
+        "etl_stale_sync",
+        model=model._meta.label,
+        total=total,
+        stale=stale,
+        deleted=deleted,
+        dry_run=False,
     )
     return result

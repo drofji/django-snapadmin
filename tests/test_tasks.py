@@ -471,3 +471,29 @@ class TestReindexProductsToElasticsearch:
             from demo.apps.shop.tasks import reindex_products_to_elasticsearch
             result = reindex_products_to_elasticsearch()
         assert result["indexed"] == 30  # many_products creates 30
+
+
+class TestAnUnknownReasonIsNeverAnUnreportedOutcome:
+    """#QA1d — a reason neither task recognises used to fall off the end of the
+    function and return ``None``: no ``status``, so a ``status != "ok"``
+    monitoring rule could not see it. It is now a ``partial`` naming the reason."""
+
+    def test_error_digest(self):
+        from snapadmin.tasks import send_error_digest
+
+        with patch("snapadmin.monitoring.send_error_digest",
+                   return_value={"sent": False, "reason": "rate_limited"}):
+            result = send_error_digest()
+
+        assert result["status"] == "partial"
+        assert result["failed"] == ["rate_limited"]
+
+    def test_health_alert(self):
+        from snapadmin.tasks import send_health_alert
+
+        with patch("snapadmin.health.send_health_alert",
+                   return_value={"sent": False, "reason": "rate_limited"}):
+            result = send_health_alert()
+
+        assert result["status"] == "partial"
+        assert result["failed"] == ["rate_limited"]

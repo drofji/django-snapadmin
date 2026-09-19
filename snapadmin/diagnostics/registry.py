@@ -31,7 +31,9 @@ CollectorFn = Callable[..., dict]
 _NON_COLLECTOR_MODULES = frozenset({"registry", "render"})
 
 #: ``scheme://user:password@host`` inside free text — exception messages quote whole DSNs.
-_URL_CREDENTIALS = re.compile(r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*://)(?P<user>[^:/@\s]+):[^@/\s]+@")
+_URL_CREDENTIALS = re.compile(
+    r"(?P<scheme>[a-zA-Z][a-zA-Z0-9+.\-]*://)(?P<user>[^:/@\s]+):[^@/\s]+@"
+)
 
 
 def _redact(text: str) -> str:
@@ -76,7 +78,9 @@ class Collector:
         try:
             return self.fn(verbose=verbose)
         except Exception as exc:
-            logger.warning("snapadmin.diagnostics.collector_failed", section=self.name, error=_describe(exc))
+            logger.warning(
+                "snapadmin.diagnostics.collector_failed", section=self.name, error=_describe(exc)
+            )
             data: dict = {"collector_error": _describe(exc)}
             if self.health_probe:
                 data["ok"] = False

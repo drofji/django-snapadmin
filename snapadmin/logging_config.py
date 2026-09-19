@@ -31,15 +31,15 @@ import structlog
 # ─────────────────────────────────────────────────────────────────────────────
 
 _LEVEL_COLOURS = {
-    "debug":    "\033[36m",   # cyan
-    "info":     "\033[32m",   # green
-    "warning":  "\033[33m",   # yellow
-    "error":    "\033[31m",   # red
-    "critical": "\033[35m",   # magenta
+    "debug": "\033[36m",  # cyan
+    "info": "\033[32m",  # green
+    "warning": "\033[33m",  # yellow
+    "error": "\033[31m",  # red
+    "critical": "\033[35m",  # magenta
 }
 _RESET = "\033[0m"
-_DIM   = "\033[2m"
-_BOLD  = "\033[1m"
+_DIM = "\033[2m"
+_BOLD = "\033[1m"
 
 
 def _colourise_level(level: str) -> str:
@@ -57,18 +57,16 @@ class ColourConsoleRenderer:
     """
 
     def __call__(self, logger, method: str, event_dict: dict) -> str:  # noqa: ARG002
-        ts        = event_dict.pop("timestamp", "")
-        level     = event_dict.pop("level", method)
-        event     = event_dict.pop("event", "")
-        exc_info  = event_dict.pop("exc_info", None)
+        ts = event_dict.pop("timestamp", "")
+        level = event_dict.pop("level", method)
+        event = event_dict.pop("event", "")
+        exc_info = event_dict.pop("exc_info", None)
 
-        ts_str    = f"{_DIM}{ts}{_RESET} " if ts else ""
+        ts_str = f"{_DIM}{ts}{_RESET} " if ts else ""
         level_str = _colourise_level(level)
         event_str = f"{_BOLD}{event}{_RESET}"
 
-        extras = "  ".join(
-            f"{_DIM}{k}{_RESET}={v!r}" for k, v in event_dict.items()
-        )
+        extras = "  ".join(f"{_DIM}{k}{_RESET}={v!r}" for k, v in event_dict.items())
 
         line = f"{ts_str}{level_str}  {event_str}"
         if extras:
@@ -76,6 +74,7 @@ class ColourConsoleRenderer:
 
         if exc_info:
             import traceback
+
             tb = traceback.format_exception(*exc_info) if isinstance(exc_info, tuple) else []
             line += "\n" + "".join(tb).rstrip()
 

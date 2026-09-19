@@ -132,3 +132,19 @@ class TestParallel:
         output = out.getvalue()
         assert "snapadmin_shard_2_primary: FAILED" in output
         assert "snapadmin_shard_1_primary: migrated" in output
+
+
+class TestASilentMigrationStillReportsSuccess:
+    """#QA1d — a shard whose ``migrate`` wrote nothing (already up to date, at
+    verbosity 0) still gets its "migrated" line, with no blank line before it."""
+
+    @override_settings(SNAPADMIN_SHARDING=TWO_SHARDS)
+    def test_no_output_no_blank_line(self, monkeypatch):
+        monkeypatch.setattr(snap_migrate_module, "call_command", lambda *a, **k: None)
+        out = StringIO()
+
+        call_command("snap_migrate", stdout=out)
+
+        lines = out.getvalue().splitlines()
+        assert "snapadmin_shard_1_primary: migrated" in lines[0]
+        assert "" not in lines

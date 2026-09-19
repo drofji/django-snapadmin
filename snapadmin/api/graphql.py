@@ -21,8 +21,12 @@ from graphql import GraphQLError, GraphQLResolveInfo
 
 from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
-from snapadmin.masking import get_masked_fields, mask_field, user_can_access_field, user_can_view_pii
-from snapadmin.models import EsStorageMode
+from snapadmin.masking import (
+    get_masked_fields,
+    mask_field,
+    user_can_access_field,
+    user_can_view_pii,
+)
 from snapadmin.registry import get_model_meta, is_registered
 
 logger = get_logger(__name__)
@@ -83,7 +87,9 @@ def _make_relation_guard(model: type[Model]) -> classmethod:
     """
 
     @classmethod
-    def get_queryset(cls: type[DjangoObjectType], queryset: QuerySet, info: GraphQLResolveInfo) -> QuerySet:
+    def get_queryset(
+        cls: type[DjangoObjectType], queryset: QuerySet, info: GraphQLResolveInfo
+    ) -> QuerySet:
         from snapadmin.tenancy import scope_queryset
 
         _check_access(info, model)
@@ -206,14 +212,21 @@ def get_dynamic_graphql_schema():
                 # enforce api_field_permissions reads (#FUT3b) so neither ever
                 # leaves GraphQL unguarded (mirroring the REST serializer).
                 type_attrs: dict = {'Meta': meta_attr, 'get_queryset': _make_relation_guard(model)}
-                guarded_fields = set(get_masked_fields(model._meta.app_label, model._meta.model_name))
+                guarded_fields = set(
+                    get_masked_fields(model._meta.app_label, model._meta.model_name)
+                )
                 guarded_fields |= {
-                    field for field, rule in (get_model_meta(model, "api_field_permissions", {}) or {}).items()
+                    field
+                    for field, rule in (
+                        get_model_meta(model, "api_field_permissions", {}) or {}
+                    ).items()
                     if isinstance(rule, dict) and rule.get("read")
                 }
                 for guarded_field in guarded_fields:
                     if guarded_field not in excluded:
-                        type_attrs[f"resolve_{guarded_field}"] = _make_masked_resolver(guarded_field)
+                        type_attrs[f"resolve_{guarded_field}"] = _make_masked_resolver(
+                            guarded_field
+                        )
                 object_type = type(type_name, (DjangoObjectType,), type_attrs)
 
                 # Add fields to Query
@@ -226,6 +239,7 @@ def get_dynamic_graphql_schema():
                         _check_access(info, m)
                         # objects.get is ES-aware for ES_ONLY models (EsManager)
                         return m.objects.get(pk=id)
+
                     return resolve_single
 
                 def make_list_resolver(m):
@@ -239,10 +253,11 @@ def get_dynamic_graphql_schema():
                             qs = m.objects.all()
                         offset = offset or 0
                         if first is not None:
-                            return qs[offset:offset + first]
+                            return qs[offset : offset + first]
                         if offset:
                             return qs[offset:]
                         return qs
+
                     return resolve_list
 
                 query_attrs[field_name] = graphene.Field(object_type, id=graphene.ID(required=True))
@@ -266,5 +281,6 @@ def get_dynamic_graphql_schema():
 
     Query = type("Query", (graphene.ObjectType,), query_attrs)
     return graphene.Schema(query=Query)
+
 
 schema = get_dynamic_graphql_schema()

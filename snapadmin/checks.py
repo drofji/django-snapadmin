@@ -46,12 +46,14 @@ def _resolve_model(dotted: str):
 def check_analytics_db_alias(app_configs, **kwargs):
     alias = get_setting("SNAPADMIN_ANALYTICS_DB_ALIAS", "") or ""
     if alias and alias not in settings.DATABASES:
-        return [Warning(
-            f"SNAPADMIN_ANALYTICS_DB_ALIAS = {alias!r} is not a configured DATABASES alias.",
-            hint="Read-replica routing will be ignored (queries stay on 'default'). "
-                 "Add the alias to DATABASES or clear the setting.",
-            id="snapadmin.W001",
-        )]
+        return [
+            Warning(
+                f"SNAPADMIN_ANALYTICS_DB_ALIAS = {alias!r} is not a configured DATABASES alias.",
+                hint="Read-replica routing will be ignored (queries stay on 'default'). "
+                "Add the alias to DATABASES or clear the setting.",
+                id="snapadmin.W001",
+            )
+        ]
     return []
 
 
@@ -61,20 +63,24 @@ def check_masked_fields(app_configs, **kwargs):
     for key, fields in masked.items():
         model = _resolve_model(key)
         if model is None:
-            errors.append(Error(
-                f"SNAPADMIN_MASKED_FIELDS key {key!r} does not resolve to an installed model.",
-                hint="Use 'app_label.ModelName', e.g. 'demo.Customer'.",
-                id="snapadmin.E001",
-            ))
+            errors.append(
+                Error(
+                    f"SNAPADMIN_MASKED_FIELDS key {key!r} does not resolve to an installed model.",
+                    hint="Use 'app_label.ModelName', e.g. 'demo.Customer'.",
+                    id="snapadmin.E001",
+                )
+            )
             continue
         model_fields = {f.name for f in model._meta.get_fields()}
         for field in fields or []:
             if field not in model_fields:
-                errors.append(Error(
-                    f"SNAPADMIN_MASKED_FIELDS[{key!r}] lists unknown field {field!r}.",
-                    hint=f"{key} has no field '{field}'. Check the spelling.",
-                    id="snapadmin.E002",
-                ))
+                errors.append(
+                    Error(
+                        f"SNAPADMIN_MASKED_FIELDS[{key!r}] lists unknown field {field!r}.",
+                        hint=f"{key} has no field '{field}'. Check the spelling.",
+                        id="snapadmin.E002",
+                    )
+                )
     return errors
 
 
@@ -93,53 +99,63 @@ def check_masking_rules(app_configs, **kwargs):
     for key, fields in rules.items():
         model = _resolve_model(key)
         if model is None:
-            errors.append(Error(
-                f"SNAPADMIN_MASKING_RULES key {key!r} does not resolve to an installed model.",
-                hint="Use 'app_label.ModelName', e.g. 'demo.Customer'. Nothing is masked "
-                     "for a key that does not resolve.",
-                id="snapadmin.E003",
-            ))
+            errors.append(
+                Error(
+                    f"SNAPADMIN_MASKING_RULES key {key!r} does not resolve to an installed model.",
+                    hint="Use 'app_label.ModelName', e.g. 'demo.Customer'. Nothing is masked "
+                    "for a key that does not resolve.",
+                    id="snapadmin.E003",
+                )
+            )
             continue
         model_fields = {f.name for f in model._meta.get_fields()}
         for field, rule in (fields or {}).items():
             if field not in model_fields:
-                errors.append(Error(
-                    f"SNAPADMIN_MASKING_RULES[{key!r}] names unknown field {field!r}.",
-                    hint=f"{key} has no field '{field}'. Check the spelling.",
-                    id="snapadmin.E004",
-                ))
+                errors.append(
+                    Error(
+                        f"SNAPADMIN_MASKING_RULES[{key!r}] names unknown field {field!r}.",
+                        hint=f"{key} has no field '{field}'. Check the spelling.",
+                        id="snapadmin.E004",
+                    )
+                )
                 continue
             if not isinstance(rule, dict):
-                errors.append(Error(
-                    f"SNAPADMIN_MASKING_RULES[{key!r}][{field!r}] is not a dict.",
-                    hint="A rule is a dict with any of 'pattern', 'replacement' and "
-                         "'permission'. This one is ignored, and the field falls back to "
-                         "the built-in masker.",
-                    id="snapadmin.E005",
-                ))
+                errors.append(
+                    Error(
+                        f"SNAPADMIN_MASKING_RULES[{key!r}][{field!r}] is not a dict.",
+                        hint="A rule is a dict with any of 'pattern', 'replacement' and "
+                        "'permission'. This one is ignored, and the field falls back to "
+                        "the built-in masker.",
+                        id="snapadmin.E005",
+                    )
+                )
                 continue
             pattern = rule.get("pattern")
             if not pattern:
                 continue
             if _has_nested_quantifier(str(pattern)):
-                errors.append(Error(
-                    f"SNAPADMIN_MASKING_RULES[{key!r}][{field!r}] pattern {pattern!r} "
-                    f"quantifies a group that is itself quantified.",
-                    hint="That shape can backtrack catastrophically, so it is refused at "
-                         "runtime and the field falls back to the built-in masker. Rewrite "
-                         "it without the nested quantifier (escape a literal '{' as '\\{').",
-                    id="snapadmin.E005",
-                ))
+                errors.append(
+                    Error(
+                        f"SNAPADMIN_MASKING_RULES[{key!r}][{field!r}] pattern {pattern!r} "
+                        f"quantifies a group that is itself quantified.",
+                        hint="That shape can backtrack catastrophically, so it is refused at "
+                        "runtime and the field falls back to the built-in masker. Rewrite "
+                        "it without the nested quantifier (escape a literal '{' as '\\{').",
+                        id="snapadmin.E005",
+                    )
+                )
                 continue
             try:
                 re.compile(str(pattern))
             except re.error as exc:
-                errors.append(Error(
-                    f"SNAPADMIN_MASKING_RULES[{key!r}][{field!r}] pattern {pattern!r} "
-                    f"is not a valid regex: {exc}.",
-                    hint="The field falls back to the built-in masker until this compiles.",
-                    id="snapadmin.E005",
-                ))
+                errors.append(
+                    Error(
+                        f"SNAPADMIN_MASKING_RULES[{key!r}][{field!r}] pattern {pattern!r} "
+                        f"is not a valid regex: {exc}.",
+                        hint="The field falls back to the built-in masker until this compiles.",
+                        id="snapadmin.E005",
+                    )
+                )
     return errors
 
 
@@ -149,12 +165,14 @@ def check_nested_apps(app_configs, **kwargs):
     nested = get_setting("SNAPADMIN_NESTED_APPS", None) or {}
     for source, target in nested.items():
         if target not in installed:
-            warnings.append(Warning(
-                f"SNAPADMIN_NESTED_APPS maps {source!r} → {target!r}, but no app "
-                f"labelled {target!r} is installed.",
-                hint="The models will stay under their own group until the target app exists.",
-                id="snapadmin.W002",
-            ))
+            warnings.append(
+                Warning(
+                    f"SNAPADMIN_NESTED_APPS maps {source!r} → {target!r}, but no app "
+                    f"labelled {target!r} is installed.",
+                    hint="The models will stay under their own group until the target app exists.",
+                    id="snapadmin.W002",
+                )
+            )
     return warnings
 
 
@@ -166,31 +184,37 @@ def check_sso_providers(app_configs, **kwargs):
     }
     for key, meta in providers.items():
         if not isinstance(meta, dict) or not (meta.get("url") or "").strip():
-            warnings.append(Warning(
-                f"SNAPADMIN_SSO_PROVIDERS[{key!r}] has no usable 'url' and will not render.",
-                hint="Each provider needs a dict with a non-empty 'url', e.g. "
-                     "{'label': '…', 'url': '/accounts/azure/login/'}.",
-                id="snapadmin.W003",
-            ))
+            warnings.append(
+                Warning(
+                    f"SNAPADMIN_SSO_PROVIDERS[{key!r}] has no usable 'url' and will not render.",
+                    hint="Each provider needs a dict with a non-empty 'url', e.g. "
+                    "{'label': '…', 'url': '/accounts/azure/login/'}.",
+                    id="snapadmin.W003",
+                )
+            )
             continue
         url = meta["url"].strip()
         netloc = urlparse(url).netloc
         if url.startswith("//"):
-            warnings.append(Warning(
-                f"SNAPADMIN_SSO_PROVIDERS[{key!r}]['url'] = {url!r} is protocol-relative.",
-                hint="A protocol-relative URL (starting with '//') resolves to an external "
-                     "origin and will not render. Use a site-relative path ('/accounts/…') "
-                     "or a full absolute URL ('https://…').",
-                id="snapadmin.W005",
-            ))
+            warnings.append(
+                Warning(
+                    f"SNAPADMIN_SSO_PROVIDERS[{key!r}]['url'] = {url!r} is protocol-relative.",
+                    hint="A protocol-relative URL (starting with '//') resolves to an external "
+                    "origin and will not render. Use a site-relative path ('/accounts/…') "
+                    "or a full absolute URL ('https://…').",
+                    id="snapadmin.W005",
+                )
+            )
         elif allowed_hosts and netloc and netloc.lower() not in allowed_hosts:
-            warnings.append(Warning(
-                f"SNAPADMIN_SSO_PROVIDERS[{key!r}]['url'] host {netloc!r} is not in "
-                f"SNAPADMIN_SSO_ALLOWED_HOSTS and will not render.",
-                hint="Add the host to SNAPADMIN_SSO_ALLOWED_HOSTS or point the provider "
-                     "at an allowed identity provider.",
-                id="snapadmin.W005",
-            ))
+            warnings.append(
+                Warning(
+                    f"SNAPADMIN_SSO_PROVIDERS[{key!r}]['url'] host {netloc!r} is not in "
+                    f"SNAPADMIN_SSO_ALLOWED_HOSTS and will not render.",
+                    hint="Add the host to SNAPADMIN_SSO_ALLOWED_HOSTS or point the provider "
+                    "at an allowed identity provider.",
+                    id="snapadmin.W005",
+                )
+            )
     return warnings
 
 
@@ -221,16 +245,18 @@ def check_nesting_active_site(app_configs, **kwargs):
     )
     if not other_sites:
         return []
-    return [Warning(
-        "SNAPADMIN_NESTED_APPS / SNAPADMIN_HIDDEN_APPS / SNAPADMIN_APP_LABELS are "
-        "configured, but at least one AdminSite other than the default "
-        f"django.contrib.admin.site also has models registered on it: {', '.join(other_sites)}.",
-        hint="SnapAdmin only patches the default site's get_app_list. If that other "
-             "site is the one serving /admin/, these settings are silently ignored there. "
-             "Register your models on django.contrib.admin.site instead, or apply "
-             "snapadmin.nesting.apply_nested_apps to your custom site's get_app_list yourself.",
-        id="snapadmin.W006",
-    )]
+    return [
+        Warning(
+            "SNAPADMIN_NESTED_APPS / SNAPADMIN_HIDDEN_APPS / SNAPADMIN_APP_LABELS are "
+            "configured, but at least one AdminSite other than the default "
+            f"django.contrib.admin.site also has models registered on it: {', '.join(other_sites)}.",
+            hint="SnapAdmin only patches the default site's get_app_list. If that other "
+            "site is the one serving /admin/, these settings are silently ignored there. "
+            "Register your models on django.contrib.admin.site instead, or apply "
+            "snapadmin.nesting.apply_nested_apps to your custom site's get_app_list yourself.",
+            id="snapadmin.W006",
+        )
+    ]
 
 
 #: Model labels listed inline in a grouped warning before it truncates.
@@ -281,15 +307,17 @@ def check_api_write_fields(app_configs, **kwargs):
     )
     if not unguarded:
         return []
-    return [Warning(
-        f"{len(unguarded)} model(s) have no api_write_fields set — on these, every field "
-        "not listed in api_exclude_fields is writable through the auto-generated API "
-        f"(create/update): {_format_labels(unguarded)}.",
-        hint="Set api_write_fields = [...] on the model to restrict which "
-             "fields accept client-supplied values (a mass-assignment guard). "
-             "Leave unset only for models where every field is safe to write.",
-        id="snapadmin.W004",
-    )]
+    return [
+        Warning(
+            f"{len(unguarded)} model(s) have no api_write_fields set — on these, every field "
+            "not listed in api_exclude_fields is writable through the auto-generated API "
+            f"(create/update): {_format_labels(unguarded)}.",
+            hint="Set api_write_fields = [...] on the model to restrict which "
+            "fields accept client-supplied values (a mass-assignment guard). "
+            "Leave unset only for models where every field is safe to write.",
+            id="snapadmin.W004",
+        )
+    ]
 
 
 def check_api_read_only(app_configs, **kwargs):
@@ -313,16 +341,18 @@ def check_api_read_only(app_configs, **kwargs):
     )
     if not inert:
         return []
-    return [Warning(
-        f"{len(inert)} model(s) set api_write_fields = [] (no field is writable) but "
-        "still expose create/update/delete through the API — a REST create inserts a "
-        "blank row and an update is a silent no-op, rather than a clean 405: "
-        f"{_format_labels(inert)}.",
-        hint="Set api_read_only = True to serve these models read-only "
-             "(list/retrieve/count/export) and answer 405 to POST/PUT/PATCH/DELETE, "
-             "or set api_http_method_names to an explicit allowlist.",
-        id="snapadmin.W007",
-    )]
+    return [
+        Warning(
+            f"{len(inert)} model(s) set api_write_fields = [] (no field is writable) but "
+            "still expose create/update/delete through the API — a REST create inserts a "
+            "blank row and an update is a silent no-op, rather than a clean 405: "
+            f"{_format_labels(inert)}.",
+            hint="Set api_read_only = True to serve these models read-only "
+            "(list/retrieve/count/export) and answer 405 to POST/PUT/PATCH/DELETE, "
+            "or set api_http_method_names to an explicit allowlist.",
+            id="snapadmin.W007",
+        )
+    ]
 
 
 def check_unfold_theme(app_configs, **kwargs):
@@ -339,15 +369,17 @@ def check_unfold_theme(app_configs, **kwargs):
 
     if UNFOLD_INSTALLED:
         return []
-    return [Info(
-        "SnapAdmin is running on Django's built-in admin theme — the optional "
-        "django-unfold theme is not active.",
-        hint="This is fully supported. For the themed UI, install the theme extra "
-             "(pip install django-snapadmin[theme]) and add 'unfold', "
-             "'unfold.contrib.filters', 'unfold.contrib.forms' and "
-             "'unfold.contrib.inlines' to INSTALLED_APPS before 'django.contrib.admin'.",
-        id="snapadmin.I001",
-    )]
+    return [
+        Info(
+            "SnapAdmin is running on Django's built-in admin theme — the optional "
+            "django-unfold theme is not active.",
+            hint="This is fully supported. For the themed UI, install the theme extra "
+            "(pip install django-snapadmin[theme]) and add 'unfold', "
+            "'unfold.contrib.filters', 'unfold.contrib.forms' and "
+            "'unfold.contrib.inlines' to INSTALLED_APPS before 'django.contrib.admin'.",
+            id="snapadmin.I001",
+        )
+    ]
 
 
 def check_backup_age_recipients(app_configs, **kwargs):
@@ -365,14 +397,16 @@ def check_backup_age_recipients(app_configs, **kwargs):
     bad = [value for value in recipients if not looks_like_recipient(str(value))]
     if not bad:
         return []
-    return [Warning(
-        f"SNAPADMIN_BACKUP_AGE_RECIPIENTS contains {len(bad)} entr{'y' if len(bad) == 1 else 'ies'} "
-        f"that do not look like an age or SSH public key: {_format_labels([repr(v) for v in bad])}.",
-        hint="Each entry must be an age public key ('age1…') or an SSH public key "
-             "('ssh-ed25519 …' / 'ssh-rsa …'). A malformed entry will fail encryption "
-             "the next time a backup runs rather than being silently skipped.",
-        id="snapadmin.W008",
-    )]
+    return [
+        Warning(
+            f"SNAPADMIN_BACKUP_AGE_RECIPIENTS contains {len(bad)} entr{'y' if len(bad) == 1 else 'ies'} "
+            f"that do not look like an age or SSH public key: {_format_labels([repr(v) for v in bad])}.",
+            hint="Each entry must be an age public key ('age1…') or an SSH public key "
+            "('ssh-ed25519 …' / 'ssh-rsa …'). A malformed entry will fail encryption "
+            "the next time a backup runs rather than being silently skipped.",
+            id="snapadmin.W008",
+        )
+    ]
 
 
 def check_backup_env_requires_encryption(app_configs, **kwargs):
@@ -393,14 +427,16 @@ def check_backup_env_requires_encryption(app_configs, **kwargs):
     recipients = get_setting("SNAPADMIN_BACKUP_AGE_RECIPIENTS", None) or []
     if recipients:
         return []
-    return [Error(
-        "SNAPADMIN_BACKUP_INCLUDE includes 'env' but SNAPADMIN_BACKUP_AGE_RECIPIENTS "
-        "is empty — a backup would ship your .env file's secrets (SECRET_KEY, DB "
-        "password, …) to the backup destination in plain text.",
-        hint="Set SNAPADMIN_BACKUP_AGE_RECIPIENTS to at least one age or SSH public "
-             "key, or remove 'env' from SNAPADMIN_BACKUP_INCLUDE.",
-        id="snapadmin.E007",
-    )]
+    return [
+        Error(
+            "SNAPADMIN_BACKUP_INCLUDE includes 'env' but SNAPADMIN_BACKUP_AGE_RECIPIENTS "
+            "is empty — a backup would ship your .env file's secrets (SECRET_KEY, DB "
+            "password, …) to the backup destination in plain text.",
+            hint="Set SNAPADMIN_BACKUP_AGE_RECIPIENTS to at least one age or SSH public "
+            "key, or remove 'env' from SNAPADMIN_BACKUP_INCLUDE.",
+            id="snapadmin.E007",
+        )
+    ]
 
 
 def check_backup_offsite_requires_encryption(app_configs, **kwargs):
@@ -436,16 +472,18 @@ def check_backup_offsite_requires_encryption(app_configs, **kwargs):
     offsite = [dest for dest in _active_destinations(config) if dest != "local"]
     if not offsite:
         return []
-    return [Warning(
-        f"Backups are shipped off this host ({_format_labels(offsite)}) but "
-        "SNAPADMIN_BACKUP_AGE_RECIPIENTS is empty — every database dump leaves "
-        "the server unencrypted.",
-        hint="Set SNAPADMIN_BACKUP_AGE_RECIPIENTS to at least one age or SSH public "
-             "key ('manage.py snapadmin_age_keygen' makes one) and every dump is "
-             "encrypted in-stream before it reaches disk. Ignore this if the "
-             "destination already encrypts at rest and you trust its transport.",
-        id="snapadmin.W021",
-    )]
+    return [
+        Warning(
+            f"Backups are shipped off this host ({_format_labels(offsite)}) but "
+            "SNAPADMIN_BACKUP_AGE_RECIPIENTS is empty — every database dump leaves "
+            "the server unencrypted.",
+            hint="Set SNAPADMIN_BACKUP_AGE_RECIPIENTS to at least one age or SSH public "
+            "key ('manage.py snapadmin_age_keygen' makes one) and every dump is "
+            "encrypted in-stream before it reaches disk. Ignore this if the "
+            "destination already encrypts at rest and you trust its transport.",
+            id="snapadmin.W021",
+        )
+    ]
 
 
 def check_backup_sftp_dir(app_configs, **kwargs):
@@ -483,19 +521,21 @@ def check_backup_sftp_dir(app_configs, **kwargs):
     if not directory.startswith("/") or not directory.strip("/"):
         return []
     relative = directory.lstrip("/")
-    return [Warning(
-        f"SNAPADMIN_BACKUP_SFTP_DIR = {directory!r} is an absolute path, but the "
-        "value is relative to the SSH login directory.",
-        hint=f"Keep {directory!r} if 'pwd' right after an SSH login already prints "
-             "it — some managed SFTP products log you in there, and the relative "
-             f"form would then create {relative!r} inside it, one level too deep. "
-             f"Otherwise write {relative!r}: on a jailed account (a storage "
-             "sub-account, a chrooted user) the directory change appears to succeed "
-             "and the upload is refused instead. The backup summary and the "
-             "'db_backup_stored' log line name the directory the server actually "
-             "used, so the first run shows which case you are in.",
-        id="snapadmin.W022",
-    )]
+    return [
+        Warning(
+            f"SNAPADMIN_BACKUP_SFTP_DIR = {directory!r} is an absolute path, but the "
+            "value is relative to the SSH login directory.",
+            hint=f"Keep {directory!r} if 'pwd' right after an SSH login already prints "
+            "it — some managed SFTP products log you in there, and the relative "
+            f"form would then create {relative!r} inside it, one level too deep. "
+            f"Otherwise write {relative!r}: on a jailed account (a storage "
+            "sub-account, a chrooted user) the directory change appears to succeed "
+            "and the upload is refused instead. The backup summary and the "
+            "'db_backup_stored' log line name the directory the server actually "
+            "used, so the first run shows which case you are in.",
+            id="snapadmin.W022",
+        )
+    ]
 
 
 #: Days simulated forward when timing a crontab's period — far enough for any
@@ -603,22 +643,22 @@ def check_backup_schedule_cadence(app_configs, **kwargs):
     # than a second copy of it here: the s3 destination was added without this
     # check being updated, and an active bucket then made `manage.py check`
     # die with KeyError('s3') instead of reporting anything at all.
-    shortest = min(
-        getattr(config, _INTERVAL_ATTRS[dest]) for dest in _active_destinations(config)
-    )
+    shortest = min(getattr(config, _INTERVAL_ATTRS[dest]) for dest in _active_destinations(config))
     if beat_hours <= shortest:
         return []
-    return [Warning(
-        f"The 'snapadmin.run_db_backups' Celery Beat entry runs about every "
-        f"{beat_hours:.1f}h, less often than the shortest configured backup "
-        f"interval ({shortest}h).",
-        hint="A destination's own *_EVERY_HOURS check only runs when Beat wakes "
-             "the task up, so this combination silently drops days. Schedule "
-             "'snapadmin.run_db_backups' at least as often as your shortest "
-             "SNAPADMIN_BACKUP_*_EVERY_HOURS setting, or raise that setting to "
-             "match the Beat cadence.",
-        id="snapadmin.W010",
-    )]
+    return [
+        Warning(
+            f"The 'snapadmin.run_db_backups' Celery Beat entry runs about every "
+            f"{beat_hours:.1f}h, less often than the shortest configured backup "
+            f"interval ({shortest}h).",
+            hint="A destination's own *_EVERY_HOURS check only runs when Beat wakes "
+            "the task up, so this combination silently drops days. Schedule "
+            "'snapadmin.run_db_backups' at least as often as your shortest "
+            "SNAPADMIN_BACKUP_*_EVERY_HOURS setting, or raise that setting to "
+            "match the Beat cadence.",
+            id="snapadmin.W010",
+        )
+    ]
 
 
 def check_backup_s3_configuration(app_configs, **kwargs):
@@ -639,28 +679,32 @@ def check_backup_s3_configuration(app_configs, **kwargs):
     warnings = []
     endpoint_url = get_setting("SNAPADMIN_BACKUP_S3_ENDPOINT_URL", "") or ""
     if endpoint_url and not endpoint_url.startswith(("http://", "https://")):
-        warnings.append(Warning(
-            f"SNAPADMIN_BACKUP_S3_ENDPOINT_URL = {endpoint_url!r} does not look like a URL.",
-            hint="Set it to a full endpoint URL, e.g. "
-                 "'https://s3.eu-central-1.wasabisys.com', or leave it unset to use "
-                 "AWS's own default endpoint.",
-            id="snapadmin.W011",
-        ))
+        warnings.append(
+            Warning(
+                f"SNAPADMIN_BACKUP_S3_ENDPOINT_URL = {endpoint_url!r} does not look like a URL.",
+                hint="Set it to a full endpoint URL, e.g. "
+                "'https://s3.eu-central-1.wasabisys.com', or leave it unset to use "
+                "AWS's own default endpoint.",
+                id="snapadmin.W011",
+            )
+        )
 
     access_key = get_setting("SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID", "") or ""
     secret_key = get_setting("SNAPADMIN_BACKUP_S3_SECRET_ACCESS_KEY", "") or ""
     if not access_key and not secret_key and not s3_ambient_credentials_likely():
-        warnings.append(Warning(
-            "SNAPADMIN_BACKUP_S3_BUCKET is set, but no SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID / "
-            "_SECRET_ACCESS_KEY is configured and no ambient AWS credential source "
-            "(environment variables, a shared credentials file, an ECS/IRSA role) was "
-            "detected — S3 backups will silently never upload.",
-            hint="Set SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID/_SECRET_ACCESS_KEY, or ignore this "
-                 "warning on a host that authenticates purely through an EC2 instance "
-                 "profile — that case cannot be detected without a network call, so this "
-                 "check does not attempt it.",
-            id="snapadmin.W011",
-        ))
+        warnings.append(
+            Warning(
+                "SNAPADMIN_BACKUP_S3_BUCKET is set, but no SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID / "
+                "_SECRET_ACCESS_KEY is configured and no ambient AWS credential source "
+                "(environment variables, a shared credentials file, an ECS/IRSA role) was "
+                "detected — S3 backups will silently never upload.",
+                hint="Set SNAPADMIN_BACKUP_S3_ACCESS_KEY_ID/_SECRET_ACCESS_KEY, or ignore this "
+                "warning on a host that authenticates purely through an EC2 instance "
+                "profile — that case cannot be detected without a network call, so this "
+                "check does not attempt it.",
+                id="snapadmin.W011",
+            )
+        )
     return warnings
 
 
@@ -676,14 +720,16 @@ def check_snapadmin_profile(app_configs, **kwargs):
     profile = getattr(settings, "SNAPADMIN_PROFILE", None)
     if profile is None or profile in conf.PROFILES:
         return []
-    return [Error(
-        f"SNAPADMIN_PROFILE = {profile!r} is not a recognised profile.",
-        hint=f"Choose one of {', '.join(conf.PROFILES)}, or unset it to apply no "
-             "profile at all. Note that unset is not the same as 'full': since 1.0 "
-             "'full' turns the REST and GraphQL surfaces on, while unset leaves them "
-             "at their built-in default of off.",
-        id="snapadmin.E006",
-    )]
+    return [
+        Error(
+            f"SNAPADMIN_PROFILE = {profile!r} is not a recognised profile.",
+            hint=f"Choose one of {', '.join(conf.PROFILES)}, or unset it to apply no "
+            "profile at all. Note that unset is not the same as 'full': since 1.0 "
+            "'full' turns the REST and GraphQL surfaces on, while unset leaves them "
+            "at their built-in default of off.",
+            id="snapadmin.E006",
+        )
+    ]
 
 
 def check_snapadmin_profile_contradiction(app_configs, **kwargs):
@@ -703,15 +749,17 @@ def check_snapadmin_profile_contradiction(app_configs, **kwargs):
     warnings = []
     for name, preset_value in sorted(conf._PRESETS[profile].items()):
         if hasattr(settings, name) and getattr(settings, name) != preset_value:
-            warnings.append(Warning(
-                f"{name} = {getattr(settings, name)!r} is set explicitly, overriding "
-                f"what SNAPADMIN_PROFILE = {profile!r} would otherwise set it to "
-                f"({preset_value!r}).",
-                hint="The explicit setting wins — this is allowed and sometimes "
-                     "intentional. If it is not, remove the explicit setting to let "
-                     "the profile take effect.",
-                id="snapadmin.W009",
-            ))
+            warnings.append(
+                Warning(
+                    f"{name} = {getattr(settings, name)!r} is set explicitly, overriding "
+                    f"what SNAPADMIN_PROFILE = {profile!r} would otherwise set it to "
+                    f"({preset_value!r}).",
+                    hint="The explicit setting wins — this is allowed and sometimes "
+                    "intentional. If it is not, remove the explicit setting to let "
+                    "the profile take effect.",
+                    id="snapadmin.W009",
+                )
+            )
     return warnings
 
 
@@ -735,11 +783,7 @@ def check_retention_purge_scheduled(app_configs, **kwargs):
     configured = (
         SnapadminAuditLog.data_retention_days() > 0
         or bool(get_setting("SNAPADMIN_EXPORT_RETENTION_DAYS", None))
-        or any(
-            _retention_configured(model)
-            for model in apps.get_models()
-            if is_registered(model)
-        )
+        or any(_retention_configured(model) for model in apps.get_models() if is_registered(model))
     )
     if not configured:
         return []
@@ -756,18 +800,20 @@ def check_retention_purge_scheduled(app_configs, **kwargs):
     if get_setting("SNAPADMIN_PURGE_EXTERNAL", False):
         return []
 
-    return [Warning(
-        "Retention is configured (a model's data_retention_days or "
-        "data_retention_date_field, SNAPADMIN_AUDIT_RETENTION_DAYS or "
-        "SNAPADMIN_EXPORT_RETENTION_DAYS), "
-        "but no CELERY_BEAT_SCHEDULE entry runs snapadmin.purge_expired_data — "
-        "the tables it names will keep growing until something calls it.",
-        hint="Add a CELERY_BEAT_SCHEDULE entry for the 'snapadmin.purge_expired_data' "
-             "task (see docs/index.html#gdpr), or run "
-             "'manage.py snapadmin_purge_expired_data' from an external cron and "
-             "declare it with SNAPADMIN_PURGE_EXTERNAL = True.",
-        id="snapadmin.W012",
-    )]
+    return [
+        Warning(
+            "Retention is configured (a model's data_retention_days or "
+            "data_retention_date_field, SNAPADMIN_AUDIT_RETENTION_DAYS or "
+            "SNAPADMIN_EXPORT_RETENTION_DAYS), "
+            "but no CELERY_BEAT_SCHEDULE entry runs snapadmin.purge_expired_data — "
+            "the tables it names will keep growing until something calls it.",
+            hint="Add a CELERY_BEAT_SCHEDULE entry for the 'snapadmin.purge_expired_data' "
+            "task (see docs/index.html#gdpr), or run "
+            "'manage.py snapadmin_purge_expired_data' from an external cron and "
+            "declare it with SNAPADMIN_PURGE_EXTERNAL = True.",
+            id="snapadmin.W012",
+        )
+    ]
 
 
 def check_snap_action_read_only_conflict(app_configs, **kwargs):
@@ -806,16 +852,18 @@ def check_snap_action_read_only_conflict(app_configs, **kwargs):
             blocked = sorted(spec.methods - allowed)
             if not blocked:
                 continue
-            errors.append(Error(
-                f"{model._meta.label}'s @snap_action {spec.name!r} declares method(s) "
-                f"{blocked} that the model's own api_read_only/api_http_method_names "
-                f"policy already blocks (only {sorted(allowed)} allowed) — this action "
-                "can never be reached and always answers 403.",
-                hint="Widen the model's api_http_method_names, drop the conflicting "
-                     "method(s) from the action, or turn off api_read_only if the "
-                     "model is meant to accept this action.",
-                id="snapadmin.E008",
-            ))
+            errors.append(
+                Error(
+                    f"{model._meta.label}'s @snap_action {spec.name!r} declares method(s) "
+                    f"{blocked} that the model's own api_read_only/api_http_method_names "
+                    f"policy already blocks (only {sorted(allowed)} allowed) — this action "
+                    "can never be reached and always answers 403.",
+                    hint="Widen the model's api_http_method_names, drop the conflicting "
+                    "method(s) from the action, or turn off api_read_only if the "
+                    "model is meant to accept this action.",
+                    id="snapadmin.E008",
+                )
+            )
     return errors
 
 
@@ -825,7 +873,7 @@ def check_snap_action_read_only_conflict(app_configs, **kwargs):
 _SUBJECT_PATH_UNDECLARED = object()
 
 
-def check_subject_paths(app_configs, **kwargs):
+def check_subject_paths(app_configs, **kwargs):  # noqa: C901 - refactor tracked as #QA1c-cx
     """GDPR subject-access declaration (#FUT4a/#FUT4b) — loud, not silent, omission.
 
     Every registered SnapAdmin model must declare ``subject_path`` — a forward
@@ -880,16 +928,18 @@ def check_subject_paths(app_configs, **kwargs):
         path = get_model_meta(model, "subject_path", _SUBJECT_PATH_UNDECLARED)
 
         if path is _SUBJECT_PATH_UNDECLARED:
-            errors.append(Error(
-                f"{label} is a registered SnapAdmin model but never declares "
-                "subject_path (or None) — a GDPR subject-access export/deletion "
-                "cannot know whether this model carries personal data reachable "
-                "from a subject.",
-                hint="Set subject_path to a forward ORM lookup path reaching the "
-                     "subject's identifying field (e.g. 'customer__email'), or "
-                     f"subject_path = None if {label} carries nothing subject-scoped.",
-                id="snapadmin.E011",
-            ))
+            errors.append(
+                Error(
+                    f"{label} is a registered SnapAdmin model but never declares "
+                    "subject_path (or None) — a GDPR subject-access export/deletion "
+                    "cannot know whether this model carries personal data reachable "
+                    "from a subject.",
+                    hint="Set subject_path to a forward ORM lookup path reaching the "
+                    "subject's identifying field (e.g. 'customer__email'), or "
+                    f"subject_path = None if {label} carries nothing subject-scoped.",
+                    id="snapadmin.E011",
+                )
+            )
             continue
         if path is None:
             continue
@@ -899,45 +949,51 @@ def check_subject_paths(app_configs, **kwargs):
 
         if is_subject:
             if not identifier:
-                errors.append(Error(
-                    f"{label} sets is_data_subject=True but declares no "
-                    "subject_identifier.",
-                    hint="Set subject_identifier to the field name on this model "
-                         "holding the raw identifier value, e.g. 'email'.",
-                    id="snapadmin.E012",
-                ))
+                errors.append(
+                    Error(
+                        f"{label} sets is_data_subject=True but declares no subject_identifier.",
+                        hint="Set subject_identifier to the field name on this model "
+                        "holding the raw identifier value, e.g. 'email'.",
+                        id="snapadmin.E012",
+                    )
+                )
                 continue
             if path != identifier:
-                errors.append(Error(
-                    f"{label} is a subject model (is_data_subject=True) whose "
-                    f"subject_path ({path!r}) does not equal its own "
-                    f"subject_identifier ({identifier!r}).",
-                    hint="A subject model must reach itself by exactly its own "
-                         f"identifying field: set subject_path = {identifier!r}.",
-                    id="snapadmin.E012",
-                ))
+                errors.append(
+                    Error(
+                        f"{label} is a subject model (is_data_subject=True) whose "
+                        f"subject_path ({path!r}) does not equal its own "
+                        f"subject_identifier ({identifier!r}).",
+                        hint="A subject model must reach itself by exactly its own "
+                        f"identifying field: set subject_path = {identifier!r}.",
+                        id="snapadmin.E012",
+                    )
+                )
                 continue
 
         if not isinstance(path, str) or not path:
-            errors.append(Error(
-                f"{label}.subject_path = {path!r} is not a non-empty string.",
-                hint="subject_path must be a '__'-joined ORM lookup path string, "
-                     "or None.",
-                id="snapadmin.E012",
-            ))
+            errors.append(
+                Error(
+                    f"{label}.subject_path = {path!r} is not a non-empty string.",
+                    hint="subject_path must be a '__'-joined ORM lookup path string, or None.",
+                    id="snapadmin.E012",
+                )
+            )
             continue
 
         segments = path.split("__")
         hops = segments[:-1]
         if len(hops) > 3:
-            errors.append(Error(
-                f"{label}.subject_path = {path!r} is {len(hops)} relation hops "
-                "deep — over the 3-hop cap.",
-                hint="Shorten the path, or reconsider the design — a path this "
-                     "deep is worth a person looking at, not a silent multi-hop "
-                     "join inside a legally-binding export.",
-                id="snapadmin.E012",
-            ))
+            errors.append(
+                Error(
+                    f"{label}.subject_path = {path!r} is {len(hops)} relation hops "
+                    "deep — over the 3-hop cap.",
+                    hint="Shorten the path, or reconsider the design — a path this "
+                    "deep is worth a person looking at, not a silent multi-hop "
+                    "join inside a legally-binding export.",
+                    id="snapadmin.E012",
+                )
+            )
             continue
 
         current = model
@@ -958,26 +1014,30 @@ def check_subject_paths(app_configs, **kwargs):
             except FieldDoesNotExist:
                 resolvable = False
         if not resolvable:
-            errors.append(Error(
-                f"{label}.subject_path = {path!r} does not resolve to a real "
-                "field via this model's own forward relations.",
-                hint="subject_path must be a '__'-joined chain of this model's "
-                     "own forward ForeignKey/OneToOneField names, ending in a "
-                     "real field name — never a reverse accessor or a "
-                     "many-to-many.",
-                id="snapadmin.E012",
-            ))
+            errors.append(
+                Error(
+                    f"{label}.subject_path = {path!r} does not resolve to a real "
+                    "field via this model's own forward relations.",
+                    hint="subject_path must be a '__'-joined chain of this model's "
+                    "own forward ForeignKey/OneToOneField names, ending in a "
+                    "real field name — never a reverse accessor or a "
+                    "many-to-many.",
+                    id="snapadmin.E012",
+                )
+            )
             continue
 
         if hops and get_model_meta(model, "es_storage_mode", None) == EsStorageMode.ES_ONLY:
-            errors.append(Error(
-                f"{label} is ES_ONLY and subject_path = {path!r} has relation "
-                "hops — EsQuerySet.filter() only matches flat field=value, so a "
-                "multi-hop path silently matches nothing at export/deletion time.",
-                hint="An ES_ONLY model may only declare a zero-hop subject_path "
-                     "— a field literally present on the ES document.",
-                id="snapadmin.E012",
-            ))
+            errors.append(
+                Error(
+                    f"{label} is ES_ONLY and subject_path = {path!r} has relation "
+                    "hops — EsQuerySet.filter() only matches flat field=value, so a "
+                    "multi-hop path silently matches nothing at export/deletion time.",
+                    hint="An ES_ONLY model may only declare a zero-hop subject_path "
+                    "— a field literally present on the ES document.",
+                    id="snapadmin.E012",
+                )
+            )
 
     return errors
 
@@ -1025,29 +1085,33 @@ def check_tenant_scoping(app_configs, **kwargs):
             # A @snap_model-decorated plain model: EsManager's tenant-scoping
             # hook (EsManager.get_queryset) is never its default manager, so
             # the declaration cannot be enforced regardless of the field.
-            errors.append(Error(
-                f"{label} sets tenant_scoped = True but is registered via @snap_model, "
-                "not a SnapModel subclass — tenant scoping is enforced through "
-                "SnapModel's EsManager, which a plain registered model never uses as "
-                "its default manager, so this declaration is never actually enforced.",
-                hint=f"Subclass SnapModel instead of decorating a plain model with "
-                     f"@snap_model, or drop tenant_scoped on {label} if isolation "
-                     "genuinely does not apply to it.",
-                id="snapadmin.E009",
-            ))
+            errors.append(
+                Error(
+                    f"{label} sets tenant_scoped = True but is registered via @snap_model, "
+                    "not a SnapModel subclass — tenant scoping is enforced through "
+                    "SnapModel's EsManager, which a plain registered model never uses as "
+                    "its default manager, so this declaration is never actually enforced.",
+                    hint=f"Subclass SnapModel instead of decorating a plain model with "
+                    f"@snap_model, or drop tenant_scoped on {label} if isolation "
+                    "genuinely does not apply to it.",
+                    id="snapadmin.E009",
+                )
+            )
             continue
 
         try:
             model._meta.get_field(field_name)
         except FieldDoesNotExist:
-            errors.append(Error(
-                f"{label} sets tenant_scoped = True but has no field named "
-                f"{field_name!r} — its tenant column cannot be resolved.",
-                hint=f"Add {field_name} = snapadmin.tenancy.tenant_field() to {label}, "
-                     "or set tenant_field to the name of the column that already "
-                     "carries the tenant value.",
-                id="snapadmin.E009",
-            ))
+            errors.append(
+                Error(
+                    f"{label} sets tenant_scoped = True but has no field named "
+                    f"{field_name!r} — its tenant column cannot be resolved.",
+                    hint=f"Add {field_name} = snapadmin.tenancy.tenant_field() to {label}, "
+                    "or set tenant_field to the name of the column that already "
+                    "carries the tenant value.",
+                    id="snapadmin.E009",
+                )
+            )
 
     return errors
 
@@ -1074,14 +1138,16 @@ def check_fetch_by_max_values(app_configs, **kwargs):
         return []
     if max_values <= FETCH_BY_MAX_VALUES_SANE_CEILING:
         return []
-    return [Warning(
-        f"SNAPADMIN_FETCH_BY_MAX_VALUES = {max_values} is unusually high — it no longer "
-        "meaningfully bounds the fetch-by route's request size.",
-        hint=f"Values above {FETCH_BY_MAX_VALUES_SANE_CEILING} defeat the purpose of the cap "
-             "(an unbounded 'values' list is a denial-of-service vector). Lower it, or confirm "
-             "this is genuinely intentional for a trusted, bulk-synchronisation caller.",
-        id="snapadmin.W013",
-    )]
+    return [
+        Warning(
+            f"SNAPADMIN_FETCH_BY_MAX_VALUES = {max_values} is unusually high — it no longer "
+            "meaningfully bounds the fetch-by route's request size.",
+            hint=f"Values above {FETCH_BY_MAX_VALUES_SANE_CEILING} defeat the purpose of the cap "
+            "(an unbounded 'values' list is a denial-of-service vector). Lower it, or confirm "
+            "this is genuinely intentional for a trusted, bulk-synchronisation caller.",
+            id="snapadmin.W013",
+        )
+    ]
 
 
 # snapadmin.W014 ("SNAPADMIN_REST_API_ENABLED/_GRAPHQL_ENABLED left unset while mounted")
@@ -1111,13 +1177,15 @@ def check_sharding_config(app_configs, **kwargs):
             for replica_dsn in shard.replica_dsns:
                 parse_dsn(replica_dsn)
     except ImproperlyConfigured as exc:
-        return [Error(
-            f"SNAPADMIN_SHARDING is enabled but could not be resolved: {exc}",
-            hint="Fix the DSN(s) or the 'SHARDS'/'DATABASES' shape in "
-                 "SNAPADMIN_SHARDING. Until this is fixed, sharding stays "
-                 "effectively off — every query runs on 'default'.",
-            id="snapadmin.E013",
-        )]
+        return [
+            Error(
+                f"SNAPADMIN_SHARDING is enabled but could not be resolved: {exc}",
+                hint="Fix the DSN(s) or the 'SHARDS'/'DATABASES' shape in "
+                "SNAPADMIN_SHARDING. Until this is fixed, sharding stays "
+                "effectively off — every query runs on 'default'.",
+                id="snapadmin.E013",
+            )
+        ]
     return []
 
 
@@ -1125,7 +1193,10 @@ def check_sharding_strategy(app_configs, **kwargs):
     """Error: ``STRATEGY``/``REPLICA_SELECTION`` not recognised, or a ``'custom'``
     ``STRATEGY`` with no importable ``CUSTOM_ROUTER_FUNC``."""
     from snapadmin.sharding.registration import (
-        REPLICA_SELECTIONS, STRATEGIES, get_sharding_config, is_sharding_enabled,
+        REPLICA_SELECTIONS,
+        STRATEGIES,
+        get_sharding_config,
+        is_sharding_enabled,
     )
 
     if not is_sharding_enabled():
@@ -1135,39 +1206,47 @@ def check_sharding_strategy(app_configs, **kwargs):
 
     strategy = raw.get("STRATEGY", "modulo")
     if strategy not in STRATEGIES:
-        errors.append(Error(
-            f"SNAPADMIN_SHARDING['STRATEGY'] = {strategy!r} is not recognised.",
-            hint=f"Choose one of {STRATEGIES}.",
-            id="snapadmin.E014",
-        ))
+        errors.append(
+            Error(
+                f"SNAPADMIN_SHARDING['STRATEGY'] = {strategy!r} is not recognised.",
+                hint=f"Choose one of {STRATEGIES}.",
+                id="snapadmin.E014",
+            )
+        )
     elif strategy == "custom":
         func_path = raw.get("CUSTOM_ROUTER_FUNC")
         if not func_path:
-            errors.append(Error(
-                "SNAPADMIN_SHARDING['STRATEGY'] = 'custom' but 'CUSTOM_ROUTER_FUNC' "
-                "is not set.",
-                hint="Set 'CUSTOM_ROUTER_FUNC' to a dotted path, e.g. "
-                     "'my_app.utils.custom_shard_selector'.",
-                id="snapadmin.E014",
-            ))
+            errors.append(
+                Error(
+                    "SNAPADMIN_SHARDING['STRATEGY'] = 'custom' but 'CUSTOM_ROUTER_FUNC' "
+                    "is not set.",
+                    hint="Set 'CUSTOM_ROUTER_FUNC' to a dotted path, e.g. "
+                    "'my_app.utils.custom_shard_selector'.",
+                    id="snapadmin.E014",
+                )
+            )
         else:
             try:
                 import_string(func_path)
             except ImportError as exc:
-                errors.append(Error(
-                    f"SNAPADMIN_SHARDING['CUSTOM_ROUTER_FUNC'] = {func_path!r} could "
-                    f"not be imported: {exc}.",
-                    hint="Check the dotted path is correct and importable.",
-                    id="snapadmin.E014",
-                ))
+                errors.append(
+                    Error(
+                        f"SNAPADMIN_SHARDING['CUSTOM_ROUTER_FUNC'] = {func_path!r} could "
+                        f"not be imported: {exc}.",
+                        hint="Check the dotted path is correct and importable.",
+                        id="snapadmin.E014",
+                    )
+                )
 
     selection = raw.get("REPLICA_SELECTION", "round_robin")
     if selection not in REPLICA_SELECTIONS:
-        errors.append(Error(
-            f"SNAPADMIN_SHARDING['REPLICA_SELECTION'] = {selection!r} is not recognised.",
-            hint=f"Choose one of {REPLICA_SELECTIONS}.",
-            id="snapadmin.E015",
-        ))
+        errors.append(
+            Error(
+                f"SNAPADMIN_SHARDING['REPLICA_SELECTION'] = {selection!r} is not recognised.",
+                hint=f"Choose one of {REPLICA_SELECTIONS}.",
+                id="snapadmin.E015",
+            )
+        )
     return errors
 
 
@@ -1193,27 +1272,30 @@ def check_sharding_ranges(app_configs, **kwargs):
 
     missing = sorted(name for name, shard in shards.items() if shard.value_range is None)
     if missing:
-        return [Error(
-            f"SNAPADMIN_SHARDING['STRATEGY'] = 'range' but shard(s) {missing} declare "
-            "no 'RANGE'.",
-            hint="Every shard needs a 'RANGE': (low, high) pair when using the range "
-                 "strategy.",
-            id="snapadmin.E016",
-        )]
+        return [
+            Error(
+                f"SNAPADMIN_SHARDING['STRATEGY'] = 'range' but shard(s) {missing} declare "
+                "no 'RANGE'.",
+                hint="Every shard needs a 'RANGE': (low, high) pair when using the range strategy.",
+                id="snapadmin.E016",
+            )
+        ]
 
     ordered = sorted(
         ((shard.value_range, name) for name, shard in shards.items()),
         key=lambda pair: pair[0][0],
     )
     errors = []
-    for (prev_range, prev_name), (curr_range, curr_name) in zip(ordered, ordered[1:]):
+    for (prev_range, prev_name), (curr_range, curr_name) in zip(ordered, ordered[1:], strict=False):
         if curr_range[0] <= prev_range[1]:
-            errors.append(Error(
-                f"SNAPADMIN_SHARDING ranges overlap: {prev_name!r} {prev_range} and "
-                f"{curr_name!r} {curr_range}.",
-                hint="Each shard's RANGE must be non-overlapping.",
-                id="snapadmin.E016",
-            ))
+            errors.append(
+                Error(
+                    f"SNAPADMIN_SHARDING ranges overlap: {prev_name!r} {prev_range} and "
+                    f"{curr_name!r} {curr_range}.",
+                    hint="Each shard's RANGE must be non-overlapping.",
+                    id="snapadmin.E016",
+                )
+            )
     return errors
 
 
@@ -1240,20 +1322,27 @@ def check_api_extras_installed(app_configs, **kwargs):
         importlib.util.find_spec(name) is None
         for name in ("rest_framework", "drf_spectacular", "django_filters")
     ):
-        errors.append(Error(
-            "The REST API and/or its OpenAPI schema is enabled but the [api] extra "
-            "(djangorestframework, drf-spectacular, django-filter) is not installed.",
-            hint="pip install django-snapadmin[api], or turn the feature(s) off: "
-                 "SNAPADMIN_REST_API_ENABLED = False and SNAPADMIN_SWAGGER_ENABLED = False.",
-            id="snapadmin.E010",
-        ))
+        errors.append(
+            Error(
+                "The REST API and/or its OpenAPI schema is enabled but the [api] extra "
+                "(djangorestframework, drf-spectacular, django-filter) is not installed.",
+                hint="pip install django-snapadmin[api], or turn the feature(s) off: "
+                "SNAPADMIN_REST_API_ENABLED = False and SNAPADMIN_SWAGGER_ENABLED = False.",
+                id="snapadmin.E010",
+            )
+        )
 
-    if get_setting("SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_ENABLED_DEFAULT) and importlib.util.find_spec("graphene_django") is None:
-        errors.append(Error(
-            "GraphQL is enabled but the [graphql] extra (graphene-django) is not installed.",
-            hint="pip install django-snapadmin[graphql], or set SNAPADMIN_GRAPHQL_ENABLED = False.",
-            id="snapadmin.E010",
-        ))
+    if (
+        get_setting("SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_ENABLED_DEFAULT)
+        and importlib.util.find_spec("graphene_django") is None
+    ):
+        errors.append(
+            Error(
+                "GraphQL is enabled but the [graphql] extra (graphene-django) is not installed.",
+                hint="pip install django-snapadmin[graphql], or set SNAPADMIN_GRAPHQL_ENABLED = False.",
+                id="snapadmin.E010",
+            )
+        )
     return errors
 
 
@@ -1322,13 +1411,15 @@ def check_empty_admin_forms(app_configs, **kwargs):
     )
     if not empty:
         return []
-    return [Warning(
-        f"{len(empty)} registered model(s) would generate an empty admin change form — no field "
-        f"sets show_in_form=True: {_format_labels(empty)}.",
-        hint="Set show_in_form=True on at least one field, or raise the project-wide "
-             "SNAPADMIN_SHOW_IN_FORM_DEFAULT if most fields should appear on the form by default.",
-        id="snapadmin.W015",
-    )]
+    return [
+        Warning(
+            f"{len(empty)} registered model(s) would generate an empty admin change form — no field "
+            f"sets show_in_form=True: {_format_labels(empty)}.",
+            hint="Set show_in_form=True on at least one field, or raise the project-wide "
+            "SNAPADMIN_SHOW_IN_FORM_DEFAULT if most fields should appear on the form by default.",
+            id="snapadmin.W015",
+        )
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1340,6 +1431,7 @@ def check_empty_admin_forms(app_configs, **kwargs):
 # next SECRET_KEY rotation, when the data is already unreadable. These three
 # checks are what makes the feature fail closed at startup instead.
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _encryption_keyset():
     """``(keyset, error_message)`` — resolving a keyset never explodes a check.
@@ -1363,37 +1455,43 @@ def check_encryption_keys(app_configs, **kwargs):
 
     keyset, error = _encryption_keyset()
     if error:
-        return [Error(
-            f"SNAPADMIN_ENCRYPTION is misconfigured: {error}",
-            hint="Encrypted fields cannot be read or written until this resolves. "
-                 "Generate a key with `python manage.py snapadmin_encryption_key`.",
-            id="snapadmin.E019",
-        )]
+        return [
+            Error(
+                f"SNAPADMIN_ENCRYPTION is misconfigured: {error}",
+                hint="Encrypted fields cannot be read or written until this resolves. "
+                "Generate a key with `python manage.py snapadmin_encryption_key`.",
+                id="snapadmin.E019",
+            )
+        ]
     if keyset is None:
         return []
 
     messages = []
     reused = [key.id for key in keyset if encryption_keys.matches_secret_key(key)]
     if reused:
-        messages.append(Error(
-            f"SNAPADMIN_ENCRYPTION key(s) {', '.join(repr(key_id) for key_id in reused)} "
-            "reuse Django's SECRET_KEY as encryption key material.",
-            hint="SECRET_KEY is rotated for session and CSRF reasons; every rotation would "
-                 "make every encrypted column permanently unreadable. Generate a dedicated "
-                 "key with `python manage.py snapadmin_encryption_key`.",
-            id="snapadmin.E017",
-        ))
+        messages.append(
+            Error(
+                f"SNAPADMIN_ENCRYPTION key(s) {', '.join(repr(key_id) for key_id in reused)} "
+                "reuse Django's SECRET_KEY as encryption key material.",
+                hint="SECRET_KEY is rotated for session and CSRF reasons; every rotation would "
+                "make every encrypted column permanently unreadable. Generate a dedicated "
+                "key with `python manage.py snapadmin_encryption_key`.",
+                id="snapadmin.E017",
+            )
+        )
 
     if keyset.source is encryption_keys.KeySource.SETTINGS and not settings.DEBUG:
-        messages.append(Warning(
-            "SNAPADMIN_ENCRYPTION['KEYS'] holds key material directly in the settings "
-            "module, with DEBUG off.",
-            hint=f"A key in a settings module is a key in version control. Move it to the "
-                 f"{encryption_keys.ENV_KEYS} environment variable, to "
-                 "SNAPADMIN_ENCRYPTION['KEY_FILE'] (a mounted secret), or to "
-                 "SNAPADMIN_ENCRYPTION['KEY_PROVIDER'] (a KMS/Vault lookup).",
-            id="snapadmin.W017",
-        ))
+        messages.append(
+            Warning(
+                "SNAPADMIN_ENCRYPTION['KEYS'] holds key material directly in the settings "
+                "module, with DEBUG off.",
+                hint=f"A key in a settings module is a key in version control. Move it to the "
+                f"{encryption_keys.ENV_KEYS} environment variable, to "
+                "SNAPADMIN_ENCRYPTION['KEY_FILE'] (a mounted secret), or to "
+                "SNAPADMIN_ENCRYPTION['KEY_PROVIDER'] (a KMS/Vault lookup).",
+                id="snapadmin.W017",
+            )
+        )
     return messages
 
 
@@ -1415,14 +1513,16 @@ def check_encryption_key_file(app_configs, **kwargs):
         return []
     if not mode & (stat.S_IRGRP | stat.S_IROTH):
         return []
-    return [Warning(
-        f"The SnapAdmin encryption key file {path!r} is readable by group or others "
-        f"(mode {stat.filemode(mode)}).",
-        hint="Every process on the host can read your encryption key. Restrict it to its "
-             "owner (chmod 600), and prefer a secret mounted read-only for the "
-             "application user.",
-        id="snapadmin.W016",
-    )]
+    return [
+        Warning(
+            f"The SnapAdmin encryption key file {path!r} is readable by group or others "
+            f"(mode {stat.filemode(mode)}).",
+            hint="Every process on the host can read your encryption key. Restrict it to its "
+            "owner (chmod 600), and prefer a secret mounted read-only for the "
+            "application user.",
+            id="snapadmin.W016",
+        )
+    ]
 
 
 def check_encryption_required(app_configs, **kwargs):
@@ -1446,13 +1546,15 @@ def check_encryption_required(app_configs, **kwargs):
     )
     if encryption_keys.is_strict():
         return [Error(message, hint=hint, id="snapadmin.E018")]
-    return [Warning(
-        f"{message} SNAPADMIN_ENCRYPTION['STRICT'] is off, so startup continues — but "
-        "every read or write of an encrypted field will still fail.",
-        hint=f"{hint} STRICT only relaxes this startup check; it never lets an encrypted "
-             "field fall back to storing plaintext.",
-        id="snapadmin.W018",
-    )]
+    return [
+        Warning(
+            f"{message} SNAPADMIN_ENCRYPTION['STRICT'] is off, so startup continues — but "
+            "every read or write of an encrypted field will still fail.",
+            hint=f"{hint} STRICT only relaxes this startup check; it never lets an encrypted "
+            "field fall back to storing plaintext.",
+            id="snapadmin.W018",
+        )
+    ]
 
 
 def _blind_index_field_class():
@@ -1514,66 +1616,76 @@ def check_encrypted_field_usage(app_configs, **kwargs):
         for field in encrypted:
             label = f"{model._meta.label}.{field.name}"
             if getattr(field, "searchable", False) and not getattr(field, "blind_index", False):
-                errors.append(Error(
-                    f"{label} is encrypted and searchable=True, but has no blind index. "
-                    "The admin search box and the REST ?search= filter build an icontains "
-                    "over the column, which holds ciphertext — the search would match "
-                    "nothing and report the row does not exist.",
-                    hint="Add blind_index=True for exact-match lookups, or drop "
-                         "searchable=True. Substring search on an encrypted column is not "
-                         "possible at all.",
-                    obj=field,
-                    id="snapadmin.E021",
-                ))
+                errors.append(
+                    Error(
+                        f"{label} is encrypted and searchable=True, but has no blind index. "
+                        "The admin search box and the REST ?search= filter build an icontains "
+                        "over the column, which holds ciphertext — the search would match "
+                        "nothing and report the row does not exist.",
+                        hint="Add blind_index=True for exact-match lookups, or drop "
+                        "searchable=True. Substring search on an encrypted column is not "
+                        "possible at all.",
+                        obj=field,
+                        id="snapadmin.E021",
+                    )
+                )
             if getattr(field, "filterable", False):
-                errors.append(Error(
-                    f"{label} is encrypted and filterable=True. A sidebar filter reads the "
-                    "column's distinct values through the ORM, which decrypts them — so the "
-                    "admin would list every distinct plaintext in the sidebar, to every user "
-                    "who can open the changelist. Applying the filter then fails outright, "
-                    "because the lookup behind it is refused.",
-                    hint="Drop filterable=True. A filter over an encrypted column cannot be "
-                         "made safe: the values it offers are the values being protected.",
-                    obj=field,
-                    id="snapadmin.E024",
-                ))
+                errors.append(
+                    Error(
+                        f"{label} is encrypted and filterable=True. A sidebar filter reads the "
+                        "column's distinct values through the ORM, which decrypts them — so the "
+                        "admin would list every distinct plaintext in the sidebar, to every user "
+                        "who can open the changelist. Applying the filter then fails outright, "
+                        "because the lookup behind it is refused.",
+                        hint="Drop filterable=True. A filter over an encrypted column cannot be "
+                        "made safe: the values it offers are the values being protected.",
+                        obj=field,
+                        id="snapadmin.E024",
+                    )
+                )
             if field.unique and not getattr(field, "blind_index", False):
-                errors.append(Error(
-                    f"{label} is encrypted and unique=True, but has no blind index. Every "
-                    "ciphertext carries its own random nonce, so the constraint is "
-                    "satisfied by every row and enforces nothing — two rows with the same "
-                    "value would both be accepted.",
-                    hint="Add blind_index=True; the constraint then moves to the "
-                         f"{field.name}_bi column, where it means what you meant.",
-                    obj=field,
-                    id="snapadmin.E022",
-                ))
+                errors.append(
+                    Error(
+                        f"{label} is encrypted and unique=True, but has no blind index. Every "
+                        "ciphertext carries its own random nonce, so the constraint is "
+                        "satisfied by every row and enforces nothing — two rows with the same "
+                        "value would both be accepted.",
+                        hint="Add blind_index=True; the constraint then moves to the "
+                        f"{field.name}_bi column, where it means what you meant.",
+                        obj=field,
+                        id="snapadmin.E022",
+                    )
+                )
             if field.db_index and not getattr(field, "blind_index", False):
-                errors.append(Warning(
-                    f"{label} is encrypted and db_index=True, but no lookup can use that "
-                    "index — the column holds ciphertext and every comparison on it is "
-                    "refused.",
-                    hint="Drop db_index=True, or add blind_index=True, which creates an "
-                         "index on the sibling column that lookups actually use.",
-                    obj=field,
-                    id="snapadmin.W019",
-                ))
+                errors.append(
+                    Warning(
+                        f"{label} is encrypted and db_index=True, but no lookup can use that "
+                        "index — the column holds ciphertext and every comparison on it is "
+                        "refused.",
+                        hint="Drop db_index=True, or add blind_index=True, which creates an "
+                        "index on the sibling column that lookups actually use.",
+                        obj=field,
+                        id="snapadmin.W019",
+                    )
+                )
 
         encrypted_names = {f.name for f in encrypted}
-        for entry in (model._meta.ordering or []):
+        for entry in model._meta.ordering or []:
             name = str(entry).lstrip("-")
             if name in encrypted_names:
-                errors.append(Error(
-                    f"{model._meta.label}.Meta.ordering sorts by {name!r}, which is "
-                    "encrypted. The database would order rows by the base64url envelope, "
-                    "which bears no relation to the value — a changelist sorted this way "
-                    "looks sorted and is not.",
-                    hint="Order by a different column. Ordering an encrypted column is "
-                         "not possible, and unlike a filter it cannot be refused at query "
-                         "time, which is why this is caught here.",
-                    obj=model,
-                    id="snapadmin.E023",
-                ))
+                errors.append(
+                    Error(
+                        f"{model._meta.label}.Meta.ordering sorts by {name!r}, which is "
+                        "encrypted. The database would order rows by the base64url envelope, "
+                        "which bears no relation to the value — a changelist sorted this way "
+                        "looks sorted and is not.",
+                        hint="Order by a different column. Ordering an encrypted column is "
+                        "not possible, and unlike a filter it cannot be refused at query "
+                        "time, which is why this is caught here.",
+                        obj=model,
+                        id="snapadmin.E023",
+                    )
+                )
 
         for field in model._meta.get_fields():
             source = getattr(field, "source_field", None)
@@ -1584,19 +1696,23 @@ def check_encrypted_field_usage(app_configs, **kwargs):
             except FieldDoesNotExist:
                 indexed = None
             if indexed is None or not getattr(indexed, "is_snap_encrypted", False):
-                missing = "is not a field on this model" if indexed is None else (
-                    "is not an encrypted field"
+                missing = (
+                    "is not a field on this model"
+                    if indexed is None
+                    else ("is not an encrypted field")
                 )
-                errors.append(Warning(
-                    f"{model._meta.label}.{field.name} indexes {source!r}, which {missing}. "
-                    "Its value can no longer be derived, so it keeps whatever was last "
-                    "written to it.",
-                    hint="Point source_field at the encrypted field it indexes, or remove "
-                         "the column. It is normally created for you by "
-                         "blind_index=True and needs no hand editing.",
-                    obj=field,
-                    id="snapadmin.W020",
-                ))
+                errors.append(
+                    Warning(
+                        f"{model._meta.label}.{field.name} indexes {source!r}, which {missing}. "
+                        "Its value can no longer be derived, so it keeps whatever was last "
+                        "written to it.",
+                        hint="Point source_field at the encrypted field it indexes, or remove "
+                        "the column. It is normally created for you by "
+                        "blind_index=True and needs no hand editing.",
+                        obj=field,
+                        id="snapadmin.W020",
+                    )
+                )
     return errors
 
 
@@ -1623,17 +1739,19 @@ def check_encrypted_fields_not_indexed(app_configs, **kwargs):
         encrypted = {f.name for f in _encrypted_fields_of(model)}
         for name in mapping:
             if name in encrypted:
-                errors.append(Error(
-                    f"{model._meta.label}.es_mapping maps {name!r}, which is an encrypted "
-                    "field. Indexing it would ship the plaintext to Elasticsearch — a "
-                    "second datastore with a different threat model, which also keeps the "
-                    "value in its own inverted index.",
-                    hint=f"Remove {name!r} from es_mapping. SnapAdmin excludes encrypted "
-                         "fields from the document anyway, so the entry has no effect "
-                         "beyond this error.",
-                    obj=model,
-                    id="snapadmin.E020",
-                ))
+                errors.append(
+                    Error(
+                        f"{model._meta.label}.es_mapping maps {name!r}, which is an encrypted "
+                        "field. Indexing it would ship the plaintext to Elasticsearch — a "
+                        "second datastore with a different threat model, which also keeps the "
+                        "value in its own inverted index.",
+                        hint=f"Remove {name!r} from es_mapping. SnapAdmin excludes encrypted "
+                        "fields from the document anyway, so the entry has no effect "
+                        "beyond this error.",
+                        obj=model,
+                        id="snapadmin.E020",
+                    )
+                )
     return errors
 
 
@@ -1682,9 +1800,7 @@ def check_es_mapping_present(app_configs, **kwargs) -> list[CheckMessage]:
             continue
 
         mode = get_model_meta(model, "es_storage_mode", EsStorageMode.DB_ONLY)
-        indexes = mode != EsStorageMode.DB_ONLY or get_model_meta(
-            model, "es_index_enabled", False
-        )
+        indexes = mode != EsStorageMode.DB_ONLY or get_model_meta(model, "es_index_enabled", False)
         if not indexes or model.get_es_mapping():
             continue
 
@@ -1800,8 +1916,7 @@ def _installed_apps_entry(app_config: AppConfig) -> str:
         (
             entry
             for entry in settings.INSTALLED_APPS
-            if entry == name
-            or (entry.startswith(f"{name}.") and entry.endswith(config_suffix))
+            if entry == name or (entry.startswith(f"{name}.") and entry.endswith(config_suffix))
         ),
         name,
     )
@@ -1828,31 +1943,36 @@ def check_extra_settings_admin_app(app_configs, **kwargs) -> list[CheckMessage]:
     upstream = f"{value!r} application not listed in settings.INSTALLED_APPS."
     app_config = _app_config_for(value)
     if app_config is None:
-        return [Error(
-            f"EXTRA_SETTINGS_ADMIN_APP = {value!r} matches no installed app — "
-            f"django-extra-settings will refuse to start with \"{upstream}\"",
-            hint="The value is compared against settings.INSTALLED_APPS verbatim. Use the "
-                 "INSTALLED_APPS entry of the app that should host the Setting admin, or "
-                 "drop the setting to leave that admin in 'extra_settings'.",
-            id="snapadmin.E025",
-        )]
+        return [
+            Error(
+                f"EXTRA_SETTINGS_ADMIN_APP = {value!r} matches no installed app — "
+                f"django-extra-settings will refuse to start with \"{upstream}\"",
+                hint="The value is compared against settings.INSTALLED_APPS verbatim. Use the "
+                "INSTALLED_APPS entry of the app that should host the Setting admin, or "
+                "drop the setting to leave that admin in 'extra_settings'.",
+                id="snapadmin.E025",
+            )
+        ]
 
     entry = _installed_apps_entry(app_config)
-    return [Error(
-        f"EXTRA_SETTINGS_ADMIN_APP = {value!r} is the {app_config.label!r} app's "
-        f"identifier but not its INSTALLED_APPS entry — django-extra-settings will "
-        f"refuse to start with \"{upstream}\", naming the value you passed rather than "
-        f"the one it wants.",
-        hint=f"Set EXTRA_SETTINGS_ADMIN_APP = {entry!r} — the INSTALLED_APPS entry for that "
-             f"app. The value is matched against settings.INSTALLED_APPS verbatim, so an app "
-             f"nested in a package needs its full dotted path, never the bare label.",
-        id="snapadmin.E025",
-    )]
+    return [
+        Error(
+            f"EXTRA_SETTINGS_ADMIN_APP = {value!r} is the {app_config.label!r} app's "
+            f"identifier but not its INSTALLED_APPS entry — django-extra-settings will "
+            f"refuse to start with \"{upstream}\", naming the value you passed rather than "
+            f"the one it wants.",
+            hint=f"Set EXTRA_SETTINGS_ADMIN_APP = {entry!r} — the INSTALLED_APPS entry for that "
+            f"app. The value is matched against settings.INSTALLED_APPS verbatim, so an app "
+            f"nested in a package needs its full dotted path, never the bare label.",
+            id="snapadmin.E025",
+        )
+    ]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Second field report (#EXT2) — integration traps a project cannot see
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _shadowed_objects_manager(model: type) -> tuple[type, object] | None:
     """``(base, manager)`` when ``SnapModel.objects`` hides a base's own ``objects``.
@@ -1927,44 +2047,50 @@ def check_snap_model_manager_shadowing(app_configs, **kwargs) -> list[CheckMessa
     for model in apps.get_models():
         if _tenant_scoping_manager_lost(model):
             manager_cls = type(model._meta.managers_map["objects"]).__name__
-            errors.append(Error(
-                f"{model._meta.label} sets tenant_scoped = True, but its 'objects' is "
-                f"{manager_cls}, not an EsManager — tenant scoping is enforced in "
-                "EsManager, so Model.objects, the generated admin and the API serve "
-                "every tenant's rows.",
-                hint=f"Make 'objects' a manager that inherits from both: 'class "
-                     f"{model.__name__}Manager({manager_cls}, EsManager): pass' and "
-                     f"'objects = {model.__name__}Manager()'.",
-                obj=model,
-                id="snapadmin.E027",
-            ))
+            errors.append(
+                Error(
+                    f"{model._meta.label} sets tenant_scoped = True, but its 'objects' is "
+                    f"{manager_cls}, not an EsManager — tenant scoping is enforced in "
+                    "EsManager, so Model.objects, the generated admin and the API serve "
+                    "every tenant's rows.",
+                    hint=f"Make 'objects' a manager that inherits from both: 'class "
+                    f"{model.__name__}Manager({manager_cls}, EsManager): pass' and "
+                    f"'objects = {model.__name__}Manager()'.",
+                    obj=model,
+                    id="snapadmin.E027",
+                )
+            )
             continue
         found = _shadowed_objects_manager(model)
         if found is None:
             continue
         base, manager = found
         manager_cls = type(manager).__name__
-        errors.append(Error(
-            f"{model._meta.label}: SnapModel's 'objects = EsManager()' shadows "
-            f"'objects = {manager_cls}()' declared on {base.__name__}, because "
-            f"SnapModel comes first in the MRO. {model.__name__}.objects, the "
-            "generated admin and the API use the unfiltered EsManager.",
-            hint=f"Declare the manager on {model.__name__} itself (or on an "
-                 "abstract base listed before SnapModel), e.g. "
-                 f"'class {model.__name__}Manager({manager_cls}, EsManager): pass' and "
-                 f"'objects = {model.__name__}Manager()' to keep both behaviours. If the "
-                 "plain EsManager is really what you want, add 'snapadmin.E027' to "
-                 "SILENCED_SYSTEM_CHECKS.",
-            obj=model,
-            id="snapadmin.E027",
-        ))
+        errors.append(
+            Error(
+                f"{model._meta.label}: SnapModel's 'objects = EsManager()' shadows "
+                f"'objects = {manager_cls}()' declared on {base.__name__}, because "
+                f"SnapModel comes first in the MRO. {model.__name__}.objects, the "
+                "generated admin and the API use the unfiltered EsManager.",
+                hint=f"Declare the manager on {model.__name__} itself (or on an "
+                "abstract base listed before SnapModel), e.g. "
+                f"'class {model.__name__}Manager({manager_cls}, EsManager): pass' and "
+                f"'objects = {model.__name__}Manager()' to keep both behaviours. If the "
+                "plain EsManager is really what you want, add 'snapadmin.E027' to "
+                "SILENCED_SYSTEM_CHECKS.",
+                obj=model,
+                id="snapadmin.E027",
+            )
+        )
     return errors
 
 
 #: Destination settings whose presence says "this project means to back up".
 _BACKUP_INTENT_SETTINGS = (
-    "SNAPADMIN_BACKUP_NETWORK_DIR", "SNAPADMIN_BACKUP_FTP_HOST",
-    "SNAPADMIN_BACKUP_SFTP_HOST", "SNAPADMIN_BACKUP_S3_BUCKET",
+    "SNAPADMIN_BACKUP_NETWORK_DIR",
+    "SNAPADMIN_BACKUP_FTP_HOST",
+    "SNAPADMIN_BACKUP_SFTP_HOST",
+    "SNAPADMIN_BACKUP_S3_BUCKET",
     "SNAPADMIN_BACKUP_AGE_RECIPIENTS",
 )
 
@@ -1990,15 +2116,19 @@ def check_backup_configured_but_disabled(app_configs, **kwargs) -> list[CheckMes
     configured = [name for name in _BACKUP_INTENT_SETTINGS if get_setting(name, None)]
     if not scheduled and not configured:
         return []
-    evidence = (["a 'snapadmin.run_db_backups' Celery Beat entry"] if scheduled else []) + configured
-    return [Warning(
-        "SNAPADMIN_BACKUP_ENABLED is off, but backups are configured "
-        f"({_format_labels(evidence)}) — every run ends as 'disabled' and nothing is stored.",
-        hint="Set SNAPADMIN_BACKUP_ENABLED = True to take backups. If they are off on "
-             "purpose (a staging copy of production settings), remove the Beat entry, or "
-             "add 'snapadmin.W023' to SILENCED_SYSTEM_CHECKS.",
-        id="snapadmin.W023",
-    )]
+    evidence = (
+        ["a 'snapadmin.run_db_backups' Celery Beat entry"] if scheduled else []
+    ) + configured
+    return [
+        Warning(
+            "SNAPADMIN_BACKUP_ENABLED is off, but backups are configured "
+            f"({_format_labels(evidence)}) — every run ends as 'disabled' and nothing is stored.",
+            hint="Set SNAPADMIN_BACKUP_ENABLED = True to take backups. If they are off on "
+            "purpose (a staging copy of production settings), remove the Beat entry, or "
+            "add 'snapadmin.W023' to SILENCED_SYSTEM_CHECKS.",
+            id="snapadmin.W023",
+        )
+    ]
 
 
 def check_backup_env_file_present(app_configs, **kwargs) -> list[CheckMessage]:
@@ -2019,13 +2149,15 @@ def check_backup_env_file_present(app_configs, **kwargs) -> list[CheckMessage]:
         problem = f"SNAPADMIN_BACKUP_ENV_FILE = {config.env_file!r} is not a file"
     else:
         return []
-    return [Warning(
-        f"SNAPADMIN_BACKUP_INCLUDE names 'env', but {problem} — every backup skips "
-        "the env part and still reports success.",
-        hint="Point SNAPADMIN_BACKUP_ENV_FILE at the .env file to bundle, or remove "
-             "'env' from SNAPADMIN_BACKUP_INCLUDE.",
-        id="snapadmin.W024",
-    )]
+    return [
+        Warning(
+            f"SNAPADMIN_BACKUP_INCLUDE names 'env', but {problem} — every backup skips "
+            "the env part and still reports success.",
+            hint="Point SNAPADMIN_BACKUP_ENV_FILE at the .env file to bundle, or remove "
+            "'env' from SNAPADMIN_BACKUP_INCLUDE.",
+            id="snapadmin.W024",
+        )
+    ]
 
 
 def check_masked_models_use_masking_admin(app_configs, **kwargs) -> list[CheckMessage]:
@@ -2046,8 +2178,7 @@ def check_masked_models_use_masking_admin(app_configs, **kwargs) -> list[CheckMe
     offenders: list[str] = []
     for model in apps.get_models():
         admins = [
-            site._registry[model] for site in all_sites
-            if model in getattr(site, "_registry", {})
+            site._registry[model] for site in all_sites if model in getattr(site, "_registry", {})
         ]
         if not admins or all(isinstance(a, PIIMaskingAdminMixin) for a in admins):
             continue
@@ -2055,14 +2186,16 @@ def check_masked_models_use_masking_admin(app_configs, **kwargs) -> list[CheckMe
             offenders.append(model._meta.label)
     if not offenders:
         return []
-    return [Warning(
-        f"Masked fields are configured for {_format_labels(sorted(offenders))}, but the "
-        "ModelAdmin serving it is hand-written without PIIMaskingAdminMixin — the "
-        "admin shows those values unmasked.",
-        hint="Add snapadmin.models.PIIMaskingAdminMixin as the first base of that "
-             "ModelAdmin (class UserAdmin(PIIMaskingAdminMixin, BaseUserAdmin)).",
-        id="snapadmin.W025",
-    )]
+    return [
+        Warning(
+            f"Masked fields are configured for {_format_labels(sorted(offenders))}, but the "
+            "ModelAdmin serving it is hand-written without PIIMaskingAdminMixin — the "
+            "admin shows those values unmasked.",
+            hint="Add snapadmin.models.PIIMaskingAdminMixin as the first base of that "
+            "ModelAdmin (class UserAdmin(PIIMaskingAdminMixin, BaseUserAdmin)).",
+            id="snapadmin.W025",
+        )
+    ]
 
 
 def check_admin_sections_deprecated(app_configs, **kwargs) -> list[CheckMessage]:
@@ -2073,18 +2206,21 @@ def check_admin_sections_deprecated(app_configs, **kwargs) -> list[CheckMessage]
     that set it believes it configured something.
     """
     labels = sorted(
-        model._meta.label for model in apps.get_models()
+        model._meta.label
+        for model in apps.get_models()
         if is_registered(model) and getattr(model, "admin_sections", None)
     )
     if not labels:
         return []
-    return [Warning(
-        f"admin_sections is set on {_format_labels(labels)}, but it has no effect and "
-        "is deprecated; it will be removed in a future release.",
-        hint="Group form fields with the per-field 'tab' and 'row' options, or pass "
-             "'fieldsets' through admin_overrides.",
-        id="snapadmin.W026",
-    )]
+    return [
+        Warning(
+            f"admin_sections is set on {_format_labels(labels)}, but it has no effect and "
+            "is deprecated; it will be removed in a future release.",
+            hint="Group form fields with the per-field 'tab' and 'row' options, or pass "
+            "'fieldsets' through admin_overrides.",
+            id="snapadmin.W026",
+        )
+    ]
 
 
 ALL_CHECKS = [
@@ -2133,5 +2269,6 @@ ALL_CHECKS = [
 def register_checks():
     """Register every SnapAdmin check (idempotent — safe to call from ready())."""
     from django.core.checks import register
+
     for check in ALL_CHECKS:
         register(check)

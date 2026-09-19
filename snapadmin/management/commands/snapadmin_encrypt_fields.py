@@ -95,26 +95,26 @@ class Command(BaseCommand):
             "--adopt",
             action="store_true",
             help="Encrypt rows whose column still holds plaintext (after switching "
-                 "an existing column to an encrypted field).",
+            "an existing column to an encrypted field).",
         )
         parser.add_argument(
             "--rotate",
             action="store_true",
             help="Re-encrypt rows written under an older key onto the active one, "
-                 "so the old key can be dropped from the keyset.",
+            "so the old key can be dropped from the keyset.",
         )
         parser.add_argument(
             "--reindex",
             action="store_true",
             help="Rebuild the <field>_bi blind-index columns without touching the "
-                 "ciphertext. The repair for a table changed by bulk_update() or "
-                 "QuerySet.update().",
+            "ciphertext. The repair for a table changed by bulk_update() or "
+            "QuerySet.update().",
         )
         parser.add_argument(
             "--apply",
             action="store_true",
             help="Actually write. Without it the command reports what it would do "
-                 "and changes nothing.",
+            "and changes nothing.",
         )
         parser.add_argument(
             "--dry-run",
@@ -125,7 +125,7 @@ class Command(BaseCommand):
             "--models",
             default="",
             help="Comma-separated app_label.ModelName list to restrict the pass to. "
-                 "Default: every model with an encrypted field.",
+            "Default: every model with an encrypted field.",
         )
         parser.add_argument(
             "--batch-size",
@@ -137,13 +137,13 @@ class Command(BaseCommand):
             "--start-pk",
             default=None,
             help="Resume from this primary key. Rows are walked in ascending pk "
-                 "order, so a killed run continues from the last pk it reported.",
+            "order, so a killed run continues from the last pk it reported.",
         )
         parser.add_argument(
             "--database",
             default=None,
             help="Database alias to work on (default: the write database the "
-                 "router picks for each model).",
+            "router picks for each model).",
         )
 
     # ── entry point ─────────────────────────────────────────────────────────
@@ -186,24 +186,28 @@ class Command(BaseCommand):
             f"fingerprint {keyset.fingerprint}"
         )
         if not apply_changes:
-            self.stdout.write(self.style.WARNING(
-                "Dry run — nothing will be written. Re-run with --apply to convert."
-            ))
+            self.stdout.write(
+                self.style.WARNING(
+                    "Dry run — nothing will be written. Re-run with --apply to convert."
+                )
+            )
 
         reports: list[FieldReport] = []
         for model, fields in targets:
             for model_field in fields:
-                reports.append(self._process_field(
-                    model,
-                    model_field,
-                    adopt=adopt,
-                    rotate=rotate,
-                    reindex=reindex,
-                    apply_changes=apply_changes,
-                    batch_size=options["batch_size"],
-                    start_pk=options["start_pk"],
-                    alias=options["database"],
-                ))
+                reports.append(
+                    self._process_field(
+                        model,
+                        model_field,
+                        adopt=adopt,
+                        rotate=rotate,
+                        reindex=reindex,
+                        apply_changes=apply_changes,
+                        batch_size=options["batch_size"],
+                        start_pk=options["start_pk"],
+                        alias=options["database"],
+                    )
+                )
 
         self._report(reports)
 
@@ -215,10 +219,7 @@ class Command(BaseCommand):
     def _targets(self, selection: str) -> list[tuple[type, list]]:
         """The (model, encrypted fields) pairs this run covers."""
         if not selection.strip():
-            found = [
-                (model, self._encrypted_fields(model))
-                for model in apps.get_models()
-            ]
+            found = [(model, self._encrypted_fields(model)) for model in apps.get_models()]
             return [(model, fields) for model, fields in found if fields]
 
         targets: list[tuple[type, list]] = []
@@ -267,11 +268,9 @@ class Command(BaseCommand):
         pk_column = quote(model._meta.pk.column)
         value_column = quote(model_field.column)
         index_name = getattr(model_field, "blind_index_name", None)
-        index_column = (
-            quote(model._meta.get_field(index_name).column) if index_name else None
-        )
+        index_column = quote(model._meta.get_field(index_name).column) if index_name else None
 
-        select = f"SELECT {pk_column}, {value_column} FROM {table}"
+        select = f"SELECT {pk_column}, {value_column} FROM {table}"  # noqa: S608 - quote_name()d identifiers
 
         # Keyset pagination on the primary key: each batch asks for the rows
         # after the last one it saw. No OFFSET (which re-reads the whole prefix
@@ -285,14 +284,11 @@ class Command(BaseCommand):
         while True:
             with connection.cursor() as cursor:
                 if cursor_pk is None:
-                    cursor.execute(
-                        f"{select} ORDER BY {pk_column} LIMIT %s", [batch_size]
-                    )
+                    cursor.execute(f"{select} ORDER BY {pk_column} LIMIT %s", [batch_size])
                 else:
                     comparison = ">=" if inclusive else ">"
                     cursor.execute(
-                        f"{select} WHERE {pk_column} {comparison} %s "
-                        f"ORDER BY {pk_column} LIMIT %s",
+                        f"{select} WHERE {pk_column} {comparison} %s ORDER BY {pk_column} LIMIT %s",
                         [cursor_pk, batch_size],
                     )
                 rows = cursor.fetchall()
@@ -302,9 +298,7 @@ class Command(BaseCommand):
 
             updates: list[tuple] = []
             for pk, stored in rows:
-                plan = self._plan(
-                    model_field, stored, adopt=adopt, rotate=rotate, reindex=reindex
-                )
+                plan = self._plan(model_field, stored, adopt=adopt, rotate=rotate, reindex=reindex)
                 if plan is None:
                     report.skipped += 1
                     continue
@@ -321,8 +315,13 @@ class Command(BaseCommand):
 
             if apply_changes and updates:
                 self._write(
-                    connection, table, pk_column, value_column, index_column,
-                    model_field, updates,
+                    connection,
+                    table,
+                    pk_column,
+                    value_column,
+                    index_column,
+                    model_field,
+                    updates,
                 )
 
             if len(rows) < batch_size:
@@ -347,9 +346,7 @@ class Command(BaseCommand):
             if not adopt:
                 return None
             try:
-                canonical = model_field.encode_plaintext(
-                    model_field.decode_plaintext(stored)
-                )
+                canonical = model_field.encode_plaintext(model_field.decode_plaintext(stored))
                 return cipher.encrypt(canonical, aad=aad), "adopt"
             except Exception as exc:
                 return self._describe(exc)
@@ -398,24 +395,28 @@ class Command(BaseCommand):
         return f"{type(exc).__name__} while converting this row (value not shown)"
 
     def _write(
-        self, connection, table, pk_column, value_column, index_column,
-        model_field, updates,
+        self,
+        connection,
+        table,
+        pk_column,
+        value_column,
+        index_column,
+        model_field,
+        updates,
     ) -> None:
         """Write one batch, row by row, each in its own statement."""
         with connection.cursor() as cursor:
             for pk, new_value in updates:
                 if index_column is None:
                     cursor.execute(
-                        f"UPDATE {table} SET {value_column} = %s WHERE {pk_column} = %s",
+                        f"UPDATE {table} SET {value_column} = %s WHERE {pk_column} = %s",  # noqa: S608 - quoted identifiers, bound values
                         [new_value, pk],
                     )
                     continue
                 plaintext = cipher.decrypt(new_value, aad=model_field.encryption_aad())
-                index = blind_index.index_for_write(
-                    plaintext, aad=model_field.encryption_aad()
-                )
+                index = blind_index.index_for_write(plaintext, aad=model_field.encryption_aad())
                 cursor.execute(
-                    f"UPDATE {table} SET {value_column} = %s, {index_column} = %s "
+                    f"UPDATE {table} SET {value_column} = %s, {index_column} = %s "  # noqa: S608 - quoted identifiers, bound values
                     f"WHERE {pk_column} = %s",
                     [new_value, index, pk],
                 )

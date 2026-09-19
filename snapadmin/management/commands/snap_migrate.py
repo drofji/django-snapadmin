@@ -45,13 +45,17 @@ class Command(BaseCommand):
     def _migrate_one(self, alias: str, verbosity: int) -> tuple[bool, str]:
         buffer = io.StringIO()
         try:
-            call_command("migrate", database=alias, verbosity=verbosity, stdout=buffer, stderr=buffer)
+            call_command(
+                "migrate", database=alias, verbosity=verbosity, stdout=buffer, stderr=buffer
+            )
         except Exception as exc:
             logger.error("snap_migrate_shard_failed", db_alias=alias, error=str(exc))
             return False, str(exc)
         return True, buffer.getvalue()
 
-    def _migrate_sequential(self, aliases: list[str], verbosity: int) -> dict[str, tuple[bool, str]]:
+    def _migrate_sequential(
+        self, aliases: list[str], verbosity: int
+    ) -> dict[str, tuple[bool, str]]:
         return {alias: self._migrate_one(alias, verbosity) for alias in aliases}
 
     def _migrate_parallel(self, aliases: list[str], verbosity: int) -> dict[str, tuple[bool, str]]:

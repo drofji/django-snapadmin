@@ -20,6 +20,7 @@ class EsQuerySet:
 
     def __init__(self, model, hits=None, filters=None):
         from django.db.models.sql.query import Query
+
         self.model = model
         self._hits = hits if hits is not None else []
         # Every field=value filter chained onto this queryset so far — kept
@@ -51,18 +52,38 @@ class EsQuerySet:
         return len(self._hits)
 
     def delete(self):
-        if self.model.es_storage_mode == EsStorageMode.ES_ONLY:
-            try:
-                es = self.model.get_es_client()
-                for hit in self._hits:
-                    es.delete(index=self.model.get_es_index_name(), id=hit.pk, ignore=[404])
-            except Exception as exc:
-                logger.warning(
-                    "es_queryset_delete_failed",
-                    model=self.model.__name__,
-                    hit_count=len(self._hits),
-                    error=str(exc),
-                )
+        """Delete the rows this result names, from wherever they actually live.
+
+        A ``DUAL``/``DB_ONLY`` model's ES search result names database rows: they
+        are deleted there (the ``post_delete`` receiver clears the mirror), and
+        Django's own ``(count, per-model)`` answer is returned. Before, such a
+        result deleted nothing while reporting every row as deleted — a bulk
+        delete over an ES-routed search silently kept the data.
+
+        An ``ES_ONLY`` model has no other copy: a document ES could not delete
+        raises :class:`~snapadmin.es.errors.SnapEsUnavailable` rather than being
+        counted as deleted (a GDPR erasure must not report success it did not
+        achieve). ``404`` — already gone — is success.
+        """
+        if self.model.es_storage_mode != EsStorageMode.ES_ONLY:
+            return self.model.objects.filter(pk__in=[hit.pk for hit in self._hits]).delete()
+        from snapadmin.es.errors import SnapEsUnavailable
+
+        try:
+            es = self.model.get_es_client()
+            for hit in self._hits:
+                es.delete(index=self.model.get_es_index_name(), id=hit.pk, ignore=[404])
+        except Exception as exc:
+            logger.warning(
+                "es_queryset_delete_failed",
+                model=self.model.__name__,
+                hit_count=len(self._hits),
+                error=str(exc),
+            )
+            raise SnapEsUnavailable(
+                f"{self.model.__name__}: Elasticsearch could not delete the "
+                f"{len(self._hits)} document(s); they are still stored."
+            ) from exc
         return len(self._hits), {self.model._meta.label: len(self._hits)}
 
     def filter(self, *args, **kwargs):
@@ -138,7 +159,7 @@ class EsQuerySet:
                     pk=pk,
                     error=str(exc),
                 )
-                raise self.model.DoesNotExist
+                raise self.model.DoesNotExist from exc
             for key, val in self._filters.items():
                 if getattr(obj, key, None) != val:
                     raise self.model.DoesNotExist

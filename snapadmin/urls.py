@@ -65,9 +65,7 @@ def _missing_dependency(
 
 
 def _missing_graphql_dependency(exc: ImportError) -> ImproperlyConfigured:
-    return _missing_dependency(
-        "GraphQL", "SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_EXTRA, exc
-    )
+    return _missing_dependency("GraphQL", "SNAPADMIN_GRAPHQL_ENABLED", GRAPHQL_EXTRA, exc)
 
 
 urlpatterns = []
@@ -106,7 +104,6 @@ if REST_API_ENABLED:
     urlpatterns += [
         # Token management
         path("", include(router.urls)),
-
         # Model introspection
         path("models/schema/", ModelSchemaView.as_view(), name="model-schema"),
     ]
@@ -118,38 +115,33 @@ if REST_API_ENABLED:
             path("permissions/", PermissionListView.as_view(), name="permission-list"),
         ]
     urlpatterns += [
-
         # Health check
         path("health/", HealthCheckView.as_view(), name="api-health"),
-
         # Admin-only bulk ES reindex (opt-in via SNAPADMIN_REINDEX_API_ENABLED).
         # Registered unconditionally; the view returns 404 while disabled so the
         # gate is togglable at runtime without reloading the URLconf.
         path("es/reindex/", ESReindexView.as_view(), name="es-reindex"),
-
         # Public SSO provider list (headless login for external frontends)
         path("sso-providers/", SSOProviderView.as_view(), name="sso-providers"),
-
         # Offline-capable model list (consumed by the admin connectivity layer)
         path("offline-models/", OfflineModelsView.as_view(), name="offline-models"),
-
         # Recent rows of one offline-capable model (prefetched into IndexedDB by offline.js)
         path(
             "offline-data/<str:app_label>/<str:model_name>/",
             OfflineModelDataView.as_view(),
             name="offline-data",
         ),
-
         # Dynamic model CRUD  ─  list + create
         path(
             "models/<str:app_label>/<str:model_name>/",
-            DynamicModelViewSet.as_view({
-                "get":  "list",
-                "post": "create",
-            }),
+            DynamicModelViewSet.as_view(
+                {
+                    "get": "list",
+                    "post": "create",
+                }
+            ),
             name="model-list",
         ),
-
         # No-Celery bulk helpers  ─  count + synchronous streaming export.
         # Registered before the <int:pk> detail route; the int converter never
         # matches "count"/"export" so ordering is not load-bearing, but keeping
@@ -169,19 +161,19 @@ if REST_API_ENABLED:
             DynamicModelViewSet.as_view({"post": "fetch_by"}),
             name="model-fetch-by",
         ),
-
         # Dynamic model CRUD  ─  detail + update + delete
         path(
             "models/<str:app_label>/<str:model_name>/<int:pk>/",
-            DynamicModelViewSet.as_view({
-                "get":    "retrieve",
-                "put":    "update",
-                "patch":  "partial_update",
-                "delete": "destroy",
-            }),
+            DynamicModelViewSet.as_view(
+                {
+                    "get": "retrieve",
+                    "put": "update",
+                    "patch": "partial_update",
+                    "delete": "destroy",
+                }
+            ),
             name="model-detail",
         ),
-
         # User-defined REST actions (@snap_action, #RFC1h) — registered after
         # every literal route above (count/export/<int:pk>) so Django's
         # first-match ordering never lets a numeric pk be swallowed by the
@@ -191,20 +183,28 @@ if REST_API_ENABLED:
         # dispatch_action() itself, since the action set is dynamic per model.
         path(
             "models/<str:app_label>/<str:model_name>/<int:pk>/<str:action_name>/",
-            DynamicModelViewSet.as_view({
-                "get": "dispatch_action", "post": "dispatch_action",
-                "put": "dispatch_action", "patch": "dispatch_action",
-                "delete": "dispatch_action",
-            }),
+            DynamicModelViewSet.as_view(
+                {
+                    "get": "dispatch_action",
+                    "post": "dispatch_action",
+                    "put": "dispatch_action",
+                    "patch": "dispatch_action",
+                    "delete": "dispatch_action",
+                }
+            ),
             name="model-action-detail",
         ),
         path(
             "models/<str:app_label>/<str:model_name>/<str:action_name>/",
-            DynamicModelViewSet.as_view({
-                "get": "dispatch_action", "post": "dispatch_action",
-                "put": "dispatch_action", "patch": "dispatch_action",
-                "delete": "dispatch_action",
-            }),
+            DynamicModelViewSet.as_view(
+                {
+                    "get": "dispatch_action",
+                    "post": "dispatch_action",
+                    "put": "dispatch_action",
+                    "patch": "dispatch_action",
+                    "delete": "dispatch_action",
+                }
+            ),
             name="model-action-list",
         ),
     ]
@@ -223,9 +223,9 @@ if SWAGGER_ENABLED:
 
     urlpatterns += [
         # OpenAPI schema & interactive docs
-        path("schema/",  SpectacularAPIView.as_view(),      name="api-schema"),
-        path("docs/",    SpectacularSwaggerView.as_view(url_name="api-schema"), name="swagger-ui"),
-        path("redoc/",   SpectacularRedocView.as_view(url_name="api-schema"),   name="redoc"),
+        path("schema/", SpectacularAPIView.as_view(), name="api-schema"),
+        path("docs/", SpectacularSwaggerView.as_view(url_name="api-schema"), name="swagger-ui"),
+        path("redoc/", SpectacularRedocView.as_view(url_name="api-schema"), name="redoc"),
     ]
 
 if GRAPHQL_ENABLED:
@@ -245,7 +245,11 @@ if GRAPHQL_ENABLED:
             "SNAPADMIN_GRAPHIQL_ENABLED", getattr(settings, "DEBUG", False)
         )
         urlpatterns += [
-            path("graphql/", SnapGraphQLView.as_view(graphiql=GRAPHIQL_ENABLED, schema=schema), name="graphql"),
+            path(
+                "graphql/",
+                SnapGraphQLView.as_view(graphiql=GRAPHIQL_ENABLED, schema=schema),
+                name="graphql",
+            ),
             path("graphql", SnapGraphQLView.as_view(graphiql=GRAPHIQL_ENABLED, schema=schema)),
         ]
     except ImproperlyConfigured:

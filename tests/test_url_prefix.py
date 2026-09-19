@@ -54,3 +54,19 @@ def test_empty_prefix_is_a_noop(snapadmin_urls_under):
     urls = snapadmin_urls_under(SNAPADMIN_URL_PREFIX="")
 
     assert reverse("api-health", urlconf=urls) == "/health/"
+
+
+def test_the_user_api_is_not_mounted_when_it_is_off(snapadmin_urls_under):
+    """#QA1d — both user-API routes (the viewset and the permission picker) stay
+    unmounted with ``SNAPADMIN_USER_API_ENABLED = False``, the rest untouched."""
+    from django.urls import NoReverseMatch
+
+    on = snapadmin_urls_under(SNAPADMIN_USER_API_ENABLED=True)
+    assert reverse("permission-list", urlconf=on) == "/permissions/"
+    assert reverse("api-user-list", urlconf=on) == "/users/"
+
+    off = snapadmin_urls_under(SNAPADMIN_USER_API_ENABLED=False)
+    for name in ("permission-list", "api-user-list"):
+        with pytest.raises(NoReverseMatch):
+            reverse(name, urlconf=off)
+    assert reverse("api-health", urlconf=off) == "/health/"

@@ -75,12 +75,14 @@ def get_sso_providers() -> list[dict]:
         if allowed_hosts and netloc and netloc.lower() not in allowed_hosts:
             logger.warning("sso_provider_unsafe_url_dropped", key=key, url=url)
             continue
-        providers.append({
-            "key": key,
-            "label": meta.get("label") or str(key).replace("_", " ").title(),
-            "url": url,
-            "icon": meta.get("icon", ""),
-        })
+        providers.append(
+            {
+                "key": key,
+                "label": meta.get("label") or str(key).replace("_", " ").title(),
+                "url": url,
+                "icon": meta.get("icon", ""),
+            }
+        )
     return providers
 
 

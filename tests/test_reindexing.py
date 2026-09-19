@@ -624,3 +624,47 @@ class TestReindexLimit:
         job.refresh_from_db()
         assert job.processed_rows == 2
         assert job.total_rows == 2
+
+
+# ── branch-coverage closures (#QA1d): each a case no test reached ────────────
+
+@pytest.mark.django_db
+class TestReindexBranchCases:
+    def test_restore_leaves_replicas_alone_when_none_were_captured(self):
+        """An index whose settings had no ``number_of_replicas`` (the ES default)
+        gets its refresh interval back and no replicas key invented for it."""
+        from snapadmin.reindexing import _IndexTuner
+        es = MagicMock()
+        es.indices.get_settings.return_value = {"idx": {"settings": {"index": {}}}}
+        tuner = _IndexTuner(es, "idx")
+        tuner.relax()
+        tuner.restore()
+        restore_body = es.indices.put_settings.call_args_list[-1].kwargs["body"]
+        assert restore_body == {"index": {"refresh_interval": "1s"}}
+
+    def test_resume_with_no_unfinished_job_creates_a_fresh_one(self):
+        from demo.apps.shop.models import Product
+        from snapadmin.models import SnapReindexJob
+        from snapadmin.reindexing import start_reindex
+        SnapReindexJob.objects.create(app_label="demo", model="Product", status="completed")
+
+        job = start_reindex(Product, resume=True)
+
+        assert job.status == "pending"
+        assert SnapReindexJob.objects.filter(app_label="demo", model="Product").count() == 2
+
+    def test_a_resumed_job_keeps_its_original_start_time(self, products, es_client, settings):
+        from datetime import timedelta
+        from django.utils import timezone
+        from demo.apps.shop.models import Product
+        from snapadmin.models import SnapReindexJob
+        from snapadmin.reindexing import run_reindex_job
+        settings.ELASTICSEARCH_ENABLED = True
+        started = timezone.now() - timedelta(hours=1)
+        job = SnapReindexJob.objects.create(app_label="demo", model="Product", started_at=started)
+        with patch.object(Product, "get_es_client", return_value=es_client), \
+             patch("elasticsearch.helpers.bulk", side_effect=_bulk_ok):
+            run_reindex_job(job)
+        job.refresh_from_db()
+        assert job.status == "completed"
+        assert job.started_at == started

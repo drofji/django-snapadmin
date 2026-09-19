@@ -57,6 +57,15 @@ class TestFormattedId:
         result = fn(self._make_obj("ab12-cd34"))
         assert "ab12-cd34" in result[0]
 
+    def test_a_non_integer_pk_is_html_escaped(self):
+        """A character primary key is user data; rendering it through mark_safe
+        verbatim was a stored-XSS path into every changelist using this column."""
+        fn = self._get_formatted_id_fn()
+        rendered = str(fn(self._make_obj('<img src=x onerror=alert(1)>'))[0])
+
+        assert "<img" not in rendered
+        assert "&lt;img src=x onerror=alert(1)&gt;" in rendered
+
     def test_renders_six_digit_id(self):
         fn = self._get_formatted_id_fn()
         obj = self._make_obj(42)
@@ -354,3 +363,90 @@ class TestSnapSaveMixin:
             cleaned_data = {}
 
         assert LogEntry.objects.count() == count_before
+
+
+class TestModelBranchClosures:
+    """#QA1d — model-layer cases no test reached."""
+
+    def test_valid_scopes_pass_validation(self):
+        from snapadmin.models import validate_allowed_scopes
+
+        assert validate_allowed_scopes(["reports:read", "reports:write"]) is None
+
+    def test_a_document_with_no_mapping_carries_only_its_id(self):
+        from unittest.mock import patch
+        from demo.apps.shop.models import SearchLog
+
+        log = SearchLog(pk=7, query="q", results_count=1)
+        with patch.object(SearchLog, "get_es_mapping", return_value={}):
+            assert log.get_es_document() == {"id": 7}
+
+    def test_an_index_with_no_mapping_is_created_with_the_id_alone(self, settings):
+        from unittest.mock import MagicMock, patch
+        from demo.apps.shop.models import SearchLog
+
+        settings.ELASTICSEARCH_ENABLED = True
+        es = MagicMock()
+        es.indices.exists.return_value = False
+        with patch.object(SearchLog, "get_es_client", return_value=es), \
+             patch.object(SearchLog, "get_es_mapping", return_value={}):
+            SearchLog._ensure_es_index_and_mapping()
+        body = es.indices.create.call_args.kwargs["body"]
+        assert body["mappings"]["properties"] == {"id": {"type": "integer"}}
+
+    def test_five_colliding_ids_in_a_row_still_yield_an_id(self, settings):
+        """The re-roll is bounded: after five collisions the last draw is used
+        rather than looping forever against a misbehaving cluster."""
+        from unittest.mock import MagicMock, patch
+        from demo.apps.shop.models import SearchLog
+
+        settings.ELASTICSEARCH_ENABLED = True
+        es = MagicMock()
+        es.exists.return_value = True
+        with patch.object(SearchLog, "get_es_client", return_value=es):
+            pk = SearchLog._generate_es_only_pk()
+        assert isinstance(pk, int) and pk > 0
+        assert es.exists.call_count == 5
+
+    def test_saving_an_es_only_row_keeps_an_explicit_id(self, settings):
+        from unittest.mock import MagicMock, patch
+        from demo.apps.shop.models import SearchLog
+
+        settings.ELASTICSEARCH_ENABLED = True
+        es = MagicMock()
+        with patch.object(SearchLog, "get_es_client", return_value=es), \
+             patch.object(SearchLog, "_generate_es_only_pk") as mint:
+            SearchLog(pk=77, query="q", results_count=1).save()
+        mint.assert_not_called()
+        assert es.index.call_args.kwargs["id"] == 77
+
+
+@pytest.mark.django_db
+def test_an_inline_whose_changed_field_kept_its_value_writes_no_history():
+    """#QA1d — ``changed_data`` can name a field whose cleaned value equals the
+    initial one (a re-typed identical value): no ``old -> new`` line, and with
+    nothing else changed, no history entry at all."""
+    from unittest.mock import MagicMock
+
+    from django.contrib.admin.models import LogEntry
+    from django.contrib.auth.models import User
+
+    from demo.apps.shop.models import Product
+
+    product = Product.objects.create(name="Same", price=Decimal("1.00"))
+    request = RequestFactory().get("/")
+    request.user = User.objects.create_superuser("samevalue", password="x")
+    inline = MagicMock()
+    inline.instance = product
+    inline.has_changed.return_value = True
+    inline.changed_data = ["name"]
+    inline.initial = {"name": "Same"}
+    inline.cleaned_data = {"name": "Same"}
+    formset = MagicMock()
+    formset.has_changed.return_value = True
+    formset.forms = [inline]
+
+    before = set(LogEntry.objects.values_list("pk", flat=True))
+    admin.site._registry[Product].save_related(request, MagicMock(), [formset], change=True)
+
+    assert not LogEntry.objects.exclude(pk__in=before).exists()

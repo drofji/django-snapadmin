@@ -70,9 +70,7 @@ def find_urls(project_dir: Path, settings_path: Path | None, explicit: str | Non
 
 
 def _read_requirements(project_dir: Path) -> str:
-    return "\n".join(
-        _read(project_dir / name) for name in ("requirements.txt", "pyproject.toml")
-    )
+    return "\n".join(_read(project_dir / name) for name in ("requirements.txt", "pyproject.toml"))
 
 
 def build_context(

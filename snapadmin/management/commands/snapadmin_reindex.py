@@ -133,7 +133,7 @@ class Command(BaseCommand):
             ),
         )
 
-    def handle(self, *args, **options):
+    def handle(self, *args, **options):  # noqa: C901 - refactor tracked as #QA1c-cx
         limit = options["limit"]
         if limit is not None and limit < 1:
             raise CommandError(f"--limit must be a positive integer, got {limit}.")
@@ -147,7 +147,9 @@ class Command(BaseCommand):
                 app_label, model_name = options["model"].split(".", 1)
                 model = apps.get_model(app_label, model_name)
             except (ValueError, LookupError):
-                raise CommandError(f"Unknown model: {options['model']} (use app_label.ModelName)")
+                raise CommandError(
+                    f"Unknown model: {options['model']} (use app_label.ModelName)"
+                ) from None
             # Registration alone is not enough: reindexing needs SnapModel's ES
             # machinery, which a plain model registered with @snap_model never gets.
             if not (is_registered(model) and hasattr(model, "es_reindex_all")):
@@ -178,7 +180,9 @@ class Command(BaseCommand):
                 )
                 self.stdout.flush()
 
-            throttled_progress = _ThrottledProgress(_progress, interval=options["progress_interval"])
+            throttled_progress = _ThrottledProgress(
+                _progress, interval=options["progress_interval"]
+            )
 
             job = start_reindex(model, resume=options["resume"])
             summary = run_reindex_job(
@@ -193,38 +197,46 @@ class Command(BaseCommand):
             if summary.get("skipped"):
                 self.stdout.write(f"{label}: skipped ({summary['reason']})")
             elif summary.get("cancelled"):
-                self.stdout.write(self.style.WARNING(
-                    f"{label}: cancelled at {summary['indexed']} rows"
-                ))
+                self.stdout.write(
+                    self.style.WARNING(f"{label}: cancelled at {summary['indexed']} rows")
+                )
             elif isinstance(summary.get("errors"), list):
                 failed = True
-                self.stdout.write(self.style.ERROR(
-                    f"{label}: failed after {summary.get('indexed', 0)} rows — {summary['errors'][0]}"
-                ))
+                self.stdout.write(
+                    self.style.ERROR(
+                        f"{label}: failed after {summary.get('indexed', 0)} rows — {summary['errors'][0]}"
+                    )
+                )
             else:
                 errors = summary.get("errors", 0)
                 suffix = f", {errors} rejected" if errors else ""
-                self.stdout.write(self.style.SUCCESS(
-                    f"{label}: {summary['indexed']} indexed{suffix}"
-                ))
+                self.stdout.write(
+                    self.style.SUCCESS(f"{label}: {summary['indexed']} indexed{suffix}")
+                )
                 if options["verify"]:
                     result = verify_index(job, rejected=errors)
                     if not result["applicable"]:
-                        self.stdout.write(f"  {label}: verify skipped (ES_ONLY has no independent source)")
+                        self.stdout.write(
+                            f"  {label}: verify skipped (ES_ONLY has no independent source)"
+                        )
                     elif result["match"]:
                         self.stdout.write(f"  {label}: verified ({result['expected']} in index)")
                     else:
                         failed = True
                         if "error" in result:
-                            self.stdout.write(self.style.ERROR(
-                                f"  {label}: verify failed — could not count the index: {result['error']}"
-                            ))
+                            self.stdout.write(
+                                self.style.ERROR(
+                                    f"  {label}: verify failed — could not count the index: {result['error']}"
+                                )
+                            )
                         else:
-                            self.stdout.write(self.style.ERROR(
-                                f"  {label}: MISMATCH — index holds {result['actual']}, "
-                                f"expected {result['expected']} (source {result['source_count']}, "
-                                f"{result['rejected']} rejected)"
-                            ))
+                            self.stdout.write(
+                                self.style.ERROR(
+                                    f"  {label}: MISMATCH — index holds {result['actual']}, "
+                                    f"expected {result['expected']} (source {result['source_count']}, "
+                                    f"{result['rejected']} rejected)"
+                                )
+                            )
 
         if failed:
             raise CommandError("Reindex finished with errors (see above).")

@@ -246,23 +246,21 @@ _GROUP_FLOORS: dict[str, tuple[tuple[str, ...], int]] = {
 }
 
 #: ``module -> how many ``# pragma: no cover`` lines it carries``. Frozen at the
-#: eighteen both documents describe; see the test below for why it is a ceiling
-#: rather than a ban.
+#: twelve both documents describe (down from eighteen: the five "defensive" guards
+#: and the urlsplit branch turned out reachable and are now tested — #RM1a); see
+#: the test below for why it is a ceiling rather than a ban.
 _COVERAGE_PRAGMAS: dict[str, int] = {
     "snapadmin/admin_gen.py": 2,          # the Unfold-absent import branch
-    "snapadmin/alerts.py": 3,             # two abstract methods + urlsplit on IPv6 junk
+    "snapadmin/alerts.py": 2,             # two abstract methods
     "snapadmin/api/exceptions.py": 1,     # if TYPE_CHECKING
-    "snapadmin/api/serializers.py": 3,    # defensive: model is never None in practice
-    "snapadmin/audit.py": 1,              # defensive: exercised via monkeypatch
     "snapadmin/auth_admin.py": 1,         # unreachable once is_installed() passed
     "snapadmin/backup.py": 2,             # optional-dependency guards
     "snapadmin/checks.py": 1,             # celery is the [celery] extra
     "snapadmin/fields.py": 1,             # abstract; both subclasses define it
-    "snapadmin/management/commands/snapadmin_subject_request.py": 1,  # defensive
     "snapadmin/masking.py": 1,            # if TYPE_CHECKING
     "snapadmin/tasks.py": 1,              # covered by importing this file with celery hidden
 }
-_DOCUMENTED_PRAGMA_TOTAL = 18
+_DOCUMENTED_PRAGMA_TOTAL = 12
 
 #: The suite-wide floors both documents quote.
 _SUITE_FLOOR = 5_000
@@ -344,12 +342,12 @@ class TestQuotedCountsAreMetFloors:
             ("140+ tests", "README.md"),
             ("220+ tests", "README.md"),
             ("90+ checks", "README.md"),
-            ("Eighteen lines across twelve modules", "README.md"),
-            ("eighteen lines across twelve modules", "docs/index.html"),
-            ("5,053", "docs/index.html"),
-            ("153 files", "docs/index.html"),
-            ("11,349", "docs/index.html"),
-            ("3,346", "docs/index.html"),
+            ("Twelve lines across nine modules", "README.md"),
+            ("twelve lines across nine modules", "docs/index.html"),
+            ("5,364", "docs/index.html"),
+            ("160 files", "docs/index.html"),
+            ("11,702", "docs/index.html"),
+            ("3,464", "docs/index.html"),
         ],
     )
     def test_the_document_still_carries_the_number_this_module_pins(self, quoted, document):
@@ -374,8 +372,8 @@ class TestClaimedChecksReallyRun:
             "both documents promise a 100% line-coverage gate in CI"
         )
 
-    def test_the_coverage_pragmas_are_exactly_the_documented_eighteen(self):
-        """Both pages say eighteen lines across twelve modules carry one.
+    def test_the_coverage_pragmas_are_exactly_the_documented_twelve(self):
+        """Both pages say twelve lines across nine modules carry one.
 
         A frozen list rather than a ban, because a ban would have been a lie:
         writing this module is what found the README claiming there were none
@@ -461,10 +459,6 @@ class TestClaimedChecksReallyRun:
 #: ``tool -> the paragraph that has to change when it arrives``. Listed under
 #: "What is not in place yet" in both documents.
 _DOCUMENTED_AS_ABSENT = {
-    "ruff": "Lint, format, type and security static analysis in CI",
-    "mypy": "Lint, format, type and security static analysis in CI",
-    "pyright": "Lint, format, type and security static analysis in CI",
-    "bandit": "Lint, format, type and security static analysis in CI",
     "hypothesis": "Property-based / fuzz testing",
     "mutmut": "Mutation testing",
     "cosmic-ray": "Mutation testing",
@@ -498,15 +492,31 @@ class TestChecksDocumentedAsAbsentReallyAreAbsent:
                 f"change — a gate nobody documented is a gate nobody runs."
             )
 
-    def test_branch_coverage_is_still_measured_rather_than_gated(self):
-        """Both pages say branch coverage is reported, not enforced. The day the
-        gate goes on, that wording is wrong in three places."""
+    def test_static_analysis_runs_as_the_docs_describe(self):
+        """#QA1c — the pages say Ruff lint + format are blocking and mypy is
+        advisory. Pin both halves: a Ruff step marked continue-on-error, or a
+        mypy step that silently became blocking, makes those sentences false."""
         workflow = _read(WORKFLOWS / "test.yml")
-        gated = "--cov-branch" in workflow and "--cov-fail-under" in workflow
-        assert not gated, (
-            "CI now gates on branch coverage. README.md, docs/index.html and llms.txt all still "
-            "call it measured-not-gated — update all three and drop this assertion."
+        job = workflow.split("  static-analysis:", 1)[1].split("\n  real-services:", 1)[0]
+        assert "ruff check snapadmin" in job
+        assert "ruff format --check snapadmin" in job
+        mypy_step = job.split("- name: mypy", 1)[1]
+        assert "continue-on-error: true" in mypy_step, "the docs call mypy advisory"
+        ruff_steps = job.split("- name: mypy", 1)[0]
+        assert "continue-on-error" not in ruff_steps, "the docs call Ruff blocking"
+        for tool in ("ruff", "mypy", "django-stubs"):
+            assert f"\n{tool} = " in _read(PYPROJECT), f"{tool} is not a declared dev dependency"
+
+    def test_branch_coverage_is_gated_as_the_docs_say(self):
+        """#QA1d — all three pages now say branch coverage is gated at 100%. The
+        day the flag leaves CI, that wording is wrong in three places."""
+        workflow = _read(WORKFLOWS / "test.yml")
+        assert "--cov-branch" in workflow and "--cov-fail-under=100" in workflow, (
+            "CI no longer gates on branch coverage, but README.md, docs/index.html and "
+            "llms.txt all say it does"
         )
+        for document in ("README.md", "docs/index.html", "llms.txt"):
+            assert "measured, not gated" not in _read(REPO_ROOT / document).lower(), document
 
     @pytest.mark.parametrize(
         "phrase, document",
@@ -550,12 +560,13 @@ class TestTheFourLayersAgree:
         )
 
     @pytest.mark.parametrize("copy", ["llms.txt", "docs/llms.txt"])
-    def test_llms_txt_states_the_gate_is_line_coverage_and_branch_is_not_gated(self, copy):
+    def test_llms_txt_states_both_gates(self, copy):
+        """#QA1d — an assistant must be able to say *which* coverage is enforced:
+        line and branch, both at 100%, and by which command."""
         text = _read(REPO_ROOT / copy)
-        assert "100% line" in text, (
-            f"{copy} must say the enforced gate is *line* coverage — an assistant that reads "
-            f'"100% coverage" will tell a user branches are covered too'
+        assert "100% line and 100% branch" in text, (
+            f"{copy} must say both line and branch coverage are gated at 100%"
         )
-        assert "measured, not gated" in text, (
-            f"{copy} must say branch coverage is measured rather than gated"
+        assert "--cov-branch --cov-fail-under=100" in text, (
+            f"{copy} must name the command that enforces them"
         )

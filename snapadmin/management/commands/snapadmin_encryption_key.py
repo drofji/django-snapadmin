@@ -40,13 +40,12 @@ class Command(BaseCommand):
             dest="key_id",
             default=f"{date.today():%Y-%m}",
             help="Key id recorded in every ciphertext written with it "
-                 "(default: the current year-month).",
+            "(default: the current year-month).",
         )
         parser.add_argument(
             "--rotate",
             action="store_true",
-            help="Generate a key to prepend to the existing keyset, and show the "
-                 "resulting order.",
+            help="Generate a key to prepend to the existing keyset, and show the resulting order.",
         )
 
     def handle(self, *args, **options) -> None:
@@ -92,8 +91,7 @@ class Command(BaseCommand):
                 f"Existing keys, in order (material not shown): {', '.join(keyset.ids)}"
             )
             self.stdout.write(
-                "Resulting order once the new key is prepended: "
-                f"{', '.join((key_id, *keyset.ids))}"
+                f"Resulting order once the new key is prepended: {', '.join((key_id, *keyset.ids))}"
             )
             self.stdout.write("")
             self.stdout.write(

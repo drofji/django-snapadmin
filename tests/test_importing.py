@@ -889,3 +889,63 @@ class TestResumePastEndOfFile:
         summary = run_import_job(job, file_path=str(path))
         assert summary["created"] == 2  # unchanged — nothing left to read past row 2
         assert Category.objects.count() == 2
+
+
+@pytest.mark.django_db
+class TestImportBranchClosures:
+    """#QA1d — import paths no test reached."""
+
+    def test_a_run_that_produced_no_report_prints_no_report_line(self, tmp_path, capsys, monkeypatch):
+        from snapadmin.management.commands import snapadmin_import as command_module
+
+        path = tmp_path / "categories.csv"
+        _write_csv(path, ["name", "slug", "is_active"], [{"name": "One", "slug": "one", "is_active": "True"}])
+        real_run = command_module.run_import_job
+
+        def run_without_report(job, **kwargs):
+            summary = real_run(job, **kwargs)
+            job.report_file_name = ""
+            return summary
+
+        monkeypatch.setattr(command_module, "run_import_job", run_without_report)
+        call_command("snapadmin_import", "--model", "demo.Category", "--file", str(path))
+
+        out = capsys.readouterr().out
+        assert "1 created" in out
+        assert "Report:" not in out
+
+    def test_a_report_is_published_to_a_storage_rooted_elsewhere(self, tmp_path, monkeypatch):
+        """Export storage on a different root than the working directory: the
+        report is uploaded, and a stale copy already there is replaced."""
+        from django.core.files.storage import FileSystemStorage
+
+        from snapadmin import importing
+        from snapadmin.models import SnapImportJob
+
+        remote = FileSystemStorage(location=str(tmp_path / "remote"))
+        monkeypatch.setattr(importing, "get_export_storage", lambda: remote)
+        job = SnapImportJob.objects.create(app_label="demo", model="Category")
+        job.report_file_name = f"import_{job.pk}_report.ndjson"
+        working = importing._report_path(job)
+        os.makedirs(os.path.dirname(working), exist_ok=True)
+
+        with open(working, "w") as fh:
+            fh.write('{"first": 1}\n')
+        importing._publish_report(job)   # nothing there yet → plain upload
+        with open(working, "w") as fh:
+            fh.write('{"second": 2}\n')
+        importing._publish_report(job)   # stale copy → replaced, not suffixed
+
+        with remote.open(job.report_file_name) as fh:
+            assert fh.read() == b'{"second": 2}\n'
+        assert remote.listdir("")[1] == [job.report_file_name]
+
+
+    def test_a_model_without_a_write_allowlist_accepts_its_fields(self, monkeypatch):
+        """No ``api_write_fields`` means no allowlist to fail — the check moves on
+        to the read-only and masking rules rather than refusing everything."""
+        from snapadmin.importing import check_write_surface
+
+        monkeypatch.setattr(Category, "api_write_fields", None)
+
+        assert check_write_surface(Category, {"name", "slug"}) is None

@@ -18,6 +18,8 @@ the optional ``[xlsx]`` extra, and is rejected here with a 400 when it is missin
 rather than accepted as a job that can only fail in the worker.
 """
 
+from typing import Any
+
 from django.apps import apps
 from django.db import models as django_models
 from django.http import FileResponse
@@ -69,27 +71,33 @@ def _allowed_filters_for_model(model: type[django_models.Model]) -> dict[str, se
         if not hasattr(field, "column"):
             continue
         name = field.name
-        if isinstance(field, (
-            django_models.CharField,
-            django_models.TextField,
-            django_models.EmailField,
-            django_models.URLField,
-            django_models.SlugField,
-        )):
+        if isinstance(
+            field,
+            (
+                django_models.CharField,
+                django_models.TextField,
+                django_models.EmailField,
+                django_models.URLField,
+                django_models.SlugField,
+            ),
+        ):
             allowed[name] = {"exact", "in", "icontains"}
         elif isinstance(field, django_models.UUIDField):
             allowed[name] = {"exact", "in"}
         elif isinstance(field, django_models.BooleanField):
             allowed[name] = {"exact"}
-        elif isinstance(field, (
-            django_models.IntegerField,
-            django_models.BigIntegerField,
-            django_models.SmallIntegerField,
-            django_models.PositiveIntegerField,
-            django_models.PositiveSmallIntegerField,
-            django_models.FloatField,
-            django_models.DecimalField,
-        )):
+        elif isinstance(
+            field,
+            (
+                django_models.IntegerField,
+                django_models.BigIntegerField,
+                django_models.SmallIntegerField,
+                django_models.PositiveIntegerField,
+                django_models.PositiveSmallIntegerField,
+                django_models.FloatField,
+                django_models.DecimalField,
+            ),
+        ):
             allowed[name] = {"exact", "in", "gte", "lte"}
         elif isinstance(field, (django_models.DateTimeField, django_models.DateField)):
             allowed[name] = {"exact", "in", "gte", "lte"}
@@ -101,7 +109,7 @@ def _allowed_filters_for_model(model: type[django_models.Model]) -> dict[str, se
 def _validate_export_filters(
     model: type[django_models.Model],
     filters: dict[str, FilterValue],
-    masked_fields: set[str] = frozenset(),
+    masked_fields: frozenset[str] | set[str] = frozenset(),
 ) -> None:
     """Reject any ``filters`` key that is not an allowlisted own-field + safe lookup.
 
@@ -121,7 +129,11 @@ def _validate_export_filters(
     for key in filters:
         field_name, _, lookup = key.partition("__")
         lookup = lookup or "exact"
-        if field_name not in allowed or lookup not in allowed[field_name] or field_name in masked_fields:
+        if (
+            field_name not in allowed
+            or lookup not in allowed[field_name]
+            or field_name in masked_fields
+        ):
             rejected.append(key)
     if rejected:
         raise serializers.ValidationError(
@@ -139,13 +151,31 @@ class ExportJobSerializer(serializers.ModelSerializer):
     class Meta:
         model = SnapExportJob
         fields = [
-            "id", "app_label", "model", "export_format", "filters", "status",
-            "total_rows", "processed_rows", "progress_percent", "eta_seconds",
-            "error", "created_at", "started_at", "finished_at", "download_url",
+            "id",
+            "app_label",
+            "model",
+            "export_format",
+            "filters",
+            "status",
+            "total_rows",
+            "processed_rows",
+            "progress_percent",
+            "eta_seconds",
+            "error",
+            "created_at",
+            "started_at",
+            "finished_at",
+            "download_url",
         ]
         read_only_fields = [
-            "id", "status", "total_rows", "processed_rows", "error",
-            "created_at", "started_at", "finished_at",
+            "id",
+            "status",
+            "total_rows",
+            "processed_rows",
+            "error",
+            "created_at",
+            "started_at",
+            "finished_at",
         ]
 
     def get_download_url(self, obj) -> str | None:
@@ -161,12 +191,15 @@ class ExportJobCreateSerializer(serializers.ModelSerializer):
         model = SnapExportJob
         fields = ["app_label", "model", "export_format", "filters"]
 
-    def validate(self, attrs: dict[str, object]) -> dict[str, object]:
-        app_label, model_name = attrs["app_label"], attrs["model"]
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        app_label: str = attrs["app_label"]
+        model_name: str = attrs["model"]
         try:
             model = apps.get_model(app_label, model_name)
         except LookupError:
-            raise serializers.ValidationError(f"Unknown model '{app_label}.{model_name}'.")
+            raise serializers.ValidationError(
+                f"Unknown model '{app_label}.{model_name}'."
+            ) from None
         if not is_registered(model):
             raise serializers.ValidationError("Only SnapModel-backed models can be exported.")
 
@@ -222,8 +255,9 @@ class ExportJobViewSet(
 
     def create(self, request, *args, **kwargs):
         if not export_enabled():
-            return Response({"detail": "Background export is disabled."},
-                            status=status.HTTP_403_FORBIDDEN)
+            return Response(
+                {"detail": "Background export is disabled."}, status=status.HTTP_403_FORBIDDEN
+            )
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         # Enqueue the worker (runs synchronously under CELERY_TASK_ALWAYS_EAGER).
@@ -233,9 +267,11 @@ class ExportJobViewSet(
             from snapadmin.tasks import run_export
         except ImportError:
             return Response(
-                {"detail": "Background export requires Celery. Install it with "
-                           "`pip install django-snapadmin[celery]` and configure a broker "
-                           "(CELERY_BROKER_URL)."},
+                {
+                    "detail": "Background export requires Celery. Install it with "
+                    "`pip install django-snapadmin[celery]` and configure a broker "
+                    "(CELERY_BROKER_URL)."
+                },
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
@@ -243,15 +279,19 @@ class ExportJobViewSet(
         # therefore a resolvable tenant context) is in hand — run_export_job
         # replays it via snapadmin.tenancy.use_tenant() when the worker
         # actually runs, since a Celery task has no request of its own.
-        model = apps.get_model(serializer.validated_data["app_label"], serializer.validated_data["model"])
+        model = apps.get_model(
+            serializer.validated_data["app_label"], serializer.validated_data["model"]
+        )
         tenant_id = ""
         if is_tenant_scoped(model):
             current = get_current_tenant()
             if current is None or current is ALL_TENANTS:
                 return Response(
-                    {"detail": f"No tenant is bound to this request — {model._meta.label} is "
-                               "tenant-scoped and refuses to create an export job with no "
-                               "tenant assigned."},
+                    {
+                        "detail": f"No tenant is bound to this request — {model._meta.label} is "
+                        "tenant-scoped and refuses to create an export job with no "
+                        "tenant assigned."
+                    },
                     status=status.HTTP_403_FORBIDDEN,
                 )
             tenant_id = str(current)
@@ -269,8 +309,9 @@ class ExportJobViewSet(
     def cancel(self, request, pk=None):
         job = self.get_object()
         if job.is_finished:
-            return Response({"detail": f"Job already {job.status}."},
-                            status=status.HTTP_409_CONFLICT)
+            return Response(
+                {"detail": f"Job already {job.status}."}, status=status.HTTP_409_CONFLICT
+            )
         job.status = SnapExportJob.Status.CANCELLED
         # finished_at stamps every terminal status, cancellation included — the
         # export-retention purge (SNAPADMIN_EXPORT_RETENTION_DAYS) measures its
@@ -285,13 +326,20 @@ class ExportJobViewSet(
     def download(self, request, pk=None):
         job = self.get_object()
         if job.status != SnapExportJob.Status.COMPLETED:
-            return Response({"detail": f"Job is '{job.status}', not ready for download."},
-                            status=status.HTTP_409_CONFLICT)
+            return Response(
+                {"detail": f"Job is '{job.status}', not ready for download."},
+                status=status.HTTP_409_CONFLICT,
+            )
         storage = get_export_storage()
         name = export_file_name(job)
         if not storage.exists(name):
-            return Response({"detail": "Export file is no longer available."},
-                            status=status.HTTP_410_GONE)
+            return Response(
+                {"detail": "Export file is no longer available."}, status=status.HTTP_410_GONE
+            )
         content_type = CONTENT_TYPES.get(job.export_format, "application/octet-stream")
-        return FileResponse(storage.open(name, "rb"), as_attachment=True,
-                            filename=job.file_name, content_type=content_type)
+        return FileResponse(
+            storage.open(name, "rb"),
+            as_attachment=True,
+            filename=job.file_name,
+            content_type=content_type,
+        )

@@ -23,6 +23,7 @@ KNOWN_PLACEHOLDERS = [
     "full_env_extra",
     "full_readme_extra",
     "full_requirements_extra",
+    *sorted(render._API_CONTEXT[True]),
 ]
 
 
@@ -218,6 +219,68 @@ class TestGenerateProjectFull:
         _assert_no_leftover_placeholders(written)
 
 
+class TestGenerateProjectAdminOnly:
+    """``--admin-only`` (#RM1c): the admin alone — no API apps, the switches off,
+    a base-install requirement, and a health check that does not need the API."""
+
+    def _generate(self, tmp_path, *, full=False):
+        dest = tmp_path / "myshop"
+        written = render.generate_project(
+            dest, project_name="myshop", app_name="catalog", full=full, api=False
+        )
+        return dest, written
+
+    def test_settings_lists_no_api_apps_and_switches_them_off(self, tmp_path):
+        dest, _ = self._generate(tmp_path)
+        settings = (dest / "myshop" / "settings.py").read_text(encoding="utf-8")
+        for app in ("rest_framework", "drf_spectacular", "django_filters", "graphene_django"):
+            assert f'"{app}"' not in settings
+        assert 'env_bool("SNAPADMIN_REST_API_ENABLED", False)' in settings
+        assert 'env_bool("SNAPADMIN_GRAPHQL_ENABLED", False)' in settings
+        assert '"snapadmin",' in settings
+
+    def test_env_files_switch_the_api_off(self, tmp_path):
+        dest, _ = self._generate(tmp_path)
+        for name in (".env", "dist.env"):
+            text = (dest / name).read_text(encoding="utf-8")
+            assert "SNAPADMIN_REST_API_ENABLED=False" in text
+            assert "SNAPADMIN_GRAPHQL_ENABLED=False" in text
+
+    def test_requirements_ask_for_the_base_install_only(self, tmp_path):
+        dest, _ = self._generate(tmp_path)
+        requirements = (dest / "requirements.txt").read_text(encoding="utf-8")
+        line = next(l for l in requirements.splitlines() if l.startswith("django-snapadmin"))
+        assert "[" not in line
+
+    def test_readme_does_not_advertise_api_urls(self, tmp_path):
+        dest, _ = self._generate(tmp_path)
+        readme = (dest / "README.md").read_text(encoding="utf-8")
+        assert "/api/docs/" not in readme
+        assert "--admin-only" in readme
+        assert "django-snapadmin[api,graphql]" in readme  # how to add them later
+
+    def test_full_health_check_does_not_depend_on_the_api(self, tmp_path):
+        dest, _ = self._generate(tmp_path, full=True)
+        dockerfile = (dest / "Dockerfile").read_text(encoding="utf-8")
+        assert "/admin/login/" in dockerfile
+        assert "/api/health/" not in dockerfile.split("HEALTHCHECK", 1)[1]
+
+    @pytest.mark.parametrize("full", [False, True])
+    def test_no_leftover_placeholders(self, tmp_path, full):
+        _, written = self._generate(tmp_path, full=full)
+        _assert_no_leftover_placeholders(written)
+
+    def test_the_default_still_serves_the_api(self, tmp_path):
+        dest = tmp_path / "myshop"
+        render.generate_project(dest, project_name="myshop", app_name="catalog", full=False)
+        settings = (dest / "myshop" / "settings.py").read_text(encoding="utf-8")
+        assert '"rest_framework",' in settings
+        assert 'env_bool("SNAPADMIN_REST_API_ENABLED", True)' in settings
+
+    def test_both_variants_define_the_same_keys(self):
+        assert set(render._API_CONTEXT[True]) == set(render._API_CONTEXT[False])
+
+
 class TestInstalledVersion:
     def test_falls_back_when_package_not_found(self, monkeypatch):
         from importlib.metadata import PackageNotFoundError
@@ -288,8 +351,9 @@ def _requested_extras(requirements_text: str) -> set[str]:
     raise AssertionError("requirements.txt does not depend on django-snapadmin at all")
 
 
+@pytest.mark.parametrize("api", [True, False], ids=["api", "admin-only"])
 @pytest.mark.parametrize("full", [False, True], ids=["minimal", "full"])
-def test_requirements_cover_every_third_party_app_in_installed_apps(tmp_path, full):
+def test_requirements_cover_every_third_party_app_in_installed_apps(tmp_path, full, api):
     """``pip install -r requirements.txt`` then ``manage.py check`` must work in a clean venv.
 
     The generated ``INSTALLED_APPS`` lists ``rest_framework``, ``drf_spectacular``,
@@ -306,7 +370,7 @@ def test_requirements_cover_every_third_party_app_in_installed_apps(tmp_path, fu
     import pathlib as _pathlib
 
     dest = tmp_path / "myshop"
-    render.generate_project(dest, project_name="myshop", app_name="catalog", full=full)
+    render.generate_project(dest, project_name="myshop", app_name="catalog", full=full, api=api)
 
     apps = _installed_apps((dest / "myshop" / "settings.py").read_text(encoding="utf-8"))
     extras_requested = _requested_extras((dest / "requirements.txt").read_text(encoding="utf-8"))

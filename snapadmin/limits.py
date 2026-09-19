@@ -230,7 +230,9 @@ def reserve(
         if count > limit:
             elapsed = time.time() % period_seconds
             return Reservation(
-                allowed=False, reason="rate_limited", retry_after=period_seconds - elapsed,
+                allowed=False,
+                reason="rate_limited",
+                retry_after=period_seconds - elapsed,
             )
 
     if concurrency:

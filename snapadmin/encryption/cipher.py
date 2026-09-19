@@ -156,8 +156,7 @@ def _b64encode(raw: bytes) -> str:
 def _b64decode(text: str, *, label: str) -> bytes:
     if not _B64_PATTERN.match(text):
         raise DecryptionError(
-            f"Stored value is not a readable SnapAdmin ciphertext: its {label} is not "
-            "base64url."
+            f"Stored value is not a readable SnapAdmin ciphertext: its {label} is not base64url."
         )
     try:
         return base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
@@ -250,10 +249,7 @@ class Envelope:
         )
 
     def __repr__(self) -> str:
-        return (
-            f"<Envelope {self.version} key_id={self.key_id!r} "
-            f"payload={len(self.payload)} bytes>"
-        )
+        return f"<Envelope {self.version} key_id={self.key_id!r} payload={len(self.payload)} bytes>"
 
     __str__ = __repr__
 
@@ -288,8 +284,10 @@ def encrypt(plaintext: str, *, aad: str, keyset: Keyset | None = None) -> str:
     keyset = keyset if keyset is not None else require_keyset()
     key = keyset.active
     nonce = secrets.token_bytes(NONCE_BYTES)
-    payload = _load_cryptography().aesgcm(key.material).encrypt(
-        nonce, plaintext.encode("utf-8"), aad.encode("utf-8")
+    payload = (
+        _load_cryptography()
+        .aesgcm(key.material)
+        .encrypt(nonce, plaintext.encode("utf-8"), aad.encode("utf-8"))
     )
     return Envelope(key_id=key.id, nonce=nonce, payload=payload).serialise()
 

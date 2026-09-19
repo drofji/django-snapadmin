@@ -31,8 +31,18 @@ from django.utils import timezone
 from django.utils.dateparse import parse_datetime
 
 FIELDS = [
-    "id", "timestamp", "action", "actor_id", "actor_repr", "ip_address",
-    "user_agent", "app_label", "model", "object_id", "object_repr", "changes",
+    "id",
+    "timestamp",
+    "action",
+    "actor_id",
+    "actor_repr",
+    "ip_address",
+    "user_agent",
+    "app_label",
+    "model",
+    "object_id",
+    "object_repr",
+    "changes",
 ]
 
 
@@ -40,23 +50,40 @@ class Command(BaseCommand):
     help = "Export the immutable audit trail (SnapadminAuditLog) as JSON lines or CSV for a SIEM"
 
     def add_arguments(self, parser):
-        parser.add_argument("--format", choices=["json", "csv"], default="json",
-                            help="Output format (default: json — newline-delimited)")
-        parser.add_argument("--output", default="-",
-                            help="Output file path, or '-' for stdout (default)")
-        parser.add_argument("--since", default=None,
-                            help="Only rows at/after this ISO date or datetime")
-        parser.add_argument("--until", default=None,
-                            help="Only rows strictly before this ISO date or datetime")
-        parser.add_argument("--action", choices=["create", "update", "delete"], default=None,
-                            help="Filter by action")
+        parser.add_argument(
+            "--format",
+            choices=["json", "csv"],
+            default="json",
+            help="Output format (default: json — newline-delimited)",
+        )
+        parser.add_argument(
+            "--output", default="-", help="Output file path, or '-' for stdout (default)"
+        )
+        parser.add_argument(
+            "--since", default=None, help="Only rows at/after this ISO date or datetime"
+        )
+        parser.add_argument(
+            "--until", default=None, help="Only rows strictly before this ISO date or datetime"
+        )
+        parser.add_argument(
+            "--action",
+            choices=["create", "update", "delete"],
+            default=None,
+            help="Filter by action",
+        )
         parser.add_argument("--app", default=None, help="Filter by app_label")
         parser.add_argument("--model", default=None, help="Filter by model name")
-        parser.add_argument("--purge", action="store_true",
-                            help="After exporting, delete rows older than SNAPADMIN_AUDIT_RETENTION_DAYS")
-        parser.add_argument("--reveal-pii", action="store_true",
-                            help="Export raw (unmasked) changes for SNAPADMIN_MASKED_FIELDS "
-                                 "fields, instead of the default masked diff")
+        parser.add_argument(
+            "--purge",
+            action="store_true",
+            help="After exporting, delete rows older than SNAPADMIN_AUDIT_RETENTION_DAYS",
+        )
+        parser.add_argument(
+            "--reveal-pii",
+            action="store_true",
+            help="Export raw (unmasked) changes for SNAPADMIN_MASKED_FIELDS "
+            "fields, instead of the default masked diff",
+        )
 
     def handle(self, *args, **options):
         from snapadmin.models import SnapadminAuditLog
@@ -77,7 +104,8 @@ class Command(BaseCommand):
         out = sys.stdout if options["output"] == "-" else open(options["output"], "w", newline="")
         try:
             count = (
-                self._write_csv(qs, out, reveal_pii) if options["format"] == "csv"
+                self._write_csv(qs, out, reveal_pii)
+                if options["format"] == "csv"
                 else self._write_json(qs, out, reveal_pii)
             )
         finally:
@@ -105,6 +133,7 @@ class Command(BaseCommand):
         changes = entry.changes
         if not reveal_pii:
             from snapadmin.masking import mask_changes
+
             changes = mask_changes(entry.app_label, entry.model, changes)
         return {
             "id": entry.id,
@@ -148,6 +177,7 @@ class Command(BaseCommand):
         if days <= 0:
             return 0
         from datetime import timedelta
+
         cutoff = timezone.now() - timedelta(days=days)
         # QuerySet.delete() bypasses the per-instance immutability guard by
         # design — retention pruning is the one sanctioned way to remove rows.

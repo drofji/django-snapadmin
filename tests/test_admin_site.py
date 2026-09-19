@@ -385,6 +385,43 @@ class TestSnapSaveMixinRecordsTheSave:
         assert "Parent" in written.get().change_message
         assert "Renamed" in written.get().change_message
 
+    def test_unchanged_formsets_and_unsaved_or_unchanged_inlines_write_nothing(self):
+        """Two skips the one-line layout used to hide from the coverage counter:
+        a formset with no changes is not walked, and an inline that is new (no pk
+        yet) or unchanged has no "old -> new" to log."""
+        from decimal import Decimal
+        from unittest.mock import MagicMock
+
+        from django.contrib.admin.models import LogEntry
+
+        from demo.apps.shop.models import Product
+
+        product = Product.objects.create(name="Parent", price=Decimal("20.00"))
+        request = self._request("saverelated-skips")
+
+        untouched_formset = MagicMock()
+        untouched_formset.has_changed.return_value = False
+        untouched_formset.forms = [MagicMock()]
+
+        new_inline = MagicMock()
+        new_inline.instance.pk = None
+        new_inline.has_changed.return_value = True
+        unchanged_inline = MagicMock()
+        unchanged_inline.instance = product
+        unchanged_inline.has_changed.return_value = False
+        changed_formset = MagicMock()
+        changed_formset.has_changed.return_value = True
+        changed_formset.forms = [new_inline, unchanged_inline]
+
+        before = set(LogEntry.objects.values_list("pk", flat=True))
+        self._generated_admin(Product).save_related(
+            request, MagicMock(), [untouched_formset, changed_formset], change=True
+        )
+
+        assert not LogEntry.objects.exclude(pk__in=before).exists()
+        untouched_formset.forms[0].has_changed.assert_not_called()
+        new_inline.has_changed.assert_not_called()  # short-circuited on the missing pk
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SnapSaveMixin — an edit (re-homed in #QA1b)

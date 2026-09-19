@@ -150,8 +150,7 @@ def start_reindex(model, *, resume: bool = False):
     model_name = model.__name__
     if resume:
         existing = (
-            SnapReindexJob.objects
-            .filter(app_label=app_label, model=model_name)
+            SnapReindexJob.objects.filter(app_label=app_label, model=model_name)
             .exclude(status=SnapReindexJob.Status.COMPLETED)
             .order_by("-created_at")
             .first()
@@ -189,11 +188,9 @@ def run_reindex_job(
     from snapadmin.models import SnapReindexJob
 
     Status = SnapReindexJob.Status
-    claimed = (
-        SnapReindexJob.objects
-        .filter(pk=job.pk, status__in=[Status.PENDING, Status.FAILED])
-        .update(status=Status.PROCESSING)
-    )
+    claimed = SnapReindexJob.objects.filter(
+        pk=job.pk, status__in=[Status.PENDING, Status.FAILED]
+    ).update(status=Status.PROCESSING)
     if not claimed:
         logger.info("snapadmin.reindex.skipped", job=str(job.pk))
         return {"skipped": True, "reason": "already processing or finished"}
@@ -201,7 +198,11 @@ def run_reindex_job(
     job.refresh_from_db()
     try:
         return _run(
-            job, chunk_size=chunk_size, parallel=parallel, tune=tune, limit=limit,
+            job,
+            chunk_size=chunk_size,
+            parallel=parallel,
+            tune=tune,
+            limit=limit,
             on_progress=on_progress,
         )
     except Exception as exc:
@@ -250,7 +251,13 @@ def _run(job, *, chunk_size, parallel, tune, limit, on_progress) -> dict:
         job.processed_rows = 0
         job.save(update_fields=["total_rows", "started_at", "cursor_pk", "processed_rows"])
         return _index_es_only(
-            job, rows, es, index_name, chunk_size=chunk_size, parallel=parallel, on_progress=on_progress
+            job,
+            rows,
+            es,
+            index_name,
+            chunk_size=chunk_size,
+            parallel=parallel,
+            on_progress=on_progress,
         )
 
     qs = qs.order_by("pk")
@@ -322,8 +329,7 @@ def _index_es_only(job, rows, es, index_name, *, chunk_size, parallel, on_progre
             logger.info("snapadmin.reindex.cancelled", job=str(job.pk), rows=job.processed_rows)
             return {"cancelled": True, "indexed": job.processed_rows}
         actions = [
-            {"_index": index_name, "_id": obj.pk, "_source": obj.get_es_document()}
-            for obj in batch
+            {"_index": index_name, "_id": obj.pk, "_source": obj.get_es_document()} for obj in batch
         ]
         _, errors = _bulk_index(es, actions, parallel=parallel, chunk_size=chunk_size)
         errors_total += len(errors)

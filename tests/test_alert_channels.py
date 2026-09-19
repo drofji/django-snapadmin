@@ -153,6 +153,22 @@ class TestAlert:
 # Secret handling — a webhook URL is a credential
 # ─────────────────────────────────────────────────────────────────────────────
 
+class TestPostJsonRefusesNonHttpSchemes:
+    """A webhook is an HTTP endpoint: ``urllib`` would also follow ``file:`` or
+    ``ftp:``, so anything but http(s) is refused before a request is built."""
+
+    @pytest.mark.parametrize("url", ["file:///etc/passwd", "ftp://example.com/x", "gopher://x"])
+    def test_non_http_scheme_is_refused(self, url, monkeypatch):
+        from snapadmin import alerts
+
+        def must_not_open(*args, **kwargs):
+            raise AssertionError("urlopen reached for a non-http scheme")
+
+        monkeypatch.setattr(alerts.urllib_request, "urlopen", must_not_open)
+        with pytest.raises(alerts.AlertDeliveryError, match="http or https"):
+            alerts.post_json(url, {"k": "v"}, timeout=1)
+
+
 class TestMaskWebhookUrl:
     def test_drops_the_path_because_the_path_is_the_secret(self):
         assert mask_webhook_url(SLACK_URL) == "https://hooks.slack.com/…"
@@ -170,6 +186,12 @@ class TestMaskWebhookUrl:
     @pytest.mark.parametrize("url", ["", "not-a-url", "://nohost"])
     def test_unparseable_input_reveals_nothing(self, url):
         assert mask_webhook_url(url) in ("", "…")
+
+    @pytest.mark.parametrize("url", ["http://[::1", "https://[not-an-ip]/secret-path"])
+    def test_a_malformed_ipv6_host_reveals_nothing(self, url):
+        # urlsplit raises ValueError here; the secret-bearing path must not leak
+        # through a traceback or a partial render.
+        assert mask_webhook_url(url) == "…"
 
     def test_telegram_channel_target_hides_the_bot_token(self):
         channel = TelegramChannel(token=TELEGRAM_TOKEN, chat_id="-100999")
@@ -722,3 +744,18 @@ class TestBackwardCompatibility:
         assert len(mail.outbox) == 1
         assert mail.outbox[0].to == RECIPIENTS
         assert "connection refused" in mail.outbox[0].body
+
+
+def test_a_malformed_entry_is_skipped_and_the_valid_one_kept(settings):
+    """#QA1d — an entry build_webhook_channel rejects drops out of the list
+    without taking the other channels with it."""
+    from snapadmin.alerts import get_webhook_channels
+
+    settings.SNAPADMIN_ALERT_WEBHOOKS = [
+        {"type": "slack"},  # no url → rejected
+        {"type": "slack", "url": "https://hooks.slack.com/services/T/B/x"},
+    ]
+
+    channels = get_webhook_channels(kind="errors")
+
+    assert len(channels) == 1

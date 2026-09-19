@@ -13,18 +13,21 @@ from datetime import timedelta
 from enum import Enum
 from typing import Any, NamedTuple, NoReturn
 
-from asgiref.sync import sync_to_async
-
 from django.apps import apps
-from django.core.exceptions import FieldDoesNotExist, FieldError, ImproperlyConfigured, ValidationError
+from django.core.exceptions import FieldDoesNotExist, FieldError, ValidationError
 from django.contrib import admin
 from django.contrib.auth.base_user import AbstractBaseUser
-from django.contrib.admin.models import ADDITION, CHANGE, DELETION, LogEntry
+from django.contrib.admin.models import CHANGE, LogEntry
+
+# ADDITION/DELETION are re-exported: snapadmin.models.ADDITION/CHANGE/DELETION is a
+# pinned public constant set (tests/test_public_contract.py).
+from django.contrib.admin.models import ADDITION as ADDITION
+from django.contrib.admin.models import DELETION as DELETION
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils import timezone
-from django.db.models.signals import post_save, post_delete
-from django.dispatch import receiver
+from django.db.models.signals import post_delete
+from django.utils.html import escape
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from django.conf import settings
@@ -35,11 +38,18 @@ from django.conf import settings
 # still reach them at snapadmin.models.<name>.
 
 from snapadmin import fields as snapfields
-from snapadmin.admin_gen import AdminGenMixin, UNFOLD_INSTALLED, _wysiwyg_widget
+from snapadmin.admin_gen import AdminGenMixin, UNFOLD_INSTALLED
+from snapadmin.admin_gen import _wysiwyg_widget as _wysiwyg_widget  # re-export, see above
 from snapadmin.conf import get_setting
 from snapadmin.es import EsManager, EsQuerySet, EsStorageMode, SnapEsUnavailable
-from snapadmin.fields import DjangoFieldAttributeEnum, SnapField
-from snapadmin.jobs import SnapExportJob, SnapImportJob, SnapJobBase, SnapReindexJob
+
+# Re-exported: callers import these from snapadmin.models (a public path).
+from snapadmin.fields import DjangoFieldAttributeEnum as DjangoFieldAttributeEnum
+from snapadmin.fields import SnapField as SnapField
+from snapadmin.jobs import SnapExportJob as SnapExportJob
+from snapadmin.jobs import SnapImportJob as SnapImportJob
+from snapadmin.jobs import SnapJobBase as SnapJobBase
+from snapadmin.jobs import SnapReindexJob as SnapReindexJob
 from snapadmin.logging_config import get_logger
 from snapadmin.registry import get_model_meta, is_registered, register
 
@@ -49,6 +59,7 @@ logger = get_logger(__name__)
 # ===========================================================================
 # API Token Models
 # ===========================================================================
+
 
 def validate_allowed_models(value):
     """Validator for :attr:`APIToken.allowed_models`: a list of ``"app_label.ModelName"`` strings,
@@ -64,7 +75,9 @@ def validate_allowed_models(value):
         try:
             apps.get_model(parts[0], parts[1])
         except LookupError:
-            raise ValidationError(_("Model '%(item)s' does not exist."), params={"item": item})
+            raise ValidationError(
+                _("Model '%(item)s' does not exist."), params={"item": item}
+            ) from None
 
 
 def validate_allowed_scopes(value):
@@ -77,12 +90,15 @@ def validate_allowed_scopes(value):
         if not isinstance(item, str) or not item.strip():
             raise ValidationError(_("Invalid scope: '%(item)s'."), params={"item": item})
 
+
 TOKEN_KEY_LENGTH = 40
 TOKEN_PREFIX_LENGTH = 8
+
 
 def _generate_token_key() -> str:
     alphabet = string.ascii_letters + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(TOKEN_KEY_LENGTH))
+
 
 def hash_token_key(raw_key: str) -> str:
     """Return the SHA-256 hex digest of a raw token key.
@@ -94,22 +110,72 @@ def hash_token_key(raw_key: str) -> str:
     """
     return hashlib.sha256(raw_key.encode("utf-8")).hexdigest()
 
+
 class APIToken(models.Model):
     # Holds the raw secret only on the in-memory instance that just minted it
     # (during save/create). It is never persisted and is None for any token
     # re-fetched from the database.
     _raw_token_key: str | None = None
 
-    token_name = models.CharField(max_length=100, verbose_name=_("Token Name"), help_text=_("A descriptive name for this token (e.g. 'CI Pipeline', 'Read-only dashboard')."))
-    token_prefix = models.CharField(max_length=TOKEN_PREFIX_LENGTH, blank=True, editable=False, verbose_name=_("Token Prefix"), help_text=_("First 8 characters of the key, for identification. Not secret."))
-    token_digest = models.CharField(max_length=64, unique=True, blank=True, editable=False, verbose_name=_("Token Digest"), help_text=_("SHA-256 hash of the secret key. The raw key is never stored — it is shown only once, at creation."))
+    token_name = models.CharField(
+        max_length=100,
+        verbose_name=_("Token Name"),
+        help_text=_(
+            "A descriptive name for this token (e.g. 'CI Pipeline', 'Read-only dashboard')."
+        ),
+    )
+    token_prefix = models.CharField(
+        max_length=TOKEN_PREFIX_LENGTH,
+        blank=True,
+        editable=False,
+        verbose_name=_("Token Prefix"),
+        help_text=_("First 8 characters of the key, for identification. Not secret."),
+    )
+    token_digest = models.CharField(
+        max_length=64,
+        unique=True,
+        blank=True,
+        editable=False,
+        verbose_name=_("Token Digest"),
+        help_text=_(
+            "SHA-256 hash of the secret key. The raw key is never stored — it is shown only once, at creation."
+        ),
+    )
     # settings.AUTH_USER_MODEL (not a hard-coded auth.User) so projects with a
     # custom user model can use the package.
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="api_tokens", verbose_name=_("Owner"))
-    expiration_date = models.DateTimeField(null=True, blank=True, verbose_name=_("Expiration Date"), help_text=_("Leave blank for a token that never expires."))
-    allowed_models = models.JSONField(default=list, blank=True, validators=[validate_allowed_models], verbose_name=_("Allowed Models"), help_text=_("List of 'app_label.ModelName' strings this token can access."))
-    allowed_scopes = models.JSONField(default=list, blank=True, validators=[validate_allowed_scopes], verbose_name=_("Allowed Scopes"), help_text=_("Free-form strings a project's own views may check with token_has_scope() — SnapAdmin stores and exposes them, the meaning is the project's. Empty denies every scope check (fail-closed), unlike an empty Allowed Models."))
-    is_active = models.BooleanField(default=True, verbose_name=_("Is Active"), help_text=_("Inactive tokens are rejected without being deleted."))
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="api_tokens",
+        verbose_name=_("Owner"),
+    )
+    expiration_date = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name=_("Expiration Date"),
+        help_text=_("Leave blank for a token that never expires."),
+    )
+    allowed_models = models.JSONField(
+        default=list,
+        blank=True,
+        validators=[validate_allowed_models],
+        verbose_name=_("Allowed Models"),
+        help_text=_("List of 'app_label.ModelName' strings this token can access."),
+    )
+    allowed_scopes = models.JSONField(
+        default=list,
+        blank=True,
+        validators=[validate_allowed_scopes],
+        verbose_name=_("Allowed Scopes"),
+        help_text=_(
+            "Free-form strings a project's own views may check with token_has_scope() — SnapAdmin stores and exposes them, the meaning is the project's. Empty denies every scope check (fail-closed), unlike an empty Allowed Models."
+        ),
+    )
+    is_active = models.BooleanField(
+        default=True,
+        verbose_name=_("Is Active"),
+        help_text=_("Inactive tokens are rejected without being deleted."),
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Created At"))
     last_used_at = models.DateTimeField(null=True, blank=True, verbose_name=_("Last Used At"))
 
@@ -165,7 +231,8 @@ class APIToken(models.Model):
         delegates entirely to the user's permissions. A **non-empty** list
         further narrows access to exactly those entries.
         """
-        if not self.allowed_models: return True
+        if not self.allowed_models:
+            return True
         return f"{app_label}.{model_name}" in self.allowed_models
 
     def touch(self) -> None:
@@ -192,8 +259,11 @@ class APIToken(models.Model):
         self.save(update_fields=["token_prefix", "token_digest"])
 
         from snapadmin import audit
+
         audit.record_audit(
-            request, audit.UPDATE, self,
+            request,
+            audit.UPDATE,
+            self,
             {"token_digest": {"old": f"prefix {old_prefix}", "new": f"prefix {self.token_prefix}"}},
         )
         return self.token_key
@@ -218,6 +288,7 @@ class APIToken(models.Model):
             expiration_date=expiration_date,
         )
 
+
 # ===========================================================================
 # Error Monitoring
 # ===========================================================================
@@ -234,14 +305,26 @@ class ErrorEvent(models.Model):
     ``SNAPADMIN_ERROR_RETENTION_DAYS`` by the digest task.
     """
 
-    exception_class = models.CharField(max_length=255, verbose_name=_("Exception"), help_text=_("Exception class name, or HTTP<code> for a 5xx response without an exception."))
+    exception_class = models.CharField(
+        max_length=255,
+        verbose_name=_("Exception"),
+        help_text=_("Exception class name, or HTTP<code> for a 5xx response without an exception."),
+    )
     message = models.TextField(blank=True, verbose_name=_("Message"))
     path = models.CharField(max_length=500, blank=True, verbose_name=_("Path"))
     method = models.CharField(max_length=10, blank=True, verbose_name=_("Method"))
     status_code = models.PositiveIntegerField(default=500, verbose_name=_("Status Code"))
-    fingerprint = models.CharField(max_length=64, db_index=True, blank=True, verbose_name=_("Fingerprint"), help_text=_("SHA-256 of exception class + path — groups repeats of the same error."))
+    fingerprint = models.CharField(
+        max_length=64,
+        db_index=True,
+        blank=True,
+        verbose_name=_("Fingerprint"),
+        help_text=_("SHA-256 of exception class + path — groups repeats of the same error."),
+    )
     traceback = models.TextField(blank=True, verbose_name=_("Traceback"))
-    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("Occurred At"))
+    created_at = models.DateTimeField(
+        auto_now_add=True, db_index=True, verbose_name=_("Occurred At")
+    )
 
     class Meta:
         verbose_name = _("Error Event")
@@ -295,19 +378,41 @@ class SnapadminAuditLog(models.Model):
         UPDATE = "update", _("Updated")
         DELETE = "delete", _("Deleted")
 
-    action = models.CharField(max_length=16, choices=Action.choices, db_index=True, verbose_name=_("Action"))
+    action = models.CharField(
+        max_length=16, choices=Action.choices, db_index=True, verbose_name=_("Action")
+    )
     # actor keeps referential integrity but survives user deletion via actor_repr.
-    actor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+", verbose_name=_("Actor"))
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        verbose_name=_("Actor"),
+    )
     actor_repr = models.CharField(max_length=255, blank=True, verbose_name=_("Actor (snapshot)"))
     ip_address = models.GenericIPAddressField(null=True, blank=True, verbose_name=_("IP Address"))
     user_agent = models.TextField(blank=True, verbose_name=_("User Agent"))
-    content_type = models.ForeignKey(ContentType, null=True, blank=True, on_delete=models.SET_NULL, verbose_name=_("Content Type"))
+    content_type = models.ForeignKey(
+        ContentType,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        verbose_name=_("Content Type"),
+    )
     # app_label/model are snapshots so SIEM filtering survives content-type loss.
-    app_label = models.CharField(max_length=100, blank=True, db_index=True, verbose_name=_("App Label"))
+    app_label = models.CharField(
+        max_length=100, blank=True, db_index=True, verbose_name=_("App Label")
+    )
     model = models.CharField(max_length=100, blank=True, db_index=True, verbose_name=_("Model"))
     object_id = models.CharField(max_length=255, blank=True, verbose_name=_("Object ID"))
     object_repr = models.CharField(max_length=255, blank=True, verbose_name=_("Object"))
-    changes = models.JSONField(null=True, blank=True, verbose_name=_("Changes"), help_text=_("Before/after field diff, if any."))
+    changes = models.JSONField(
+        null=True,
+        blank=True,
+        verbose_name=_("Changes"),
+        help_text=_("Before/after field diff, if any."),
+    )
     timestamp = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name=_("Timestamp"))
 
     class Meta:
@@ -384,6 +489,7 @@ class SnapadminAuditLog(models.Model):
 # Enums & Helpers
 # ===========================================================================
 
+
 class SnapModelAttributeEnum(str, Enum):
     """Names of ``SnapModel`` class attributes referenced by name elsewhere in the package."""
 
@@ -436,14 +542,27 @@ class SnapPurgeError(Exception):
 # ``text`` is deliberately excluded — a term query against it matches individual
 # analysed tokens, not the stored value, which is almost never what a caller of
 # es_filter() intends; text fields are routed to their keyword sub-field instead.
-_ES_EXACT_FILTER_TYPES = frozenset({
-    "keyword", "constant_keyword", "wildcard",
-    "boolean",
-    "long", "integer", "short", "byte",
-    "double", "float", "half_float", "scaled_float", "unsigned_long",
-    "date", "date_nanos",
-    "ip", "version",
-})
+_ES_EXACT_FILTER_TYPES = frozenset(
+    {
+        "keyword",
+        "constant_keyword",
+        "wildcard",
+        "boolean",
+        "long",
+        "integer",
+        "short",
+        "byte",
+        "double",
+        "float",
+        "half_float",
+        "scaled_float",
+        "unsigned_long",
+        "date",
+        "date_nanos",
+        "ip",
+        "version",
+    }
+)
 # Sub-field types under a ``text`` field's ``fields`` that a term filter can use.
 _ES_KEYWORD_SUBFIELD_TYPES = frozenset({"keyword", "constant_keyword", "wildcard"})
 # Default number of buckets returned per ``es_aggregate`` facet (ES's own
@@ -466,6 +585,7 @@ class DjangoAdminClassAttributeEnum(str, Enum):
     ALL_MEDIA = "all"
     INLINES = "inlines"
 
+
 @admin.display(description="ID")
 def formatted_id(obj):
     """Changelist ``list_display`` column: an integer pk zero-padded to 6 digits with the
@@ -478,9 +598,11 @@ def formatted_id(obj):
         significant_start = next((i for i, ch in enumerate(raw) if ch != "0"), len(raw))
         leading = raw[:significant_start]
         number = raw[significant_start:] or "0"
-        val = mark_safe(f'<span class="faded-zeros">{leading}</span>{number}')
+        val = mark_safe(f'<span class="faded-zeros">{leading}</span>{number}')  # noqa: S308 - digits only
     else:
-        val = mark_safe(str(pk))
+        # A char/UUID key is data, possibly user-supplied: escaped, never trusted
+        # as markup (found by ruff's S308 audit, #QA1c).
+        val = escape(str(pk))
     if UNFOLD_INSTALLED:
         return [val, None, None]
     return val
@@ -496,6 +618,7 @@ class AdminFieldSets(NamedTuple):
     (release notes, this docstring) rather than discovered as a silent
     ``ValueError`` at admin autodiscover.
     """
+
     form_fields: list[str]
     list_display: list[str]
     search_fields: list[str]
@@ -506,6 +629,7 @@ class AdminFieldSets(NamedTuple):
 # ===========================================================================
 # Admin Mixin
 # ===========================================================================
+
 
 class PIIMaskingAdminMixin:
     """Masks configured PII fields in the admin for users without PII access.
@@ -524,6 +648,7 @@ class PIIMaskingAdminMixin:
 
     def _snap_masked_fields(self) -> list[str]:
         from snapadmin.masking import get_masked_fields
+
         return get_masked_fields(self.model._meta.app_label, self.model._meta.model_name)
 
     def _snap_mask_column(self, field_name, user=None):
@@ -532,8 +657,9 @@ class PIIMaskingAdminMixin:
         opts = self.model._meta
 
         def column(obj):
-            return mask_field(opts.app_label, opts.model_name, field_name,
-                              getattr(obj, field_name, None), user)
+            return mask_field(
+                opts.app_label, opts.model_name, field_name, getattr(obj, field_name, None), user
+            )
 
         # The model's own label, lazy translation intact — a title-cased field
         # name would relabel every masked column in every non-English admin
@@ -586,7 +712,12 @@ class SnapSaveMixin:
         """
         from django.core.exceptions import PermissionDenied
 
-        from snapadmin.tenancy import ALL_TENANTS, get_current_tenant, is_tenant_scoped, tenant_field_name
+        from snapadmin.tenancy import (
+            ALL_TENANTS,
+            get_current_tenant,
+            is_tenant_scoped,
+            tenant_field_name,
+        )
 
         model = type(obj)
         if not is_tenant_scoped(model):
@@ -605,10 +736,9 @@ class SnapSaveMixin:
             super().save_model(request, obj, form, change)
             # Audit trail: snapshot the created field values.
             from snapadmin import audit
+
             created = {
-                name: audit.change_entry(
-                    type(obj), name, None, form.cleaned_data.get(name)
-                )
+                name: audit.change_entry(type(obj), name, None, form.cleaned_data.get(name))
                 for name in form.cleaned_data
             }
             audit.record_audit(request, audit.CREATE, obj, created or None)
@@ -621,6 +751,7 @@ class SnapSaveMixin:
             if old_val != new_val:
                 verbose = _(self.model._meta.get_field(field_name).verbose_name)
                 from snapadmin import audit
+
                 # Django's own LogEntry message is a second copy of the diff and
                 # is shown in the admin's history view, so it gets the same
                 # redaction as the SnapAdmin trail rather than only one of them.
@@ -628,9 +759,7 @@ class SnapSaveMixin:
                     change_lines.append(f"{verbose}: {audit.REDACTED} -> {audit.REDACTED}")
                 else:
                     change_lines.append(f"{verbose}: '{old_val}' -> '{new_val}'")
-                changes[field_name] = audit.change_entry(
-                    self.model, field_name, old_val, new_val
-                )
+                changes[field_name] = audit.change_entry(self.model, field_name, old_val, new_val)
         super().save_model(request, obj, form, change)
         if change_lines:
             LogEntry.objects.log_actions(
@@ -645,17 +774,20 @@ class SnapSaveMixin:
             request._snap_logged_change = True
         if changes:
             from snapadmin import audit
+
             audit.record_audit(request, audit.UPDATE, obj, changes)
 
     def delete_model(self, request, obj):
         # Capture the object before it is gone.
         from snapadmin import audit
+
         audit.record_audit(request, audit.DELETE, obj, None)
         super().delete_model(request, obj)
 
     def delete_queryset(self, request, queryset):
         # Bulk "delete selected" admin action — audit each row before deletion.
         from snapadmin import audit
+
         for obj in queryset:
             audit.record_audit(request, audit.DELETE, obj, None)
         super().delete_queryset(request, queryset)
@@ -672,11 +804,13 @@ class SnapSaveMixin:
 
     def save_related(self, request, form, formsets, change):
         for formset in formsets:
-            if not formset.has_changed(): continue
+            if not formset.has_changed():
+                continue
             for related_form in formset.forms:
                 try:
                     instance = related_form.instance
-                    if not (instance.pk and related_form.has_changed()): continue
+                    if not (instance.pk and related_form.has_changed()):
+                        continue
                     change_lines = []
                     for field_name in related_form.changed_data:
                         old_val = related_form.initial.get(field_name)
@@ -692,12 +826,19 @@ class SnapSaveMixin:
                             change_message="\n".join(change_lines),
                             single_object=True,
                         )
-                except Exception: pass
+                except Exception as exc:
+                    # Django's own history entry is a courtesy next to the audit
+                    # trail; failing to write it must not fail the save.
+                    logger.warning(
+                        "admin_log_entry_failed", model=type(instance).__name__, error=str(exc)
+                    )
         super().save_related(request, form, formsets, change)
+
 
 # ===========================================================================
 # Base SnapModel
 # ===========================================================================
+
 
 class SnapModel(AdminGenMixin, models.Model):
     """Abstract base model that generates the admin, the API and the search mapping.
@@ -1044,16 +1185,19 @@ class SnapModel(AdminGenMixin, models.Model):
             return None
         # Most-specific classes first — Email/Slug/URL subclass CharField,
         # DateTimeField subclasses DateField, ImageField subclasses FileField.
-        if isinstance(field, (
-            models.EmailField,
-            models.SlugField,
-            models.URLField,
-            models.UUIDField,
-            models.GenericIPAddressField,
-            models.FileField,
-            models.DurationField,
-            models.TimeField,
-        )):
+        if isinstance(
+            field,
+            (
+                models.EmailField,
+                models.SlugField,
+                models.URLField,
+                models.UUIDField,
+                models.GenericIPAddressField,
+                models.FileField,
+                models.DurationField,
+                models.TimeField,
+            ),
+        ):
             return {"type": "keyword"}
         if isinstance(field, (models.CharField, models.TextField)):
             return {
@@ -1183,10 +1327,9 @@ class SnapModel(AdminGenMixin, models.Model):
             )
 
     def index_in_es(self) -> None:
-        if (
-            not (self.es_index_enabled or self.es_storage_mode != EsStorageMode.DB_ONLY)
-            or not getattr(settings, "ELASTICSEARCH_ENABLED", False)
-        ):
+        if not (
+            self.es_index_enabled or self.es_storage_mode != EsStorageMode.DB_ONLY
+        ) or not getattr(settings, "ELASTICSEARCH_ENABLED", False):
             return
         try:
             es = self.get_es_client()
@@ -1203,10 +1346,9 @@ class SnapModel(AdminGenMixin, models.Model):
             )
 
     def delete_from_es(self) -> None:
-        if (
-            not (self.es_index_enabled or self.es_storage_mode != EsStorageMode.DB_ONLY)
-            or not getattr(settings, "ELASTICSEARCH_ENABLED", False)
-        ):
+        if not (
+            self.es_index_enabled or self.es_storage_mode != EsStorageMode.DB_ONLY
+        ) or not getattr(settings, "ELASTICSEARCH_ENABLED", False):
             return
         try:
             es = self.get_es_client()
@@ -1342,16 +1484,20 @@ class SnapModel(AdminGenMixin, models.Model):
         if use_es:
             try:
                 es = cls.get_es_client()
-                query = {
-                    "multi_match": {
-                        "query": query_string,
-                        "fields": cls._es_search_fields(),
-                        "fuzziness": "AUTO",
-                        # Ignore type-mismatch parse errors (e.g. a text query
-                        # hitting a numeric field) instead of failing the search.
-                        "lenient": True,
+                query = (
+                    {
+                        "multi_match": {
+                            "query": query_string,
+                            "fields": cls._es_search_fields(),
+                            "fuzziness": "AUTO",
+                            # Ignore type-mismatch parse errors (e.g. a text query
+                            # hitting a numeric field) instead of failing the search.
+                            "lenient": True,
+                        }
                     }
-                } if query_string else {"match_all": {}}
+                    if query_string
+                    else {"match_all": {}}
+                )
                 query = cls._with_tenant_es_scope(query)
                 response = es.search(
                     index=cls.get_es_index_name(),
@@ -1373,7 +1519,9 @@ class SnapModel(AdminGenMixin, models.Model):
                     return cls._tag_search_backend(EsQuerySet(cls, results), "elasticsearch")
 
                 pks = [hit["_source"]["id"] for hit in hits]
-                preserved = models.Case(*[models.When(pk=pk, then=pos) for pos, pk in enumerate(pks)])
+                preserved = models.Case(
+                    *[models.When(pk=pk, then=pos) for pos, pk in enumerate(pks)]
+                )
                 return cls._tag_search_backend(
                     cls.objects.filter(pk__in=pks).order_by(preserved), "elasticsearch"
                 )
@@ -1397,8 +1545,10 @@ class SnapModel(AdminGenMixin, models.Model):
         q_objects = models.Q()
         for field in search_fields:
             if field == "id":
-                try: q_objects |= models.Q(id=int(query_string))
-                except ValueError: pass
+                try:
+                    q_objects |= models.Q(id=int(query_string))
+                except ValueError:
+                    pass
                 continue
             q_objects |= models.Q(**{f"{field}__icontains": query_string})
 
@@ -1424,42 +1574,44 @@ class SnapModel(AdminGenMixin, models.Model):
         sub-field, or an analysed ``text`` field that has no keyword sub-field.
         """
         node = cls.get_es_mapping() or {}
-        parts = key.split("__")
+        *parents, leaf = key.split("__")
         path: list[str] = []
-        for i, part in enumerate(parts):
-            if not isinstance(node, dict) or part not in node:
+
+        def entry(container: object, part: str) -> dict:
+            if not isinstance(container, dict) or part not in container:
                 resolved = ".".join(path + [part])
                 raise ValueError(
                     f"{cls.__name__}.es_filter: unknown ES field {key!r} "
                     f"(no mapping for {resolved!r})"
                 )
-            field_def = node[part]
+            return container[part]
+
+        for part in parents:
+            node = entry(node, part).get("properties")
             path.append(part)
-            if i < len(parts) - 1:
-                node = field_def.get("properties")
-                if node is None:
-                    raise ValueError(
-                        f"{cls.__name__}.es_filter: {'.'.join(path)!r} has no "
-                        f"sub-fields to resolve {key!r}"
-                    )
-                continue
-            ftype = field_def.get("type")
-            if ftype in _ES_EXACT_FILTER_TYPES:
-                return ".".join(path)
-            if ftype == "text":
-                subfields = field_def.get("fields") or {}
-                for sub_name, sub_def in subfields.items():
-                    if isinstance(sub_def, dict) and sub_def.get("type") in _ES_KEYWORD_SUBFIELD_TYPES:
-                        return ".".join(path + [sub_name])
+            if node is None:
                 raise ValueError(
-                    f"{cls.__name__}.es_filter: field {key!r} is an analysed text "
-                    f"field with no keyword sub-field; term filters need a keyword "
-                    f"mapping (add fields={{'raw': {{'type': 'keyword'}}}} to its es_mapping)"
+                    f"{cls.__name__}.es_filter: {'.'.join(path)!r} has no "
+                    f"sub-fields to resolve {key!r}"
                 )
+        field_def = entry(node, leaf)
+        path.append(leaf)
+        ftype = field_def.get("type")
+        if ftype in _ES_EXACT_FILTER_TYPES:
+            return ".".join(path)
+        if ftype == "text":
+            subfields = field_def.get("fields") or {}
+            for sub_name, sub_def in subfields.items():
+                if isinstance(sub_def, dict) and sub_def.get("type") in _ES_KEYWORD_SUBFIELD_TYPES:
+                    return ".".join(path + [sub_name])
             raise ValueError(
-                f"{cls.__name__}.es_filter: field {key!r} of ES type {ftype!r} "
-                f"is not term-filterable"
+                f"{cls.__name__}.es_filter: field {key!r} is an analysed text "
+                f"field with no keyword sub-field; term filters need a keyword "
+                f"mapping (add fields={{'raw': {{'type': 'keyword'}}}} to its es_mapping)"
             )
+        raise ValueError(
+            f"{cls.__name__}.es_filter: field {key!r} of ES type {ftype!r} is not term-filterable"
+        )
 
     @classmethod
     def _tenant_es_term(cls) -> tuple[str, Any] | None:
@@ -1483,7 +1635,12 @@ class SnapModel(AdminGenMixin, models.Model):
         result: one fail-closed shape, not a second "return nothing" branch
         duplicated in every caller.
         """
-        from snapadmin.tenancy import ALL_TENANTS, get_current_tenant, is_tenant_scoped, tenant_field_name
+        from snapadmin.tenancy import (
+            ALL_TENANTS,
+            get_current_tenant,
+            is_tenant_scoped,
+            tenant_field_name,
+        )
 
         if not is_tenant_scoped(cls):
             return None
@@ -1616,7 +1773,9 @@ class SnapModel(AdminGenMixin, models.Model):
                     return cls._tag_search_backend(EsQuerySet(cls, results), "elasticsearch")
 
                 pks = [hit["_source"]["id"] for hit in hits]
-                preserved = models.Case(*[models.When(pk=pk, then=pos) for pos, pk in enumerate(pks)])
+                preserved = models.Case(
+                    *[models.When(pk=pk, then=pos) for pos, pk in enumerate(pks)]
+                )
                 return cls._tag_search_backend(
                     cls.objects.filter(pk__in=pks).order_by(preserved), "elasticsearch"
                 )
@@ -1625,7 +1784,8 @@ class SnapModel(AdminGenMixin, models.Model):
                     "es_filter_failed",
                     model=cls.__name__,
                     terms=list(terms),
-                    fallback="empty" if cls.es_storage_mode == EsStorageMode.ES_ONLY
+                    fallback="empty"
+                    if cls.es_storage_mode == EsStorageMode.ES_ONLY
                     else ("db" if fallback else "raise"),
                     error=str(exc),
                 )
@@ -1658,23 +1818,29 @@ class SnapModel(AdminGenMixin, models.Model):
         A non-empty ``query_string`` is added as a scored ``must`` multi_match.
         """
         clauses = [
-            ({"terms": {field: list(value)}}
-             if isinstance(value, (list, tuple, set))
-             else {"term": {field: value}})
+            (
+                {"terms": {field: list(value)}}
+                if isinstance(value, (list, tuple, set))
+                else {"term": {field: value}}
+            )
             for field, value in resolved_terms.items()
         ]
         if query_string:
-            return {"bool": {
-                "filter": clauses,
-                "must": [{
-                    "multi_match": {
-                        "query": query_string,
-                        "fields": cls._es_search_fields(),
-                        "fuzziness": "AUTO",
-                        "lenient": True,
-                    }
-                }],
-            }}
+            return {
+                "bool": {
+                    "filter": clauses,
+                    "must": [
+                        {
+                            "multi_match": {
+                                "query": query_string,
+                                "fields": cls._es_search_fields(),
+                                "fuzziness": "AUTO",
+                                "lenient": True,
+                            }
+                        }
+                    ],
+                }
+            }
         if clauses:
             return {"bool": {"filter": clauses}}
         return {"match_all": {}}
@@ -1767,7 +1933,8 @@ class SnapModel(AdminGenMixin, models.Model):
                     "es_aggregate_failed",
                     model=cls.__name__,
                     fields=list(fields),
-                    fallback="empty" if cls.es_storage_mode == EsStorageMode.ES_ONLY
+                    fallback="empty"
+                    if cls.es_storage_mode == EsStorageMode.ES_ONLY
                     else ("db" if fallback else "raise"),
                     error=str(exc),
                 )
@@ -1798,9 +1965,7 @@ class SnapModel(AdminGenMixin, models.Model):
                     .annotate(_snap_count=models.Count("pk"))
                     .order_by("-_snap_count", name)[:size]
                 )
-                result[name] = [
-                    {"key": row[name], "count": row["_snap_count"]} for row in rows
-                ]
+                result[name] = [{"key": row[name], "count": row["_snap_count"]} for row in rows]
             except FieldError:
                 result[name] = []
         return result
@@ -1866,7 +2031,8 @@ class SnapModel(AdminGenMixin, models.Model):
                     "es_count_failed",
                     model=cls.__name__,
                     terms=list(terms),
-                    fallback="zero" if cls.es_storage_mode == EsStorageMode.ES_ONLY
+                    fallback="zero"
+                    if cls.es_storage_mode == EsStorageMode.ES_ONLY
                     else ("db" if fallback else "raise"),
                     error=str(exc),
                 )
@@ -1898,8 +2064,9 @@ class SnapModel(AdminGenMixin, models.Model):
         exact match. Shared by the database fallbacks of the ES query methods.
         """
         return {
-            (f"{key}__in" if isinstance(value, (list, tuple, set)) else key):
-                (list(value) if isinstance(value, (list, tuple, set)) else value)
+            (f"{key}__in" if isinstance(value, (list, tuple, set)) else key): (
+                list(value) if isinstance(value, (list, tuple, set)) else value
+            )
             for key, value in terms.items()
         }
 
@@ -1981,7 +2148,13 @@ class SnapModel(AdminGenMixin, models.Model):
         fallback = cls._es_db_fallback(db_fallback)
         pk_only = source is False
         return cls._es_scan_iter(
-            resolved, terms, query_string, page_size, fallback, pk_only, limit,
+            resolved,
+            terms,
+            query_string,
+            page_size,
+            fallback,
+            pk_only,
+            limit,
         )
 
     @classmethod
@@ -2011,7 +2184,8 @@ class SnapModel(AdminGenMixin, models.Model):
                     model=cls.__name__,
                     terms=list(terms),
                     produced=produced,
-                    fallback="none" if (produced or cls.es_storage_mode == EsStorageMode.ES_ONLY)
+                    fallback="none"
+                    if (produced or cls.es_storage_mode == EsStorageMode.ES_ONLY)
                     else ("db" if fallback else "raise"),
                     error=str(exc),
                 )
@@ -2242,7 +2416,9 @@ class SnapModel(AdminGenMixin, models.Model):
         failed = cls._es_delete_failures(response)
         if failed:
             logger.warning(
-                "es_purge_delete_failed", model=cls.__name__, pk_count=len(pks),
+                "es_purge_delete_failed",
+                model=cls.__name__,
+                pk_count=len(pks),
                 error=f"{failed} document(s) reported in the response's failures",
             )
             return False
@@ -2297,10 +2473,12 @@ class SnapModel(AdminGenMixin, models.Model):
         expired = models.Q(**{f"{date_field}__lt": now})
         if retention_days and retention_days > 0:
             cutoff = now - timedelta(days=retention_days)
-            expired |= models.Q(**{
-                f"{date_field}__isnull": True,
-                f"{retention_field}__lt": cutoff,
-            })
+            expired |= models.Q(
+                **{
+                    f"{date_field}__isnull": True,
+                    f"{retention_field}__lt": cutoff,
+                }
+            )
         return expired
 
     @staticmethod
@@ -2322,16 +2500,20 @@ class SnapModel(AdminGenMixin, models.Model):
             return past_deadline
 
         cutoff = now - timedelta(days=retention_days)
-        return {"bool": {
-            "should": [
-                past_deadline,
-                {"bool": {
-                    "must_not": [{"exists": {"field": date_field}}],
-                    "filter": [{"range": {retention_field: {"lt": cutoff.isoformat()}}}],
-                }},
-            ],
-            "minimum_should_match": 1,
-        }}
+        return {
+            "bool": {
+                "should": [
+                    past_deadline,
+                    {
+                        "bool": {
+                            "must_not": [{"exists": {"field": date_field}}],
+                            "filter": [{"range": {retention_field: {"lt": cutoff.isoformat()}}}],
+                        }
+                    },
+                ],
+                "minimum_should_match": 1,
+            }
+        }
 
     @classmethod
     def _purge_expired_es_only(
@@ -2350,9 +2532,9 @@ class SnapModel(AdminGenMixin, models.Model):
         try:
             es = cls.get_es_client()
             index_name = cls.get_es_index_name()
-            body = {"query": cls._retention_es_query(
-                now, retention_days, retention_field, date_field
-            )}
+            body = {
+                "query": cls._retention_es_query(now, retention_days, retention_field, date_field)
+            }
             if dry_run:
                 resp = es.count(index=index_name, body=body)
                 return resp.get("count", 0)
@@ -2424,7 +2606,9 @@ class SnapModel(AdminGenMixin, models.Model):
                 if checked[key]:
                     logger.info(
                         "snapadmin.purge.file_shared_skip",
-                        model=cls.__name__, field=field_name, path=path,
+                        model=cls.__name__,
+                        field=field_name,
+                        path=path,
                     )
                     continue
                 try:
@@ -2433,7 +2617,10 @@ class SnapModel(AdminGenMixin, models.Model):
                 except Exception as exc:
                     logger.error(
                         "snapadmin.purge.file_delete_failed",
-                        model=cls.__name__, field=field_name, path=path, error=str(exc),
+                        model=cls.__name__,
+                        field=field_name,
+                        path=path,
+                        error=str(exc),
                     )
                     failures.append(f"{field_name}={path}: {exc}")
         if failures:
@@ -2493,9 +2680,11 @@ class SnapModel(AdminGenMixin, models.Model):
         now = now or timezone.now()
 
         if cls.es_storage_mode == EsStorageMode.ES_ONLY:
-            return SnapPurgeResult(cls._purge_expired_es_only(
-                now, retention_days, retention_field, date_field, dry_run
-            ))
+            return SnapPurgeResult(
+                cls._purge_expired_es_only(
+                    now, retention_days, retention_field, date_field, dry_run
+                )
+            )
 
         # Retention is time-based, not tenant-based: an expired row is purged
         # regardless of which tenant it belongs to, so this sweep is one of
@@ -2530,8 +2719,10 @@ class SnapModel(AdminGenMixin, models.Model):
 
             if kept_pks:
                 logger.warning(
-                    "retention_purge_skipped_protected", model=cls._meta.label,
-                    skipped=len(kept_pks), purged=len(deleted_pks),
+                    "retention_purge_skipped_protected",
+                    model=cls._meta.label,
+                    skipped=len(kept_pks),
+                    purged=len(deleted_pks),
                 )
             return SnapPurgeResult(len(deleted_pks), len(kept_pks))
 
@@ -2592,10 +2783,12 @@ class SnapModel(AdminGenMixin, models.Model):
     def __str__(self):
         for attr in ["name", "alias"]:
             val = getattr(self, attr, None)
-            if val: return str(val)
+            if val:
+                return str(val)
         for pair in [("first_name", "last_name"), ("firstname", "lastname")]:
-            f, l = getattr(self, pair[0], None), getattr(self, pair[1], None)
-            if f and l: return f"{l}, {f}"
+            first, last = getattr(self, pair[0], None), getattr(self, pair[1], None)
+            if first and last:
+                return f"{last}, {first}"
         return super().__str__()
 
     # get_admin_fields(), get_admin_media(), register_admin() and
@@ -2617,9 +2810,7 @@ def _retention_configured(model: type) -> bool:
     growing forever.
     """
     days = get_model_meta(model, "data_retention_days", None)
-    return bool(get_model_meta(model, "data_retention_date_field", None)) or bool(
-        days and days > 0
-    )
+    return bool(get_model_meta(model, "data_retention_date_field", None)) or bool(days and days > 0)
 
 
 # ===========================================================================
@@ -2767,21 +2958,40 @@ def _as_lookup_map(value: Any) -> Any:
 #: every name here still exists on ``SnapModel`` (catching a stale entry) and
 #: is never accepted as a decorator keyword (catching an entry #RFC1g already
 #: closed that nobody remembered to remove from this set).
-_SNAP_MODEL_UNEXPOSED_ATTRIBUTES: frozenset[str] = frozenset({
-    # Elasticsearch — needs EsMirrorMixin, not just a keyword (#RFC1g row 1).
-    "es_index_enabled", "es_storage_mode", "es_index_name", "es_mapping",
-    "es_index_settings", "es_auto_mapping", "es_query_routing",
-    # GDPR retention — needs a shared purge_expired attachment (#RFC1g row 2).
-    "data_retention_days", "data_retention_field", "data_retention_files",
-    "data_retention_date_field",
-    # Generated admin — needs register_admin()/get_admin_fields() refactored
-    # onto get_model_meta() before these mean anything for a plain model
-    # (#RFC1g row 3).
-    "admin_enabled", "admin_sections", "admin_list_display_pk", "admin_tabs", "snap_inlines", "admin_mixins",
-    "js_admin_files", "css_admin_files",
-    "compressed_fields", "warn_unsaved_form", "list_filter_submit",
-    "list_per_page", "list_max_show_all", "show_full_result_count",
-})
+_SNAP_MODEL_UNEXPOSED_ATTRIBUTES: frozenset[str] = frozenset(
+    {
+        # Elasticsearch — needs EsMirrorMixin, not just a keyword (#RFC1g row 1).
+        "es_index_enabled",
+        "es_storage_mode",
+        "es_index_name",
+        "es_mapping",
+        "es_index_settings",
+        "es_auto_mapping",
+        "es_query_routing",
+        # GDPR retention — needs a shared purge_expired attachment (#RFC1g row 2).
+        "data_retention_days",
+        "data_retention_field",
+        "data_retention_files",
+        "data_retention_date_field",
+        # Generated admin — needs register_admin()/get_admin_fields() refactored
+        # onto get_model_meta() before these mean anything for a plain model
+        # (#RFC1g row 3).
+        "admin_enabled",
+        "admin_sections",
+        "admin_list_display_pk",
+        "admin_tabs",
+        "snap_inlines",
+        "admin_mixins",
+        "js_admin_files",
+        "css_admin_files",
+        "compressed_fields",
+        "warn_unsaved_form",
+        "list_filter_submit",
+        "list_per_page",
+        "list_max_show_all",
+        "show_full_result_count",
+    }
+)
 
 
 def snap_model(
@@ -2930,8 +3140,7 @@ def snap_model(
     def decorator(model: type[models.Model]) -> type[models.Model]:
         if not (isinstance(model, type) and issubclass(model, models.Model)):
             raise TypeError(
-                "@snap_model can only decorate a django.db.models.Model subclass, "
-                f"got {model!r}."
+                f"@snap_model can only decorate a django.db.models.Model subclass, got {model!r}."
             )
         register(model, **given)
         logger.debug(
@@ -2947,6 +3156,7 @@ def snap_model(
 # ===========================================================================
 # A computed column as a method — @snap_property
 # ===========================================================================
+
 
 def snap_property(
     *,
@@ -3049,7 +3259,8 @@ def reindexable_snapmodels() -> list[type["SnapModel"]]:
         and hasattr(model, "es_reindex_all")
         and (
             get_model_meta(model, "es_index_enabled", False)
-            or get_model_meta(model, "es_storage_mode", EsStorageMode.DB_ONLY) != EsStorageMode.DB_ONLY
+            or get_model_meta(model, "es_storage_mode", EsStorageMode.DB_ONLY)
+            != EsStorageMode.DB_ONLY
         )
     ]
 

@@ -552,3 +552,28 @@ class TestExportCommand:
         call_command("snapadmin_audit_export", "--output", str(out))
         rows = [json.loads(l) for l in out.read_text().strip().splitlines()]
         assert any(r["changes"] and r["changes"].get("name", {}).get("new") == "P" for r in rows)
+
+
+@pytest.mark.django_db
+class TestAuditWriteFailureNeverBreaksTheSave:
+    """F8 / #RM1a — ``record_audit`` swallows its own failure by design (auditing
+    must never break the admin operation it records). The branch sat behind a
+    ``# pragma: no cover``; it is reachable — a locked table, a full disk, a
+    dropped connection — so it is pinned here instead of excluded."""
+
+    def test_a_failing_insert_is_logged_and_does_not_raise(self, product, admin_user, monkeypatch):
+        from structlog.testing import capture_logs
+
+        def refusing_create(**kwargs):
+            raise RuntimeError("database is locked")
+
+        monkeypatch.setattr(SnapadminAuditLog.objects, "create", refusing_create)
+
+        with capture_logs() as emitted:
+            audit.record_audit(_request(admin_user), audit.UPDATE, product, {"name": {"old": "a", "new": "b"}})
+
+        failures = [e for e in emitted if e["event"] == "snapadmin.audit.record_failed"]
+        assert len(failures) == 1
+        assert failures[0]["action"] == audit.UPDATE
+        assert failures[0]["log_level"] == "error"
+        assert SnapadminAuditLog.objects.count() == 0

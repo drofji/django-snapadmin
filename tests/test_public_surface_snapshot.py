@@ -361,6 +361,7 @@ SNAPSHOT: dict[str, list[str]] = {
         "license_check_main",
     ],
     "snapadmin.masking": [
+        "PermissionUser",
         "apply_masking_rule",
         "get_masked_fields",
         "get_masking_rules",

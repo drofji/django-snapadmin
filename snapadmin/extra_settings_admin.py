@@ -64,6 +64,7 @@ def apply_unfold_styling() -> bool:
         return False
 
     from django.contrib import admin
+
     try:
         from unfold.admin import ModelAdmin as UnfoldModelAdmin
     except ImportError:

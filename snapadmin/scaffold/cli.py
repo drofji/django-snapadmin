@@ -18,12 +18,17 @@ def build_parser() -> argparse.ArgumentParser:
         epilog="Examples:\n"
         "  snapadmin-new myshop\n"
         "  snapadmin-new myshop --app-name storefront\n"
-        "  snapadmin-new myshop --full   # + Dockerfile, docker-compose.yml, Postgres/Redis/ES\n",
+        "  snapadmin-new myshop --full   # + Dockerfile, docker-compose.yml, Postgres/Redis/ES\n"
+        "  snapadmin-new myshop --admin-only   # the admin alone, no REST API or GraphQL\n",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument("project_name", help="Name of the project (also its settings-package name).")
     parser.add_argument(
-        "--path", default=".", help="Directory to create the project in (default: the current directory)."
+        "project_name", help="Name of the project (also its settings-package name)."
+    )
+    parser.add_argument(
+        "--path",
+        default=".",
+        help="Directory to create the project in (default: the current directory).",
     )
     parser.add_argument(
         "--app-name",
@@ -35,6 +40,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--full",
         action="store_true",
         help="Also write a Dockerfile, docker-compose.yml and the Postgres/Redis/Elasticsearch wiring.",
+    )
+    parser.add_argument(
+        "--admin-only",
+        dest="admin_only",
+        action="store_true",
+        help="Generate the admin alone: REST API and GraphQL off, base install only "
+        "(the library's own default since 1.0).",
     )
     return parser
 
@@ -73,6 +85,7 @@ def main(argv: list[str] | None = None) -> int:
             project_name=args.project_name,
             app_name=args.app_name,
             full=args.full,
+            api=not args.admin_only,
         )
         print(f"Wrote {len(written)} file(s).")
         _print_next_steps(dest, full=args.full)

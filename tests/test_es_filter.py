@@ -252,3 +252,25 @@ class TestEsFilterFallback:
             result = Product.es_filter(ghost="anything")
         assert list(result) == []
         assert result._snap_search_backend == "database"
+
+
+class TestTermFieldResolutionEdges:
+    """#QA1d — two resolver paths no test reached."""
+
+    def test_a_text_field_skips_non_keyword_subfields_to_find_the_keyword_one(self):
+        from demo.apps.shop.models import Product
+
+        mapping = {"title": {"type": "text", "fields": {
+            "english": {"type": "text"}, "raw": {"type": "keyword"},
+        }}}
+        with patch.object(Product, "get_es_mapping", return_value=mapping):
+            assert Product._resolve_es_term_field("title") == "title.raw"
+
+    def test_an_object_field_itself_is_not_term_filterable(self):
+        from demo.apps.shop.models import Product
+
+        mapping = {"payload": {"type": "object", "properties": {"status": {"type": "keyword"}}}}
+        with patch.object(Product, "get_es_mapping", return_value=mapping):
+            with pytest.raises(ValueError, match="'payload' of ES type 'object' is not term-filterable"):
+                Product._resolve_es_term_field("payload")
+            assert Product._resolve_es_term_field("payload__status") == "payload.status"

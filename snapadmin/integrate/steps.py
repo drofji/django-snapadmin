@@ -10,7 +10,17 @@ from dataclasses import dataclass
 
 from snapadmin.integrate.detect import ProjectContext
 
-_SKIP_DIRS = {".venv", "venv", "env", "node_modules", "__pycache__", ".git", ".staticfiles", "snapadmin", "migrations"}
+_SKIP_DIRS = {
+    ".venv",
+    "venv",
+    "env",
+    "node_modules",
+    "__pycache__",
+    ".git",
+    ".staticfiles",
+    "snapadmin",
+    "migrations",
+}
 
 _INSTALLED_APPS_SNIPPET = (
     "INSTALLED_APPS = [\n"
@@ -92,10 +102,14 @@ def _has(text: str, *tokens: str) -> bool:
 
 def installed_apps_step(ctx: ProjectContext) -> Step:
     present = _has(ctx.settings_text, '"snapadmin"', "'snapadmin'")
-    note = "" if _has(ctx.settings_text, "unfold") else (
-        "The 'unfold' theme is optional (pip install django-snapadmin[theme]); without it "
-        "SnapAdmin renders on Django's built-in admin. If you add it, list the unfold apps "
-        "before 'django.contrib.admin'."
+    note = (
+        ""
+        if _has(ctx.settings_text, "unfold")
+        else (
+            "The 'unfold' theme is optional (pip install django-snapadmin[theme]); without it "
+            "SnapAdmin renders on Django's built-in admin. If you add it, list the unfold apps "
+            "before 'django.contrib.admin'."
+        )
     )
     return Step("installed_apps", "INSTALLED_APPS", present, _INSTALLED_APPS_SNIPPET, note)
 
@@ -118,7 +132,9 @@ def settings_step(ctx: ProjectContext) -> Step:
 
 
 def rest_step(ctx: ProjectContext) -> Step:
-    present = _has(ctx.settings_text, "rest_framework") and _has(ctx.settings_text, "drf_spectacular")
+    present = _has(ctx.settings_text, "rest_framework") and _has(
+        ctx.settings_text, "drf_spectacular"
+    )
     return Step("rest_api", "REST framework config", present, _REST_SNIPPET)
 
 
@@ -198,7 +214,10 @@ def api_auth_step(ctx: ProjectContext) -> Step:
         "]"
     )
     return Step(
-        "api_auth", "Authentication on the API", present, snippet,
+        "api_auth",
+        "Authentication on the API",
+        present,
+        snippet,
         "Defaults to SnapAdmin's own token auth if unset — fine to ship, but confirm it's the "
         "authenticator you actually want.",
         group="should_configure",
@@ -212,19 +231,22 @@ def masking_step(ctx: ProjectContext) -> Step:
         "# or SNAPADMIN_MASKING_RULES for per-permission unmasking"
     )
     return Step(
-        "pii_masking", "PII masking configured for sensitive fields", present, snippet,
+        "pii_masking",
+        "PII masking configured for sensitive fields",
+        present,
+        snippet,
         group="should_configure",
     )
 
 
 def throttling_step(ctx: ProjectContext) -> Step:
     present = _has(ctx.settings_text, "SNAPADMIN_THROTTLE_ANON", "SNAPADMIN_THROTTLE_USER")
-    snippet = (
-        'SNAPADMIN_THROTTLE_ANON = "60/min"\n'
-        'SNAPADMIN_THROTTLE_USER = "600/min"'
-    )
+    snippet = 'SNAPADMIN_THROTTLE_ANON = "60/min"\nSNAPADMIN_THROTTLE_USER = "600/min"'
     return Step(
-        "throttling", "API throttling configured", present, snippet,
+        "throttling",
+        "API throttling configured",
+        present,
+        snippet,
         "Ships with a default rate even if unset — this row flags an explicit choice, not a gap.",
         group="should_configure",
     )
@@ -234,20 +256,31 @@ def pagination_step(ctx: ProjectContext) -> Step:
     present = "SNAPADMIN_API_PAGE_SIZE" in ctx.settings_text
     snippet = "SNAPADMIN_API_PAGE_SIZE = 25   # default; lower for wide rows, raise for small ones"
     return Step(
-        "pagination", "API page size configured", present, snippet,
+        "pagination",
+        "API page size configured",
+        present,
+        snippet,
         "Ships with a default (25) even if unset — this row flags an explicit choice, not a gap.",
         group="should_configure",
     )
 
 
 def alerts_step(ctx: ProjectContext) -> Step:
-    present = _has(ctx.settings_text, "SNAPADMIN_HEALTH_ALERT_EMAILS", "SNAPADMIN_ERROR_ALERT_EMAILS", "SNAPADMIN_ALERT_")
+    present = _has(
+        ctx.settings_text,
+        "SNAPADMIN_HEALTH_ALERT_EMAILS",
+        "SNAPADMIN_ERROR_ALERT_EMAILS",
+        "SNAPADMIN_ALERT_",
+    )
     snippet = (
         'SNAPADMIN_HEALTH_ALERT_EMAILS = ["ops@example.com"]\n'
         "# or SNAPADMIN_ALERT_SLACK_WEBHOOK / _DISCORD_WEBHOOK / _TEAMS_WEBHOOK / _TELEGRAM_*"
     )
     return Step(
-        "alerts", "Error and health alerts wired to a real channel", present, snippet,
+        "alerts",
+        "Error and health alerts wired to a real channel",
+        present,
+        snippet,
         group="should_configure",
     )
 
@@ -260,7 +293,10 @@ def backups_step(ctx: ProjectContext) -> Step:
         "SNAPADMIN_BACKUP_SFTP_EVERY_HOURS = 24   # a second, offsite destination — the 3-2-1 rule"
     )
     return Step(
-        "backups", "Backups enabled, with at least two destinations", present, snippet,
+        "backups",
+        "Backups enabled, with at least two destinations",
+        present,
+        snippet,
         "This doctor only checks that backups are turned on, not how many destinations are "
         "configured — confirm with `snapadmin_info --section features` once the project is running.",
         group="data_safety",
@@ -269,15 +305,22 @@ def backups_step(ctx: ProjectContext) -> Step:
 
 def backup_encryption_step(ctx: ProjectContext) -> Step:
     present = "SNAPADMIN_BACKUP_AGE_RECIPIENTS" in ctx.settings_text
-    snippet = 'SNAPADMIN_BACKUP_AGE_RECIPIENTS = ["age1qyqs..."]  # pip install django-snapadmin[age]'
+    snippet = (
+        'SNAPADMIN_BACKUP_AGE_RECIPIENTS = ["age1qyqs..."]  # pip install django-snapadmin[age]'
+    )
     note = (
-        "" if present else
-        "Optional, but strongly recommended: an unencrypted dump on a rented offsite server is "
+        ""
+        if present
+        else "Optional, but strongly recommended: an unencrypted dump on a rented offsite server is "
         "your whole database in someone else's hands. Costs one setting."
     )
     return Step(
-        "backup_encryption", "Backup encryption configured (strongly recommended)", present, snippet,
-        note, group="data_safety",
+        "backup_encryption",
+        "Backup encryption configured (strongly recommended)",
+        present,
+        snippet,
+        note,
+        group="data_safety",
     )
 
 
@@ -289,7 +332,10 @@ def restore_tested_step(ctx: ProjectContext) -> Step:
     honestly rather than citing a command that does not exist.
     """
     return Step(
-        "restore_tested", "You have actually run a restore", None, "",
+        "restore_tested",
+        "You have actually run a restore",
+        None,
+        "",
         "An untested backup is the most common form of not having a backup. There is no "
         "automated restore command yet — verify manually: restore a recent dump to a scratch "
         "database and confirm the data matches.",
