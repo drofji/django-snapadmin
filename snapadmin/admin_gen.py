@@ -157,11 +157,143 @@ def _pk_list_column(model: type[models.Model]) -> tuple[str, bool]:
     return name, pk is None or isinstance(pk, models.IntegerField)
 
 
+def _list_filter_for(fields: dict) -> list:
+    """The ``list_filter`` entries for every ``filterable=True`` field.
+
+    Each type gets the widget that can actually express its range: a date or a
+    number gets a range filter, a foreign key a searchable dropdown, a field
+    with choices a choice dropdown, everything else Django's default.
+    """
+    filters: list = []
+    for field_name, field in fields.items():
+        if not getattr(field, SnapFieldAttributeEnum.FILTERABLE.value, False):
+            continue
+        if isinstance(field, (models.DateField, models.DateTimeField, models.TimeField)):
+            filters.append((field_name, RangeDateFilter))
+        elif isinstance(field, (models.IntegerField, models.FloatField, models.DecimalField)):
+            filters.append((field_name, RangeNumericFilter))
+        elif isinstance(field, models.ForeignKey):
+            filters.append((field_name, RelatedDropdownFilter))
+        elif isinstance(field, models.CharField) and field.choices:
+            filters.append((field_name, ChoicesDropdownFilter))
+        else:
+            filters.append(field_name)
+    return filters
+
+
+def _wysiwyg_display(model, field_name: str):
+    """A changelist column that renders one rich-text field as HTML, safely."""
+    field_obj = model._meta.get_field(field_name)
+
+    @unfold_display(description=field_obj.verbose_name)
+    def _display(self, obj):
+        raw = getattr(obj, field_name, "") or ""
+        # Wysiwyg values are attacker-controllable HTML. Sanitize
+        # before mark_safe to prevent stored XSS in the changelist,
+        # unless the field explicitly trusts its content.
+        if getattr(field_obj, "safe_html", False):
+            return mark_safe(raw)  # noqa: S308 - safe_html=True: the developer vouches for it
+        return mark_safe(sanitize_html(raw))  # noqa: S308 - sanitized on the line itself
+
+    return _display
+
+
+def _function_field_display(field):
+    """A changelist column that renders one :class:`SnapFunctionField`."""
+
+    @unfold_display(
+        description=getattr(field, "verbose_name", "") or getattr(field, "name", ""),
+        header=True,
+    )
+    def _display(self, obj):
+        val = field.get_display_value(obj)
+        if UNFOLD_INSTALLED:
+            return [val, None, None]
+        return val
+
+    return _display
+
+
+def _group_fields_by_row(model, field_names: list[str]) -> list:
+    """Fold fields that share a ``row=`` name into one Django fieldset row."""
+    grouped: list = []
+    rows: dict[str, list[str]] = {}
+    for name in field_names:
+        try:
+            row_name = getattr(model._meta.get_field(name), "row", None)
+        except FieldDoesNotExist:
+            row_name = None
+        if not row_name:
+            grouped.append(name)
+            continue
+        if row_name not in rows:
+            rows[row_name] = []
+            grouped.append(rows[row_name])
+        rows[row_name].append(name)
+    return [tuple(item) if isinstance(item, list) else item for item in grouped]
+
+
+def _fieldsets_for(model, form_fields: list[str]) -> list:
+    """The form's fieldsets: one per ``tab=`` name, plus the untabbed fields."""
+    tabs: dict[str, list[str]] = {}
+    untabbed: list[str] = []
+    for name in form_fields:
+        try:
+            tab_name = getattr(model._meta.get_field(name), "tab", None)
+        except FieldDoesNotExist:
+            tab_name = None
+        if tab_name:
+            tabs.setdefault(tab_name, []).append(name)
+        else:
+            untabbed.append(name)
+
+    fieldsets: list = []
+    if untabbed:
+        fieldsets.append((None, {"fields": _group_fields_by_row(model, untabbed)}))
+    for tab_name, names in tabs.items():
+        fieldsets.append(
+            (tab_name, {"fields": _group_fields_by_row(model, names), "classes": ("tab",)})
+        )
+    return fieldsets
+
+
+def _drop_masked_fields(fieldsets, masked: set[str]):
+    """The same fieldsets without the fields this viewer may not see raw.
+
+    A masked field is shown starred on the changelist; on the change form there
+    is no starred equivalent — an input holds the raw value — so it is removed
+    from the form entirely for a viewer without PII access.
+    """
+    filtered = []
+    for name, options in fieldsets:
+        fields = []
+        for entry in options.get("fields", []):
+            if isinstance(entry, tuple):
+                kept = tuple(item for item in entry if item not in masked)
+                if kept:
+                    fields.append(kept if len(kept) > 1 else kept[0])
+            elif entry not in masked:
+                fields.append(entry)
+        filtered.append((name, {**options, "fields": fields}))
+    return filtered
+
+
+def _mark_row_fieldsets(fieldsets):
+    """Tag every fieldset holding a multi-field row for Unfold's row layout."""
+    for _name, options in fieldsets:
+        if any(isinstance(entry, tuple) for entry in options.get("fields", [])):
+            classes = list(options.get("classes", []))
+            if "snap-field-row" not in classes:
+                classes.append("snap-field-row")
+            options["classes"] = tuple(classes)
+    return fieldsets
+
+
 class AdminGenMixin:
     """``SnapModel``'s generated-admin methods — see the module docstring."""
 
     @classmethod
-    def get_admin_fields(cls):  # noqa: C901 - refactor tracked as #QA1c-cx
+    def get_admin_fields(cls):
         from snapadmin.models import AdminFieldSets
 
         meta_fields = {
@@ -225,20 +357,7 @@ class AdminGenMixin:
         # current field state.
         generated_overrides = {"get_readonly_fields": dynamic_get_readonly_fields}
 
-        list_filter = []
-        for field_name, field in meta_fields.items():
-            if not getattr(field, SnapFieldAttributeEnum.FILTERABLE.value, False):
-                continue
-            if isinstance(field, (models.DateField, models.DateTimeField, models.TimeField)):
-                list_filter.append((field_name, RangeDateFilter))
-            elif isinstance(field, (models.IntegerField, models.FloatField, models.DecimalField)):
-                list_filter.append((field_name, RangeNumericFilter))
-            elif isinstance(field, models.ForeignKey):
-                list_filter.append((field_name, RelatedDropdownFilter))
-            elif isinstance(field, models.CharField) and field.choices:
-                list_filter.append((field_name, ChoicesDropdownFilter))
-            else:
-                list_filter.append(field_name)
+        list_filter = _list_filter_for(meta_fields)
 
         autocomplete_fields = [
             fn
@@ -246,51 +365,19 @@ class AdminGenMixin:
             if getattr(fo, SnapFieldAttributeEnum.AUTOCOMPLETE.value, True)
         ]
 
-        # Handle WYSIWYG fields for safe HTML rendering in list view
-        wysiwyg_fields = [fn for fn, fo in meta_fields.items() if getattr(fo, "wysiwyg", False)]
-        for fn in wysiwyg_fields:
-            if fn in list_display:
-                idx = list_display.index(fn)
-                method_name = f"safe_html_{fn}"
-
-                def make_wysiwyg_display(field_name):
-                    field_obj = cls._meta.get_field(field_name)
-
-                    @unfold_display(description=field_obj.verbose_name)
-                    def _display(self, obj):
-                        raw = getattr(obj, field_name, "") or ""
-                        # Wysiwyg values are attacker-controllable HTML. Sanitize
-                        # before mark_safe to prevent stored XSS in the changelist,
-                        # unless the field explicitly trusts its content.
-                        if getattr(field_obj, "safe_html", False):
-                            return mark_safe(raw)  # noqa: S308 - safe_html=True: the developer vouches for it
-                        return mark_safe(sanitize_html(raw))  # noqa: S308 - sanitized on the line itself
-
-                    return _display
-
-                generated_overrides[method_name] = make_wysiwyg_display(fn)
-                list_display[idx] = method_name
+        # A rich-text column renders HTML, so it is shown through a generated,
+        # sanitizing display method rather than as the raw field.
+        for field_name, field in meta_fields.items():
+            if getattr(field, "wysiwyg", False) and field_name in list_display:
+                method_name = f"safe_html_{field_name}"
+                generated_overrides[method_name] = _wysiwyg_display(cls, field_name)
+                list_display[list_display.index(field_name)] = method_name
 
         for attr_name, attr_value in attr_fields.items():
-            if not isinstance(attr_value, snapfields.SnapFunctionField):
-                continue
-            method_name = f"SnapFunctionField{attr_name.capitalize()}"
-
-            def _make_display_method(field):
-                @unfold_display(
-                    description=getattr(field, "verbose_name", "") or getattr(field, "name", ""),
-                    header=True,
-                )
-                def _display(self, obj):
-                    val = field.get_display_value(obj)
-                    if UNFOLD_INSTALLED:
-                        return [val, None, None]
-                    return val
-
-                return _display
-
-            generated_overrides[method_name] = _make_display_method(attr_value)
-            list_display.append(method_name)
+            if isinstance(attr_value, snapfields.SnapFunctionField):
+                method_name = f"SnapFunctionField{attr_name.capitalize()}"
+                generated_overrides[method_name] = _function_field_display(attr_value)
+                list_display.append(method_name)
 
         if pk_name in list_display:
             list_display.remove(pk_name)
@@ -364,7 +451,7 @@ class AdminGenMixin:
         return final_js, final_css
 
     @classmethod
-    def register_admin(cls) -> None:  # noqa: C901 - refactor tracked as #QA1c-cx
+    def register_admin(cls) -> None:
         """Build and register this model's ``ModelAdmin`` from its Snap field flags.
 
         ``admin_overrides`` is merged in last, so it always wins over every
@@ -389,55 +476,7 @@ class AdminGenMixin:
         list_filter = admin_fields.list_filter
         autocomplete_fields = admin_fields.autocomplete_fields
 
-        # Build fieldsets based on 'tab' and 'row' attributes
-        tabs_map = {}
-        untabbed_fields = []
-
-        def group_fields_by_row(fields_list):
-            grouped = []
-            row_map = {}
-            for fn in fields_list:
-                try:
-                    field_obj = cls._meta.get_field(fn)
-                    row_name = getattr(field_obj, "row", None)
-                    if row_name:
-                        if row_name not in row_map:
-                            row_map[row_name] = []
-                            grouped.append(row_map[row_name])
-                        row_map[row_name].append(fn)
-                    else:
-                        grouped.append(fn)
-                except FieldDoesNotExist:
-                    grouped.append(fn)
-
-            # Convert multi-field rows to tuples for Django fieldsets
-            final_grouped = []
-            for item in grouped:
-                if isinstance(item, list):
-                    final_grouped.append(tuple(item))
-                else:
-                    final_grouped.append(item)
-            return final_grouped
-
-        for field_name in form_fields:
-            try:
-                field = cls._meta.get_field(field_name)
-                tab_name = getattr(field, "tab", None)
-                if tab_name:
-                    tabs_map.setdefault(tab_name, []).append(field_name)
-                else:
-                    untabbed_fields.append(field_name)
-            except FieldDoesNotExist:
-                untabbed_fields.append(field_name)
-
-        fieldsets = []
-        if untabbed_fields:
-            fieldsets.append((None, {"fields": group_fields_by_row(untabbed_fields)}))
-
-        for tab_name, fields in tabs_map.items():
-            fieldsets.append(
-                (tab_name, {"fields": group_fields_by_row(fields), "classes": ("tab",)})
-            )
+        fieldsets = _fieldsets_for(cls, form_fields)
 
         final_js, final_css = cls.get_admin_media()
 
@@ -522,29 +561,8 @@ class AdminGenMixin:
 
             masked = set(get_masked_fields(cls._meta.app_label, cls._meta.model_name))
             if masked and not user_can_view_pii(request.user):
-                filtered = []
-                for name, opts in fs:
-                    new_fields = []
-                    for f in opts.get("fields", []):
-                        if isinstance(f, tuple):
-                            kept = tuple(x for x in f if x not in masked)
-                            if kept:
-                                new_fields.append(kept if len(kept) > 1 else kept[0])
-                        elif f not in masked:
-                            new_fields.append(f)
-                    filtered.append((name, {**opts, "fields": new_fields}))
-                fs = filtered
-
-            if UNFOLD_INSTALLED:
-                for _name, opts in fs:
-                    fields = opts.get("fields", [])
-                    has_row = any(isinstance(f, tuple) for f in fields)
-                    if has_row:
-                        classes = list(opts.get("classes", []))
-                        if "snap-field-row" not in classes:
-                            classes.append("snap-field-row")
-                        opts["classes"] = tuple(classes)
-            return fs
+                fs = _drop_masked_fields(fs, masked)
+            return _mark_row_fieldsets(fs) if UNFOLD_INSTALLED else fs
 
         admin_attrs["formfield_for_dbfield"] = formfield_for_dbfield
         admin_attrs["get_fieldsets"] = get_fieldsets

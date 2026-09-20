@@ -77,6 +77,7 @@ import io
 import json
 import os
 import re
+from itertools import islice
 from typing import Any, Iterator
 
 from django.core.exceptions import ValidationError
@@ -600,12 +601,14 @@ def run_import_job(job, *, file_path: str, chunk_size: int | None = None, on_pro
         }
 
 
-def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:  # noqa: C901 - refactor tracked as #QA1c-cx
-    from snapadmin.models import SnapImportJob
+def _resolve_import_plan(job, file_path: str):
+    """The column map and natural key this file/model pair will be read with.
 
-    Status = SnapImportJob.Status
+    Raises :class:`SnapImportError` for every shape the run cannot proceed
+    with — an empty file, a header naming none of the model's fields, a natural
+    key whose fields the file does not carry — before a single row is written.
+    """
     model = job.target_model()
-
     header = read_header(file_path, job.import_format)
     if not header:
         raise SnapImportError(f"{file_path} has no header row (or is empty) — nothing to import.")
@@ -619,17 +622,57 @@ def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:  # noqa:
 
     check_write_surface(model, mapped_field_names, requested_by=job.requested_by)
 
-    explicit_key = tuple(job.natural_key) if job.natural_key else None
     natural_key = resolve_natural_key(
-        model, explicit=explicit_key, mapped_field_names=mapped_field_names
+        model,
+        explicit=tuple(job.natural_key) if job.natural_key else None,
+        mapped_field_names=mapped_field_names,
     )
-    if natural_key:
-        missing = [name for name in natural_key if name not in mapped_field_names]
-        if missing:
-            raise SnapImportError(
-                f"Natural key field(s) not present in {file_path}'s mapped columns: "
-                f"{', '.join(missing)}."
-            )
+    missing = [name for name in natural_key or () if name not in mapped_field_names]
+    if missing:
+        raise SnapImportError(
+            f"Natural key field(s) not present in {file_path}'s mapped columns: "
+            f"{', '.join(missing)}."
+        )
+    return model, column_map, natural_key, unmapped_columns
+
+
+def _prepare_report_file(job) -> tuple[str, int]:
+    """Position the report file for this attempt; return ``(path, rows to skip)``.
+
+    On a resume the file is truncated back to the byte length the last committed
+    chunk confirmed. A counter with no local report to resume into (another
+    worker, an ephemeral volume) restarts the job clean rather than skipping
+    rows no report ever described.
+    """
+    report_path = _report_path(job)
+    if job.processed_rows > 0 and os.path.exists(report_path):
+        with open(report_path, "r+b") as truncator:
+            truncator.truncate(job.report_cursor_bytes)
+        return report_path, job.processed_rows
+
+    if os.path.exists(report_path):
+        os.remove(report_path)
+    if job.processed_rows:
+        job.processed_rows = 0
+        job.created_count = job.updated_count = job.skipped_count = job.failed_count = 0
+    return report_path, 0
+
+
+def _chunks(rows, chunk_size: int):
+    """Yield ``chunk_size``-sized lists from ``rows`` until it is exhausted."""
+    row_iter = iter(rows)
+    while True:
+        chunk = list(islice(row_iter, chunk_size))
+        if not chunk:
+            return
+        yield chunk
+
+
+def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:
+    from snapadmin.models import SnapImportJob
+
+    Status = SnapImportJob.Status
+    model, column_map, natural_key, unmapped_columns = _resolve_import_plan(job, file_path)
 
     if job.started_at is None:
         job.started_at = timezone.now()
@@ -643,22 +686,7 @@ def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:  # noqa:
         job.total_rows = sum(1 for _ in iter_input_rows(file_path, job.import_format))
     job.save(update_fields=["started_at", "report_file_name", "total_rows"])
 
-    report_path = _report_path(job)
-    resuming = job.processed_rows > 0 and os.path.exists(report_path)
-    if resuming:
-        with open(report_path, "r+b") as truncator:
-            truncator.truncate(job.report_cursor_bytes)
-    else:
-        if os.path.exists(report_path):
-            os.remove(report_path)
-        if job.processed_rows:
-            # A stale counter with no local report file to resume into (a
-            # different worker, an ephemeral volume) — restart clean rather
-            # than silently skip rows a fresh pass never wrote a report for.
-            job.processed_rows = 0
-            job.created_count = job.updated_count = job.skipped_count = job.failed_count = 0
-
-    skip_rows = job.processed_rows
+    report_path, skip_rows = _prepare_report_file(job)
     row_number = skip_rows
     cancelled = False
 
@@ -671,19 +699,7 @@ def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:  # noqa:
             except StopIteration:
                 break
 
-        row_iter = iter(rows)
-        exhausted = False
-        while not exhausted and not cancelled:
-            chunk_rows = []
-            for row in row_iter:
-                chunk_rows.append(row)
-                if len(chunk_rows) >= chunk_size:
-                    break
-            else:
-                exhausted = True
-            if not chunk_rows:
-                break
-
+        for chunk_rows in _chunks(rows, chunk_size):
             # The whole chunk — every row's write (or, for a failed row, its
             # rolled-back savepoint) plus the job's own checkpoint advance —
             # commits as one transaction. A crash anywhere before this block
@@ -732,6 +748,7 @@ def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:  # noqa:
             job.refresh_from_db(fields=["status"])
             if job.status == Status.CANCELLED:
                 cancelled = True
+                break
 
         if cancelled:
             logger.info("snapadmin.import.cancelled", job=str(job.pk), rows=job.processed_rows)
@@ -756,7 +773,6 @@ def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:  # noqa:
         job.save(update_fields=["report_cursor_bytes"])
     finally:
         report_handle.close()
-
     _publish_report(job)
     job.status = Status.COMPLETED
     job.finished_at = timezone.now()

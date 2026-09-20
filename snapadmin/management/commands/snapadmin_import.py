@@ -99,41 +99,80 @@ class Command(BaseCommand):
             "to resolve one from. Ignored for a model that is not tenant-scoped.",
         )
 
-    def handle(self, *args, **options):  # noqa: C901 - refactor tracked as #QA1c-cx
+    @staticmethod
+    def _model_from(label: str):
+        """The registered model ``app_label.ModelName`` names, or a CommandError."""
         try:
-            app_label, model_name = options["model"].split(".", 1)
+            app_label, model_name = label.split(".", 1)
             model = apps.get_model(app_label, model_name)
         except (ValueError, LookupError):
-            raise CommandError(
-                f"Unknown model: {options['model']} (use app_label.ModelName)"
-            ) from None
+            raise CommandError(f"Unknown model: {label} (use app_label.ModelName)") from None
         if not is_registered(model):
-            raise CommandError(f"{options['model']} is not a SnapAdmin model.")
+            raise CommandError(f"{label} is not a SnapAdmin model.")
+        return model
 
-        column_map = None
-        if options["map"]:
-            try:
-                column_map = json.loads(options["map"])
-            except json.JSONDecodeError as exc:
-                raise CommandError(f"--map is not valid JSON: {exc}") from exc
-            if not isinstance(column_map, dict):
-                raise CommandError(
-                    "--map must be a JSON object, e.g. '{\"CSV Header\": \"field\"}'."
+    @staticmethod
+    def _column_map_from(raw: str | None) -> dict | None:
+        """``--map`` parsed, or a CommandError naming what is wrong with it."""
+        if not raw:
+            return None
+        try:
+            column_map = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise CommandError(f"--map is not valid JSON: {exc}") from exc
+        if not isinstance(column_map, dict):
+            raise CommandError('--map must be a JSON object, e.g. \'{"CSV Header": "field"}\'.')
+        return column_map
+
+    @staticmethod
+    def _user_from(username: str | None):
+        """``--requested-by`` resolved to a user, or a CommandError naming it."""
+        if not username:
+            return None
+        User = get_user_model()
+        try:
+            return User.objects.get(**{User.USERNAME_FIELD: username})
+        except User.DoesNotExist:
+            raise CommandError(f"No user named {username!r}.") from None
+
+    def _report(self, summary: dict, report_path: str | None) -> None:
+        """Print one run's outcome, and fail the command when the run did."""
+        if summary.get("skipped"):
+            self.stdout.write(f"skipped ({summary['reason']})")
+            return
+        if summary.get("cancelled"):
+            self.stdout.write(
+                self.style.WARNING(
+                    f"cancelled — {summary['created']} created, {summary['updated']} updated, "
+                    f"{summary['skipped']} skipped, {summary['failed']} failed so far"
                 )
+            )
+            return
+        if "errors" in summary:
+            raise CommandError(f"Import failed: {summary['errors'][0]}")
 
-        natural_key = None
-        if options["natural_key"]:
-            natural_key = [
-                name.strip() for name in options["natural_key"].split(",") if name.strip()
-            ]
+        unmapped = summary.get("unmapped_columns") or []
+        suffix = f" ({len(unmapped)} unmapped column(s): {', '.join(unmapped)})" if unmapped else ""
+        self.stdout.write(
+            self.style.SUCCESS(
+                f"{summary['created']} created, {summary['updated']} updated, "
+                f"{summary['skipped']} skipped, {summary['failed']} failed{suffix}"
+            )
+        )
+        if report_path:
+            self.stdout.write(f"Report: {report_path}")
+        if summary.get("failed"):
+            raise CommandError(f"{summary['failed']} row(s) failed — see the report for details.")
 
-        requested_by = None
-        if options["requested_by"]:
-            User = get_user_model()
-            try:
-                requested_by = User.objects.get(**{User.USERNAME_FIELD: options["requested_by"]})
-            except User.DoesNotExist:
-                raise CommandError(f"No user named {options['requested_by']!r}.") from None
+    def handle(self, *args, **options):
+        model = self._model_from(options["model"])
+        column_map = self._column_map_from(options["map"])
+        natural_key = (
+            [name.strip() for name in options["natural_key"].split(",") if name.strip()]
+            if options["natural_key"]
+            else None
+        )
+        requested_by = self._user_from(options["requested_by"])
 
         try:
             job = start_import(
@@ -162,32 +201,4 @@ class Command(BaseCommand):
         )
 
         report_path = f"{export_dir()}/{job.report_file_name}" if job.report_file_name else None
-
-        if summary.get("skipped"):
-            self.stdout.write(f"skipped ({summary['reason']})")
-        elif summary.get("cancelled"):
-            self.stdout.write(
-                self.style.WARNING(
-                    f"cancelled — {summary['created']} created, {summary['updated']} updated, "
-                    f"{summary['skipped']} skipped, {summary['failed']} failed so far"
-                )
-            )
-        elif "errors" in summary:
-            raise CommandError(f"Import failed: {summary['errors'][0]}")
-        else:
-            unmapped = summary.get("unmapped_columns") or []
-            suffix = (
-                f" ({len(unmapped)} unmapped column(s): {', '.join(unmapped)})" if unmapped else ""
-            )
-            self.stdout.write(
-                self.style.SUCCESS(
-                    f"{summary['created']} created, {summary['updated']} updated, "
-                    f"{summary['skipped']} skipped, {summary['failed']} failed{suffix}"
-                )
-            )
-            if report_path:
-                self.stdout.write(f"Report: {report_path}")
-            if summary.get("failed"):
-                raise CommandError(
-                    f"{summary['failed']} row(s) failed — see the report for details."
-                )
+        self._report(summary, report_path)

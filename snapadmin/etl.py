@@ -194,7 +194,68 @@ def upsert_from_source(
     return {"processed": processed, "batches": batches, "reindex": reindex_summary}
 
 
-def stale_sync(  # noqa: C901 - refactor tracked as #QA1c-cx
+def _validate_stale_sync_call(
+    *,
+    strategy: str,
+    on_exceed: str,
+    max_fraction: float,
+    key_field: str,
+    seen_keys: Iterable | None,
+    last_seen_field: str,
+    run_started: datetime | None,
+) -> None:
+    """Refuse a call that cannot mean what it says, before anything is counted.
+
+    Every message names the argument that is wrong: a stale-row delete is not a
+    place to guess what the caller meant.
+    """
+    if strategy not in ("keyset", "last_seen"):
+        raise ValueError(f"stale_sync strategy must be 'keyset' or 'last_seen'; got {strategy!r}.")
+    if on_exceed not in ("raise", "skip"):
+        raise ValueError(f"stale_sync on_exceed must be 'raise' or 'skip'; got {on_exceed!r}.")
+    if not 0 < max_fraction <= 1:
+        raise ValueError(f"stale_sync max_fraction must be in (0, 1]; got {max_fraction!r}.")
+    if strategy == "keyset":
+        if not key_field:
+            raise ValueError(
+                "stale_sync(strategy='keyset') requires key_field (the natural-key column)."
+            )
+        if seen_keys is None:
+            raise ValueError("stale_sync(strategy='keyset') requires seen_keys.")
+        return
+    if not last_seen_field:
+        raise ValueError(
+            "stale_sync(strategy='last_seen') requires last_seen_field (the watermark column)."
+        )
+    if run_started is None:
+        raise ValueError(
+            "stale_sync(strategy='last_seen') requires run_started (the sync start time)."
+        )
+
+
+def _stale_queryset(
+    base: QuerySet,
+    *,
+    strategy: str,
+    key_field: str,
+    seen_keys: Iterable | None,
+    last_seen_field: str,
+    run_started: datetime | None,
+) -> QuerySet:
+    """The candidate rows the sync no longer reports, by the chosen strategy."""
+    if strategy == "keyset":
+        # Diff the existing keys against the sync in Python: a healthy sync leaves
+        # few stale keys, so the follow-up delete filters on a small `IN (...)` set
+        # rather than a table-sized `NOT IN (seen)`.
+        seen = seen_keys if isinstance(seen_keys, (set, frozenset)) else set(seen_keys)
+        stale_keys = set(base.values_list(key_field, flat=True)) - seen
+        return base.filter(**{f"{key_field}__in": stale_keys}) if stale_keys else base.none()
+    # DB-side watermark prune: no natural-key set is materialised. NULL
+    # watermarks (never synced) are excluded by SQL's NULL comparison rules.
+    return base.filter(**{f"{last_seen_field}__lt": run_started})
+
+
+def stale_sync(
     model: type[SnapModel],
     seen_keys: Iterable | None = None,
     *,
@@ -276,28 +337,15 @@ def stale_sync(  # noqa: C901 - refactor tracked as #QA1c-cx
             last_seen call missing ``last_seen_field``/``run_started``, or an
             ES_ONLY model.
     """
-    if strategy not in ("keyset", "last_seen"):
-        raise ValueError(f"stale_sync strategy must be 'keyset' or 'last_seen'; got {strategy!r}.")
-    if on_exceed not in ("raise", "skip"):
-        raise ValueError(f"stale_sync on_exceed must be 'raise' or 'skip'; got {on_exceed!r}.")
-    if not 0 < max_fraction <= 1:
-        raise ValueError(f"stale_sync max_fraction must be in (0, 1]; got {max_fraction!r}.")
-    if strategy == "keyset":
-        if not key_field:
-            raise ValueError(
-                "stale_sync(strategy='keyset') requires key_field (the natural-key column)."
-            )
-        if seen_keys is None:
-            raise ValueError("stale_sync(strategy='keyset') requires seen_keys.")
-    else:
-        if not last_seen_field:
-            raise ValueError(
-                "stale_sync(strategy='last_seen') requires last_seen_field (the watermark column)."
-            )
-        if run_started is None:
-            raise ValueError(
-                "stale_sync(strategy='last_seen') requires run_started (the sync start time)."
-            )
+    _validate_stale_sync_call(
+        strategy=strategy,
+        on_exceed=on_exceed,
+        max_fraction=max_fraction,
+        key_field=key_field,
+        seen_keys=seen_keys,
+        last_seen_field=last_seen_field,
+        run_started=run_started,
+    )
 
     storage_mode = getattr(model, "es_storage_mode", EsStorageMode.DB_ONLY)
     if storage_mode == EsStorageMode.ES_ONLY:
@@ -317,18 +365,14 @@ def stale_sync(  # noqa: C901 - refactor tracked as #QA1c-cx
     if total == 0:
         return result
 
-    if strategy == "keyset":
-        # Diff the existing keys against the sync in Python: a healthy sync leaves
-        # few stale keys, so the follow-up delete filters on a small `IN (...)` set
-        # rather than a table-sized `NOT IN (seen)`.
-        seen = seen_keys if isinstance(seen_keys, (set, frozenset)) else set(seen_keys)
-        existing_keys = set(base.values_list(key_field, flat=True))
-        stale_keys = existing_keys - seen
-        stale_qs = base.filter(**{f"{key_field}__in": stale_keys}) if stale_keys else base.none()
-    else:
-        # DB-side watermark prune: no natural-key set is materialised. NULL
-        # watermarks (never synced) are excluded by SQL's NULL comparison rules.
-        stale_qs = base.filter(**{f"{last_seen_field}__lt": run_started})
+    stale_qs = _stale_queryset(
+        base,
+        strategy=strategy,
+        key_field=key_field,
+        seen_keys=seen_keys,
+        last_seen_field=last_seen_field,
+        run_started=run_started,
+    )
 
     stale = stale_qs.count()
     fraction = stale / total

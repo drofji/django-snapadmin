@@ -133,7 +133,82 @@ class Command(BaseCommand):
             ),
         )
 
-    def handle(self, *args, **options):  # noqa: C901 - refactor tracked as #QA1c-cx
+    @staticmethod
+    def _models_from(label: str | None):
+        """The SnapModels to reindex: the one named, or every ES-enabled one."""
+        if not label:
+            return reindexable_snapmodels()
+        try:
+            app_label, model_name = label.split(".", 1)
+            model = apps.get_model(app_label, model_name)
+        except (ValueError, LookupError):
+            raise CommandError(f"Unknown model: {label} (use app_label.ModelName)") from None
+        # Registration alone is not enough: reindexing needs SnapModel's ES
+        # machinery, which a plain model registered with @snap_model never gets.
+        if not (is_registered(model) and hasattr(model, "es_reindex_all")):
+            raise CommandError(f"{label} is not a SnapModel.")
+        return [model]
+
+    def _report_run(self, label: str, summary: dict) -> bool:
+        """Print one model's outcome; ``True`` when it counts as a failure."""
+        if summary.get("skipped"):
+            self.stdout.write(f"{label}: skipped ({summary['reason']})")
+            return False
+        if summary.get("cancelled"):
+            self.stdout.write(
+                self.style.WARNING(f"{label}: cancelled at {summary['indexed']} rows")
+            )
+            return False
+        if isinstance(summary.get("errors"), list):
+            self.stdout.write(
+                self.style.ERROR(
+                    f"{label}: failed after {summary.get('indexed', 0)} rows — {summary['errors'][0]}"
+                )
+            )
+            return True
+        rejected = summary.get("errors", 0)
+        suffix = f", {rejected} rejected" if rejected else ""
+        self.stdout.write(self.style.SUCCESS(f"{label}: {summary['indexed']} indexed{suffix}"))
+        return False
+
+    def _report_verification(self, label: str, job, rejected: int) -> bool:
+        """Print the post-reindex count check; ``True`` when it did not match."""
+        result = verify_index(job, rejected=rejected)
+        if not result["applicable"]:
+            self.stdout.write(f"  {label}: verify skipped (ES_ONLY has no independent source)")
+            return False
+        if result["match"]:
+            self.stdout.write(f"  {label}: verified ({result['expected']} in index)")
+            return False
+        if "error" in result:
+            self.stdout.write(
+                self.style.ERROR(
+                    f"  {label}: verify failed — could not count the index: {result['error']}"
+                )
+            )
+        else:
+            self.stdout.write(
+                self.style.ERROR(
+                    f"  {label}: MISMATCH — index holds {result['actual']}, "
+                    f"expected {result['expected']} (source {result['source_count']}, "
+                    f"{result['rejected']} rejected)"
+                )
+            )
+        return True
+
+    def _progress_for(self, label: str, interval):
+        def _progress(job):
+            eta = job.eta_seconds
+            eta_str = f" ETA {eta}s" if eta else ""
+            self.stdout.write(
+                f"  {label}: {job.processed_rows}/{job.total_rows} "
+                f"({job.progress_percent}%){eta_str}"
+            )
+            self.stdout.flush()
+
+        return _ThrottledProgress(_progress, interval=interval)
+
+    def handle(self, *args, **options):
         limit = options["limit"]
         if limit is not None and limit < 1:
             raise CommandError(f"--limit must be a positive integer, got {limit}.")
@@ -142,48 +217,22 @@ class Command(BaseCommand):
         if tune is None:
             tune = get_setting("SNAPADMIN_REINDEX_TUNE_DEFAULT", False)
 
-        if options["model"]:
-            try:
-                app_label, model_name = options["model"].split(".", 1)
-                model = apps.get_model(app_label, model_name)
-            except (ValueError, LookupError):
-                raise CommandError(
-                    f"Unknown model: {options['model']} (use app_label.ModelName)"
-                ) from None
-            # Registration alone is not enough: reindexing needs SnapModel's ES
-            # machinery, which a plain model registered with @snap_model never gets.
-            if not (is_registered(model) and hasattr(model, "es_reindex_all")):
-                raise CommandError(f"{options['model']} is not a SnapModel.")
-            models = [model]
-        else:
-            models = reindexable_snapmodels()
-            if not models:
-                self.stdout.write("No ES-enabled SnapModels found — nothing to reindex.")
-                return
+        models = self._models_from(options["model"])
+        if not models:
+            self.stdout.write("No ES-enabled SnapModels found — nothing to reindex.")
+            return
 
         if not getattr(settings, "ELASTICSEARCH_ENABLED", False):
             for model in models:
-                label = f"{model._meta.app_label}.{model.__name__}"
-                self.stdout.write(f"{label}: skipped (Elasticsearch not available)")
+                self.stdout.write(
+                    f"{model._meta.app_label}.{model.__name__}: "
+                    "skipped (Elasticsearch not available)"
+                )
             return
 
         failed = False
         for model in models:
             label = f"{model._meta.app_label}.{model.__name__}"
-
-            def _progress(job, _label=label):
-                eta = job.eta_seconds
-                eta_str = f" ETA {eta}s" if eta else ""
-                self.stdout.write(
-                    f"  {_label}: {job.processed_rows}/{job.total_rows} "
-                    f"({job.progress_percent}%){eta_str}"
-                )
-                self.stdout.flush()
-
-            throttled_progress = _ThrottledProgress(
-                _progress, interval=options["progress_interval"]
-            )
-
             job = start_reindex(model, resume=options["resume"])
             summary = run_reindex_job(
                 job,
@@ -191,52 +240,15 @@ class Command(BaseCommand):
                 parallel=options["parallel"],
                 tune=tune,
                 limit=limit,
-                on_progress=throttled_progress,
+                on_progress=self._progress_for(label, options["progress_interval"]),
             )
-
-            if summary.get("skipped"):
-                self.stdout.write(f"{label}: skipped ({summary['reason']})")
-            elif summary.get("cancelled"):
-                self.stdout.write(
-                    self.style.WARNING(f"{label}: cancelled at {summary['indexed']} rows")
-                )
-            elif isinstance(summary.get("errors"), list):
-                failed = True
-                self.stdout.write(
-                    self.style.ERROR(
-                        f"{label}: failed after {summary.get('indexed', 0)} rows — {summary['errors'][0]}"
-                    )
-                )
-            else:
-                errors = summary.get("errors", 0)
-                suffix = f", {errors} rejected" if errors else ""
-                self.stdout.write(
-                    self.style.SUCCESS(f"{label}: {summary['indexed']} indexed{suffix}")
-                )
-                if options["verify"]:
-                    result = verify_index(job, rejected=errors)
-                    if not result["applicable"]:
-                        self.stdout.write(
-                            f"  {label}: verify skipped (ES_ONLY has no independent source)"
-                        )
-                    elif result["match"]:
-                        self.stdout.write(f"  {label}: verified ({result['expected']} in index)")
-                    else:
-                        failed = True
-                        if "error" in result:
-                            self.stdout.write(
-                                self.style.ERROR(
-                                    f"  {label}: verify failed — could not count the index: {result['error']}"
-                                )
-                            )
-                        else:
-                            self.stdout.write(
-                                self.style.ERROR(
-                                    f"  {label}: MISMATCH — index holds {result['actual']}, "
-                                    f"expected {result['expected']} (source {result['source_count']}, "
-                                    f"{result['rejected']} rejected)"
-                                )
-                            )
+            run_failed = self._report_run(label, summary)
+            failed = failed or run_failed
+            verifiable = (
+                not run_failed and not summary.get("skipped") and not summary.get("cancelled")
+            )
+            if options["verify"] and verifiable:
+                failed = self._report_verification(label, job, summary.get("errors", 0)) or failed
 
         if failed:
             raise CommandError("Reindex finished with errors (see above).")
