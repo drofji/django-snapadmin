@@ -15,7 +15,8 @@ that aren't obvious from the code.
   blocks on it); `PYTHONPATH=. mypy` reports type findings (advisory, but `encryption/`, `crypto.py`
   and `sharding/` are strict and clean — keep them that way). A suppression is local, names its rule
   and says why: `# noqa: S603 - argv list, no shell`.
-- **Tests:** `pytest` from the repo root — the `snapadmin/` package is kept at 100% line coverage.
+- **Tests:** `pytest` from the repo root — the `snapadmin/` package is kept at 100% line and branch
+  coverage (`pytest --cov=snapadmin --cov-branch --cov-fail-under=100`).
   The same suite ships in the **sdist** (never the wheel): `pip download --no-binary :all:
   --no-deps django-snapadmin`, unpack, install the test dependencies, and run `python -m pytest`
   inside the unpacked directory.
@@ -32,6 +33,18 @@ that aren't obvious from the code.
   `pytest -p no:randomly` restores the old file order. **A failure under one seed and not another
   is a real bug in the tests** — shared state, an ambient setting, a leaked global — not a reason
   to pin the order; see the empty-test and isolation notes in the testing rules.
+- **Property-based and fuzz tests** (`tests/test_properties_*.py`, `tests/test_fuzz_*.py`) run in
+  the ordinary `pytest` — no marker. Each states a law ("`decrypt(encrypt(x)) == x`", "a parameter
+  on a masked field changes nothing") and [`hypothesis`](https://hypothesis.readthedocs.io/)
+  generates the inputs: 100 per test locally, 300 in CI (`pytest --hypothesis-profile=ci`; both
+  profiles are in `tests/conftest.py`). A failure prints the shrunk, smallest failing input and a
+  `@reproduce_failure(...)` line — paste it onto the test to replay that exact case. Then decide
+  whether the law or the code is wrong: a law that promised too much is narrowed *with a comment
+  saying why*; a defect gets a named regression test in the example suite and a fix. Never filter
+  the generator to steer around a failure.
+- **Query counts** (`tests/test_query_counts.py`) are pinned per surface, at two row counts. If
+  your change moves one, confirm the extra query is intended and update the pin in the same commit,
+  with the reason in the commit message; if the two counts differ, you added a per-row query.
 - **Databases:** the suite runs on in-memory SQLite by default, so there is nothing to start. CI
   also runs the identical test files against a real PostgreSQL, because the package carries
   backend-specific code (the estimated-count paginator's `reltuples` query, the `pg_dump` backup

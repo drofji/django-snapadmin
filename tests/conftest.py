@@ -2,6 +2,18 @@
 import pytest
 from decimal import Decimal
 
+from hypothesis import settings as hypothesis_settings
+
+# Property-based tests (tests/test_properties_*.py, #QA1d). `deadline=None`
+# because a per-example wall-clock deadline is a timing check, and timing checks
+# are the flaky kind this suite refuses — a slow CI runner is not a bug. The
+# example budget is set per environment: the everyday local run stays fast, CI
+# searches harder. `print_blob` puts the exact failing example in the report, so
+# a CI failure reproduces locally with `@reproduce_failure` rather than by luck.
+hypothesis_settings.register_profile("default", max_examples=100, deadline=None, print_blob=True)
+hypothesis_settings.register_profile("ci", max_examples=300, deadline=None, print_blob=True)
+hypothesis_settings.load_profile("default")
+
 @pytest.fixture
 def product(db):
     from demo.apps.shop.models import Product

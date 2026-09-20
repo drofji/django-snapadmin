@@ -1048,6 +1048,42 @@ class TestSnapFieldWrapperEditableIsNotAMigration:
         field = snap_field(dj_models.CharField(max_length=10, editable=False), searchable=True)
         assert field.deconstruct()[3]["editable"] is False
 
+    @pytest.mark.parametrize("wrapper_editable", [True, False])
+    def test_the_callers_own_editable_survives_a_wrapper_editable_too(self, wrapper_editable):
+        """Regression (#QA1d, found by the ``snap_field`` property tests): with
+        ``editable=False`` on the Django field *and* ``editable=`` on the
+        wrapper, the strip removed the caller's constructor kwarg as well, so
+        the field's migration state changed and ``makemigrations`` wrote an
+        ``AlterField``. What ``deconstruct()`` reports must be what the Django
+        constructor was given, whatever the wrapper does to the live value."""
+        from django.db import models as dj_models
+
+        from snapadmin.fields import snap_field
+
+        field = snap_field(
+            dj_models.CharField(max_length=10, editable=False), editable=wrapper_editable
+        )
+
+        assert field.editable is wrapper_editable
+        assert field.deconstruct()[3]["editable"] is False
+
+    @pytest.mark.parametrize("auto", ["auto_now", "auto_now_add"])
+    @pytest.mark.parametrize("wrapper_editable", [True, False])
+    def test_an_auto_now_field_stays_read_only_and_deconstructs(self, auto, wrapper_editable):
+        """Regression (#QA1d): ``editable=True`` on a wrapped ``auto_now`` field
+        made Django's own ``DateTimeField.deconstruct()`` raise ``KeyError:
+        'editable'`` — ``makemigrations`` crashed. The wrapper now keeps parity
+        with Django and ``Snap*Field``, which both force such a field read-only."""
+        from django.db import models as dj_models
+
+        from snapadmin.fields import snap_field
+
+        before = dj_models.DateTimeField(**{auto: True}).deconstruct()
+        field = snap_field(dj_models.DateTimeField(**{auto: True}), editable=wrapper_editable)
+
+        assert field.editable is False
+        assert field.deconstruct() == before
+
     def test_other_wrapper_kwargs_are_untouched(self):
         from django.db import models as dj_models
 

@@ -73,7 +73,10 @@ jobs:
         # `python -m pytest` (not the bare `pytest` console script) so the repository root lands on
         # sys.path — the suite imports `snapadmin` and `demo` straight from the source tree, exactly
         # as it runs locally. A bare `pytest` would fail to import `demo.core.settings_test`.
-        run: python -m pytest --cov=snapadmin --cov-branch --cov-report=term-missing --cov-fail-under=100
+        # `--hypothesis-profile=ci` raises the property/fuzz tests from 100 to 300
+        # generated examples each (profiles live in tests/conftest.py); the local
+        # default stays at 100 so the everyday run stays fast.
+        run: python -m pytest --cov=snapadmin --cov-branch --cov-report=term-missing --cov-fail-under=100 --hypothesis-profile=ci
 
   # ───────────────────────────────────────────────────────────────────────────
   # The same suite, against a real PostgreSQL.
@@ -200,7 +203,7 @@ jobs:
           SNAPADMIN_TEST_POSTGRES_DB: snapadmin_test
           SNAPADMIN_TEST_POSTGRES_USER: snapadmin
           SNAPADMIN_TEST_POSTGRES_PASSWORD: snapadmin
-        run: python -m pytest
+        run: python -m pytest --hypothesis-profile=ci
 
       - name: Run the live-Elasticsearch tests
         # Deselected everywhere else (`-m "not real_es"` in pytest.ini), so this

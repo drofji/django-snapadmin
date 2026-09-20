@@ -446,12 +446,35 @@ class TestExportCommand:
         assert rows[0]["ip_address"] == "203.0.113.5"
 
     def test_csv_export(self, tmp_path, product, admin_user):
+        import csv
+
+        from snapadmin.management.commands.snapadmin_audit_export import FIELDS
+
         self._seed(product, admin_user)
         out = tmp_path / "audit.csv"
         call_command("snapadmin_audit_export", "--format", "csv", "--output", str(out))
-        text = out.read_text()
-        assert "timestamp,action,actor_id" in text.replace(" ", "")[:80] or "action" in text
-        assert text.count("\n") >= 3  # header + 2 rows
+
+        records = list(csv.reader(out.open(newline="")))
+        assert records[0] == FIELDS
+        assert sorted(row[FIELDS.index("action")] for row in records[1:]) == ["create", "delete"]
+
+    @pytest.mark.parametrize("hostile_ua", ['=HYPERLINK("http://x","y")', "@SUM(1+1)", "+cmd", "-cmd"])
+    def test_csv_export_neutralises_a_formula_in_attacker_controlled_text(
+        self, tmp_path, product, admin_user, hostile_ua
+    ):
+        """Regression (#QA1d, CWE-1236): ``user_agent`` is whatever the client
+        sent, and the CSV lands in a SIEM analyst's spreadsheet — it was
+        written raw, so it opened as a live formula."""
+        import csv
+
+        from snapadmin.management.commands.snapadmin_audit_export import FIELDS
+
+        audit.record_audit(_request(admin_user, ua=hostile_ua), audit.DELETE, product, None)
+        out = tmp_path / "audit.csv"
+        call_command("snapadmin_audit_export", "--format", "csv", "--output", str(out))
+
+        records = list(csv.reader(out.open(newline="")))
+        assert records[1][FIELDS.index("user_agent")] == "'" + hostile_ua
 
     def test_action_filter(self, tmp_path, product, admin_user):
         self._seed(product, admin_user)

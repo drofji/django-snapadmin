@@ -161,10 +161,14 @@ class SnapField:
     ``allowed_extensions`` / ``allowed_encodings`` / ``max_size_bytes``
         Upload validation on file and image fields.
 
-    **None of these add a database migration.** They are stripped in
-    :meth:`handleDjangoKwargs` before Django sees the field and are absent from
-    ``deconstruct()``, so adding or changing one leaves ``makemigrations`` with
-    nothing to detect. ``editable`` is the one that needs help to keep that
+    **None of these add a database migration**, with two named exceptions:
+    ``required`` (it sets ``null``/``blank``, which is its purpose) and, on
+    :class:`SnapFileField`/:class:`SnapImageField`, the three upload limits —
+    those are serialised the way Django serialises ``validators=``, so a
+    reconstructed field keeps them, and changing one is an ``AlterField`` that
+    runs no SQL. The rest are stripped in :meth:`handleDjangoKwargs` before
+    Django sees the field and are absent from ``deconstruct()``, so adding or
+    changing one leaves ``makemigrations`` with nothing to detect. ``editable`` is the one that needs help to keep that
     promise: it is passed through to Django on purpose (see above), and
     ``Field.deconstruct()`` would report it, so the mixin's ``deconstruct()``
     wrapper drops it again — an ``editable=False`` already recorded by an
@@ -444,7 +448,12 @@ def _attach_file_validator(
     field.deconstruct = types.MethodType(deconstruct, field)
 
 
-def _detach_editable_from_deconstruct(field: models.Field) -> None:
+#: Marks "the Django constructor's own ``deconstruct()`` did not report
+#: ``editable``" for :func:`_detach_editable_from_deconstruct`.
+_EDITABLE_NOT_RECORDED = object()
+
+
+def _detach_editable_from_deconstruct(field: models.Field, recorded_editable: object) -> None:
     """Keep a wrapper-set ``editable`` out of ``deconstruct()``.
 
     :func:`snap_field`'s "adds no database migration" promise rests on its
@@ -457,13 +466,18 @@ def _detach_editable_from_deconstruct(field: models.Field) -> None:
     Only a wrapper-set value is stripped. A caller who wrote
     ``snap_field(models.CharField(..., editable=False), searchable=True)`` meant
     Django's kwarg, migration included, and removing it from their history would
-    be the same bug pointed the other way.
+    be the same bug pointed the other way. So ``deconstruct()`` reports
+    ``recorded_editable`` — what the field's own ``deconstruct()`` said before
+    the wrapper touched it, or nothing if it said nothing — whatever the wrapper
+    then set on the live field.
     """
     original_deconstruct = field.deconstruct
 
     def deconstruct(self):
         name, path, args, kwargs = original_deconstruct()
         kwargs.pop(SnapFieldAttributeEnum.EDITABLE.value, None)
+        if recorded_editable is not _EDITABLE_NOT_RECORDED:
+            kwargs[SnapFieldAttributeEnum.EDITABLE.value] = recorded_editable
         return name, path, args, kwargs
 
     field.deconstruct = types.MethodType(deconstruct, field)
@@ -545,6 +559,16 @@ def snap_field(field: models.Field, **kwargs: bool | str | None) -> models.Field
     if SnapFieldAttributeEnum.REQUIRED.value in kwargs:
         _apply_required_flag(field, kwargs[SnapFieldAttributeEnum.REQUIRED.value])
 
+    editable_key = SnapFieldAttributeEnum.EDITABLE.value
+    if editable_key in kwargs:
+        recorded_editable = field.deconstruct()[3].get(editable_key, _EDITABLE_NOT_RECORDED)
+        if getattr(field, "auto_now", False) or getattr(field, "auto_now_add", False):
+            # Django's DateField/DateTimeField/TimeField force an auto_now field
+            # read-only in __init__, and so does a Snap*Field; the wrapper keeps
+            # parity rather than making it editable. It would also break
+            # Django's own deconstruct(), which deletes the `editable` key it
+            # expects such a field to report — makemigrations would crash.
+            kwargs = {**kwargs, editable_key: False}
     skip = _SNAP_FIELD_FILE_VALIDATOR_KWARGS | {SnapFieldAttributeEnum.REQUIRED.value}
     for key, value in kwargs.items():
         if key in skip:
@@ -552,7 +576,7 @@ def snap_field(field: models.Field, **kwargs: bool | str | None) -> models.Field
         setattr(field, key, value)
 
     if SnapFieldAttributeEnum.EDITABLE.value in kwargs:
-        _detach_editable_from_deconstruct(field)
+        _detach_editable_from_deconstruct(field, recorded_editable)
 
     if getattr(field, "wysiwyg", False):
         _bind_wysiwyg_pre_save(field)

@@ -91,16 +91,36 @@ def is_sharding_enabled() -> bool:
     return bool(get_sharding_config().get("ENABLED"))
 
 
+#: Appended to every "this DSN does not parse" error: the usual cause is URL
+#: syntax inside a generated password, and the fix is one stdlib call.
+_PERCENT_ENCODE_HINT = (
+    "If the user or password contains '/', '#', '?', '@', ':' or '%', percent-encode it "
+    "(urllib.parse.quote(password, safe=''))."
+)
+
+
 def redact_dsn(dsn: str) -> str:
-    """``dsn`` with any password blanked out — safe to log or raise in an error message."""
-    try:
-        parsed = urlsplit(dsn)
-    except ValueError:
-        return "<unparseable DSN>"
-    if not parsed.password:
+    """``dsn`` with any password blanked out — safe to log or raise in an error message.
+
+    Works on the text as written rather than on what :func:`urlsplit` makes of
+    it, because the DSN most in need of redaction is the one that does not
+    parse: a password with a raw ``/``, ``#`` or ``?`` ends the URL's authority
+    early, so a parser sees no password at all and would hand the whole string
+    back. Everything between the first ``:`` after the scheme and the **last**
+    ``@`` is treated as the password — which over-redacts a DSN with an ``@``
+    in its database name, and never under-redacts one with an ``@`` (or
+    anything else) in its password.
+    """
+    head, separator, rest = dsn.partition("://")
+    if not separator:
+        head, rest = "", dsn
+    at = rest.rfind("@")
+    if at == -1:
         return dsn
-    netloc = parsed.netloc.replace(f":{parsed.password}@", ":***@")
-    return parsed._replace(netloc=netloc).geturl()
+    colon = rest.find(":", 0, at)
+    if colon == -1:
+        return dsn
+    return f"{head}{separator}{rest[: colon + 1]}***{rest[at:]}"
 
 
 def parse_dsn(dsn: str) -> dict[str, str]:
@@ -109,8 +129,9 @@ def parse_dsn(dsn: str) -> dict[str, str]:
     Uses only ``urllib.parse`` (stdlib) — no new dependency.
 
     :raises ImproperlyConfigured: the DSN cannot be parsed, its scheme is not
-        one of ``postgres``/``postgresql``/``mysql``, or it is missing a host
-        or database name. The message never includes the DSN's password (see
+        one of ``postgres``/``postgresql``/``mysql``, it is missing a host or
+        database name, or an ``@`` follows the host (an unencoded password).
+        The message never includes any part of the DSN's password (see
         :func:`redact_dsn`).
     """
     try:
@@ -123,10 +144,24 @@ def parse_dsn(dsn: str) -> dict[str, str]:
     except ValueError as exc:
         # urlsplit() itself raises on a malformed IPv6 host; a non-numeric
         # port only raises once .port is actually accessed, above — both are
-        # "could not parse this DSN", not two different failure modes.
+        # "could not parse this DSN", not two different failure modes. The
+        # stdlib's message is not repeated: for a password with a raw "/" it
+        # reads "Port could not be cast to integer value as '<first half of
+        # the password>'".
         raise ImproperlyConfigured(
-            f"SNAPADMIN_SHARDING: could not parse DSN {redact_dsn(dsn)!r}: {exc}"
+            f"SNAPADMIN_SHARDING: could not parse DSN {redact_dsn(dsn)!r}: its host or port "
+            f"is malformed. {_PERCENT_ENCODE_HINT}"
         ) from exc
+
+    if "@" in f"{parsed.path}{parsed.query}{parsed.fragment}":
+        # "app:1234/abc@db/shop" is valid URL syntax — host "app", port 1234,
+        # database "abc@db/shop" — and nothing else would object to it. A
+        # database name holding a literal "@" is written "%40", so a raw one
+        # here is always an authority that ended too early.
+        raise ImproperlyConfigured(
+            f"SNAPADMIN_SHARDING: DSN {redact_dsn(dsn)!r} has an '@' after its host, so the "
+            f"user or password was read as part of the address. {_PERCENT_ENCODE_HINT}"
+        )
 
     engine = _ENGINE_BY_SCHEME.get(scheme)
     if engine is None:

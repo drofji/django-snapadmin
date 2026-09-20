@@ -28,6 +28,12 @@ the `0.x` beta series.
 - The SFTP backup location in the run summary and `db_backup_stored` is the directory the server
   resolved, so a relative `SNAPADMIN_BACKUP_SFTP_DIR` now reports the full path from the login
   directory.
+- CSV exports (`export_format="csv"`, `snapadmin_audit_export --format csv`) write text that starts
+  with `=`, `+`, `-`, `@`, a tab or a carriage return behind a leading `'`; JSON is unchanged.
+- `snapadmin.E028` fails `manage.py check` for a masking setting in the wrong shape (a string or a
+  number where a list belongs, a list where a rule map belongs).
+- `POST /api/exports/` answers `400` for `filters` that are not a JSON object of scalars, and reports
+  every `filters` error under `filters` (the key allowlist used `non_field_errors`).
 
 ### Added
 - `snapadmin_restore --database <alias>` for restore drills: `db` only, into another alias, with a
@@ -46,6 +52,11 @@ the `0.x` beta series.
   that matches nothing falls back to the built-in masker instead of returning the raw value.
 - `snapadmin.W022`'s hint covers SFTP accounts whose login directory is the absolute path, and a
   directory created on the fly is logged as `sftp_backup_dir_created`.
+- The test suite pins the SQL query count of the changelist with relations, the REST list endpoint,
+  the audit timeline and masked output, each measured at two row counts, so an N+1 regression fails.
+- The test suite adds property-based and fuzz tests (`hypothesis`, dev-only): laws over generated
+  input for encryption, DSN parsing, masking, field `deconstruct()` and export serialization, and
+  hostile input against the REST list, export filters, masking settings and key configuration.
 
 ### Fixed
 - A due row held by a `PROTECT`/`RESTRICT` foreign key no longer aborts the model's retention purge,
@@ -58,11 +69,19 @@ the `0.x` beta series.
 - `delete_pks_from_es()` treats a `failures` list in the Elasticsearch answer as a failed delete.
 - A masked changelist column keeps the field's `verbose_name`.
 - Generated `ModelAdmin` classes report the model's module as `__module__`.
+- `snap_field()` keeps the Django constructor's own `editable=False` in `deconstruct()`, and
+  `editable=True` on a wrapped `auto_now` field no longer crashes `makemigrations`.
+- An encryption key configured as bytes or a number is an `ImproperlyConfigured`, not an
+  `AttributeError`.
 
 ### Security
 - `formatted_id` escapes a non-integer primary key instead of rendering it as markup (stored XSS).
 - Alert webhooks accept only `http`/`https` URLs.
 - `snapadmin_restore` escapes the database name in the SQL it sends to `psql`.
+- CSV exports and the CSV audit export neutralise spreadsheet formulas (CWE-1236).
+- No part of a sharding DSN's password reaches an error message, however the DSN is written; a DSN
+  whose raw password moved the host is refused instead of parsed into the wrong server.
+- A masking setting written as a string masks that field instead of none.
 
 ### Deprecated
 - `SnapModel.admin_sections` — never read; setting it raises `snapadmin.W026`.

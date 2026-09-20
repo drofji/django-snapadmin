@@ -190,6 +190,16 @@ class EncryptionKey:
                 "'.', ':' and whitespace are not available)."
             )
 
+        if not isinstance(encoded, str | None):
+            # A provider or a settings dict can hand over bytes or a number; the
+            # parser below would raise AttributeError/TypeError out of
+            # configuration loading instead of saying what is wrong. The value
+            # itself is never echoed — it may be the key.
+            raise ImproperlyConfigured(
+                f"{SETTING_NAME}: key {displayable_id(key_id)} must be a base64url string, got "
+                f"{type(encoded).__name__}. Generate one with "
+                "`python manage.py snapadmin_encryption_key`."
+            )
         candidate = (encoded or "").strip()
         if not candidate:
             raise ImproperlyConfigured(

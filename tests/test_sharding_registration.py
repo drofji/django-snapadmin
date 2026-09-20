@@ -64,6 +64,28 @@ class TestParseDsn:
         with pytest.raises(ImproperlyConfigured, match="could not parse DSN"):
             registration.parse_dsn("postgres://db1:notanumber/mydb")
 
+    def test_a_raw_slash_in_the_password_leaks_no_part_of_it(self):
+        # Regression (#QA1d): the stdlib's "Port could not be cast to integer
+        # value as 's3c'" used to be appended, echoing the password's first half,
+        # and the whole DSN was echoed because redaction found no password.
+        with pytest.raises(ImproperlyConfigured, match="percent-encode") as excinfo:
+            registration.parse_dsn("postgres://alice:s3c/ret@db1:5432/mydb")
+
+        message = str(excinfo.value)
+        assert "s3c" not in message and "ret@" not in message
+        assert "postgres://alice:***@db1:5432/mydb" in message
+
+    def test_a_numeric_password_with_a_raw_slash_is_refused_not_misread(self):
+        # Regression (#QA1d): valid URL syntax for host "alice", port 1234 and
+        # database "abc@db1/mydb" — it used to be accepted as exactly that.
+        with pytest.raises(ImproperlyConfigured, match="an '@' after its host") as excinfo:
+            registration.parse_dsn("postgres://alice:1234/abc@db1/mydb")
+
+        assert "1234/abc" not in str(excinfo.value)
+
+    def test_a_percent_encoded_at_sign_in_the_database_name_is_accepted(self):
+        assert registration.parse_dsn("postgres://alice:pw@db1/my%40db")["NAME"] == "my@db"
+
     def test_error_message_never_leaks_the_password(self):
         with pytest.raises(ImproperlyConfigured) as excinfo:
             registration.parse_dsn("redis://alice:s3cret@db1:6379/0")
@@ -83,11 +105,33 @@ class TestRedactDsn:
         dsn = "postgres://alice@db1:5432/mydb"
         assert registration.redact_dsn(dsn) == dsn
 
-    def test_unparseable_dsn_returns_placeholder(self):
-        # urlsplit() itself raises ValueError on a malformed IPv6 host (a bad
-        # port, by contrast, only raises lazily on .port access — see
-        # TestParseDsn.test_unparseable_dsn_raises for that case).
-        assert registration.redact_dsn("postgres://[::1/mydb") == "<unparseable DSN>"
+    def test_unparseable_dsn_still_has_its_password_masked(self):
+        # urlsplit() itself raises ValueError on a malformed IPv6 host. The
+        # redaction used to give up there and return a placeholder; it now
+        # works on the text, so an unparseable DSN keeps everything a reader
+        # needs to find the typo and loses only the password (#QA1d).
+        assert registration.redact_dsn("postgres://alice:s3cret@[::1/mydb") == (
+            "postgres://alice:***@[::1/mydb"
+        )
+
+    def test_unparseable_dsn_without_a_password_is_shown_as_written(self):
+        assert registration.redact_dsn("postgres://[::1/mydb") == "postgres://[::1/mydb"
+
+    @pytest.mark.parametrize("separator", ["/", "#", "?"])
+    def test_a_raw_url_character_in_the_password_does_not_unmask_it(self, separator):
+        # Regression (#QA1d): the separator ends the URL's authority early, so
+        # urlsplit() saw no password and the old redaction echoed the DSN whole.
+        dsn = f"postgres://alice:s3c{separator}ret@db1:5432/mydb"
+
+        assert registration.redact_dsn(dsn) == "postgres://alice:***@db1:5432/mydb"
+
+    def test_an_at_sign_in_the_password_is_masked_whole(self):
+        assert registration.redact_dsn("postgres://alice:p@ss@db1/mydb") == (
+            "postgres://alice:***@db1/mydb"
+        )
+
+    def test_a_dsn_with_no_scheme_is_masked_too(self):
+        assert registration.redact_dsn("alice:s3cret@db1/mydb") == "alice:***@db1/mydb"
 
 
 # ── get_shards: explicit SHARDS mapping (Mode B) ──────────────────────────────

@@ -641,7 +641,88 @@ def _run(job) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def purge_expired_export_jobs(*, now=None, dry_run: bool = False) -> dict:  # noqa: C901 - refactor tracked as #QA1c-cx
+def _purge_export_jobs(queryset, storage, result: dict, *, dry_run: bool) -> None:
+    """Delete each job's published file, then — only if every one went — the rows.
+
+    A storage failure leaves the **whole batch** of rows intact (and is recorded
+    in ``result["failed"]``), so the next run retries it rather than leaving a
+    row pointing at a file that is gone, or a file no row names.
+    """
+    from snapadmin.models import SnapExportJob
+
+    if dry_run:
+        result["jobs_deleted"]["SnapExportJob"] = queryset.count()
+        return
+
+    pks = []
+    for job in queryset.iterator():
+        pks.append(job.pk)
+        name = export_file_name(job)
+        try:
+            if storage.exists(name):
+                storage.delete(name)
+                result["files_deleted"] += 1
+        except Exception as exc:
+            logger.error(
+                "snapadmin.export_retention.file_delete_failed",
+                job=str(job.pk),
+                name=name,
+                error=str(exc),
+            )
+            result["failed"].append(f"SnapExportJob {job.pk} file {name!r}: {exc}")
+    if pks and not result["failed"]:
+        deleted, _ = SnapExportJob.objects.filter(pk__in=pks).delete()
+        result["jobs_deleted"]["SnapExportJob"] = deleted
+    else:
+        result["jobs_deleted"]["SnapExportJob"] = 0
+
+
+def _orphan_export_files(storage, cutoff, known_names: set[str]) -> Iterator[str]:
+    """Names in the export storage older than ``cutoff`` that no job claims.
+
+    A storage backend that cannot list or cannot report a modification time
+    yields nothing rather than guessing: an unknown age is not an old age.
+    """
+    try:
+        _, storage_files = storage.listdir("")
+    except NotImplementedError:
+        return
+    for name in storage_files:
+        if name in known_names:
+            continue
+        try:
+            modified = storage.get_modified_time(name)
+        except (NotImplementedError, OSError):
+            continue
+        if timezone.is_naive(modified):
+            modified = timezone.make_aware(modified)
+        if modified < cutoff:
+            yield name
+
+
+def _purge_orphan_files(storage, cutoff, result: dict, *, dry_run: bool) -> None:
+    from snapadmin.models import SnapExportJob
+
+    known_names = set(
+        SnapExportJob.objects.exclude(file_name="").values_list("file_name", flat=True)
+    )
+    for name in _orphan_export_files(storage, cutoff, known_names):
+        if dry_run:
+            result["orphan_files_deleted"] += 1
+            continue
+        try:
+            storage.delete(name)
+            result["orphan_files_deleted"] += 1
+        except Exception as exc:
+            logger.error(
+                "snapadmin.export_retention.orphan_delete_failed",
+                name=name,
+                error=str(exc),
+            )
+            result["failed"].append(f"orphan file {name!r}: {exc}")
+
+
+def purge_expired_export_jobs(*, now=None, dry_run: bool = False) -> dict:
     """Purge finished ``SnapExportJob``/``SnapReindexJob`` rows and their files.
 
     A no-op (``{"enabled": False, ...}``) when :func:`export_retention_days`
@@ -691,38 +772,19 @@ def purge_expired_export_jobs(*, now=None, dry_run: bool = False) -> dict:  # no
     cutoff = now - datetime.timedelta(days=retention_days)
     storage = get_export_storage()
 
-    export_qs = SnapExportJob.objects.filter(
-        status__in=[
-            SnapExportJob.Status.COMPLETED,
-            SnapExportJob.Status.FAILED,
-            SnapExportJob.Status.CANCELLED,
-        ],
-        finished_at__lt=cutoff,
+    _purge_export_jobs(
+        SnapExportJob.objects.filter(
+            status__in=[
+                SnapExportJob.Status.COMPLETED,
+                SnapExportJob.Status.FAILED,
+                SnapExportJob.Status.CANCELLED,
+            ],
+            finished_at__lt=cutoff,
+        ),
+        storage,
+        result,
+        dry_run=dry_run,
     )
-    if dry_run:
-        result["jobs_deleted"]["SnapExportJob"] = export_qs.count()
-    else:
-        export_pks = []
-        for job in export_qs.iterator():
-            export_pks.append(job.pk)
-            name = export_file_name(job)
-            try:
-                if storage.exists(name):
-                    storage.delete(name)
-                    result["files_deleted"] += 1
-            except Exception as exc:
-                logger.error(
-                    "snapadmin.export_retention.file_delete_failed",
-                    job=str(job.pk),
-                    name=name,
-                    error=str(exc),
-                )
-                result["failed"].append(f"SnapExportJob {job.pk} file {name!r}: {exc}")
-        if export_pks and not result["failed"]:
-            deleted, _ = SnapExportJob.objects.filter(pk__in=export_pks).delete()
-            result["jobs_deleted"]["SnapExportJob"] = deleted
-        else:
-            result["jobs_deleted"]["SnapExportJob"] = 0
 
     reindex_qs = SnapReindexJob.objects.filter(
         status__in=[SnapReindexJob.Status.COMPLETED, SnapReindexJob.Status.FAILED],
@@ -734,38 +796,7 @@ def purge_expired_export_jobs(*, now=None, dry_run: bool = False) -> dict:  # no
         deleted, _ = reindex_qs.delete()
         result["jobs_deleted"]["SnapReindexJob"] = deleted
 
-    known_names = set(
-        SnapExportJob.objects.exclude(file_name="").values_list("file_name", flat=True)
-    )
-    try:
-        _, storage_files = storage.listdir("")
-    except NotImplementedError:
-        storage_files = []
-    for name in storage_files:
-        if name in known_names:
-            continue
-        try:
-            modified = storage.get_modified_time(name)
-        except (NotImplementedError, OSError):
-            continue
-        if timezone.is_naive(modified):
-            modified = timezone.make_aware(modified)
-        if modified >= cutoff:
-            continue
-        if dry_run:
-            result["orphan_files_deleted"] += 1
-            continue
-        try:
-            storage.delete(name)
-            result["orphan_files_deleted"] += 1
-        except Exception as exc:
-            logger.error(
-                "snapadmin.export_retention.orphan_delete_failed",
-                name=name,
-                error=str(exc),
-            )
-            result["failed"].append(f"orphan file {name!r}: {exc}")
-
+    _purge_orphan_files(storage, cutoff, result, dry_run=dry_run)
     return result
 
 
@@ -777,9 +808,33 @@ def _write_bytes(handle, data: bytes) -> int:
     return len(data)
 
 
+#: First characters a spreadsheet treats as the start of a formula when it opens
+#: a CSV file (OWASP "CSV injection", CWE-1236): ``=``/``+``/``-``/``@`` start
+#: one outright, and a leading tab or carriage return is stripped by some
+#: spreadsheets before the rest is evaluated.
+CSV_FORMULA_TRIGGERS = frozenset("=+-@\t\r")
+
+
+def _csv_cell(value: object) -> object:
+    """Neutralise ``value`` for a CSV cell: text opening with a formula trigger
+    gets a leading ``'``, which every major spreadsheet reads as "this is text".
+
+    Only ``str`` is touched. A number is written by ``str()`` too, but ``-5``
+    from an integer column is data a spreadsheet should sum, and it cannot
+    carry a formula; text is where a user-supplied ``=HYPERLINK(…)`` lives. The
+    ``xlsx`` writer solves the same problem with a typed cell (see
+    :func:`_xlsx_cell`); JSON is left verbatim, since programs read it.
+    """
+    if isinstance(value, str) and value[:1] in CSV_FORMULA_TRIGGERS:
+        return "'" + value
+    return value
+
+
 def _csv_header_bytes(fields: list[str]) -> bytes:
+    # A custom export source names its own columns, so a header cell reaches
+    # the same spreadsheet a value does.
     buffer = io.StringIO()
-    csv.DictWriter(buffer, fieldnames=fields).writeheader()
+    csv.writer(buffer).writerow([_csv_cell(name) for name in fields])
     return buffer.getvalue().encode("utf-8")
 
 
@@ -788,7 +843,7 @@ def _rows_bytes(batch: list[dict], fields: list[str], is_csv: bool) -> bytes:
     if is_csv:
         writer = csv.DictWriter(buffer, fieldnames=fields)
         for row in batch:
-            writer.writerow(row)
+            writer.writerow({name: _csv_cell(value) for name, value in row.items()})
     else:
         for row in batch:
             buffer.write(json.dumps(row, default=str) + "\n")

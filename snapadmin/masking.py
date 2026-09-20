@@ -113,11 +113,33 @@ def _model_entry(setting: str, app_label: str, model_name: str):
     and ``"demo.customer"`` resolve identically.
     """
     raw = get_setting(setting, None) or {}
+    if not isinstance(raw, dict):
+        # A list or a string where the model map belongs names no model this
+        # lookup could match; snapadmin.E028 reports it instead of every
+        # masked request raising AttributeError.
+        return None
     wanted = f"{app_label}.{model_name}".lower()
     for key, value in raw.items():
         if str(key).lower() == wanted:
             return value
     return None
+
+
+def _field_names(entry: object) -> list[str]:
+    """The field names a model's masking entry lists, whatever shape it was written in.
+
+    The documented shape is a list of names. Two mistakes are read the way they
+    were evidently meant, because the alternative fails *open*: a bare string is
+    one field name (iterating it would mask the fields ``"e"``, ``"m"``, …), and
+    a mapping contributes its keys. Anything else names no field, and a
+    non-string item inside a list is skipped — ``snapadmin.E028`` reports each
+    of these so the deploy stops rather than going out unmasked.
+    """
+    if isinstance(entry, str):
+        return [entry]
+    if isinstance(entry, (list, tuple, set, frozenset, dict)):
+        return [name for name in entry if isinstance(name, str)]
+    return []
 
 
 def get_masking_rules(app_label: str, model_name: str) -> dict[str, dict]:
@@ -136,6 +158,12 @@ def get_masking_rules(app_label: str, model_name: str) -> dict[str, dict]:
     built-in masker rather than silently revealing anything.
     """
     rules = _model_entry("SNAPADMIN_MASKING_RULES", app_label, model_name) or {}
+    if not isinstance(rules, dict):
+        # Field names written as a list (or one as a string) rather than as a
+        # field -> rule map: each one is still declared sensitive, so it is
+        # masked with the built-in masker (an empty rule) rather than not at
+        # all. snapadmin.E028 reports the shape.
+        return {name: {} for name in _field_names(rules)}
     return {str(field): rule for field, rule in rules.items() if isinstance(rule, dict)}
 
 
@@ -197,7 +225,7 @@ def get_masked_fields(app_label: str, model_name: str) -> list[str]:
     case-insensitively on both the app label and the model name, so
     ``"demo.Customer"`` and ``"demo.customer"`` resolve identically.
     """
-    fields = list(_model_entry("SNAPADMIN_MASKED_FIELDS", app_label, model_name) or [])
+    fields = _field_names(_model_entry("SNAPADMIN_MASKED_FIELDS", app_label, model_name))
     for field in get_masking_rules(app_label, model_name):
         if field not in fields:
             fields.append(field)

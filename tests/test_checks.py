@@ -946,6 +946,40 @@ class TestSubjectPathsCheck:
         result = checks.check_subject_paths(None)
         assert [e.id for e in result] == ["snapadmin.E011"]
         assert "never declares" in result[0].msg
+        # The hint is the half that says what to *do*; a check without one
+        # leaves the reader with a label and no next step. (A mutation run
+        # showed nothing noticed it going missing.)
+        assert model._meta.label in result[0].hint
+        assert "subject_path = None" in result[0].hint
+
+    @pytest.mark.parametrize(
+        "model_kwargs, expected_hint",
+        [
+            (
+                {"fields": {"email": django_models.EmailField()}, "subject_path": "email",
+                 "is_data_subject": True},
+                "Set subject_identifier",
+            ),
+            (
+                {"fields": {"email": django_models.EmailField(),
+                            "username": django_models.CharField(max_length=20)},
+                 "subject_path": "username", "is_data_subject": True,
+                 "subject_identifier": "email"},
+                "subject_path = 'email'",
+            ),
+            ({"subject_path": 123}, "'__'-joined ORM lookup path"),
+            ({"subject_path": "a__b__c__d__email"}, "Shorten the path"),
+            ({"subject_path": "nope__email"}, "forward ForeignKey/OneToOneField"),
+        ],
+    )
+    def test_every_e012_shape_says_what_to_do(self, monkeypatch, model_kwargs, expected_hint):
+        model = _plain_model(f"HintCase{abs(hash(expected_hint)) % 1000}", **model_kwargs)
+        monkeypatch.setattr(checks.apps, "get_models", lambda: [model])
+
+        [error] = checks.check_subject_paths(None)
+
+        assert error.id == "snapadmin.E012"
+        assert expected_hint in error.hint
 
     def test_explicit_none_is_clean(self, monkeypatch):
         model = _plain_model("None0", subject_path=None)

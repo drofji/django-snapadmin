@@ -158,13 +158,18 @@ class Command(BaseCommand):
         return count
 
     def _write_csv(self, qs, out, reveal_pii: bool) -> int:
+        from snapadmin.exporting import _csv_cell
+
         writer = csv.DictWriter(out, fieldnames=FIELDS)
         writer.writeheader()
         count = 0
         for entry in qs.iterator():
             row = self._row(entry, reveal_pii)
             row["changes"] = json.dumps(row["changes"], default=str) if row["changes"] else ""
-            writer.writerow(row)
+            # user_agent is whatever the client sent and object_repr is user
+            # data; the file ends up in a spreadsheet, so neither may open as a
+            # formula (the same neutralisation the data export applies).
+            writer.writerow({name: _csv_cell(value) for name, value in row.items()})
             count += 1
         return count
 

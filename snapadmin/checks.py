@@ -57,9 +57,32 @@ def check_analytics_db_alias(app_configs, **kwargs):
     return []
 
 
+def _masking_shape_error(message: str) -> Error:
+    """``snapadmin.E028``: a masking setting written in a shape it cannot mean.
+
+    Raised instead of letting ``.items()``/iteration blow up inside the check
+    run (which used to stop ``manage.py check`` itself) or, worse, iterating a
+    string into single-character "field names" that match nothing.
+    """
+    return Error(
+        message,
+        hint="SNAPADMIN_MASKED_FIELDS = {'app.Model': ['field', ...]}; "
+        "SNAPADMIN_MASKING_RULES = {'app.Model': {'field': {'replacement': '…'}}}. "
+        "Until this is fixed, only the field names that can be read out of the value are masked.",
+        id="snapadmin.E028",
+    )
+
+
 def check_masked_fields(app_configs, **kwargs):
     errors = []
     masked = get_setting("SNAPADMIN_MASKED_FIELDS", None) or {}
+    if not isinstance(masked, dict):
+        return [
+            _masking_shape_error(
+                f"SNAPADMIN_MASKED_FIELDS must be a dict of 'app.Model' -> field names, "
+                f"got {type(masked).__name__}."
+            )
+        ]
     for key, fields in masked.items():
         model = _resolve_model(key)
         if model is None:
@@ -71,8 +94,26 @@ def check_masked_fields(app_configs, **kwargs):
                 )
             )
             continue
+        if fields is None:
+            continue
+        if not isinstance(fields, (list, tuple, set, frozenset, dict)):
+            errors.append(
+                _masking_shape_error(
+                    f"SNAPADMIN_MASKED_FIELDS[{key!r}] must be a list of field names, "
+                    f"got {type(fields).__name__}."
+                )
+            )
+            continue
         model_fields = {f.name for f in model._meta.get_fields()}
-        for field in fields or []:
+        for field in fields:
+            if not isinstance(field, str):
+                errors.append(
+                    _masking_shape_error(
+                        f"SNAPADMIN_MASKED_FIELDS[{key!r}] lists {field!r}, which is not a "
+                        "field name (a string)."
+                    )
+                )
+                continue
             if field not in model_fields:
                 errors.append(
                     Error(
@@ -96,6 +137,13 @@ def check_masking_rules(app_configs, **kwargs):
 
     errors = []
     rules = get_setting("SNAPADMIN_MASKING_RULES", None) or {}
+    if not isinstance(rules, dict):
+        return [
+            _masking_shape_error(
+                f"SNAPADMIN_MASKING_RULES must be a dict of 'app.Model' -> field rules, "
+                f"got {type(rules).__name__}."
+            )
+        ]
     for key, fields in rules.items():
         model = _resolve_model(key)
         if model is None:
@@ -108,8 +156,18 @@ def check_masking_rules(app_configs, **kwargs):
                 )
             )
             continue
+        if fields is None:
+            continue
+        if not isinstance(fields, dict):
+            errors.append(
+                _masking_shape_error(
+                    f"SNAPADMIN_MASKING_RULES[{key!r}] must be a dict of field -> rule, "
+                    f"got {type(fields).__name__}."
+                )
+            )
+            continue
         model_fields = {f.name for f in model._meta.get_fields()}
-        for field, rule in (fields or {}).items():
+        for field, rule in fields.items():
             if field not in model_fields:
                 errors.append(
                     Error(
@@ -873,7 +931,133 @@ def check_snap_action_read_only_conflict(app_configs, **kwargs):
 _SUBJECT_PATH_UNDECLARED = object()
 
 
-def check_subject_paths(app_configs, **kwargs):  # noqa: C901 - refactor tracked as #QA1c-cx
+def _resolves_forward(model, segments) -> bool:
+    """Whether ``segments`` walks ``model``'s own forward relations to a real field.
+
+    Forward ``ForeignKey``/``OneToOneField`` hops only: the path lives on the
+    model that *has* the data, so a reverse accessor or a many-to-many is not a
+    way to reach a subject from here.
+    """
+    from django.core.exceptions import FieldDoesNotExist
+    from django.db import models as django_models
+
+    current = model
+    for segment in segments[:-1]:
+        try:
+            field = current._meta.get_field(segment)
+        except FieldDoesNotExist:
+            return False
+        if not isinstance(field, (django_models.ForeignKey, django_models.OneToOneField)):
+            return False
+        current = field.related_model
+    try:
+        current._meta.get_field(segments[-1])
+    except FieldDoesNotExist:
+        return False
+    return True
+
+
+def _subject_path_errors(model) -> list[Error]:
+    """Every ``snapadmin.E011``/``E012`` one model's declaration earns.
+
+    Each problem is terminal for that model: a path that is not a string cannot
+    also be checked for hop depth, so the first answer is the only answer.
+    """
+    from snapadmin.models import EsStorageMode
+
+    label = model._meta.label
+    path = get_model_meta(model, "subject_path", _SUBJECT_PATH_UNDECLARED)
+
+    if path is _SUBJECT_PATH_UNDECLARED:
+        return [
+            Error(
+                f"{label} is a registered SnapAdmin model but never declares "
+                "subject_path (or None) — a GDPR subject-access export/deletion "
+                "cannot know whether this model carries personal data reachable "
+                "from a subject.",
+                hint="Set subject_path to a forward ORM lookup path reaching the "
+                "subject's identifying field (e.g. 'customer__email'), or "
+                f"subject_path = None if {label} carries nothing subject-scoped.",
+                id="snapadmin.E011",
+            )
+        ]
+    if path is None:
+        return []
+
+    if get_model_meta(model, "is_data_subject", False):
+        identifier = get_model_meta(model, "subject_identifier", None)
+        if not identifier:
+            return [
+                Error(
+                    f"{label} sets is_data_subject=True but declares no subject_identifier.",
+                    hint="Set subject_identifier to the field name on this model "
+                    "holding the raw identifier value, e.g. 'email'.",
+                    id="snapadmin.E012",
+                )
+            ]
+        if path != identifier:
+            return [
+                Error(
+                    f"{label} is a subject model (is_data_subject=True) whose "
+                    f"subject_path ({path!r}) does not equal its own "
+                    f"subject_identifier ({identifier!r}).",
+                    hint="A subject model must reach itself by exactly its own "
+                    f"identifying field: set subject_path = {identifier!r}.",
+                    id="snapadmin.E012",
+                )
+            ]
+
+    if not isinstance(path, str) or not path:
+        return [
+            Error(
+                f"{label}.subject_path = {path!r} is not a non-empty string.",
+                hint="subject_path must be a '__'-joined ORM lookup path string, or None.",
+                id="snapadmin.E012",
+            )
+        ]
+
+    segments = path.split("__")
+    hops = segments[:-1]
+    if len(hops) > 3:
+        return [
+            Error(
+                f"{label}.subject_path = {path!r} is {len(hops)} relation hops "
+                "deep — over the 3-hop cap.",
+                hint="Shorten the path, or reconsider the design — a path this "
+                "deep is worth a person looking at, not a silent multi-hop "
+                "join inside a legally-binding export.",
+                id="snapadmin.E012",
+            )
+        ]
+
+    if not _resolves_forward(model, segments):
+        return [
+            Error(
+                f"{label}.subject_path = {path!r} does not resolve to a real "
+                "field via this model's own forward relations.",
+                hint="subject_path must be a '__'-joined chain of this model's "
+                "own forward ForeignKey/OneToOneField names, ending in a "
+                "real field name — never a reverse accessor or a "
+                "many-to-many.",
+                id="snapadmin.E012",
+            )
+        ]
+
+    if hops and get_model_meta(model, "es_storage_mode", None) == EsStorageMode.ES_ONLY:
+        return [
+            Error(
+                f"{label} is ES_ONLY and subject_path = {path!r} has relation "
+                "hops — EsQuerySet.filter() only matches flat field=value, so a "
+                "multi-hop path silently matches nothing at export/deletion time.",
+                hint="An ES_ONLY model may only declare a zero-hop subject_path "
+                "— a field literally present on the ES document.",
+                id="snapadmin.E012",
+            )
+        ]
+    return []
+
+
+def check_subject_paths(app_configs, **kwargs):
     """GDPR subject-access declaration (#FUT4a/#FUT4b) — loud, not silent, omission.
 
     Every registered SnapAdmin model must declare ``subject_path`` — a forward
@@ -914,132 +1098,12 @@ def check_subject_paths(app_configs, **kwargs):  # noqa: C901 - refactor tracked
     invisible here before the question is even asked. State that next to the
     subject-request command's own honesty limits, not just here.
     """
-    from django.core.exceptions import FieldDoesNotExist
-    from django.db import models as django_models
-
-    from snapadmin.models import EsStorageMode
-
-    errors = []
-    for model in apps.get_models():
-        if not is_registered(model):
-            continue
-
-        label = model._meta.label
-        path = get_model_meta(model, "subject_path", _SUBJECT_PATH_UNDECLARED)
-
-        if path is _SUBJECT_PATH_UNDECLARED:
-            errors.append(
-                Error(
-                    f"{label} is a registered SnapAdmin model but never declares "
-                    "subject_path (or None) — a GDPR subject-access export/deletion "
-                    "cannot know whether this model carries personal data reachable "
-                    "from a subject.",
-                    hint="Set subject_path to a forward ORM lookup path reaching the "
-                    "subject's identifying field (e.g. 'customer__email'), or "
-                    f"subject_path = None if {label} carries nothing subject-scoped.",
-                    id="snapadmin.E011",
-                )
-            )
-            continue
-        if path is None:
-            continue
-
-        is_subject = bool(get_model_meta(model, "is_data_subject", False))
-        identifier = get_model_meta(model, "subject_identifier", None)
-
-        if is_subject:
-            if not identifier:
-                errors.append(
-                    Error(
-                        f"{label} sets is_data_subject=True but declares no subject_identifier.",
-                        hint="Set subject_identifier to the field name on this model "
-                        "holding the raw identifier value, e.g. 'email'.",
-                        id="snapadmin.E012",
-                    )
-                )
-                continue
-            if path != identifier:
-                errors.append(
-                    Error(
-                        f"{label} is a subject model (is_data_subject=True) whose "
-                        f"subject_path ({path!r}) does not equal its own "
-                        f"subject_identifier ({identifier!r}).",
-                        hint="A subject model must reach itself by exactly its own "
-                        f"identifying field: set subject_path = {identifier!r}.",
-                        id="snapadmin.E012",
-                    )
-                )
-                continue
-
-        if not isinstance(path, str) or not path:
-            errors.append(
-                Error(
-                    f"{label}.subject_path = {path!r} is not a non-empty string.",
-                    hint="subject_path must be a '__'-joined ORM lookup path string, or None.",
-                    id="snapadmin.E012",
-                )
-            )
-            continue
-
-        segments = path.split("__")
-        hops = segments[:-1]
-        if len(hops) > 3:
-            errors.append(
-                Error(
-                    f"{label}.subject_path = {path!r} is {len(hops)} relation hops "
-                    "deep — over the 3-hop cap.",
-                    hint="Shorten the path, or reconsider the design — a path this "
-                    "deep is worth a person looking at, not a silent multi-hop "
-                    "join inside a legally-binding export.",
-                    id="snapadmin.E012",
-                )
-            )
-            continue
-
-        current = model
-        resolvable = True
-        for segment in hops:
-            try:
-                field = current._meta.get_field(segment)
-            except FieldDoesNotExist:
-                resolvable = False
-                break
-            if not isinstance(field, (django_models.ForeignKey, django_models.OneToOneField)):
-                resolvable = False
-                break
-            current = field.related_model
-        if resolvable:
-            try:
-                current._meta.get_field(segments[-1])
-            except FieldDoesNotExist:
-                resolvable = False
-        if not resolvable:
-            errors.append(
-                Error(
-                    f"{label}.subject_path = {path!r} does not resolve to a real "
-                    "field via this model's own forward relations.",
-                    hint="subject_path must be a '__'-joined chain of this model's "
-                    "own forward ForeignKey/OneToOneField names, ending in a "
-                    "real field name — never a reverse accessor or a "
-                    "many-to-many.",
-                    id="snapadmin.E012",
-                )
-            )
-            continue
-
-        if hops and get_model_meta(model, "es_storage_mode", None) == EsStorageMode.ES_ONLY:
-            errors.append(
-                Error(
-                    f"{label} is ES_ONLY and subject_path = {path!r} has relation "
-                    "hops — EsQuerySet.filter() only matches flat field=value, so a "
-                    "multi-hop path silently matches nothing at export/deletion time.",
-                    hint="An ES_ONLY model may only declare a zero-hop subject_path "
-                    "— a field literally present on the ES document.",
-                    id="snapadmin.E012",
-                )
-            )
-
-    return errors
+    return [
+        error
+        for model in apps.get_models()
+        if is_registered(model)
+        for error in _subject_path_errors(model)
+    ]
 
 
 def check_tenant_scoping(app_configs, **kwargs):

@@ -459,7 +459,6 @@ class TestClaimedChecksReallyRun:
 #: ``tool -> the paragraph that has to change when it arrives``. Listed under
 #: "What is not in place yet" in both documents.
 _DOCUMENTED_AS_ABSENT = {
-    "hypothesis": "Property-based / fuzz testing",
     "mutmut": "Mutation testing",
     "cosmic-ray": "Mutation testing",
     "mutatest": "Mutation testing",
@@ -507,6 +506,39 @@ class TestChecksDocumentedAsAbsentReallyAreAbsent:
         for tool in ("ruff", "mypy", "django-stubs"):
             assert f"\n{tool} = " in _read(PYPROJECT), f"{tool} is not a declared dev dependency"
 
+    def test_property_and_fuzz_tests_run_as_the_docs_describe(self):
+        """#QA1d (3)/(4) — all three pages say ``hypothesis`` runs 100 examples
+        per test locally and 300 in CI, inside the ordinary run. Pin every
+        half of that sentence: the dependency, both profiles and their budgets,
+        the CI flag on both jobs that run the suite, and the files."""
+        assert "\nhypothesis = " in _read(PYPROJECT), "hypothesis is not a declared dev dependency"
+        assert "hypothesis>=" in _read(REPO_ROOT / "demo" / "requirements.txt"), (
+            "CI installs from demo/requirements.txt, which does not carry hypothesis"
+        )
+        conftest = _read(REPO_ROOT / "tests" / "conftest.py")
+        assert 'register_profile("default", max_examples=100' in conftest
+        assert 'register_profile("ci", max_examples=300' in conftest
+        workflow = _read(WORKFLOWS / "test.yml")
+        matrix_job = workflow.split("  static-analysis:", 1)[0]
+        services_job = workflow.split("  real-services:", 1)[1]
+        assert "--hypothesis-profile=ci" in matrix_job, "the matrix does not run the CI profile"
+        assert "--hypothesis-profile=ci" in services_job, "the PostgreSQL job does not run the CI profile"
+        tests_dir = REPO_ROOT / "tests"
+        assert sorted(tests_dir.glob("test_properties_*.py")), "no property-based test file"
+        assert sorted(tests_dir.glob("test_fuzz_*.py")), "no fuzz test file"
+        for document in ("README.md", "docs/index.html", "llms.txt"):
+            text = _read(REPO_ROOT / document)
+            assert "hypothesis" in text, f"{document} does not name the property/fuzz tool"
+            assert "300 in CI" in text, f"{document} does not state the CI example budget"
+
+    @pytest.mark.parametrize("document", ["README.md", "docs/index.html"])
+    def test_a_running_check_is_not_listed_as_absent(self, document):
+        """The inverse of the gap list: once a layer runs, the "not in place
+        yet" section must stop listing it, or the page contradicts itself."""
+        text = _read(REPO_ROOT / document)
+        gap_section = text.split("What is not in place yet", 1)[1][:6000]
+        assert "Property-based" not in gap_section, f"{document} still lists property-based tests as absent"
+
     def test_branch_coverage_is_gated_as_the_docs_say(self):
         """#QA1d — all three pages now say branch coverage is gated at 100%. The
         day the flag leaves CI, that wording is wrong in three places."""
@@ -523,7 +555,6 @@ class TestChecksDocumentedAsAbsentReallyAreAbsent:
         [
             ("What is not in place yet", "README.md"),
             ("Mutation testing", "README.md"),
-            ("Property-based / fuzz testing", "README.md"),
             ("Browser E2E", "README.md"),
             ("What is not in place yet", "docs/index.html"),
             ("Mutation testing", "docs/index.html"),

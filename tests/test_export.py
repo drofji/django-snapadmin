@@ -151,6 +151,36 @@ class TestRunExportJob:
         assert text.startswith("id,")  # header
         assert text.count("\n") == 6   # header + 5 rows
 
+    @pytest.mark.parametrize("hostile", ["=HYPERLINK(\"http://x\",\"y\")", "+1+1", "-2+3", "@SUM(A1)", "\t=1+1"])
+    def test_csv_cell_opening_with_a_formula_trigger_is_neutralised(self, db, hostile):
+        """Regression (#QA1d, CWE-1236): the CSV writer wrote user text raw, so a
+        value like ``=HYPERLINK(…)`` became a live formula in whichever
+        spreadsheet opened the export. The XLSX writer already pinned such cells
+        to text; the CSV writer now prefixes a ``'``, the OWASP neutralisation."""
+        import csv
+        import io
+
+        from demo.apps.shop.models import AuditLog
+
+        AuditLog.objects.create(action=hostile, user_email="a@example.com")
+        job = _job(model="AuditLog", export_format="csv")
+
+        exporting.run_export_job(job.pk)
+
+        records = list(csv.reader(io.StringIO(open(exporting.output_path(job), newline="").read())))
+        assert records[1][records[0].index("action")] == "'" + hostile
+
+    def test_json_export_keeps_formula_shaped_text_verbatim(self, db):
+        from demo.apps.shop.models import AuditLog
+
+        AuditLog.objects.create(action="=1+1", user_email="a@example.com")
+        job = _job(model="AuditLog", export_format="json")
+
+        exporting.run_export_job(job.pk)
+
+        line = open(exporting.output_path(job)).read().splitlines()[0]
+        assert json.loads(line)["action"] == "=1+1"
+
     def test_json_export(self, products):
         job = _job(export_format="json")
         exporting.run_export_job(job.pk)
@@ -1083,6 +1113,47 @@ class TestValidateExportFilters:
 class TestExportFilterValidationApi:
     """POST /api/exports/ end-to-end filter allowlist enforcement."""
 
+    @pytest.mark.parametrize(
+        "hostile_filters, expected_message",
+        [
+            # Regression (#QA1d fuzzing): a list passed the key allowlist — its
+            # elements were read as keys — and the job then failed in the worker.
+            (["name"], "must be a JSON object"),
+            # Regression: non-string keys crashed validation with a 500.
+            ([1, 2], "must be a JSON object"),
+            ("name", "must be a JSON object"),
+            (5, "must be a JSON object"),
+            # A nested object is not a value any allowed lookup takes.
+            ({"name": {"$ne": "x"}}, "filters['name'] must be a string, number, boolean or null"),
+            ({"price__gte": [1, 2]}, "filters['price__gte'] must be a string, number, boolean or null"),
+            # "__in" takes a list; a string would silently match its characters.
+            ({"name__in": "abc"}, "filters['name__in'] must be a list"),
+            ({"name__in": ["a", {"b": 1}]}, "filters['name__in'] must be a list of strings, numbers, booleans or nulls"),
+        ],
+    )
+    def test_a_malformed_filters_payload_is_a_400_naming_the_problem(
+        self, auth_client, products, hostile_filters, expected_message
+    ):
+        r = auth_client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Product", "filters": hostile_filters},
+            format="json",
+        )
+
+        assert r.status_code == 400
+        [message] = r.json()["filters"]
+        assert expected_message in message
+        assert SnapExportJob.objects.count() == 0
+
+    def test_an_in_lookup_with_a_list_of_scalars_is_accepted(self, auth_client, products):
+        r = auth_client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Product", "filters": {"name__in": ["P1", "P2"]}},
+            format="json",
+        )
+
+        assert r.status_code == 201
+
     def test_relation_traversal_rejected(self, auth_client, products):
         from demo.apps.shop.models import Category
         Category.objects.create(name="C1", slug="c1")
@@ -1093,6 +1164,20 @@ class TestExportFilterValidationApi:
         )
         assert r.status_code == 400
         assert "category__name" in str(r.json())
+
+    def test_a_rejected_key_is_reported_against_filters_by_its_repr(self, auth_client, products):
+        """Regression (#QA1d fuzzing): the allowlist error came back under
+        ``non_field_errors`` while every other filters error named ``filters``,
+        and an empty key rendered as "Invalid filter key(s): ." — nothing."""
+        r = auth_client.post(
+            "/api/exports/",
+            {"app_label": "demo", "model": "Product", "filters": {"": 1, "tags__name": "x"}},
+            format="json",
+        )
+
+        assert r.status_code == 400
+        [message] = r.json()["filters"]
+        assert message.startswith("Invalid filter key(s): '', 'tags__name'.")
 
     def test_m2m_relation_rejected(self, auth_client, products):
         r = auth_client.post(

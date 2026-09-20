@@ -106,6 +106,40 @@ def _allowed_filters_for_model(model: type[django_models.Model]) -> dict[str, se
     return allowed
 
 
+#: JSON value types a filter lookup can take; ``__in`` takes a list of them.
+_FILTER_SCALARS = (str, int, float, bool, type(None))
+
+
+def _validate_filter_shape(filters: object) -> dict[str, FilterValue]:
+    """Refuse a ``filters`` payload that is not ``{lookup: value}`` of JSON scalars.
+
+    The key allowlist below only reads keys, so it has to be handed a mapping:
+    a JSON list used to pass it (its elements were read as keys) and fail in the
+    worker, and a list of numbers crashed validation with a 500. Values are
+    checked too, because ``qs.filter(**filters)`` accepts whatever it is given —
+    a nested object is not a value any allowed lookup takes, and a string given
+    to ``__in`` would silently match its individual characters.
+    """
+    if not isinstance(filters, dict):
+        raise serializers.ValidationError(
+            "filters must be a JSON object mapping a field lookup to a value, "
+            'e.g. {"name__icontains": "widget"}.'
+        )
+    for key, value in filters.items():
+        if key.endswith("__in"):
+            if not isinstance(value, list):
+                raise serializers.ValidationError(f"filters[{key!r}] must be a list.")
+            if not all(isinstance(item, _FILTER_SCALARS) for item in value):
+                raise serializers.ValidationError(
+                    f"filters[{key!r}] must be a list of strings, numbers, booleans or nulls."
+                )
+        elif not isinstance(value, _FILTER_SCALARS):
+            raise serializers.ValidationError(
+                f"filters[{key!r}] must be a string, number, boolean or null."
+            )
+    return filters
+
+
 def _validate_export_filters(
     model: type[django_models.Model],
     filters: dict[str, FilterValue],
@@ -136,10 +170,16 @@ def _validate_export_filters(
         ):
             rejected.append(key)
     if rejected:
+        # Keyed by the field, like every other filters error; repr() so an
+        # empty or whitespace key is still visible in the message.
         raise serializers.ValidationError(
-            f"Invalid filter key(s): {', '.join(sorted(rejected))}. Filters may only "
-            "target the exported model's own fields with an allowed lookup "
-            "(no relation traversal)."
+            {
+                "filters": (
+                    f"Invalid filter key(s): {', '.join(repr(key) for key in sorted(rejected))}. "
+                    "Filters may only target the exported model's own fields with an allowed "
+                    "lookup (no relation traversal)."
+                )
+            }
         )
 
 
@@ -190,6 +230,9 @@ class ExportJobCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = SnapExportJob
         fields = ["app_label", "model", "export_format", "filters"]
+
+    def validate_filters(self, value: object) -> dict[str, FilterValue]:
+        return _validate_filter_shape(value)
 
     def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
         app_label: str = attrs["app_label"]

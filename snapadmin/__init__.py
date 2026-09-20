@@ -280,6 +280,8 @@ Operations
         ``snapadmin.E001``…``E019`` catch misconfiguration at startup, so read
         them before debugging behaviour. The masking checks are *errors* because
         a mistyped rule fails open: it masks nothing and says nothing.
+        ``E028`` is the same for a masking setting written in the wrong shape
+        (a string or a number where a list of field names belongs).
         ``E013``–``E016`` cover ``SNAPADMIN_SHARDING``: an unresolvable DSN or
         shard shape, an unrecognised ``STRATEGY``/``REPLICA_SELECTION`` or a
         ``'custom'`` strategy with no importable ``CUSTOM_ROUTER_FUNC``, and a

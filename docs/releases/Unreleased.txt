@@ -12,7 +12,7 @@ Every release carries a `Breaking` heading, including a pre-release. If nothing 
 Breaking
 --------
 
-Seven entries from the second round of production field reports and the quality work behind them. Each is a deliberate change of
+Ten entries from the second round of production field reports and the quality work behind them. Each is a deliberate change of
 something that was silently wrong; each comes with a one-line way back.
 
 * **``snapadmin.E027`` can stop ``manage.py check``.** It fires when ``SnapModel``'s own
@@ -51,6 +51,21 @@ something that was silently wrong; each comes with a one-line way back.
   resolved**, not the configured string. With a relative ``SNAPADMIN_BACKUP_SFTP_DIR`` the reported
   path therefore now starts at the login directory (``sftp://host:22/home/backup/backups/...``
   instead of ``sftp://host:22/backups/...``). Only code that parses that string is affected.
+* **CSV exports neutralise spreadsheet formulas.** A text value starting with ``=``, ``+``, ``-``,
+  ``@``, a tab or a carriage return is written behind a leading ``'`` in ``export_format="csv"`` and
+  in ``snapadmin_audit_export --format csv`` (see Security). A program that reads those files and
+  needs the raw text either strips one leading ``'`` from such cells or switches to the JSON format,
+  which is unchanged.
+* **``snapadmin.E028`` can stop ``manage.py check``.** It fires for a masking setting written in a
+  shape it cannot mean — a string or a number where ``SNAPADMIN_MASKED_FIELDS`` expects a list of
+  field names, a list where ``SNAPADMIN_MASKING_RULES`` expects a field → rule map, or either
+  setting not being a dict at all. Such a setting used to mask nothing (or crash every masked
+  request and the check run itself). Fix: write it in the documented shape.
+* **``POST /api/exports/`` refuses ``filters`` that are not a JSON object of scalars** with a
+  ``400`` naming the key, and reports every ``filters`` error — including the key allowlist, which
+  used ``non_field_errors`` — under ``filters``. A client that read the allowlist error from
+  ``non_field_errors`` reads it from ``filters`` instead. ``__in`` now takes a list; a string there
+  used to match its individual characters.
 
 Added
 -----
@@ -109,6 +124,22 @@ Changed
   directory the server resolved, and a directory created on the fly is logged as the warning
   ``sftp_backup_dir_created``.
 
+* **Query counts are pinned on the N+1-prone surfaces.** ``tests/test_query_counts.py`` drives the
+  changelist with foreign keys and a many-to-many, the REST list endpoint, the audit timeline and
+  the masked changelist/list/timeline through real HTTP requests and counts their SQL twice — at 3
+  rows and at 12. The two numbers must match (a per-row query anywhere makes them differ) and the
+  larger one is pinned exactly, so a new query on a hot path has to be a decision rather than an
+  accident. None of the surfaces had an N+1 today; the pins keep it that way.
+
+* **Property-based and fuzz tests.** ``hypothesis`` (a dev dependency only — it never reaches
+  ``pip install django-snapadmin``) now checks laws over generated input rather than a handful of
+  examples: ``decrypt(encrypt(x)) == x`` for any text and any keyset, a field rebuilt from its own
+  ``deconstruct()`` deconstructs identically for any combination of kwargs, a DSN never leaks any
+  part of its password, a masked character class never survives its rule, CSV and NDJSON exports
+  round-trip, and hostile REST query strings, export filters, masking settings, key configurations
+  and HTML are refused correctly. 100 examples per test locally, 300 in CI. The first pass found the
+  defects listed under Security and Fixed.
+
 Fixed
 -----
 
@@ -147,6 +178,18 @@ Fixed
   place.
 * **The demo project schedules its backup task only while backups are on**, so it no longer
   exhibits the very state ``snapadmin.W023`` reports.
+* **``snap_field()`` no longer rewrites a field's migration state through ``editable``.** Passing
+  ``editable=`` to the wrapper as well as ``editable=False`` to the Django field removed the
+  constructor's own ``editable=False`` from ``deconstruct()``, so ``makemigrations`` wrote an
+  ``AlterField``; and ``editable=True`` on a wrapped ``auto_now``/``auto_now_add`` field made
+  Django's own ``deconstruct()`` raise ``KeyError`` — ``makemigrations`` crashed. The wrapper now
+  reports exactly what the Django constructor was given, and keeps an ``auto_now`` field read-only
+  the way Django and ``Snap*Field`` already do.
+* **Configuring an encryption key as bytes or a number is a configuration error** naming the key
+  id, not an ``AttributeError`` out of configuration loading.
+* **The ``SnapField`` docstring and ``llms.txt`` state the second migration exception**: on
+  ``SnapFileField``/``SnapImageField`` the upload limits are recorded in ``deconstruct()`` the way
+  Django records ``validators=``, so changing one is an ``AlterField`` that runs no SQL.
 
 Security
 --------
@@ -160,6 +203,25 @@ Found by the new static-analysis pass (Ruff's bandit rules), each fixed with a r
   ``file:``, ``ftp:`` or a custom handler for a misconfigured ``SNAPADMIN_ALERT_WEBHOOKS`` entry.
 * **``snapadmin_restore`` quotes the database name in the SQL it sends to ``psql``.** A name
   containing a quote produced invalid (or different) SQL; it is now escaped as an SQL literal.
+
+Found by the new property-based and fuzz tests, each fixed with a regression test:
+
+* **CSV exports never open as spreadsheet formulas (CWE-1236).** The XLSX writer already pinned a
+  ``=``-cell to text; the CSV writer wrote ``=HYPERLINK(…)`` raw, and so did
+  ``snapadmin_audit_export``, whose ``user_agent`` column is whatever the client sent. Text cells
+  opening with ``= + - @``, a tab or a carriage return now carry a leading ``'``.
+* **No part of a sharding DSN's password reaches an error message.** A generated password with a
+  raw ``/``, ``#`` or ``?`` ended the URL's authority early: ``redact_dsn`` found no password and
+  echoed the whole DSN into ``ImproperlyConfigured`` (and so into ``manage.py check`` and the logs),
+  and the port error quoted the password's first half. A digits-only password followed by ``/``
+  even parsed — into the wrong host, with no password. Redaction now works on the text as written,
+  and an ``@`` after the host is refused with a percent-encoding hint.
+* **A masking setting in the wrong shape no longer fails open.** ``"email"`` instead of
+  ``["email"]`` masked the fields ``e``, ``m``, ``a``… (none of them real); it now masks ``email``.
+  A list of names under ``SNAPADMIN_MASKING_RULES`` masks those fields with the built-in masker
+  instead of crashing. ``snapadmin.E028`` reports both (see Breaking).
+* **Export ``filters`` are validated by shape before the allowlist runs.** A JSON list passed the
+  key allowlist (its elements were read as keys) and a list of numbers answered ``500``.
 
 Deprecated
 ----------

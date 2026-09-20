@@ -230,6 +230,16 @@ Key protections:
   `export_format="xlsx"` pins such cells to the text type, so Excel displays the characters that are
   in the database and executes nothing. Control characters the format forbids are stripped and text
   is clamped to the per-cell limit, so one hostile row cannot fail the whole export either.
+- **CSV exports never open as formulas either.** A CSV cell starting with `=`, `+`, `-`, `@`, a tab or
+  a carriage return is evaluated by the spreadsheet that opens it (CWE-1236, "CSV injection"). Text
+  values that start that way are written behind a leading `'`, the OWASP neutralisation every major
+  spreadsheet reads as "this is text" — in the data export (`export_format="csv"`) and in
+  `snapadmin_audit_export --format csv`, whose `user_agent` column is whatever the client sent.
+  Numbers are left alone (`-5` from an integer column is data), and the JSON formats are verbatim.
+- **`POST /api/exports/` `filters` must be a JSON object of scalars.** A list passed the key
+  allowlist below (its elements were read as keys) and a list of numbers answered `500`; a nested
+  object or a string given to `__in` reached `queryset.filter()` as-is. Each is now a `400` naming
+  the key.
 - Data access goes through the Django ORM / DRF serializers — no hand-built SQL from user input.
 - **`POST /api/exports/` `filters` are restricted to the target model's own fields.** The dict is
   applied as `queryset.filter(**filters)`, so an unvalidated key could otherwise traverse a
@@ -314,6 +324,12 @@ Key protections:
   masker, so a broken rule degrades to *more* masking, never to raw data — and so does a `pattern`
   that matches nothing in a non-empty value, which used to hand the value back unchanged. The
   built-in e-mail mask no longer reveals a one- or two-character local part (`***@domain`).
+- **A masking setting in the wrong shape stops the deploy (`snapadmin.E028`)** — a bare string where
+  a list of field names belongs used to be iterated into one-character "field names" that matched
+  nothing, and a number or a list where a rule map belongs raised on every masked request *and*
+  inside `manage.py check`, so the check could not report it. Where the intent is readable it is now
+  masked anyway (the string is one field name; a list of rule names masks those fields with the
+  built-in masker), nothing raises, and `E028` names the setting to fix.
 - **The serializer mixins work on a hand-built serializer.** `PIIMaskingSerializerMixin` and
   `FieldPermissionSerializerMixin` resolve the model from `Meta.model` when SnapAdmin did not build
   the class; before, a project's own `ModelSerializer` using them returned every field raw.
@@ -631,7 +647,13 @@ Key protections:
   "no opinion" on a broken config specifically so it can never block an unrelated app's migration.
   `python manage.py snap_migrate` and the sharding-aware `manage.py snapadmin_db_backup` both target
   every shard's **primary only** — a replica is never migrated or dumped directly, since replication
-  already propagates both at the database layer.
+  already propagates both at the database layer. **No part of a DSN's password reaches an error
+  message or a log line**, however the DSN is written: a generated password with a raw `/`, `#` or
+  `?` ends the URL's authority early, which used to leave nothing for the redaction to find (the
+  whole DSN was echoed) and put the password's first half into the port error; a digits-only
+  password followed by `/` even parsed, into the wrong host with no password. Redaction now works on
+  the text as written, the port error no longer quotes the stdlib's message, and an `@` after the
+  host is refused with a percent-encoding hint.
 - **Alert webhook URLs are credentials** — a Slack/Discord/Teams incoming-webhook URL and a Telegram
   bot token let their holder post into your channel, so `SNAPADMIN_ALERT_WEBHOOKS` entries belong in
   environment variables, not in committed settings. SnapAdmin never writes one to a log line (a
