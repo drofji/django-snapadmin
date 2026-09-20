@@ -40,18 +40,9 @@ from snapadmin.api.exports import _allowed_filters_for_model
 #: The rows are built once per test, before hypothesis starts, and every
 #: example only reads them (or writes inside a rolled-back savepoint) — so
 #: sharing the function-scoped fixtures across examples is safe, which is the
-#: one thing ``function_scoped_fixture`` exists to warn about.
-#:
-#: ``differing_executors`` is suppressed for the same reason the ``mutation``
-#: hypothesis profile suppresses it (tests/conftest.py): a mutation run re-runs
-#: these test objects from forked workers, and a per-test ``settings`` replaces
-#: the profile's list rather than adding to it, so it has to be named here too.
-#: These classes carry no state between examples.
+#: one thing this health check exists to warn about.
 REUSES_READ_ONLY_FIXTURES = settings(
-    suppress_health_check=[
-        HealthCheck.function_scoped_fixture,
-        HealthCheck.differing_executors,
-    ]
+    suppress_health_check=[HealthCheck.function_scoped_fixture]
 )
 
 HOSTILE_TEXT = st.one_of(

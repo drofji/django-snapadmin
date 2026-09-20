@@ -55,6 +55,8 @@ include = [
     { path = "docs/**/*", format = ["sdist"] },
     { path = "CONTRIBUTING.md", format = ["sdist"] },
     { path = ".github/**/*", format = ["sdist"] },
+    # The mutation-testing runner the CI jobs and CONTRIBUTING.md both call.
+    { path = "scripts/*.py", format = ["sdist"] },
 ]
 
 # Extra links shown in the PyPI sidebar ("Project links"). `homepage`, `repository` and
@@ -195,6 +197,9 @@ pytest-randomly = "^3.15"
 # Property-based and fuzz tests (tests/test_properties_*.py, tests/test_fuzz_*.py).
 # MPL-2.0, dev-only: it never reaches `pip install django-snapadmin`.
 hypothesis = ">=6.100"
+# Mutation testing (#QA1d), advisory: scripts/mutation.py + .github/workflows/mutation.yml.
+# BSD-3-Clause, dev-only.
+mutmut = ">=3.8"
 faker = "^25.0.0"
 # Dev extras (installed via demo/requirements.txt)
 # The suite exercises the REST API and GraphQL end to end; the package core
@@ -268,3 +273,31 @@ django_settings_module = "demo.core.settings_test"
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.mutmut]
+# Mutation testing (#QA1d) — advisory, never blocking. The mechanism is explained
+# in CONTRIBUTING.md and docs/index.html#testing-mutation; the diff-scoped and
+# weekly runs are .github/workflows/mutation.yml, driven by scripts/mutation.py.
+source_paths = ["snapadmin"]
+do_not_mutate = ["snapadmin/migrations/*", "snapadmin/scaffold/templates/*"]
+also_copy = ["demo", "pytest.ini", "conftest.py"]
+# mutmut runs the suite from a copy in mutants/ whose functions are rewritten
+# into dispatch "trampolines". Tests that read the repository's documents or
+# the package's own source text as data (docs truth, the AST surface snapshot,
+# version sync, the sdist manifest) cannot run there and assert nothing about
+# behaviour a mutant could change, so they are left out of mutation runs only.
+pytest_add_cli_args = [
+    "-p", "no:randomly", "-p", "no:cacheprovider", "-q",
+    # Deterministic, cheap property tests: a mutant is killed by a law, never by
+    # a new random example (see tests/conftest.py).
+    "--hypothesis-profile=mutation",
+    "--ignore=tests/test_ai_entry_points.py",
+    "--ignore=tests/test_distribution_contents.py",
+    "--ignore=tests/test_docs_completeness.py",
+    "--ignore=tests/test_docs_site.py",
+    "--ignore=tests/test_public_surface_snapshot.py",
+    "--ignore=tests/test_testing_docs_truth.py",
+    "--ignore=tests/test_version_sync.py",
+    "--deselect=tests/test_api_surface_defaults.py::TestNoGuideClaimsTheOldDefault::test_the_doc_scan_sees_the_guides",
+    "--deselect=tests/test_es_mapping_completeness.py::TestTheDocumentedExampleWouldWork::test_every_dual_or_es_only_docs_example_declares_a_mapping",
+]

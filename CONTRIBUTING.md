@@ -45,6 +45,23 @@ that aren't obvious from the code.
 - **Query counts** (`tests/test_query_counts.py`) are pinned per surface, at two row counts. If
   your change moves one, confirm the extra query is intended and update the pin in the same commit,
   with the reason in the commit message; if the two counts differ, you added a per-row query.
+- **Mutation testing** (`mutmut`, advisory — it reports, it never blocks) asks whether a test would
+  *notice* the code being wrong. One command runs it, in CI and locally:
+
+  ```bash
+  pip install "mutmut>=3.8"
+  python scripts/mutation.py diff --base origin/main   # only what you changed
+  python scripts/mutation.py modules                   # the dangerous modules, whole (slow)
+  ```
+
+  The first form reads your changed lines out of `git diff`, maps each to the function around it and
+  runs only those functions' mutants — minutes, not hours. A **surviving** mutant means the suite
+  did not notice that change to the code: read it with `mutmut show <name>` and either strengthen the
+  test until it dies, or write down why the mutation is not worth catching (an *equivalent* mutant —
+  an unreachable guard, a value nothing can observe — cannot be killed by any test, and a 100% score
+  is not the goal). Survivors that only reword a message are counted but not listed: asserting prose
+  word for word is not a bar this project sets. `mutants/` is a working copy mutmut creates; it is
+  git-ignored.
 - **Databases:** the suite runs on in-memory SQLite by default, so there is nothing to start. CI
   also runs the identical test files against a real PostgreSQL, because the package carries
   backend-specific code (the estimated-count paginator's `reltuples` query, the `pg_dump` backup

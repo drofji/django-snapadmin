@@ -459,9 +459,6 @@ class TestClaimedChecksReallyRun:
 #: ``tool -> the paragraph that has to change when it arrives``. Listed under
 #: "What is not in place yet" in both documents.
 _DOCUMENTED_AS_ABSENT = {
-    "mutmut": "Mutation testing",
-    "cosmic-ray": "Mutation testing",
-    "mutatest": "Mutation testing",
     "playwright": "Browser E2E",
     "cypress": "Browser E2E",
 }
@@ -531,6 +528,32 @@ class TestChecksDocumentedAsAbsentReallyAreAbsent:
             assert "hypothesis" in text, f"{document} does not name the property/fuzz tool"
             assert "300 in CI" in text, f"{document} does not state the CI example budget"
 
+    def test_mutation_testing_runs_as_the_docs_describe(self):
+        """#QA1d (5) — the pages describe two cadences, one command and an
+        advisory outcome. Pin the tool, the runner, both jobs, the "never
+        blocks" half, and the deterministic hypothesis profile mutation runs
+        use, because every one of those is a sentence on three pages."""
+        assert "\nmutmut = " in _read(PYPROJECT), "mutmut is not a declared dev dependency"
+        runner = REPO_ROOT / "scripts" / "mutation.py"
+        assert runner.is_file(), "the documented one-command runner is missing"
+        runner_source = _read(runner)
+        assert "DANGEROUS_MODULES" in runner_source
+        for module in ("snapadmin/masking.py", "snapadmin/backup.py", "snapadmin/api/filters.py"):
+            assert module in runner_source, f"the weekly set no longer names {module}"
+        workflow = _read(WORKFLOWS / "mutation.yml")
+        assert "schedule:" in workflow and "cron:" in workflow, "no weekly cadence"
+        assert "mutation.py diff" in workflow and "mutation.py modules" in workflow
+        assert workflow.count("continue-on-error: true") == 2, (
+            "both mutation jobs must stay advisory — all three pages say it reports, never blocks"
+        )
+        assert 'register_profile(\n    "mutation"' in _read(REPO_ROOT / "tests" / "conftest.py")
+        assert "derandomize=True" in _read(REPO_ROOT / "tests" / "conftest.py")
+        assert "--hypothesis-profile=mutation" in _read(PYPROJECT)
+        for document in ("README.md", "docs/index.html", "llms.txt", "CONTRIBUTING.md"):
+            text = _read(REPO_ROOT / document)
+            assert "mutmut" in text or "Mutation" in text, f"{document} does not describe it"
+            assert "scripts/mutation.py" in text, f"{document} does not name the command"
+
     @pytest.mark.parametrize("document", ["README.md", "docs/index.html"])
     def test_a_running_check_is_not_listed_as_absent(self, document):
         """The inverse of the gap list: once a layer runs, the "not in place
@@ -538,6 +561,7 @@ class TestChecksDocumentedAsAbsentReallyAreAbsent:
         text = _read(REPO_ROOT / document)
         gap_section = text.split("What is not in place yet", 1)[1][:6000]
         assert "Property-based" not in gap_section, f"{document} still lists property-based tests as absent"
+        assert "Mutation" not in gap_section, f"{document} still lists mutation testing as absent"
 
     def test_branch_coverage_is_gated_as_the_docs_say(self):
         """#QA1d — all three pages now say branch coverage is gated at 100%. The
@@ -554,10 +578,8 @@ class TestChecksDocumentedAsAbsentReallyAreAbsent:
         "phrase, document",
         [
             ("What is not in place yet", "README.md"),
-            ("Mutation testing", "README.md"),
             ("Browser E2E", "README.md"),
             ("What is not in place yet", "docs/index.html"),
-            ("Mutation testing", "docs/index.html"),
             ("Browser E2E", "docs/index.html"),
         ],
     )

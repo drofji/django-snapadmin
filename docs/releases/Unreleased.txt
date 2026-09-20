@@ -140,6 +140,16 @@ Changed
   and HTML are refused correctly. 100 examples per test locally, 300 in CI. The first pass found the
   defects listed under Security and Fixed.
 
+* **Mutation testing, advisory.** ``mutmut`` now answers the question coverage cannot: would a test
+  *notice* the code being wrong? One command runs it — ``python scripts/mutation.py diff`` mutates
+  only the functions a change touched (minutes, and what CI runs on every push), ``python
+  scripts/mutation.py modules`` mutates the encryption, crypto, sharding-router, masking, API-filter,
+  backup, restore and task modules whole (what CI runs weekly). Both **report and never block**: a
+  surviving mutant is either killed by a stronger test or accepted in writing, and an equivalent
+  mutant cannot be killed at all. The mechanism — what gets mutated, how the diff scoping picks it,
+  what "survived" means and what to do about one — is documented in ``CONTRIBUTING.md`` and in the
+  docs site's Testing section.
+
 Fixed
 -----
 

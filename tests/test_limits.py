@@ -212,7 +212,16 @@ class TestCacheEviction:
         under real memory pressure, and confirm reserve() never raises —
         an evicted counter degrades to "allowed", it never crashes the caller.
         """
+        from django.core.cache import caches
+
         from snapadmin.limits import reserve
+
+        # The autouse fixture clears the *default* cache; this test overrides
+        # CACHES with its own LOCATION, and a LocMemCache is process-global per
+        # LOCATION — so without this the counters survive into a second run of
+        # this test in the same process (a mutation run, `--count=2`) and the
+        # first reserve() below is already over the limit.
+        caches["default"].clear()
         for i in range(50):
             result = reserve(f"pressure-{i}", windows={60: 3}, concurrency=2)
             assert result.allowed is True

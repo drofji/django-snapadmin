@@ -5152,16 +5152,6 @@ class Invoice(snap_models.SnapModel):
   backend-specific query — PostgreSQL's planner estimate, which an unfiltered changelist asks for
   before an exact <code>COUNT(*)</code> — is part of the pin on PostgreSQL and absent elsewhere.</p>
 
-  <h4>Query-count pins</h4>
-  <p><strong>What runs:</strong> <code>tests/test_query_counts.py</code> drives the N+1-prone surfaces —
-  a changelist with foreign keys and a many-to-many, the REST list endpoint, the audit timeline, and
-  the masked changelist, list and timeline — through real HTTP requests and counts their SQL twice, at
-  3 rows and at 12. <strong>What fails:</strong> the two counts differing (a query per row, somewhere)
-  or the larger one moving off its pinned number. A new query on a hot path should be a decision; when
-  it is one, the pin changes in the same commit with the reason in its message. The one
-  backend-specific query — PostgreSQL's planner estimate, which an unfiltered changelist asks for
-  before an exact <code>COUNT(*)</code> — is part of the pin on PostgreSQL and absent elsewhere.</p>
-
   <h4 id="testing-mutation">Mutation testing — <code>mutmut</code>, advisory</h4>
   <p><strong>What it asks:</strong> the question coverage cannot. 100% line and branch coverage says
   every statement ran; it says nothing about whether a test would <em>notice</em> the statement being
@@ -5285,20 +5275,6 @@ SNAPADMIN_TEST_ES_URL=http://localhost:9200 pytest -m real_es</code></pre>
   <table>
     <thead><tr><th>Check</th><th>How it will work, and what it will verify</th><th>Status</th></tr></thead>
     <tbody>
-      <tr>
-        <td><strong>Mutation testing</strong></td>
-        <td>A mutation tool makes a small, deliberately wrong change to the production code — inverts a
-        boolean, turns <code>&gt;</code> into <code>&gt;=</code>, replaces a return value with
-        <code>None</code>, deletes a call, widens a boundary — and then runs the tests against that
-        mutant. If a test fails, the mutant is <em>killed</em> and the tests demonstrably detect that
-        class of error. If every test still passes, the mutant <em>survives</em>: the line was covered,
-        but nothing asserted anything that depended on it. The planned cadence is two-tier —
-        <strong>per push, only the lines that push changed</strong>, and <strong>weekly over the
-        dangerous modules</strong> in full. It will <strong>report, never block</strong>: a contributor
-        facing a survivor either strengthens a test until it kills the mutant, or records in writing
-        why that mutation is not worth catching.</td>
-        <td>Planned. No tool installed, no job, no score</td>
-      </tr>
       <tr>
         <td><strong>Browser E2E</strong></td>
         <td>A real browser, driven by Playwright against the <code>demo/</code> project, walking the

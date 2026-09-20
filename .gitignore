@@ -70,3 +70,8 @@ node_modules/
 npm-debug.log
 yarn-debug.log
 yarn-error.log
+
+# mutmut's working copy of the package + tests (scripts/mutation.py). Rebuilt on
+# every run; never committed.
+mutants/
+

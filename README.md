@@ -615,6 +615,7 @@ application does. Each layer below exists today and runs in the same `pytest` in
 | **Accessibility** | WCAG 2.1 AA assertions on the dashboard and the SSO partial | `tests/test_accessibility.py` |
 | **Property-based** | laws that must hold for *every* generated input (`hypothesis`, 100 examples per test locally, 300 in CI) — `deconstruct()` round-trips, the encryption envelope and blind index, DSN parsing, masking rules, `snap_field()`, export serialization | `tests/test_properties_fields.py`, `tests/test_properties_encryption.py`, `tests/test_properties_exporting.py` |
 | **Fuzz** | generated hostile input against the request-facing surfaces — REST query strings, export filters, masking settings, key configuration, rich-text HTML — asserting the right refusal and the invariant: no 5xx, no widened result, no raw PII, no key material in an error | `tests/test_fuzz_api.py`, `tests/test_fuzz_encryption_config.py`, `tests/test_fuzz_sanitize.py` |
+| **Mutation** | proof that the tests can *detect* a wrong change, not merely run the line: `mutmut` rewrites one function at a time (inverts a boolean, moves a boundary, drops a call) and a survivor means nothing asserted what that line does. Advisory — per push over the functions the push changed, weekly over the modules where a wrong answer costs most | `scripts/mutation.py`, `.github/workflows/mutation.yml` |
 | **Performance / query count** | no N+1 on the changelist with relations, the REST list endpoint, the audit timeline and masked output — each surface counted at two row counts (the numbers must match) and pinned exactly, so a new query on a hot path is a decision, not an accident · plus the list-view knobs and estimated-count pagination | `tests/test_query_counts.py`, `tests/test_performance.py`, `tests/test_pagination.py` |
 | **Process-level E2E** | `snapadmin-new` generates a project and that project really boots — a real `subprocess`, real `check` and `migrate` | `tests/test_scaffold_e2e.py` |
 | **End-to-end smoke** | the seam *between* the layers: admin form POST → database row → audit entry → REST read, in one walk | `tests/test_critical_path_smoke.py` |
@@ -681,7 +682,6 @@ and none will be claimed here until it actually runs in CI:
 
 | Missing | What it would add | Status |
 |---|---|---|
-| **Mutation testing** | Proof that the tests can *detect* a wrong change, not merely execute the line. 100% line coverage says every statement ran; it says nothing about whether flipping a `>` to a `>=` would fail anything | Planned. Not run, not reported |
 | **Browser E2E** | A real browser driving the generated admin: navigation, filters, pagination, actions, validation errors. Today the admin is reached only through Django's test client, which is not a browser | Planned. No Playwright, no Cypress |
 | **A blocking type-check gate** | mypy runs on every push, but advisory: the dynamic admin/field mixins still carry a backlog. Ruff (lint, format, security rules) is already clean and blocking | Advisory; strict and clean on `encryption/`, `crypto.py`, `sharding/` |
 

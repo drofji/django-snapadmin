@@ -2,6 +2,7 @@
 import pytest
 from decimal import Decimal
 
+from hypothesis import HealthCheck
 from hypothesis import settings as hypothesis_settings
 
 # Property-based tests (tests/test_properties_*.py, #QA1d). `deadline=None`
@@ -12,6 +13,22 @@ from hypothesis import settings as hypothesis_settings
 # a CI failure reproduces locally with `@reproduce_failure` rather than by luck.
 hypothesis_settings.register_profile("default", max_examples=100, deadline=None, print_blob=True)
 hypothesis_settings.register_profile("ci", max_examples=300, deadline=None, print_blob=True)
+# Mutation runs (#QA1d (5)) re-run the suite once per mutant, so the property
+# tests must be both cheap and *deterministic* there: a law that searched new
+# random inputs each time would make an unrelated flaky failure look like a
+# killed mutant.
+hypothesis_settings.register_profile(
+    "mutation",
+    max_examples=25,
+    deadline=None,
+    derandomize=True,
+    print_blob=True,
+    # mutmut re-runs the same test objects from forked workers, which trips the
+    # "called from multiple different executors" check. The check guards against
+    # a test whose class carries state between examples; these classes are plain
+    # namespaces, so under this profile — and only under it — it is suppressed.
+    suppress_health_check=[HealthCheck.differing_executors],
+)
 hypothesis_settings.load_profile("default")
 
 @pytest.fixture

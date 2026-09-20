@@ -57,6 +57,8 @@ the `0.x` beta series.
 - The test suite adds property-based and fuzz tests (`hypothesis`, dev-only): laws over generated
   input for encryption, DSN parsing, masking, field `deconstruct()` and export serialization, and
   hostile input against the REST list, export filters, masking settings and key configuration.
+- Mutation testing (`mutmut`, advisory) runs per push over the functions a push changed and weekly
+  over the modules where a wrong answer costs most: `python scripts/mutation.py diff|modules`.
 
 ### Fixed
 - A due row held by a `PROTECT`/`RESTRICT` foreign key no longer aborts the model's retention purge,

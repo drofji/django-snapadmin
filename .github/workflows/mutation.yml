@@ -1,0 +1,92 @@
+name: Mutation testing
+
+# Mutation testing asks the question coverage cannot: would a test *notice* if
+# the code were wrong? A mutant is a small, deliberately wrong version of one
+# function (a `>` turned into a `>=`, a `return True` into `return False`); if
+# the suite still passes, that mutant "survived" and nothing pins that line's
+# behaviour.
+#
+# Two cadences, both ADVISORY (`continue-on-error`, and scripts/mutation.py
+# exits 0 either way) — a surviving mutant is not automatically a bug, because
+# an equivalent mutant (a log string, an unreachable guard) cannot be killed by
+# any test. The report is the output; each survivor is killed by a stronger test
+# or accepted in writing.
+#
+#   * per push  — only the functions the push changed (minutes)
+#   * weekly    — the modules where a silent wrong answer costs most, whole
+#
+# The mechanism is documented in CONTRIBUTING.md and in the docs site's
+# #testing section; scripts/mutation.py is the one command that runs it, here
+# and locally.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Mondays, 04:17 UTC — off the hour, so it does not queue behind everyone
+    # else's cron.
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diff-scoped:
+    name: Changed functions only
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # mutmut needs the commit the push started from to diff against.
+          fetch-depth: 0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r demo/requirements.txt
+          pip install "mutmut>=3.8"
+
+      - name: Mutate the functions this change touched
+        run: |
+          python scripts/mutation.py diff \
+            --base "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}"
+
+  weekly-dangerous-modules:
+    name: Dangerous modules, in full
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r demo/requirements.txt
+          pip install "mutmut>=3.8"
+
+      - name: Mutate encryption, crypto, sharding, masking, filters, backup and restore
+        run: python scripts/mutation.py modules

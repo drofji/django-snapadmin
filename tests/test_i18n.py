@@ -382,9 +382,20 @@ CATALOG_ROOTS = (
 )
 
 
-def _catalogs():
-    for root in CATALOG_ROOTS:
-        yield from sorted(root.glob("*/LC_MESSAGES/django.po"))
+def _catalogs() -> list[pathlib.Path]:
+    """Every shipped catalog, as a **list**.
+
+    Not a generator: ``pytest.mark.parametrize`` holds whatever it is given, and
+    a generator is consumed by the first collection — a second collection in the
+    same process (a mutation run, `-p xdist`, collect-then-run) then sees zero
+    parameter sets and errors out with "1 parameter sets specified, with
+    different number of ids". Found by the mutation run, 2026-09-20.
+    """
+    return [
+        catalog
+        for root in CATALOG_ROOTS
+        for catalog in sorted(root.glob("*/LC_MESSAGES/django.po"))
+    ]
 
 
 class TestNoFuzzyTranslationShips:
