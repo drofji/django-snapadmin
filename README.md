@@ -479,6 +479,11 @@ never a false green):
 → [Full checklist](https://drofji.github.io/django-snapadmin/#integration-checklist) — Must work /
 Should be configured / Data safety / Optional, with a "why it matters" column.
 
+→ [Production playbook](https://drofji.github.io/django-snapadmin/#playbook) — the layer above it:
+the decisions to settle with whoever owns the project (identity and login, database posture, what
+the audit trail does *not* record), the order to build in, what your own test suite should cover,
+and which shipped defaults stop being the right ones under load.
+
 ---
 
 # What you get

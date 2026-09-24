@@ -112,6 +112,22 @@ Added
 Changed
 -------
 
+* **``llms.txt`` is now an operating manual, not only a docs map.** Both copies (the repository root,
+  shipped in the sdist, and ``docs/llms.txt``, published at ``/llms.txt``) carry four new layers for an
+  assistant helping someone run SnapAdmin in production: the *Decisions to settle with the developer*
+  interview grew from 12 questions to 18 — the load profile the project must carry, ``AUTH_USER_MODEL``
+  and whether the login is an e-mail or a username, what guards the login door (SnapAdmin ships no SSO,
+  no second factor and no login throttling of its own), how the application reaches the database and as
+  whom, what the audit trail records and what it silently does not (admin writes, not REST/GraphQL
+  writes or ``QuerySet.update()``), and where a failure becomes visible — followed by a *Build order for
+  a new project*, a *Testing a project built on SnapAdmin* checklist, a *Production readiness and high
+  load* section that states the shipped defaults (page size 25 capped at 500, 60/min and 600/min
+  throttles, the 100 000-row estimated-count threshold, the JSON-filter scan cap, the export chunk
+  size), and *Development norms in a SnapAdmin project*. No behaviour changed; what changed is how much
+  a model has to infer. The same material is now on the documentation site as a **Production Playbook**
+  section (``#playbook``), linked from the README, so the human-facing and the machine-facing copies say
+  the same thing.
+
 * **Short values are masked harder.** An e-mail whose local part is one or two characters masks to
   ``***@domain`` — ``a***@x.io`` for ``a@x.io`` printed the whole local part. A
   ``SNAPADMIN_MASKING_RULES`` ``pattern`` that matches nothing in a non-empty value falls back to

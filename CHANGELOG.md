@@ -48,6 +48,15 @@ the `0.x` beta series.
 - `SnapModel.purge_expired()` returns `SnapPurgeResult`, an `int` with `skipped_protected`.
 
 ### Changed
+- `llms.txt` carries the full adoption playbook an assistant needs before writing integration
+  code: the configuration interview grew from 12 to 18 questions (identity and `AUTH_USER_MODEL`,
+  what guards the login, database posture and encrypted columns, what the audit trail does and
+  does not record, where failures become visible), followed by a build order for a new project,
+  a test plan for a project built on SnapAdmin, a production/high-load checklist with the shipped
+  defaults, and the development norms to write code by.
+- The documentation site gains a **Production Playbook** section — the same five checklists in
+  human-readable form, linked from the README and from `llms.txt`, so a developer and an assistant
+  are never working from different advice.
 - An e-mail with a one- or two-character local part masks to `***@domain`; a masking-rule pattern
   that matches nothing falls back to the built-in masker instead of returning the raw value.
 - `snapadmin.W022`'s hint covers SFTP accounts whose login directory is the absolute path, and a

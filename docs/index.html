@@ -263,6 +263,7 @@
       <li><a href="#scaffold">New Project (snapadmin-new)</a></li>
       <li><a href="#snapadmin-init">Integrate an Existing Project</a></li>
       <li><a href="#integration-checklist">Integration Checklist</a></li>
+      <li><a href="#playbook">Production Playbook</a></li>
     </ul>
     <div class="section-label">🏗 Declare Your Models</div>
     <ul>
@@ -685,6 +686,206 @@ snapadmin-init --json             # machine-readable, for your own tooling</code
   </table>
 
 
+
+
+  <!-- ── Production Playbook ──────────────────────────────────────────────── -->
+  <h2 id="playbook">🧭 Production Playbook</h2>
+  <p>The checklist above proves an install is wired correctly. This one is about the decisions
+  around it — what to settle with whoever owns the project before writing integration code, the
+  order to build in, what the project's own test suite should cover, and which defaults stop being
+  the right ones under load. It is written for a developer starting a real deployment, and it is
+  the same material an AI assistant reads from
+  <a href="https://drofji.github.io/django-snapadmin/llms.txt"><code>llms.txt</code></a>, so the
+  two never give different advice.</p>
+
+  <h3 id="playbook-interview">1. Decisions to settle before writing integration code</h3>
+  <p>Each row has a default that is <em>safe</em> but not necessarily <em>right</em>, and each one
+  fails quietly rather than loudly if nobody chooses. Ordered by how expensive they are to change
+  later — the first three are paid for once and then forever, the rest are settings.</p>
+  <table>
+    <thead><tr><th>Decide</th><th>Why it can't be guessed</th><th>Where the answer lands</th></tr></thead>
+    <tbody>
+      <tr><td><strong>What is being built, and what load must it carry</strong></td><td>Which models are hot, rows expected in a year, read/write ratio, peak concurrent users, whether the admin is an internal tool for ten staff or an operations console, how sensitive the data is, what the legal retention obligation is. Every row below is read against these answers.</td><td>Nothing — this is the conversation that decides which rows even apply</td></tr>
+      <tr><td><strong><code>AUTH_USER_MODEL</code> — e-mail login or username?</strong></td><td>Decided before the first migration and painful afterwards: swapping the user model later is a data migration across every foreign key pointing at it. SnapAdmin never assumes <code>username</code> — its user API builds its field list from <code>UserModel.USERNAME_FIELD</code> and adds <code>email</code>/<code>first_name</code>/<code>last_name</code> only when the model defines them — so both work, but only you can say which. Decide at the same time whether customers and staff share one table.</td><td><code>AUTH_USER_MODEL</code>, <code>USERNAME_FIELD</code>, <code>AUTH_PASSWORD_VALIDATORS</code></td></tr>
+      <tr><td><strong>What guards the login door</strong></td><td>SnapAdmin implements <strong>no</strong> SSO, <strong>no</strong> second factor and <strong>no</strong> login rate limiting of its own — the admin login is Django's. <code>SNAPADMIN_SSO_PROVIDERS</code> only renders buttons for backends you already wired (allauth, social-auth, mozilla-django-oidc) and drops any entry whose URL is protocol-relative or outside <code>SNAPADMIN_SSO_ALLOWED_HOSTS</code>.</td><td><code>manage.py check --deploy</code>, session/CSRF cookie flags, brute-force protection (a proxy rule, <code>django-axes</code>, or a guard on <a href="#quotas"><code>snapadmin.limits</code></a>), who gets <code>is_staff</code> vs <code>is_superuser</code>, <code>SNAPADMIN_URL_PREFIX</code>, <code>SNAPADMIN_DASHBOARD_PUBLIC</code> (<code>False</code>)</td></tr>
+      <tr><td>Which surfaces are exposed at all</td><td>REST and GraphQL are off by default and each needs its extra. Generating a writable endpoint per model is a decision about attack surface, not a convenience.</td><td><a href="#profiles"><code>SNAPADMIN_PROFILE</code></a></td></tr>
+      <tr><td><code>subject_path</code> on every registered model</td><td>Required, no default — <code>snapadmin.E011</code> fails <code>manage.py check</code> until it is answered. <em>What</em> the right path is, and which model is the subject, is a domain question.</td><td><a href="#gdpr-subject-request">Subject-access requests</a></td></tr>
+      <tr><td>Who may write which fields</td><td>Unset means every field on every registered model is mass-assignable through the generated API. Fine for a demo, rarely right for real data; <code>snapadmin.W004</code> warns, but a warning is not a decision.</td><td><code>api_write_fields</code> / <code>api_exclude_fields</code> / <code>api_read_only</code></td></tr>
+      <tr><td>Which fields are personal data</td><td>Unset means the changelist, REST, GraphQL, exports and audit diffs all show raw values to any staff user. Decide alongside who holds <code>snapadmin.view_raw_pii</code>.</td><td><a href="#pii-masking"><code>SNAPADMIN_MASKED_FIELDS</code></a> + <a href="#masking-rules"><code>SNAPADMIN_MASKING_RULES</code></a></td></tr>
+      <tr><td>Should a field be invisible rather than starred</td><td>Orthogonal to masking: masking decides whether a visible field is raw, this decides whether it is there at all. Salary, cost price and internal notes usually want this one.</td><td><a href="#field-permissions"><code>api_field_permissions</code></a></td></tr>
+      <tr><td>One tenant or many</td><td>Default-deny once on: no bound tenant means an empty read and a refused write. Two limits to state out loud — isolation is <em>logical</em>, and backups run below the ORM, so a bundle contains every tenant's rows.</td><td><a href="#multi-tenancy"><code>tenant_scoped</code></a></td></tr>
+      <tr><td><strong>How the application reaches the database, and as whom</strong></td><td>Outside SnapAdmin's code, inside its blast radius: a least-privilege role that is not the schema owner and not a superuser, TLS, credentials from the environment rather than <code>settings.py</code>, <code>CONN_MAX_AGE</code> and a pooler matched to the worker model. Encrypted columns are decided while the tables are still small — adopting one later re-encrypts every row, and an encrypted column cannot be compared, ordered or range-filtered in the database.</td><td><a href="#enterprise-config"><code>SNAPADMIN_ANALYTICS_DB_ALIAS</code></a>, <a href="#sharding"><code>SNAPADMIN_SHARDING</code></a>, <a href="#field-encryption">field encryption</a> (<code>snapadmin.E017</code>: the key is never <code>SECRET_KEY</code>)</td></tr>
+      <tr><td>Backups: where, encrypted, and has a restore ever been run</td><td>Three separate questions. Settle two more while you are there: who holds the AGE identity file — a dump nobody can decrypt is not a backup — and how often the drill is repeated.</td><td><a href="#backups">3-2-1 backups</a>, <a href="#backup-encryption">AGE encryption</a>, <a href="#restore-drill">restore drills</a></td></tr>
+      <tr><td>What deletes old data, and what runs it</td><td>SnapAdmin ships no daemon: without a Beat entry or a cron line, nothing purges and the tables grow forever. <code>snapadmin.W012</code> catches configured-but-unscheduled.</td><td><a href="#gdpr"><code>data_retention_days</code></a>, <code>SNAPADMIN_AUDIT_RETENTION_DAYS</code> (365), <code>SNAPADMIN_EXPORT_RETENTION_DAYS</code> (off)</td></tr>
+      <tr><td>Authentication and limits on the API, if it is on</td><td>The defaults are reasonable and none of them were chosen for this project: token auth, 60/min anonymous, 600/min authenticated, 25 rows per page capped at 500. GraphQL requires authentication by default; the user-management API is off.</td><td><code>SNAPADMIN_API_AUTHENTICATION_CLASSES</code>, <code>SNAPADMIN_THROTTLE_ANON</code>/<code>_USER</code>, <code>SNAPADMIN_API_PAGE_SIZE</code></td></tr>
+      <tr><td><strong>What records that something changed — and what silently does not</strong></td><td>The audit trail covers creates/updates/deletes made <strong>through a SnapAdmin-generated admin</strong> (plus token rename and rotation). It does <strong>not</strong> record REST or GraphQL writes, <code>QuerySet.update()</code>, <code>bulk_update()</code>, management commands or shell sessions. Telling a compliance team otherwise is the kind of mistake that surfaces during an audit.</td><td><a href="#audit-trail">Audit trail</a>; for API writes call <code>snapadmin.audit.record_audit(...)</code> from a <code>perform_create</code>/<code>perform_update</code> override</td></tr>
+      <tr><td>Where a failure becomes visible</td><td>Error capture, alert channels and health alerting are all opt-in. An alert channel nobody reads is the same as no alerting — ask who is actually paged.</td><td><a href="#error-monitoring">Error monitoring</a>, <a href="#alert-channels">alert channels</a>, <a href="#healthcheck"><code>/api/health/</code></a>, <a href="#logging">structured logging</a></td></tr>
+      <tr><td>Whether the licence posture matters</td><td>The base install is permissive only (MIT/BSD/Apache) and safe for commercial and proprietary use; <code>[wysiwyg]</code> bundles CKEditor 5 (GPL-or-commercial) and MySQL users choose between <code>mysqlclient</code> (GPL) and <code>PyMySQL</code> (MIT).</td><td><a href="#license-check"><code>snapadmin-license-check --critical-only</code></a></td></tr>
+      <tr><td>What the first migration looks like</td><td>Converting existing fields to <code>Snap*Field</code> changes every <code>deconstruct()</code> path, so the first <code>makemigrations</code> is a wall of <code>AlterField</code> — expected, not a symptom.</td><td><code>sqlmigrate</code> the result and confirm no column type or constraint changes</td></tr>
+      <tr><td>Whether there is infrastructure for the optional stacks</td><td>Elasticsearch and Celery are opt-in and need real services. Everything degrades to a clear "not available" rather than a false green, so the honest answer to "not yet" is to leave them off.</td><td><a href="#elasticsearch"><code>es_storage_mode</code></a>, <a href="#celery">Celery</a></td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="playbook-build-order">2. Build order for a new project</h3>
+  <p>The answers above become this order. Each step is verifiable before the next one starts —
+  skipping ahead is what produces a project that works under <code>DEBUG</code> and fails on its
+  first real day. <a href="#scaffold"><code>snapadmin-new</code></a> scaffolds steps 1–4 for a
+  greenfield project; <a href="#snapadmin-init"><code>snapadmin-init</code></a> prints the same
+  steps as ready-to-paste snippets for an existing one, and never edits your source.</p>
+  <ol>
+    <li><strong>Identity and the settings skeleton, before the first <code>migrate</code>.</strong>
+    A custom user model — even an empty <code>AbstractUser</code> subclass, because adding one
+    later is the expensive migration — <code>USERNAME_FIELD</code>, password validators, and one
+    settings module per environment with every secret read from the environment.</li>
+    <li><strong>Install the surfaces the project actually wants.</strong> The extras the answers
+    require, Unfold's apps before <code>django.contrib.admin</code>, <code>snapadmin.urls</code>
+    in the root URLconf, and one <a href="#profiles"><code>SNAPADMIN_PROFILE</code></a> line.</li>
+    <li><strong>Model the domain as ordinary Django first, then add the Snap kwargs.</strong>
+    Relations, constraints, indexes and <code>Meta</code> are Django decisions SnapAdmin does not
+    change; <code>searchable</code>/<code>filterable</code>/<code>show_in_list</code> are
+    presentation layered on top and add no migration. A model that is wrong as a Django model is
+    not rescued by a generated admin.</li>
+    <li><strong>Register, then look at it.</strong> <code>register_all_admins()</code>, then
+    <code>manage.py check</code>, <code>snapadmin_info --section inventory</code> — every model,
+    the door it came in by, the capabilities inactive on it — and an actual visit to
+    <code>/admin/</code>.</li>
+    <li><strong>Permissions before data.</strong> Groups and permissions per role, write surfaces
+    on every model the API exposes, <a href="#field-permissions">field-level guards</a> where a
+    field must not be visible at all, and
+    <a href="#api-action-permissions"><code>SNAPADMIN_API_ACTION_PERMISSIONS</code></a> for every
+    custom action — an unmapped action is refused for everyone, superusers included. Do this while
+    the tables are empty and a mistake costs nothing.</li>
+    <li><strong>Declare the data-protection layer.</strong> <code>subject_path</code> everywhere,
+    masking for personal data, encrypted columns for anything that must be unreadable in a dump,
+    retention windows where a legal one exists.</li>
+    <li><strong>Wire the operational layer.</strong> Backups to at least two destinations with AGE
+    recipients, a Celery worker <em>and</em> a Beat schedule, the error-monitor middleware and one
+    alert channel that reaches a human, JSON logs, and <a href="#healthcheck"><code>/api/health/</code></a>
+    as the container probe — never <code>/admin/</code>, which answers 302 with the database down.</li>
+    <li><strong>Only now turn on what the load profile demands.</strong> Elasticsearch mirroring,
+    a read replica or sharding, caching, remote storage. Each is an operational commitment; adding
+    one because it might be needed is how a two-service project becomes a six-service one.</li>
+    <li><strong>Harden the deployment.</strong> <code>DEBUG = False</code>,
+    <code>ALLOWED_HOSTS</code>, a clean <code>manage.py check --deploy</code>,
+    <code>collectstatic</code> in the image build, a least-privilege database role, and
+    <code>SNAPADMIN_URL_PREFIX</code> if the admin should not sit at a guessable path.</li>
+    <li><strong>Prove it with tests</strong> — the next subsection — and make
+    <code>manage.py check</code>, <code>makemigrations --check --dry-run</code> and the suite a CI
+    gate rather than a habit.</li>
+    <li><strong>Rehearse the recovery</strong> before you need it:
+    <a href="#restore-drill"><code>snapadmin_restore --database &lt;alias&gt;</code></a> into a
+    throwaway database, row counts compared, the result written down with a date, repeated on a
+    schedule.</li>
+    <li><strong>Pin the version and read the release notes on every upgrade.</strong> The package
+    is pre-1.0; pin an exact version in production, then re-run <code>manage.py check</code> and
+    <code>makemigrations --check</code> immediately after each bump.</li>
+  </ol>
+
+  <h3 id="playbook-testing">3. Testing the project you build</h3>
+  <p><a href="#testing">SnapAdmin's own suite</a> covers the library and nothing about your models,
+  your permissions or your data. Your project needs its own, in the same discipline: every
+  assertion states a concrete contract — a status code, a value, an exception type, a side effect,
+  a query count, never <code>assert x is not None</code> where a value is checkable — every test is
+  order-independent with no shared mutable state and no reliance on the wall clock, and
+  <strong>no test is ever weakened, skipped, <code>xfail</code>ed, mocked into silence or given a
+  longer timeout to make it pass</strong>. A failing test is a diagnosis job first.</p>
+  <p><strong>The base.</strong> <code>pytest</code> + <code>pytest-django</code> with a dedicated
+  test settings module; run the suite against the real database engine, because PostgreSQL differs
+  from SQLite on constraints, ordering and transactions; random order
+  (<code>pytest-randomly</code>) so ordering coupling fails loudly; factories rather than fixtures
+  full of literals; frozen time instead of <code>datetime.now()</code>; no outbound network in unit
+  tests. Measure coverage with <code>--cov-branch</code> and treat a high number as a floor for the
+  domain layer, never as the goal — it proves lines ran, not that a mutation would be caught.</p>
+  <p><strong>Per app.</strong> Models: constraints, <code>clean()</code>, custom managers, computed
+  properties, <code>__str__</code>. Migrations: <code>makemigrations --check --dry-run</code> in
+  CI, plus a forward run on both an empty database and a production-shaped copy. Admin: that the
+  changelist renders for each role, that the columns and filters you declared are the ones that
+  appear, and that a save produces the audit row. API: one test per role per action, the
+  401/403/404 distinction, validation errors as 400 rather than 500, pagination, filtering and
+  every custom <code>@snap_action</code>. Background tasks: the task function called directly with
+  real arguments, <code>.delay()</code> mocked only at the boundary.</p>
+  <p><strong>The SnapAdmin-specific traps, one test each.</strong> Every one of these fails
+  silently in production if it regresses:</p>
+  <table>
+    <thead><tr><th>Pin this</th><th>Because</th></tr></thead>
+    <tbody>
+      <tr><td>Snap-only kwargs add no migration</td><td><code>makemigrations --check</code> must keep saying "No changes detected" — <code>required=True</code> and the file-upload limits are the documented exceptions</td></tr>
+      <tr><td><code>QuerySet.update()</code> bypasses <code>pre_save()</code></td><td>A wysiwyg or encrypted field written that way stores unsanitized markup or plaintext; <code>bulk_create()</code> is safe, because the insert compiler still calls <code>pre_save()</code></td></tr>
+      <tr><td>An API action missing from the permission map is refused</td><td>Superusers included — a custom action added later and not mapped must fail closed, not inherit <code>view</code></td></tr>
+      <tr><td>A tenant-scoped model with no bound tenant</td><td>Empty read, refused write, and a create naming a <em>different</em> tenant refused rather than silently rewritten</td></tr>
+      <tr><td>Masking degrades toward more masking</td><td>Every failure path must mask harder, and a hand-written admin needs <code>PIIMaskingAdminMixin</code> (<code>snapadmin.W025</code>)</td></tr>
+      <tr><td>Field-permission precedence</td><td><code>api_exclude_fields</code> &gt; <code>api_field_permissions</code> &gt; <code>api_write_fields</code> &gt; masking</td></tr>
+      <tr><td>A delete guard answers 403</td><td><code>SNAPADMIN_API_DELETE_GUARD</code> or <code>api_can_delete</code> must refuse, not delete</td></tr>
+      <tr><td>Elasticsearch down</td><td>The model still answers from the database when <a href="#es-db-fallback">fallback</a> is on — and deletes still propagate when it is up</td></tr>
+      <tr><td>Encrypted columns</td><td>The lookups the database cannot do raise <code>FieldError</code> rather than returning wrong rows</td></tr>
+      <tr><td><code>GET /api/health/</code></td><td><strong>503</strong> when the database is unreachable, 200 when only Elasticsearch is</td></tr>
+      <tr><td>The retention purge</td><td>Deletes a row past its window <em>only when the task runs</em>, and keeps the rows a <code>PROTECT</code> key holds</td></tr>
+      <tr><td>Import conflicts</td><td><code>--on-conflict fail</code> fails the row instead of overwriting it</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Production points that need a test rather than a hope.</strong> Pin the query count of
+  every list surface that matters (<code>django_assert_num_queries</code>) — an N+1 introduced by a
+  new <code>__str__</code> or a template that walks a relation is invisible at 50 rows and fatal at
+  50,000. Assert that the pagination cap actually caps, that a client asking for a bigger page gets
+  the maximum and not the whole table, and that throttling answers 429. Keep
+  <code>manage.py check</code> and <code>check --deploy</code> (against production settings) in CI.
+  Test the permission matrix as a matrix, not one happy path. Assert the fail-closed defaults stay
+  fail-closed after every dependency upgrade. And make a restore drill part of the schedule,
+  asserted by row count rather than by the absence of an error message.</p>
+  <p><strong>What SnapAdmin's own suite does not have, and a high-load project probably should:</strong>
+  browser E2E over the admin's critical flows, and load tests against the API's real page sizes and
+  filters.</p>
+
+  <h3 id="playbook-scale">4. Production readiness and high load</h3>
+  <p>Where the library helps, and where it deliberately stops. Every number below is the shipped
+  default, and every one of them is a setting — the right value is the measured one.</p>
+  <table>
+    <thead><tr><th>Area</th><th>What ships</th><th>What you tune at scale</th></tr></thead>
+    <tbody>
+      <tr><td>Database</td><td>Nothing automatic — indexes, constraints and query shape stay yours</td><td>Index what you filter and order on; prefer keyset pagination over deep <code>OFFSET</code>; <code>CONN_MAX_AGE</code> and a pooler matched to the worker model — see the <a href="#optimizations">optimizations guide</a></td></tr>
+      <tr><td>Changelist counts</td><td><code>SNAPADMIN_ESTIMATED_COUNT</code> on, threshold 100 000 rows: PostgreSQL's <code>pg_class.reltuples</code> replaces <code>COUNT(*)</code> on <em>unfiltered</em> listings only, with an exact count everywhere else</td><td><code>show_full_result_count = False</code> on huge tables to drop the admin's second, unfiltered <code>COUNT(*)</code> — often the most expensive query on the page</td></tr>
+      <tr><td>Admin rendering</td><td><code>list_select_related</code> derived automatically from the foreign keys actually shown, so the changelist joins instead of firing one query per row</td><td><code>list_per_page</code> (100) and <code>list_max_show_all</code> (200) — see <a href="#performance">large-dataset performance</a></td></tr>
+      <tr><td>REST</td><td>Pagination always on: 25 per page, client-capped at 500, regardless of your own <code>REST_FRAMEWORK</code> defaults</td><td><code>SNAPADMIN_API_PAGE_SIZE</code>, <code>SNAPADMIN_API_MAX_PAGE_SIZE</code>, and the JSON-filter scan cap (100 000 rows) / <code>fetch-by</code> key cap (10 000)</td></tr>
+      <tr><td>Rate limits</td><td>60/min anonymous, 600/min authenticated</td><td><code>SNAPADMIN_THROTTLE_ANON</code>/<code>_USER</code>, plus <a href="#quotas">multi-window quotas</a> for anything the API calls outward</td></tr>
+      <tr><td>Bulk data</td><td><a href="#async-export">Async exports</a> stream on a Celery worker in chunks of 1 000; <a href="#bulk-import">imports</a> validate through <code>full_clean()</code> and resume after a crash</td><td>Keep large result sets out of request/response entirely — chunk sizes are settings</td></tr>
+      <tr><td>Search</td><td>For <code>DUAL</code>/<code>ES_ONLY</code> models the REST list endpoint serves from Elasticsearch, moving full-text search and deep pagination off the primary database; a search is capped at 1 000 hits</td><td><code>SNAPADMIN_ES_SEARCH_LIMIT</code>, and <a href="#es-db-fallback"><code>SNAPADMIN_ES_DB_FALLBACK</code></a> — a silent fallback keeps the site up and hides an outage, so choose deliberately</td></tr>
+      <tr><td>Read scaling</td><td>Nothing routed unless asked</td><td><a href="#enterprise-config"><code>SNAPADMIN_ANALYTICS_DB_ALIAS</code></a> for one replica, <a href="#sharding"><code>SNAPADMIN_SHARDING</code></a> for real shard/replica routing (<code>AUTO_FAILOVER</code> defaults to <code>False</code> — only enable it against a promotable replica)</td></tr>
+      <tr><td>Background work</td><td>Tasks, no daemon: backups, the retention purge, digests and async exports need a worker <em>and</em> a Beat entry</td><td>Every scheduled task but <code>run_export</code> returns <code>status</code> (<code>ok</code>/<code>partial</code>/<code>noop</code>/<code>disabled</code>) plus <code>failed</code> and raises when every unit failed — one monitoring rule covers all of them</td></tr>
+      <tr><td>Shared state</td><td>Quota counters are per-process unless told otherwise, and an evicted counter fails open</td><td><code>SNAPADMIN_LIMITS_CACHE_ALIAS</code> pointed at a shared cache once there is more than one web process; the same deliberate choice for sessions</td></tr>
+      <tr><td>Delivery</td><td><code>/api/health/</code> answers 200 healthy/degraded and 503 when the database is down</td><td><code>collectstatic</code> in the image build, <a href="#remote-storage">remote S3-compatible storage</a> for static/media/exports, JSON logs shipped somewhere searchable</td></tr>
+    </tbody>
+  </table>
+
+  <h3 id="playbook-norms">5. Development norms in a SnapAdmin project</h3>
+  <ul>
+    <li><strong>Read model configuration through the registry</strong>, never with a hand-rolled
+    <code>getattr</code>: <code>is_registered(model)</code> is the gate every surface asks, and
+    <code>get_model_meta(model, name, default)</code> resolves decorator argument &gt; class
+    attribute &gt; <code>SNAPADMIN_&lt;NAME&gt;</code> setting &gt; default.</li>
+    <li><strong>Prefer the change that needs no migration.</strong> Snap-only kwargs, settings and
+    admin-layer overrides cost nothing to deploy; a column change costs a maintenance window on
+    every install.</li>
+    <li><strong>Write through the ORM save path</strong> when a field carries behaviour.
+    Sanitization and encryption live in <code>pre_save()</code>, so <code>save()</code>, the admin,
+    serializers and <code>bulk_create()</code> are covered — and <code>QuerySet.update()</code>,
+    raw SQL and direct database access are not.</li>
+    <li><strong>Extend, don't fork, the generated surfaces.</strong>
+    <a href="#admin-extension-surface"><code>admin_overrides</code></a> wins over anything the
+    generator produces and <code>get_admin_media()</code> extends the base asset lists instead of
+    snapshotting them; a copied-and-edited generated class silently stops inheriting fixes.</li>
+    <li><strong>Keep new surfaces fail-closed.</strong> The library's own defaults refuse rather
+    than allow — an unmapped action, an unbound tenant, a masking rule that cannot resolve. Project
+    code that adds a bypass should make it explicit, audited and tested, the way
+    <code>use_all_tenants()</code> is.</li>
+    <li><strong>Type the public functions, log through <code>structlog</code>, read secrets from
+    the environment.</strong> Every new setting gets a commented entry in the settings module and a
+    line in the environment template, so nobody has to read the code to find it.</li>
+    <li><strong>Upgrades are a task, not a bump.</strong> Pin the exact version, read the release
+    notes, run <code>manage.py check</code> and <code>makemigrations --check</code>, then the
+    suite. The audit trail's <code>{field: {"old", "new"}}</code> shape and every
+    <code>snapadmin.*</code> import path are stable across releases; behaviour behind a default can
+    still change, which is what the notes are for.</li>
+  </ul>
 
   <!-- ═══════════════════════ GROUP: Declare Your Models ═══════════════════════ -->
   <!-- ── Two Ways to Declare a Model ──────────────────────────────────────── -->
