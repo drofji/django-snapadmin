@@ -11,7 +11,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from datetime import timedelta
 from enum import Enum
-from typing import Any, NamedTuple, NoReturn
+from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn, cast
 
 from django.apps import apps
 from django.core.exceptions import FieldDoesNotExist, FieldError, ValidationError
@@ -266,7 +266,9 @@ class APIToken(models.Model):
             self,
             {"token_digest": {"old": f"prefix {old_prefix}", "new": f"prefix {self.token_prefix}"}},
         )
-        return self.token_key
+        # save() above has just minted one, so this is never the None a token
+        # loaded from the database returns.
+        return cast(str, self.token_key)
 
     @classmethod
     def create_for_user(
@@ -646,10 +648,14 @@ class PIIMaskingAdminMixin:
     in ``SNAPADMIN_MASKING_RULES`` is obfuscated by its own rule here too.
     """
 
+    if TYPE_CHECKING:  # pragma: no cover - typing only
+        # Supplied by the ModelAdmin this is mixed into.
+        model: type[models.Model]
+
     def _snap_masked_fields(self) -> list[str]:
         from snapadmin.masking import get_masked_fields
 
-        return get_masked_fields(self.model._meta.app_label, self.model._meta.model_name)
+        return get_masked_fields(self.model._meta.app_label, str(self.model._meta.model_name))
 
     def _snap_mask_column(self, field_name, user=None):
         from snapadmin.masking import mask_field
@@ -885,7 +891,7 @@ class SnapModel(AdminGenMixin, models.Model):
     # e.g. {"list_per_page": 25} or a project's own get_readonly_fields.
     admin_overrides = {}
     snap_inlines = []
-    admin_sections = []
+    admin_sections: list[Any] = []
     # Whether the changelist shows the primary-key column first. ``None`` (the
     # default) shows it for integer keys only — a UUID is noise in a list; True
     # or False overrides that either way (#EXT2g).
@@ -1253,7 +1259,7 @@ class SnapModel(AdminGenMixin, models.Model):
 
                 if audit.field_is_encrypted(model, field_name):
                     continue
-                val = getattr(self, field_name, None)
+                val: Any = getattr(self, field_name, None)
                 if hasattr(val, "pk"):
                     val = val.pk
                 elif isinstance(val, (timedelta,)):
@@ -1587,7 +1593,7 @@ class SnapModel(AdminGenMixin, models.Model):
             return container[part]
 
         for part in parents:
-            node = entry(node, part).get("properties")
+            node = entry(node, part).get("properties")  # type: ignore[assignment]
             path.append(part)
             if node is None:
                 raise ValueError(
@@ -2340,7 +2346,7 @@ class SnapModel(AdminGenMixin, models.Model):
                 "es_bulk_reindex_partial",
                 model=cls.__name__,
                 indexed=indexed,
-                error_count=len(errors),
+                error_count=len(cast(list, errors)),
             )
             return {"indexed": indexed, "errors": errors}
         return {"indexed": indexed}
@@ -2612,8 +2618,10 @@ class SnapModel(AdminGenMixin, models.Model):
                     )
                     continue
                 try:
-                    if field_file.storage.exists(path):
-                        field_file.storage.delete(path)
+                    # `path` is non-empty only when field_file is a real file.
+                    storage = cast(Any, field_file).storage
+                    if storage.exists(path):
+                        storage.delete(path)
                 except Exception as exc:
                     logger.error(
                         "snapadmin.purge.file_delete_failed",
@@ -3253,7 +3261,7 @@ def reindexable_snapmodels() -> list[type["SnapModel"]]:
     can be set on any registered model.
     """
     return [
-        model
+        cast("type[SnapModel]", model)
         for model in apps.get_models()
         if is_registered(model)
         and hasattr(model, "es_reindex_all")

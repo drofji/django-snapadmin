@@ -224,11 +224,11 @@ def resolve_column_map(
             column_map[column] = field_name
             continue
         norm = _normalize_header(column)
-        field_name = by_norm_name.get(norm) or by_norm_verbose.get(norm)
-        if field_name is None:
+        mapped: str | None = by_norm_name.get(norm) or by_norm_verbose.get(norm)
+        if mapped is None:
             unmapped.append(column)
             continue
-        column_map[column] = field_name
+        column_map[column] = mapped
     return column_map, unmapped
 
 

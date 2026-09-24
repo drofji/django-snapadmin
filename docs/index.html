@@ -5006,7 +5006,7 @@ class Invoice(snap_models.SnapModel):
   <strong>What a contributor does about it:</strong> write the test. Reaching for
   <code>#&nbsp;pragma: no cover</code> to silence the gate is not an option — a pragma is treated as
   a hidden gap rather than an exemption.
-  <strong>The honest exception:</strong> twelve lines across nine modules do carry one, each
+  <strong>The honest exception:</strong> seventeen lines across twelve modules do carry one, each
   with a written reason, and they fall into three groups — abstract methods whose body is only
   <code>raise NotImplementedError</code>; <code>if TYPE_CHECKING:</code> blocks that never execute;
   and the import-time branch taken when an optional dependency is absent (which the suite does cover,
@@ -5098,12 +5098,21 @@ class Invoice(snap_models.SnapModel):
   (pyflakes, pycodestyle, bugbear, complexity, and bandit's security rules over the whole package,
   backups, crypto, encryption, the API and sharding included), <code>ruff format --check snapadmin</code>,
   and <code>mypy</code> over <code>snapadmin/</code> with the Django plugin.
-  <strong>What fails the build:</strong> any Ruff finding or unformatted file — the package is clean
-  under both, so they are blocking. mypy is <strong>advisory</strong>: it reports on every push but
-  does not fail the job while its backlog in the dynamic admin/field mixins is worked down; the modules
-  where a wrong type costs most — <code>encryption/</code>, <code>crypto.py</code>,
-  <code>sharding/</code> — already run under raised strictness (every function annotated, untyped
-  bodies checked) and are clean.
+  <strong>What fails the build:</strong> any Ruff finding, any unformatted file, and any type error —
+  all three are clean and all three are blocking. mypy was advisory while a backlog of 136 findings in
+  the dynamic admin and field layers was worked down; that backlog is gone, so a new type error now
+  fails the job instead of scrolling past in a report nobody reads. The modules where a wrong type
+  costs most — <code>encryption/</code>, <code>crypto.py</code>, <code>sharding/</code>,
+  <code>backup.py</code>, <code>validators.py</code>, <code>logging_config.py</code> and
+  <code>quickstart/</code> — additionally run under raised strictness: every function annotated and
+  every untyped body checked.
+  <strong>How the backlog was cleared, since the shape repeats:</strong> most of it came from mixins.
+  A mixin that calls <code>super().handle_exception()</code> or reads <code>self._meta</code> has no
+  base class saying those exist, so every such call was unchecked. Each mixin now declares what it is
+  mixed into in an <code>if TYPE_CHECKING:</code> block — the DRF view or serializer it extends, or
+  the model attributes a <code>SnapModel</code> supplies — which costs nothing at runtime and makes
+  those calls checkable. What is left is a handful of local suppressions, each naming its rule and its
+  reason on the line.
   <strong>What a contributor does about a finding:</strong> fix it. A suppression is local, names its
   rule and says why (<code># noqa: S603 - argv list, no shell</code>); a bare or blanket one is not
   accepted. The first pass paid for itself: it found an unescaped primary key rendered as markup in the
@@ -5284,12 +5293,6 @@ SNAPADMIN_TEST_ES_URL=http://localhost:9200 pytest -m real_es</code></pre>
         combination, marker-gated and deselected by default so the everyday run stays at forty seconds.
         A flaky browser test will be diagnosed, never retried.</td>
         <td>Planned. No Playwright, no Cypress</td>
-      </tr>
-      <tr>
-        <td><strong>A blocking type-check gate</strong></td>
-        <td>mypy runs on every push but is advisory: the dynamic admin/field mixins still carry a
-        backlog of findings. It becomes blocking once that backlog is worked down, module by module.</td>
-        <td>Advisory; strict and clean on <code>encryption/</code>, <code>crypto.py</code>, <code>sharding/</code></td>
       </tr>
     </tbody>
   </table>

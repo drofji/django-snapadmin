@@ -46,10 +46,13 @@ FilterValue = str | int | float | bool | list[object] | None
 #: Download ``Content-Type`` per export format. An unknown value (a row written
 #: before a format was retired, or by something other than this API) downloads as
 #: a generic binary attachment rather than being mislabelled as text.
+# `str(member)` rather than the member itself: a TextChoices member declared
+# with its label (`CSV = "csv", "CSV"`) is typed as that two-tuple, and a
+# member's str() is its stored value — which is what `job.export_format` holds.
 CONTENT_TYPES: dict[str, str] = {
-    SnapExportJob.Format.CSV: "text/csv",
-    SnapExportJob.Format.JSON: "application/x-ndjson",
-    SnapExportJob.Format.XLSX: (
+    str(SnapExportJob.Format.CSV): "text/csv",
+    str(SnapExportJob.Format.JSON): "application/x-ndjson",
+    str(SnapExportJob.Format.XLSX): (
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     ),
 }

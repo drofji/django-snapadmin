@@ -210,7 +210,7 @@ class Command(BaseCommand):
             path = get_model_meta(model, "subject_path", None)
             if not path:
                 continue
-            rows = list(model.objects.filter(**{path: identifier}))
+            rows = list(model._default_manager.filter(**{path: identifier}))
             if rows:
                 matches[model] = rows
         return matches

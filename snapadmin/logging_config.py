@@ -21,9 +21,11 @@ Usage:
 
 import logging
 import sys
-from typing import Optional
+from collections.abc import MutableMapping
+from typing import Any, Optional
 
 import structlog
+from structlog.typing import Processor
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,7 +58,10 @@ class ColourConsoleRenderer:
         [TIMESTAMP] [LEVEL] event  key=value key=value
     """
 
-    def __call__(self, logger, method: str, event_dict: dict) -> str:  # noqa: ARG002
+    def __call__(self, logger: Any, method: str, event_dict: MutableMapping[str, Any]) -> str:  # noqa: ARG002
+        # MutableMapping, not dict: that is the shape structlog's own Processor
+        # type passes, and a renderer that insisted on dict could not be put in
+        # a processor chain without mypy objecting.
         ts = event_dict.pop("timestamp", "")
         level = event_dict.pop("level", method)
         event = event_dict.pop("event", "")
@@ -93,7 +98,7 @@ def configure_logging(
         json_logs: When True (e.g. in production / Docker), emit JSON lines
                    instead of the human-friendly coloured format.
     """
-    shared_processors = [
+    shared_processors: list[Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_logger_name,
         structlog.stdlib.add_log_level,
@@ -101,10 +106,9 @@ def configure_logging(
         structlog.processors.StackInfoRenderer(),
     ]
 
-    if json_logs:
-        renderer = structlog.processors.JSONRenderer()
-    else:
-        renderer = ColourConsoleRenderer()
+    renderer: Processor = (
+        structlog.processors.JSONRenderer() if json_logs else ColourConsoleRenderer()
+    )
 
     structlog.configure(
         processors=[

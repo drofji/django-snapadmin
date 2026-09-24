@@ -69,7 +69,7 @@ import json
 import os
 import re
 from decimal import Decimal
-from typing import Iterator, Protocol
+from typing import Any, Iterator, Protocol, cast
 
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
@@ -348,7 +348,7 @@ class _LineFileWriter:
         """Nothing to finalise — every chunk is already durable on disk."""
 
     def close(self) -> None:
-        self._handle.close()
+        cast(io.BufferedWriter, self._handle).close()
 
 
 class _WorkbookWriter:
@@ -374,9 +374,11 @@ class _WorkbookWriter:
     def __init__(self, path: str, fields: list[str]) -> None:
         self._path = path
         self._fields = fields
-        self._workbook = None
-        self._sheet = None
-        self._cell_cls = None
+        # openpyxl ships no types, and the workbook only exists from start()
+        # onwards — the writer protocol's own contract (see _ExportWriter).
+        self._workbook: Any = None
+        self._sheet: Any = None
+        self._cell_cls: Any = None
         self.byte_len = 0
 
     def start(self, *, resuming: bool, byte_len: int) -> None:

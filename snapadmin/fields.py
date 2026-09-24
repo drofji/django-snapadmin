@@ -10,6 +10,7 @@ import decimal
 import json
 import types
 import typing
+from typing import Any, cast
 from enum import Enum
 
 from django.db import models
@@ -402,7 +403,8 @@ def _apply_required_flag(field: models.Field, required: bool) -> None:
     already concrete booleans with no record of whether they were explicit.
     ``required`` can only ever *tighten* a wrapped field, never loosen one.
     """
-    field.required = required
+    # `required` is SnapAdmin's own attribute; Field declares no such name.
+    field.required = required  # type: ignore[attr-defined]
     if required:
         field.null = False
         field.blank = False
@@ -438,14 +440,17 @@ def _attach_file_validator(
         max_size_bytes=max_size_bytes,
     )
     field.__dict__.pop(DjangoFieldAttributeEnum.VALIDATORS.value, None)
-    field._validators = list(field._validators) + [validator]
+    # `validators` is a cached_property over the private `_validators` list —
+    # the same list Django's own contribute_to_class appends to.
+    field._validators = list(field._validators) + [validator]  # type: ignore[attr-defined]
 
     original_deconstruct = field.deconstruct
 
     def deconstruct(self):
         return _strip_auto_validator(original_deconstruct(), validator)
 
-    field.deconstruct = types.MethodType(deconstruct, field)
+    # Bound over the instance: the wrapper has no class of its own to override.
+    field.deconstruct = types.MethodType(deconstruct, field)  # type: ignore[method-assign]
 
 
 #: Marks "the Django constructor's own ``deconstruct()`` did not report
@@ -480,7 +485,7 @@ def _detach_editable_from_deconstruct(field: models.Field, recorded_editable: ob
             kwargs[SnapFieldAttributeEnum.EDITABLE.value] = recorded_editable
         return name, path, args, kwargs
 
-    field.deconstruct = types.MethodType(deconstruct, field)
+    field.deconstruct = types.MethodType(deconstruct, field)  # type: ignore[method-assign]
 
 
 def snap_field(field: models.Field, **kwargs: bool | str | None) -> models.Field:
@@ -557,7 +562,7 @@ def snap_field(field: models.Field, **kwargs: bool | str | None) -> models.Field
         _attach_file_validator(field, **file_kwargs)
 
     if SnapFieldAttributeEnum.REQUIRED.value in kwargs:
-        _apply_required_flag(field, kwargs[SnapFieldAttributeEnum.REQUIRED.value])
+        _apply_required_flag(field, bool(kwargs[SnapFieldAttributeEnum.REQUIRED.value]))
 
     editable_key = SnapFieldAttributeEnum.EDITABLE.value
     if editable_key in kwargs:
@@ -655,8 +660,9 @@ def _bind_wysiwyg_pre_save(field: models.Field) -> None:
         value = original_pre_save(model_instance, add)
         return _sanitize_wysiwyg_pre_save_value(self, model_instance, value)
 
-    field.pre_save = types.MethodType(pre_save, field)
-    field._snap_wysiwyg_pre_save_bound = True
+    field.pre_save = types.MethodType(pre_save, field)  # type: ignore[method-assign]
+    # The marker that stops a second bind stacking another sanitiser.
+    field._snap_wysiwyg_pre_save_bound = True  # type: ignore[attr-defined]
 
 
 class SanitizedHtmlOnSaveMixin:
@@ -1094,7 +1100,9 @@ class SnapBlindIndexField(models.CharField):
             kwargs["source_field"] = self.source_field
         return name, path, args, kwargs
 
-    def contribute_to_class(self, cls, name, **kwargs) -> None:
+    def contribute_to_class(
+        self, cls: type[models.Model], name: str, private_only: bool = False, **kwargs: Any
+    ) -> None:
         """Attach, unless a field of this name is already on the class.
 
         Django renders a historical model from a migration's full field list,
@@ -1116,7 +1124,9 @@ class SnapBlindIndexField(models.CharField):
         if not self.source_field:
             return _NO_INDEX
         try:
-            source = self.model._meta.get_field(self.source_field)
+            # The sibling always names a concrete field, never a reverse
+            # relation; the checks below refuse anything else.
+            source = cast(Any, self.model._meta.get_field(self.source_field))
         except FieldDoesNotExist:
             # A hand-written sibling naming a field that is not there. Fall
             # back to the stored value rather than breaking attribute access;
@@ -1209,7 +1219,19 @@ class _BlindIndexIn(_BlindIndexLookup):
         return list(self.rhs)
 
 
-class SnapEncryptedField:
+if typing.TYPE_CHECKING:  # pragma: no cover - typing only
+    # What this mixin is mixed into: a Snap field, which is a Django Field
+    # plus SnapField. Declaring it makes the super() calls and the attribute
+    # reads below checkable rather than silently untyped; at runtime the mixin
+    # stays a plain mixin and the concrete classes supply both halves.
+    class _EncryptedFieldBase(models.Field, SnapField):
+        pass
+
+else:
+    _EncryptedFieldBase = object
+
+
+class SnapEncryptedField(_EncryptedFieldBase):
     """Mixin turning any Snap field into one that stores ciphertext.
 
     The deal it makes is narrow: **the column holds a ``snap1.`` envelope, the
@@ -1329,7 +1351,9 @@ class SnapEncryptedField:
                 kwargs["unique"] = True
         return name, path, args, kwargs
 
-    def contribute_to_class(self, cls, name, **kwargs) -> None:
+    def contribute_to_class(
+        self, cls: type[models.Model], name: str, private_only: bool = False, **kwargs: Any
+    ) -> None:
         """Attach to the model, adding the ``<name>_bi`` sibling when asked."""
         super().contribute_to_class(cls, name, **kwargs)
         if not self.blind_index or cls._meta.abstract:
@@ -1545,7 +1569,9 @@ class SnapEncryptedField:
             return None
         return self.decode_plaintext(decrypt(value, aad=self.encryption_aad()))
 
-    def value_to_string(self, obj) -> str | None:
+    # `None` where Django's signature says `str`: a null column serialises as
+    # null, exactly as it does for an unencrypted field.
+    def value_to_string(self, obj: Any) -> str | None:  # type: ignore[override]
         """Serialise for ``dumpdata`` as ciphertext, never as the plaintext."""
         from snapadmin.encryption.cipher import encrypt
 
@@ -1553,7 +1579,8 @@ class SnapEncryptedField:
         if value is None:
             return None
         if self._already_encrypted(value):
-            return value
+            # Already an envelope (a loaddata round trip): pass it through.
+            return cast(str, value)
         return encrypt(self.encode_plaintext(value), aad=self.encryption_aad())
 
     def to_python(self, value):
@@ -1656,7 +1683,8 @@ class SnapEncryptedIntegerField(SnapEncryptedField, models.IntegerField, SnapFie
         ``KeyError`` outright. Everything a caller declared (``validators=[...]``,
         ``MinValueValidator``, …) still applies.
         """
-        return [*self.default_validators, *self._validators]
+        # `validators` is a cached_property over the private `_validators` list.
+        return [*self.default_validators, *self._validators]  # type: ignore[attr-defined]
 
     def encode_plaintext(self, value) -> str:
         return str(int(value))
@@ -1676,7 +1704,7 @@ class SnapEncryptedDecimalField(SnapEncryptedField, models.DecimalField, SnapFie
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
     def encode_plaintext(self, value) -> str:
-        return format_number(self.to_python(value), self.max_digits, self.decimal_places)
+        return str(format_number(self.to_python(value), self.max_digits, self.decimal_places))
 
     def decode_plaintext(self, text: str) -> decimal.Decimal:
         return decimal.Decimal(text)
@@ -1814,8 +1842,8 @@ class SnapStatusBadgeField(SnapFunctionField):
         field_name: str | None = None,
         choices: typing.List[SnapStatusBadgeFieldChoice] | None = None,
         *,
-        verbose_name: str = None,
-        style_arguments: dict = None,
+        verbose_name: str | None = None,
+        style_arguments: dict | None = None,
         **kwargs,
     ):
         # Both may be written positionally: they are what the field *is*, and passing the

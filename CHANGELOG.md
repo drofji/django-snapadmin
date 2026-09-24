@@ -59,6 +59,8 @@ the `0.x` beta series.
   hostile input against the REST list, export filters, masking settings and key configuration.
 - Mutation testing (`mutmut`, advisory) runs per push over the functions a push changed and weekly
   over the modules where a wrong answer costs most: `python scripts/mutation.py diff|modules`.
+- The type check is blocking: `mypy` over `snapadmin/` is clean, and `encryption/`, `crypto.py`,
+  `sharding/`, `backup.py`, `validators.py`, `logging_config.py` and `quickstart/` run strictly.
 
 ### Fixed
 - A due row held by a `PROTECT`/`RESTRICT` foreign key no longer aborts the model's retention purge,

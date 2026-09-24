@@ -247,7 +247,9 @@ def _stale_queryset(
         # Diff the existing keys against the sync in Python: a healthy sync leaves
         # few stale keys, so the follow-up delete filters on a small `IN (...)` set
         # rather than a table-sized `NOT IN (seen)`.
-        seen = seen_keys if isinstance(seen_keys, (set, frozenset)) else set(seen_keys)
+        # _validate_stale_sync_call() has already refused a keyset call
+        # without seen_keys.
+        seen = seen_keys if isinstance(seen_keys, (set, frozenset)) else set(seen_keys or ())
         stale_keys = set(base.values_list(key_field, flat=True)) - seen
         return base.filter(**{f"{key_field}__in": stale_keys}) if stale_keys else base.none()
     # DB-side watermark prune: no natural-key set is materialised. NULL

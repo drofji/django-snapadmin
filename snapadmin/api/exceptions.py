@@ -31,6 +31,9 @@ from rest_framework import exceptions as drf_exceptions
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle, see below
     from rest_framework.response import Response
+    from rest_framework.views import APIView as _ViewBase
+else:
+    _ViewBase = object
 
 # ``rest_framework.views`` and ``rest_framework.serializers`` are imported inside
 # the functions below, not here. This module is reached while DRF is still
@@ -89,7 +92,11 @@ def snap_exception_handler(exc: Exception, context: dict[str, Any]) -> "Response
     return drf_exception_handler(exc, context)
 
 
-class DjangoValidationErrorMixin:
+#: What the mixin below is mixed *into*. At runtime it stays a plain mixin
+#: (``object``); for the type checker it is the DRF class whose hooks it calls
+#: through ``super()``, which is what makes those calls checkable instead of
+#: silently untyped.
+class DjangoValidationErrorMixin(_ViewBase):
     """View mixin translating an escaping Django ``ValidationError`` into a 400.
 
     **The project's own handler keeps first refusal.** The translation happens

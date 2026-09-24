@@ -75,7 +75,8 @@ import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import BinaryIO, Callable
+from types import ModuleType
+from typing import IO, Any, BinaryIO, Callable, cast
 
 import django
 from django.conf import settings
@@ -230,7 +231,18 @@ def _sqlite_source_path(db: dict) -> str:
     return source
 
 
-def _copy_sqlite_into(db: dict, writer: BinaryIO) -> None:
+def _as_binary(stream: object) -> IO[bytes]:
+    """A gzip/pipe stream as the binary file object these helpers read and write.
+
+    ``gzip.open(..., "wb")`` and ``gzip.GzipFile`` provide the whole binary-file
+    surface used here (``read``/``write``/``close``), but typeshed does not
+    declare ``GzipFile`` as an ``IO[bytes]``, so the call sites say so once here
+    instead of each carrying its own suppression.
+    """
+    return cast(IO[bytes], stream)
+
+
+def _copy_sqlite_into(db: dict, writer: IO[bytes]) -> None:
     with open(_sqlite_source_path(db), "rb") as src:
         shutil.copyfileobj(src, writer)
 
@@ -251,14 +263,15 @@ def _postgres_dump_command(db: dict) -> tuple[list[str], dict]:
     return command, env
 
 
-def _copy_postgres_into(db: dict, writer: BinaryIO) -> None:
+def _copy_postgres_into(db: dict, writer: IO[bytes]) -> None:
     command, env = _postgres_dump_command(db)
     # Stream pg_dump's stdout straight into the writer so the whole uncompressed
     # dump never has to fit in memory at once — a large database would OOM the
     # worker otherwise.
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)  # noqa: S603 - argv list, no shell
-    shutil.copyfileobj(process.stdout, writer)
-    stderr_output = process.stderr.read()
+    # Both pipes were requested above, so neither stream is None.
+    shutil.copyfileobj(cast(IO[bytes], process.stdout), writer)
+    stderr_output = cast(IO[bytes], process.stderr).read()
     returncode = process.wait()
     if returncode != 0:
         raise BackupError(f"pg_dump failed: {stderr_output.decode(errors='replace')}")
@@ -281,7 +294,7 @@ def _mysql_dump_command(db: dict) -> tuple[list[str], dict]:
     return command, env
 
 
-def _copy_mysql_into(db: dict, writer: BinaryIO) -> None:
+def _copy_mysql_into(db: dict, writer: IO[bytes]) -> None:
     command, env = _mysql_dump_command(db)
     # Stream mysqldump's stdout straight into the writer, same reasoning as
     # the Postgres branch above — a large database must never have to fit in
@@ -290,8 +303,9 @@ def _copy_mysql_into(db: dict, writer: BinaryIO) -> None:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)  # noqa: S603 - argv list, no shell
     except FileNotFoundError as exc:
         raise BackupError("mysqldump is not installed or not on PATH.") from exc
-    shutil.copyfileobj(process.stdout, writer)
-    stderr_output = process.stderr.read()
+    # Both pipes were requested above, so neither stream is None.
+    shutil.copyfileobj(cast(IO[bytes], process.stdout), writer)
+    stderr_output = cast(IO[bytes], process.stderr).read()
     returncode = process.wait()
     if returncode != 0:
         raise BackupError(f"mysqldump failed: {stderr_output.decode(errors='replace')}")
@@ -315,14 +329,14 @@ def create_db_dump(target_dir: Path, *, alias: str = "default", label: str | Non
     if "sqlite" in engine:
         out = target_dir / f"{prefix}{stamp}.sqlite3.gz"
         with gzip.open(out, "wb") as dst:
-            _copy_sqlite_into(db, dst)
+            _copy_sqlite_into(db, _as_binary(dst))
         return out
 
     if "postgresql" in engine:
         out = target_dir / f"{prefix}{stamp}.sql.gz"
         try:
             with gzip.open(out, "wb") as dst:
-                _copy_postgres_into(db, dst)
+                _copy_postgres_into(db, _as_binary(dst))
         except BackupError:
             out.unlink(missing_ok=True)
             raise
@@ -332,7 +346,7 @@ def create_db_dump(target_dir: Path, *, alias: str = "default", label: str | Non
         out = target_dir / f"{prefix}{stamp}.sql.gz"
         try:
             with gzip.open(out, "wb") as dst:
-                _copy_mysql_into(db, dst)
+                _copy_mysql_into(db, _as_binary(dst))
         except BackupError:
             out.unlink(missing_ok=True)
             raise
@@ -361,7 +375,7 @@ class _ProducerThread(threading.Thread):
     """Runs `producer(write_end)` in the background, capturing any exception
     so the reader side can re-raise it via `check()` once done reading."""
 
-    def __init__(self, producer: Callable[[BinaryIO], None], write_fh: BinaryIO) -> None:
+    def __init__(self, producer: Callable[[IO[bytes]], None], write_fh: IO[bytes]) -> None:
         super().__init__(daemon=True)
         self._producer = producer
         self._write_fh = write_fh
@@ -391,7 +405,9 @@ class _ProducerThread(threading.Thread):
             raise self.exception
 
 
-def _stream_through_pipe(producer: Callable[[BinaryIO], None]) -> tuple[BinaryIO, _ProducerThread]:
+def _stream_through_pipe(
+    producer: Callable[[IO[bytes]], None],
+) -> tuple[IO[bytes], _ProducerThread]:
     """Return (reader, thread): bytes `producer` writes become readable from `reader`.
 
     A real OS pipe applies natural backpressure (its own small buffer), so
@@ -406,9 +422,9 @@ def _stream_through_pipe(producer: Callable[[BinaryIO], None]) -> tuple[BinaryIO
     return reader, thread
 
 
-def _gzip_into(writer: BinaryIO, copy_fn: Callable[[BinaryIO], None]) -> None:
+def _gzip_into(writer: IO[bytes], copy_fn: Callable[[IO[bytes]], None]) -> None:
     with gzip.GzipFile(fileobj=writer, mode="wb") as gz:
-        copy_fn(gz)
+        copy_fn(_as_binary(gz))
 
 
 def create_encrypted_db_dump(
@@ -450,7 +466,7 @@ def create_encrypted_db_dump(
     try:
         with open(tmp, "wb") as dst:
             crypto.encrypt_stream(
-                reader,
+                cast(BinaryIO, reader),
                 dst,
                 config.age_recipients,
                 backend=config.age_backend,
@@ -496,7 +512,7 @@ def _iter_media_files(media_root: Path, exclude: list[str]) -> list[Path]:
 
 
 def _tar_media_into(
-    media_root: Path, files: list[Path], writer: BinaryIO, warning_bytes: int
+    media_root: Path, files: list[Path], writer: IO[bytes], warning_bytes: int
 ) -> None:
     """Write every file in `files` into a tar stream on `writer`.
 
@@ -553,7 +569,7 @@ def create_media_bundle(target_dir: Path, config: BackupConfig, stamp: str) -> P
         try:
             with open(tmp, "wb") as dst:
                 crypto.encrypt_stream(
-                    reader,
+                    cast(BinaryIO, reader),
                     dst,
                     config.age_recipients,
                     backend=config.age_backend,
@@ -573,7 +589,7 @@ def create_media_bundle(target_dir: Path, config: BackupConfig, stamp: str) -> P
     tmp = out.with_name(out.name + ".tmp")
     try:
         with gzip.open(tmp, "wb") as dst:
-            tar_fn(dst)
+            tar_fn(_as_binary(dst))
     except Exception:
         tmp.unlink(missing_ok=True)
         raise
@@ -614,7 +630,7 @@ def create_env_bundle(target_dir: Path, config: BackupConfig, stamp: str) -> Pat
     try:
         with open(env_path, "rb") as reader, open(tmp, "wb") as writer:
             crypto.encrypt_stream(
-                reader,
+                cast(BinaryIO, reader),
                 writer,
                 config.age_recipients,
                 backend=config.age_backend,
@@ -791,7 +807,9 @@ def store_remote_ftp(dump: Path, config: BackupConfig) -> str:
     ftp.connect(config.ftp_host, config.ftp_port)
     ftp.login(config.ftp_user, config.ftp_password)
     if config.ftp_tls:
-        ftp.prot_p()
+        # ftp_class above is FTP_TLS exactly when this branch runs; plain FTP
+        # has no prot_p (and would have nothing to protect).
+        cast(ftplib.FTP_TLS, ftp).prot_p()
     try:
         try:
             ftp.cwd(config.ftp_dir)
@@ -811,7 +829,7 @@ def store_remote_ftp(dump: Path, config: BackupConfig) -> str:
     return f"ftp://{config.ftp_host}:{config.ftp_port}{config.ftp_dir.rstrip('/')}/{dump.name}"
 
 
-def _load_sftp_host_keys(client, config: BackupConfig) -> None:
+def _load_sftp_host_keys(client: Any, config: BackupConfig) -> None:
     """Populate ``client``'s trusted host keys for the SFTP destination.
 
     Unset (the default), this is ``load_system_host_keys()`` — byte-for-byte
@@ -976,7 +994,7 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
 
 
 @functools.lru_cache(maxsize=1)
-def _load_boto3():
+def _load_boto3() -> ModuleType:
     """Return the imported ``boto3`` package, imported lazily and cached.
 
     Mirrors ``crypto._load_pyrage()`` / ``exporting._load_openpyxl()``: the
@@ -1037,7 +1055,7 @@ def s3_ambient_credentials_likely() -> bool:
     return (Path.home() / ".aws" / "credentials").is_file()
 
 
-def _s3_client(config: BackupConfig):
+def _s3_client(config: BackupConfig) -> Any:
     """Build a boto3 S3 client for `config`.
 
     When no explicit access key is configured, the client is built with no
@@ -1057,7 +1075,7 @@ def _s3_client(config: BackupConfig):
     return boto3.client("s3", **kwargs)
 
 
-def _s3_list_keys(client, bucket: str, prefix: str) -> list[str]:
+def _s3_list_keys(client: Any, bucket: str, prefix: str) -> list[str]:
     """Every object key under `prefix`, paginated (list_objects_v2 caps at 1000/page)."""
     keys: list[str] = []
     kwargs: dict = {"Bucket": bucket, "Prefix": prefix}
@@ -1157,7 +1175,9 @@ def list_remote_ftp(config: BackupConfig) -> list[str]:
     ftp.connect(config.ftp_host, config.ftp_port)
     ftp.login(config.ftp_user, config.ftp_password)
     if config.ftp_tls:
-        ftp.prot_p()
+        # ftp_class above is FTP_TLS exactly when this branch runs; plain FTP
+        # has no prot_p (and would have nothing to protect).
+        cast(ftplib.FTP_TLS, ftp).prot_p()
     try:
         try:
             ftp.cwd(config.ftp_dir)
@@ -1176,7 +1196,9 @@ def fetch_remote_ftp(name: str, target_dir: Path, config: BackupConfig) -> Path:
     ftp.connect(config.ftp_host, config.ftp_port)
     ftp.login(config.ftp_user, config.ftp_password)
     if config.ftp_tls:
-        ftp.prot_p()
+        # ftp_class above is FTP_TLS exactly when this branch runs; plain FTP
+        # has no prot_p (and would have nothing to protect).
+        cast(ftplib.FTP_TLS, ftp).prot_p()
     target = target_dir / name
     try:
         ftp.cwd(config.ftp_dir)
@@ -1220,7 +1242,7 @@ def fetch_remote_sftp(name: str, target_dir: Path, config: BackupConfig) -> Path
     return target
 
 
-def _connect_sftp(config: BackupConfig):
+def _connect_sftp(config: BackupConfig) -> Any:
     """Shared connect step for the SFTP list/fetch pair above — same host-key
     verification policy as :func:`store_remote_sftp` (reject unknown keys) and
     the same ``SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS`` resolution. Restores read
@@ -1473,7 +1495,7 @@ def due_destinations(config: BackupConfig | None = None) -> list[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _log_backup_outcome(status: str, **fields) -> None:
+def _log_backup_outcome(status: str, **fields: Any) -> None:
     """Log the shared outcome marker/level for ``snapadmin.run_db_backups``.
 
     See ``snapadmin/tasks.py``'s module docstring for the full convention

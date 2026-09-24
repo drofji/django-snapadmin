@@ -538,7 +538,7 @@ Concretely, on the current release:
   3,400+ branches, 0 missing, 0 partial. CI runs `pytest --cov=snapadmin --cov-branch
   --cov-fail-under=100`, so a pull request that adds an untested line or a half-tested conditional
   fails.
-  **Twelve lines across nine modules carry a `# pragma: no cover`**, each with a written reason:
+  **Seventeen lines across twelve modules carry a `# pragma: no cover`**, each with a written reason:
   abstract methods that only raise, `if TYPE_CHECKING:` blocks, and the import-time branch taken
   when an optional dependency is absent. That list is pinned by a test so it cannot quietly grow.
   There used to be eighteen: six "defensive, unreachable" guards turned out to be reachable — one of
@@ -683,7 +683,6 @@ and none will be claimed here until it actually runs in CI:
 | Missing | What it would add | Status |
 |---|---|---|
 | **Browser E2E** | A real browser driving the generated admin: navigation, filters, pagination, actions, validation errors. Today the admin is reached only through Django's test client, which is not a browser | Planned. No Playwright, no Cypress |
-| **A blocking type-check gate** | mypy runs on every push, but advisory: the dynamic admin/field mixins still carry a backlog. Ruff (lint, format, security rules) is already clean and blocking | Advisory; strict and clean on `encryption/`, `crypto.py`, `sharding/` |
 
 <details>
 <summary>Where the rest of the coverage goes</summary>

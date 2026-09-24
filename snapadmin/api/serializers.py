@@ -5,7 +5,7 @@ DRF serializers for the SnapAdmin auto-generated REST API.
 """
 
 import copy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.apps import apps
 from django.core.exceptions import ValidationError as DjangoValidationError
@@ -149,7 +149,17 @@ class WriteFieldAllowlistSerializerMixin:
         return fields
 
 
-class ModelCleanSerializerMixin:
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from rest_framework.serializers import Serializer as _SerializerBase
+else:
+    _SerializerBase = object
+
+
+#: What the mixin below is mixed *into*. At runtime it stays a plain mixin
+#: (``object``); for the type checker it is the DRF class whose hooks it calls
+#: through ``super()``, which is what makes those calls checkable instead of
+#: silently untyped.
+class ModelCleanSerializerMixin(_SerializerBase):
     """Runs the model's own ``full_clean()`` on the API write path (#EXT1k).
 
     Off by default, opted into per model with ``api_full_clean = True`` or

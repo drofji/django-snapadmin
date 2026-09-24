@@ -2246,7 +2246,7 @@ def check_masked_models_use_masking_admin(app_configs, **kwargs) -> list[CheckMe
         ]
         if not admins or all(isinstance(a, PIIMaskingAdminMixin) for a in admins):
             continue
-        if get_masked_fields(model._meta.app_label, model._meta.model_name):
+        if get_masked_fields(model._meta.app_label, str(model._meta.model_name)):
             offenders.append(model._meta.label)
     if not offenders:
         return []

@@ -86,7 +86,6 @@ def _make_relation_guard(model: type[Model]) -> classmethod:
     itself rather than relying on that manager detail staying true.
     """
 
-    @classmethod
     def get_queryset(
         cls: type[DjangoObjectType], queryset: QuerySet, info: GraphQLResolveInfo
     ) -> QuerySet:
@@ -95,7 +94,7 @@ def _make_relation_guard(model: type[Model]) -> classmethod:
         _check_access(info, model)
         return scope_queryset(model, queryset)
 
-    return get_queryset
+    return classmethod(get_queryset)
 
 
 def _make_masked_resolver(field_name: str):
@@ -142,11 +141,12 @@ def _make_masked_resolver(field_name: str):
             return None
         value = getattr(root, field_name)
         opts = root._meta
-        if field_name not in get_masked_fields(opts.app_label, opts.model_name):
+        model_name = str(opts.model_name)
+        if field_name not in get_masked_fields(opts.app_label, model_name):
             return value
         if user_can_view_pii(user):
             return value
-        return mask_field(opts.app_label, opts.model_name, field_name, value, user)
+        return mask_field(opts.app_label, model_name, field_name, value, user)
 
     return resolve_masked
 

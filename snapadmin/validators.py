@@ -110,9 +110,11 @@ class SnapFileValidator:
 
     def __init__(
         self,
-        allowed_extensions: typing.List[typing.Union[FileExtensionEnum, str]] = None,
-        allowed_encodings: typing.List[typing.Union[FileEncodingEnum, str]] = None,
-        max_size_bytes: int = None,
+        allowed_extensions: typing.Optional[
+            typing.List[typing.Union[FileExtensionEnum, str]]
+        ] = None,
+        allowed_encodings: typing.Optional[typing.List[typing.Union[FileEncodingEnum, str]]] = None,
+        max_size_bytes: typing.Optional[int] = None,
     ):
         self.allowed_extensions = (
             [
@@ -131,7 +133,7 @@ class SnapFileValidator:
 
         self.max_size_bytes = max_size_bytes
 
-    def __call__(self, file):
+    def __call__(self, file: typing.Any) -> None:
         if self.allowed_extensions:
             ext = os.path.splitext(file.name)[1].lower().replace('.', '')
             if ext not in self.allowed_extensions:
@@ -172,7 +174,7 @@ class SnapFileValidator:
                     params={'encodings': ", ".join(self.allowed_encodings)},
                 )
 
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
         """
         Equality check used by Django's migration framework.
         Prevents spurious duplicate migrations on each makemigrations run.
@@ -185,7 +187,7 @@ class SnapFileValidator:
             and self.max_size_bytes == other.max_size_bytes
         )
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         return hash(
             (
                 tuple(self.allowed_extensions or []),

@@ -39,7 +39,7 @@ from __future__ import annotations
 import contextvars
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from django.db import models as django_models
 from django.utils.module_loading import import_string
@@ -281,7 +281,17 @@ class SnapTenantMiddleware:
             return self.get_response(request)
 
 
-class SnapTenantRebindMixin:
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from rest_framework.views import APIView as _ViewBase
+else:
+    _ViewBase = object
+
+
+#: What the mixin below is mixed *into*. At runtime it stays a plain mixin
+#: (``object``); for the type checker it is the DRF class whose hooks it calls
+#: through ``super()``, which is what makes those calls checkable instead of
+#: silently untyped.
+class SnapTenantRebindMixin(_ViewBase):
     """DRF mixin: rebind the current tenant once DRF's own authentication has
     actually resolved ``request.user``/``request.auth`` (#FUT1b).
 

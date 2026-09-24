@@ -17,8 +17,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import date
+from email.message import Message
 from enum import Enum
 from importlib import metadata
+from typing import cast
 
 
 class Tier(Enum):
@@ -192,7 +194,9 @@ def scan_curated() -> list[PackageStatus]:
 def _license_from_metadata(name: str) -> str:
     """Best-effort licence string for an installed distribution's own metadata."""
     try:
-        meta = metadata.metadata(name)
+        # The runtime object is an email.Message, whose .get() this reads;
+        # importlib.metadata's PackageMetadata protocol does not declare it.
+        meta = cast(Message, metadata.metadata(name))
     except metadata.PackageNotFoundError:
         return ""
     expression = meta.get("License-Expression")

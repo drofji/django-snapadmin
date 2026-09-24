@@ -140,6 +140,18 @@ Changed
   and HTML are refused correctly. 100 examples per test locally, 300 in CI. The first pass found the
   defects listed under Security and Fixed.
 
+* **The type check is blocking.** ``mypy`` ran on every push but reported rather than failed,
+  because 136 findings sat in the dynamic admin and field layers. They are gone, so a type error
+  now fails CI. Most of them were one shape: a mixin that calls ``super().handle_exception()`` or
+  reads ``self._meta`` has no base class saying those exist, so the call was never checked at all.
+  Each mixin now declares what it is mixed into in an ``if TYPE_CHECKING:`` block — the DRF view or
+  serializer it extends, or the attributes a ``SnapModel`` supplies — which changes nothing at
+  runtime. ``encryption/``, ``crypto.py``, ``sharding/``, ``backup.py``, ``validators.py``,
+  ``logging_config.py`` and ``quickstart/`` additionally run under raised strictness: every function
+  annotated, every untyped body checked. Two public signatures are now honest about accepting
+  ``None`` (``SnapFileValidator``'s three upload limits, ``SnapStatusBadgeField``'s ``verbose_name``
+  and ``style_arguments``) — a documentation fix, not a behaviour change.
+
 * **Mutation testing, advisory.** ``mutmut`` now answers the question coverage cannot: would a test
   *notice* the code being wrong? One command runs it — ``python scripts/mutation.py diff`` mutates
   only the functions a change touched (minutes, and what CI runs on every push), ``python

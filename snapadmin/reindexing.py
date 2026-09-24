@@ -42,7 +42,7 @@ on every write. This module reuses the async-export job pattern
 
 from __future__ import annotations
 
-from typing import Callable, Iterable, Iterator
+from typing import Callable, Iterable, Iterator, cast
 
 from django.utils import timezone
 
@@ -121,7 +121,10 @@ def _bulk_index(es, actions, *, parallel: int, chunk_size: int) -> tuple[int, li
             else:
                 errors.append(info)
         return indexed, errors
-    return helpers.bulk(es, actions, chunk_size=chunk_size, raise_on_error=False)
+    # raise_on_error=False makes the second element the list of failures;
+    # elasticsearch-py types it as int | list for the raising variant too.
+    indexed, failures = helpers.bulk(es, actions, chunk_size=chunk_size, raise_on_error=False)
+    return indexed, cast(list, failures)
 
 
 def _iter_chunks(iterable: Iterable, size: int) -> Iterator[list]:

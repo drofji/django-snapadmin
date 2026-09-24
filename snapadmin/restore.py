@@ -28,7 +28,7 @@ import tarfile
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import IO, Callable, cast
 
 from django.conf import settings
 from django.utils import timezone
@@ -366,9 +366,11 @@ def _restore_postgres(db: dict, decrypted_path: Path, *, recreate_database: bool
             stderr=subprocess.PIPE,
             env=env,
         )
-        shutil.copyfileobj(sql, process.stdin)
-        process.stdin.close()
-        stderr_output = process.stderr.read()
+        # Both pipes were requested above, so neither stream is None.
+        stdin = cast(IO[bytes], process.stdin)
+        shutil.copyfileobj(sql, stdin)
+        stdin.close()
+        stderr_output = cast(IO[bytes], process.stderr).read()
         if process.wait() != 0:
             raise RestoreError(f"psql restore failed: {stderr_output.decode(errors='replace')}")
 

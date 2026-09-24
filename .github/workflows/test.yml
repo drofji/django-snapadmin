@@ -98,10 +98,11 @@ jobs:
   # on any non-PostgreSQL vendor), so demanding 100% from a single backend would
   # be asking for the wrong thing.
   static-analysis:
-    # Ruff lint + format are clean and blocking. mypy runs over snapadmin/ with
-    # raised strictness on encryption/, crypto and sharding/ (clean, and any
-    # regression there shows up in the report); the remaining backlog keeps it
-    # advisory for now (#QA1c) — the step reports and does not fail the job.
+    # Ruff lint + format and mypy are all clean and blocking. mypy runs over
+    # snapadmin/ with raised strictness (every function annotated, untyped
+    # bodies checked) on the modules where a wrong type costs most; the backlog
+    # that kept it advisory is gone (#QA1c-mypy), so a new type error fails the
+    # job rather than being reported and scrolled past.
     name: Static analysis · Ruff + mypy
     runs-on: ubuntu-latest
     steps:
@@ -127,8 +128,7 @@ jobs:
       - name: Ruff format
         run: ruff format --check snapadmin
 
-      - name: mypy (advisory)
-        continue-on-error: true
+      - name: mypy
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: mypy

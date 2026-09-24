@@ -262,7 +262,16 @@ plugins = ["mypy_django_plugin.main"]
 # Raised strictness where a wrong type is most expensive (#QA1a decision 2).
 # Clean today; any new unannotated or untyped code here fails the check.
 [[tool.mypy.overrides]]
-module = ["snapadmin.encryption.*", "snapadmin.crypto", "snapadmin.sharding.*"]
+module = [
+    "snapadmin.encryption.*",
+    "snapadmin.crypto",
+    "snapadmin.sharding.*",
+    # Cleared and kept clean, module by module (#QA1c-mypy).
+    "snapadmin.validators",
+    "snapadmin.logging_config",
+    "snapadmin.quickstart.*",
+    "snapadmin.backup",
+]
 check_untyped_defs = true
 disallow_untyped_defs = true
 disallow_incomplete_defs = true

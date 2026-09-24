@@ -12,8 +12,11 @@ that aren't obvious from the code.
   `python demo/manage.py <command>` (it puts the repo root on `sys.path` itself). Docker runs
   via `docker compose -f demo/docker-compose.yml up --build`. See [`demo/README.md`](demo/README.md).
 - **Static analysis:** `ruff check snapadmin && ruff format --check snapadmin` must be clean (CI
-  blocks on it); `PYTHONPATH=. mypy` reports type findings (advisory, but `encryption/`, `crypto.py`
-  and `sharding/` are strict and clean — keep them that way). A suppression is local, names its rule
+  blocks on it); `PYTHONPATH=. mypy` must be clean too — CI blocks on it, and `encryption/`,
+  `crypto.py`, `sharding/`, `backup.py`, `validators.py`, `logging_config.py` and `quickstart/` run
+  under raised strictness (every function annotated), so keep them that way. A mixin that calls
+  `super()` or reads an attribute its own class does not declare gets an `if TYPE_CHECKING:` block
+  naming what it is mixed into, rather than a suppression. A suppression is local, names its rule
   and says why: `# noqa: S603 - argv list, no shell`.
 - **Tests:** `pytest` from the repo root — the `snapadmin/` package is kept at 100% line and branch
   coverage (`pytest --cov=snapadmin --cov-branch --cov-fail-under=100`).

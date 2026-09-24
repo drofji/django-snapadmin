@@ -246,21 +246,27 @@ _GROUP_FLOORS: dict[str, tuple[tuple[str, ...], int]] = {
 }
 
 #: ``module -> how many ``# pragma: no cover`` lines it carries``. Frozen at the
-#: twelve both documents describe (down from eighteen: the five "defensive" guards
-#: and the urlsplit branch turned out reachable and are now tested — #RM1a); see
-#: the test below for why it is a ceiling rather than a ban.
+#: seventeen both documents describe (down from eighteen: the five "defensive"
+#: guards and the urlsplit branch turned out reachable and are now tested —
+#: #RM1a; up by the five ``if TYPE_CHECKING:`` blocks #QA1c-mypy added, each
+#: giving a mixin the typed base its ``super()`` calls and attribute reads are
+#: checked against, and each executing nothing at runtime); see the test below
+#: for why it is a ceiling rather than a ban.
 _COVERAGE_PRAGMAS: dict[str, int] = {
-    "snapadmin/admin_gen.py": 2,          # the Unfold-absent import branch
+    "snapadmin/admin_gen.py": 3,          # the Unfold-absent import branch, if TYPE_CHECKING
     "snapadmin/alerts.py": 2,             # two abstract methods
     "snapadmin/api/exceptions.py": 1,     # if TYPE_CHECKING
     "snapadmin/auth_admin.py": 1,         # unreachable once is_installed() passed
     "snapadmin/backup.py": 2,             # optional-dependency guards
     "snapadmin/checks.py": 1,             # celery is the [celery] extra
-    "snapadmin/fields.py": 1,             # abstract; both subclasses define it
+    "snapadmin/fields.py": 2,             # abstract (both subclasses define it), if TYPE_CHECKING
     "snapadmin/masking.py": 1,            # if TYPE_CHECKING
+    "snapadmin/models.py": 1,             # if TYPE_CHECKING
     "snapadmin/tasks.py": 1,              # covered by importing this file with celery hidden
+    "snapadmin/tenancy.py": 1,            # if TYPE_CHECKING
+    "snapadmin/api/serializers.py": 1,    # if TYPE_CHECKING
 }
-_DOCUMENTED_PRAGMA_TOTAL = 12
+_DOCUMENTED_PRAGMA_TOTAL = 17
 
 #: The suite-wide floors both documents quote.
 _SUITE_FLOOR = 5_000
@@ -342,8 +348,8 @@ class TestQuotedCountsAreMetFloors:
             ("140+ tests", "README.md"),
             ("220+ tests", "README.md"),
             ("90+ checks", "README.md"),
-            ("Twelve lines across nine modules", "README.md"),
-            ("twelve lines across nine modules", "docs/index.html"),
+            ("Seventeen lines across twelve modules", "README.md"),
+            ("seventeen lines across twelve modules", "docs/index.html"),
             ("5,364", "docs/index.html"),
             ("160 files", "docs/index.html"),
             ("11,702", "docs/index.html"),
@@ -373,7 +379,7 @@ class TestClaimedChecksReallyRun:
         )
 
     def test_the_coverage_pragmas_are_exactly_the_documented_twelve(self):
-        """Both pages say twelve lines across nine modules carry one.
+        """Both pages say seventeen lines across twelve modules carry one.
 
         A frozen list rather than a ban, because a ban would have been a lie:
         writing this module is what found the README claiming there were none
@@ -489,19 +495,37 @@ class TestChecksDocumentedAsAbsentReallyAreAbsent:
             )
 
     def test_static_analysis_runs_as_the_docs_describe(self):
-        """#QA1c — the pages say Ruff lint + format are blocking and mypy is
-        advisory. Pin both halves: a Ruff step marked continue-on-error, or a
-        mypy step that silently became blocking, makes those sentences false."""
+        """#QA1c — all three pages now say Ruff lint, Ruff format and mypy are
+        clean and blocking. The day any of them is marked continue-on-error,
+        those sentences are false, and a type error scrolls past in a report."""
         workflow = _read(WORKFLOWS / "test.yml")
         job = workflow.split("  static-analysis:", 1)[1].split("\n  real-services:", 1)[0]
         assert "ruff check snapadmin" in job
         assert "ruff format --check snapadmin" in job
-        mypy_step = job.split("- name: mypy", 1)[1]
-        assert "continue-on-error: true" in mypy_step, "the docs call mypy advisory"
-        ruff_steps = job.split("- name: mypy", 1)[0]
-        assert "continue-on-error" not in ruff_steps, "the docs call Ruff blocking"
+        assert "run: mypy" in job
+        assert "continue-on-error" not in job, (
+            "a step of the static-analysis job is advisory, but README.md, docs/index.html and "
+            "llms.txt all say Ruff and mypy are blocking"
+        )
         for tool in ("ruff", "mypy", "django-stubs"):
             assert f"\n{tool} = " in _read(PYPROJECT), f"{tool} is not a declared dev dependency"
+
+    def test_the_strict_mypy_modules_are_the_ones_the_docs_name(self):
+        """The pages name the modules that run under raised strictness. A module
+        quietly dropped from the override would keep passing while the promise
+        on three pages stopped being true."""
+        overrides = _read(PYPROJECT).split("[[tool.mypy.overrides]]", 1)[1]
+        for module in (
+            "snapadmin.encryption.*",
+            "snapadmin.crypto",
+            "snapadmin.sharding.*",
+            "snapadmin.validators",
+            "snapadmin.logging_config",
+            "snapadmin.quickstart.*",
+            "snapadmin.backup",
+        ):
+            assert f'"{module}"' in overrides, f"{module} is no longer type-checked strictly"
+        assert "disallow_untyped_defs = true" in overrides
 
     def test_property_and_fuzz_tests_run_as_the_docs_describe(self):
         """#QA1d (3)/(4) — all three pages say ``hypothesis`` runs 100 examples

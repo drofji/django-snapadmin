@@ -24,9 +24,12 @@ costs nothing but a dict lookup.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING, Any, cast
+
 from django.apps import apps
 from django.conf import settings
 from django.contrib import admin
+from django.contrib.admin.exceptions import AlreadyRegistered
 from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured
 from django.db import models
 from django.utils.safestring import mark_safe
@@ -291,6 +294,28 @@ def _mark_row_fieldsets(fieldsets):
 
 class AdminGenMixin:
     """``SnapModel``'s generated-admin methods — see the module docstring."""
+
+    if TYPE_CHECKING:  # pragma: no cover - typing only
+        # What a model mixing this in provides. Declared rather than inherited:
+        # the mixin is deliberately not a Model (SnapModel supplies the model
+        # half), but every attribute below is read by the methods here, so
+        # stating the contract is what makes those reads checkable.
+        _meta: Any
+        __name__: str
+        admin_enabled: bool
+        admin_mixins: list[type]
+        admin_overrides: dict[str, Any]
+        admin_tabs: list[dict[str, Any]]
+        compressed_fields: bool
+        css_admin_files: str | list[str]
+        js_admin_files: str | list[str]
+        list_filter_submit: bool
+        list_max_show_all: int
+        list_per_page: int
+        offline_mode: bool
+        show_full_result_count: bool
+        snap_inlines: list[type]
+        warn_unsaved_form: bool
 
     @classmethod
     def get_admin_fields(cls):
@@ -590,8 +615,9 @@ class AdminGenMixin:
         admin_attrs["__module__"] = cls.__module__
         admin_class = type(f"{cls.__name__}Admin", parent_classes, admin_attrs)
         try:
-            admin.site.register(cls, admin_class)
-        except admin.sites.AlreadyRegistered:
+            # cls is the SnapModel this mixin is mixed into.
+            admin.site.register(cast("type[models.Model]", cls), admin_class)
+        except AlreadyRegistered:
             pass
 
     @staticmethod
@@ -602,15 +628,15 @@ class AdminGenMixin:
         if _token_admin_enabled():
             try:
                 admin.site.register(APIToken, APITokenAdmin)
-            except admin.sites.AlreadyRegistered:
+            except AlreadyRegistered:
                 pass
         try:
             admin.site.register(ErrorEvent, ErrorEventAdmin)
-        except admin.sites.AlreadyRegistered:
+        except AlreadyRegistered:
             pass
         try:
             admin.site.register(SnapadminAuditLog, SnapadminAuditLogAdmin)
-        except admin.sites.AlreadyRegistered:
+        except AlreadyRegistered:
             pass
 
         for model in apps.get_models():

@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import shutil
 import tarfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import IO, cast
 
 from snapadmin.quickstart import QuickstartError, stamp as stamp_mod
 
@@ -43,7 +44,7 @@ def _print_paths(paths: list[Path]) -> None:
         print(f"  … and {len(paths) - 20} more")
 
 
-def _prompt_overwrite(replaced: list[Path], removed: list[Path] = ()) -> bool:
+def _prompt_overwrite(replaced: list[Path], removed: Sequence[Path] = ()) -> bool:
     if replaced:
         print("The following files already exist and would be replaced:")
         _print_paths(replaced)
@@ -102,7 +103,10 @@ def extract_demo(
                 target.mkdir(parents=True, exist_ok=True)
             elif member.isfile():
                 target.parent.mkdir(parents=True, exist_ok=True)
-                with tar.extractfile(member) as source, open(target, "wb") as out:
+                # `isfile()` above is exactly the condition under which
+                # extractfile() returns a stream rather than None.
+                source = cast(IO[bytes], tar.extractfile(member))
+                with source, open(target, "wb") as out:
                     shutil.copyfileobj(source, out)
             # symlinks / devices are deliberately skipped
 

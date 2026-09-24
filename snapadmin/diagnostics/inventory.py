@@ -12,7 +12,7 @@ database is unreachable they are simply omitted rather than failing the whole re
 from __future__ import annotations
 
 from django.apps import apps
-from django.db.models import Q
+from django.db.models import Model, Q
 from django.utils import timezone
 
 from snapadmin.conf import get_setting
@@ -38,11 +38,11 @@ _DOOR_CAPABILITY_MARKERS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _registered_models() -> list[type]:
+def _registered_models() -> list[type[Model]]:
     return [model for model in apps.get_models() if is_registered(model)]
 
 
-def _door(model: type) -> str:
+def _door(model: type[Model]) -> str:
     """Which registration door ``model`` came through: ``"subclass"`` or ``"decorator"``.
 
     ``register_admin`` is defined on ``SnapModel`` itself, so every subclass carries it

@@ -51,6 +51,8 @@ class SnapErrorMonitorMiddleware:
         return response
 
     def process_exception(self, request: HttpRequest, exception: Exception) -> None:
-        request._snapadmin_error_recorded = True
+        # A marker read back in process_response, set on the request the way
+        # Django's own middleware set their own attributes.
+        request._snapadmin_error_recorded = True  # type: ignore[attr-defined]
         record_error(request=request, exception=exception)
         return None
