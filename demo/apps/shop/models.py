@@ -464,9 +464,11 @@ Order.snap_inlines = [OrderItemInline]
 class Showcase(snap_models.SnapModel):
     # Tab: Text Content
     char_field = snap_fields.SnapCharField(max_length=100, verbose_name=_("Char Field"), show_in_form=True, searchable=True, tab=_("Text Content"))
-    text_field = snap_fields.SnapTextField(verbose_name=_("Text Field"), show_in_form=True, tab=_("Text Content"))
+    # row="prose" groups the two long-text fields; a rich-text editor in a row still
+    # gets a full-width line of its own (its toolbar needs the room) in either theme.
+    text_field = snap_fields.SnapTextField(verbose_name=_("Text Field"), show_in_form=True, tab=_("Text Content"), row="prose")
     # wysiwyg=True enables the rich-text editor (same as SnapRichTextField shorthand)
-    wysiwyg_field = snap_fields.SnapTextField(verbose_name=_("WYSIWYG Field"), wysiwyg=True, show_in_form=True, tab=_("Text Content"))
+    wysiwyg_field = snap_fields.SnapTextField(verbose_name=_("WYSIWYG Field"), wysiwyg=True, show_in_form=True, tab=_("Text Content"), row="prose")
 
     # Tab: Numeric Data — filterable fields show numeric range filters in the sidebar
     integer_field = snap_fields.SnapIntegerField(verbose_name=_("Integer Field"), show_in_form=True, filterable=True, tab=_("Numbers"))

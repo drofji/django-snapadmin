@@ -1,11 +1,28 @@
-{% extends "unfold/layouts/base.html" %}
+{% extends "admin/index.html" %}
 {% load demo_dashboard %}
 
 {% comment %}
+Extends the *next* admin/index.html in the template loader chain — Unfold's
+when the theme is active, Django's own otherwise — so the demo's admin index
+renders under either admin. It used to extend "unfold/layouts/base.html"
+directly, which made /admin/ a 500 the moment Unfold left INSTALLED_APPS, while
+the package itself promises to run on the stock admin (found by the browser
+suite, #QA1e).
+
+The panel is Tailwind markup that only Unfold styles, so it replaces the app
+list on the themed admin, whose sidebar already carries the navigation. On the
+stock admin the ordinary app list stays: there it is the only navigation the
+index has.
+
 The panel is pulled in as a *partial* via the inclusion tag. Never include a
 template that itself extends a layout here — the admin shell (sidebar, header,
 menu) would be rendered a second time inside this content block.
 {% endcomment %}
 {% block content %}
-    {% demo_dashboard %}
+    {% demo_admin_theme as admin_theme %}
+    {% if admin_theme == "unfold" %}
+        {% demo_dashboard %}
+    {% else %}
+        {{ block.super }}
+    {% endif %}
 {% endblock %}

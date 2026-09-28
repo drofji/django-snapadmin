@@ -1034,15 +1034,20 @@ UNFOLD = {
             "rel": "icon",
             "sizes": "32x32",
             "type": "image/svg+xml",
-            "href": lambda request: static_lambda("favicon.svg"),
+            # The package logo — the demo ships no favicon of its own, and a
+            # reference to one that does not exist is a 404 on every page.
+            "href": lambda request: static_lambda("snapadmin/snap-logo.svg"),
         },
     ],
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": True,
     "SHOW_BACK_BUTTON": False,
     "THEME": "light",
+    # No LOGIN["image"]: the demo ships no background picture, and pointing at
+    # one that does not exist made the login page request a 404 on every visit
+    # (found by the browser suite, #QA1e). Add a file under STATICFILES_DIRS and
+    # name it here to get Unfold's split login layout.
     "LOGIN": {
-        "image": lambda request: static_lambda("sample/login-bg.jpg"),
         "redirect_after": lambda request: reverse_lazy_lambda("admin:index"),
     },
     "STYLES": [

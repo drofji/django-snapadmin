@@ -465,8 +465,8 @@ class TestClaimedChecksReallyRun:
 #: ``tool -> the paragraph that has to change when it arrives``. Listed under
 #: "What is not in place yet" in both documents.
 _DOCUMENTED_AS_ABSENT = {
-    "playwright": "Browser E2E",
-    "cypress": "Browser E2E",
+    "locust": "Load testing",
+    "k6": "Load testing",
 }
 
 
@@ -578,6 +578,43 @@ class TestChecksDocumentedAsAbsentReallyAreAbsent:
             assert "mutmut" in text or "Mutation" in text, f"{document} does not describe it"
             assert "scripts/mutation.py" in text, f"{document} does not name the command"
 
+    def test_browser_e2e_runs_as_the_docs_describe(self):
+        """#QA1e — four pages describe one opt-in marker, one CI job that runs
+        the suite once per admin theme on Chromium, a pinned Playwright, no
+        retries, and a command a contributor can run. Pin every half of it,
+        because every half is a sentence somebody reads."""
+        assert "\nplaywright = " in _read(PYPROJECT), "playwright is not a declared dev dependency"
+        pytest_ini = _read(PYTEST_INI)
+        assert "not e2e" in pytest_ini, "the docs promise a plain `pytest` needs no browser"
+        assert "\n    e2e:" in pytest_ini, "the e2e marker is not registered"
+
+        workflow = _read(WORKFLOWS / "test.yml")
+        assert "\n  browser-e2e:" in workflow, "no browser-e2e job"
+        job = workflow.split("\n  browser-e2e:", 1)[1]
+        assert job.count("python -m pytest -m e2e") == 2, "the docs say the suite runs once per theme"
+        assert "SNAPADMIN_TEST_ADMIN_THEME: stock" in job, "no stock-admin run"
+        assert re.search(r'"playwright==\d+\.\d+\.\d+"', job), "Playwright is not pinned exactly"
+        assert "playwright install --with-deps chromium" in job
+        # The gap list says Firefox and WebKit do not run in CI yet.
+        assert "firefox" not in job and "webkit" not in job, (
+            "CI now runs another browser engine, but README.md and docs/index.html still list "
+            "Firefox and WebKit under 'What is not in place yet'"
+        )
+        for retrying in ("continue-on-error", "--reruns", "rerunfailures", "flaky"):
+            assert retrying not in job, f"the docs say a flaky browser test is diagnosed, never retried ({retrying})"
+
+        e2e_dir = REPO_ROOT / "tests" / "e2e"
+        assert (e2e_dir / "conftest.py").is_file()
+        for document in ("README.md", "docs/index.html", "llms.txt", "CONTRIBUTING.md"):
+            text = _read(REPO_ROOT / document)
+            assert "pytest -m e2e" in text, f"{document} does not give the command"
+            assert "SNAPADMIN_TEST_ADMIN_THEME=stock" in text, f"{document} omits the stock-admin run"
+        for document in ("README.md", "docs/index.html"):
+            named = sorted(set(re.findall(r"tests/e2e/test_[a-z_]+\.py", _read(REPO_ROOT / document))))
+            assert named, f"{document} names no browser test file"
+            missing = [name for name in named if not (REPO_ROOT / name).is_file()]
+            assert not missing, f"{document} names browser test file(s) that do not exist: {missing}"
+
     @pytest.mark.parametrize("document", ["README.md", "docs/index.html"])
     def test_a_running_check_is_not_listed_as_absent(self, document):
         """The inverse of the gap list: once a layer runs, the "not in place
@@ -586,6 +623,7 @@ class TestChecksDocumentedAsAbsentReallyAreAbsent:
         gap_section = text.split("What is not in place yet", 1)[1][:6000]
         assert "Property-based" not in gap_section, f"{document} still lists property-based tests as absent"
         assert "Mutation" not in gap_section, f"{document} still lists mutation testing as absent"
+        assert "Browser E2E" not in gap_section, f"{document} still lists browser E2E as absent"
 
     def test_branch_coverage_is_gated_as_the_docs_say(self):
         """#QA1d — all three pages now say branch coverage is gated at 100%. The
@@ -602,9 +640,9 @@ class TestChecksDocumentedAsAbsentReallyAreAbsent:
         "phrase, document",
         [
             ("What is not in place yet", "README.md"),
-            ("Browser E2E", "README.md"),
+            ("Load testing", "README.md"),
             ("What is not in place yet", "docs/index.html"),
-            ("Browser E2E", "docs/index.html"),
+            ("Load testing", "docs/index.html"),
         ],
     )
     def test_the_honest_gap_list_is_still_on_the_page(self, phrase, document):

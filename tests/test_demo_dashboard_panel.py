@@ -100,3 +100,40 @@ class TestDemoDashboardTag:
         html = admin_client.get("/admin/").content.decode()
         assert "99.99" in html
         assert "5,678" not in html                   # the old hardcoded placeholder
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The index works under either admin theme (#QA1e)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.django_db
+class TestAdminIndexUnderEitherTheme:
+    """The demo's index used to extend ``unfold/layouts/base.html`` directly, so
+    ``/admin/`` answered 500 on the stock admin the package promises to support.
+    It now extends the next ``admin/index.html`` in the loader chain and asks the
+    package which admin it built. The real stock-admin page is rendered by the
+    browser suite's stock run; here the package's flag is flipped in-process to
+    pin the template's two branches."""
+
+    PANEL_HEADING = "SnapAdmin Custom Dashboard"
+
+    def test_the_themed_admin_shows_the_panel(self, admin_client):
+        html = admin_client.get("/admin/").content.decode()
+
+        assert self.PANEL_HEADING in html
+
+    def test_the_stock_admin_keeps_the_app_list_instead(self, admin_client, monkeypatch):
+        monkeypatch.setattr("snapadmin.admin.UNFOLD_INSTALLED", False)
+
+        response = admin_client.get("/admin/")
+
+        html = response.content.decode()
+        assert response.status_code == 200
+        assert self.PANEL_HEADING not in html
+        assert 'href="/admin/demo/product/"' in html
+
+    @pytest.mark.parametrize("unfold_installed, expected", [(True, "unfold"), (False, "stock")])
+    def test_the_theme_tag_reports_the_package_flag(self, monkeypatch, unfold_installed, expected):
+        monkeypatch.setattr("snapadmin.admin.UNFOLD_INSTALLED", unfold_installed)
+
+        assert tag_module.demo_admin_theme() == expected

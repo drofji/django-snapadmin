@@ -395,12 +395,18 @@
         </footer>
     </div>
 
-    {# Serialised through json_script rather than |safe: a model verbose_name is
-       developer-supplied text and must not be pasted raw into a <script> body. #}
+    {% comment %}
+      Serialised through json_script rather than |safe: a model verbose_name is
+      developer-supplied text and must not be pasted raw into a script body.
+      A block comment, never a multi-line {# #}: Django only recognises that
+      form on a single line, and a multi-line one is rendered as page text.
+    {% endcomment %}
     {{ chart_data|json_script:"snap-chart-data" }}
-    {# escapejs, not a bare literal: a translated label can carry an apostrophe
-       (fr: "Nombre d'enregistrements"), which would close the JS string and
-       break the whole script block. #}
+    {% comment %}
+      escapejs, not a bare literal: a translated label can carry an apostrophe
+      (fr: "Nombre d'enregistrements"), which would close the JS string and
+      break the whole script block.
+    {% endcomment %}
     {% translate "Record Count" as record_count_label %}
     <script>
         const snapChartData = JSON.parse(document.getElementById('snap-chart-data').textContent);

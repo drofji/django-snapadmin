@@ -34,6 +34,9 @@ the `0.x` beta series.
   number where a list belongs, a list where a rule map belongs).
 - `POST /api/exports/` answers `400` for `filters` that are not a JSON object of scalars, and reports
   every `filters` error under `filters` (the key allowlist used `non_field_errors`).
+- The audit trail records a relation by its key — a foreign key as the key it holds, a many-to-many
+  as the sorted list of primary keys — on both sides of a change and on a created entry, instead of
+  the related object's label.
 
 ### Added
 - `snapadmin_restore --database <alias>` for restore drills: `db` only, into another alias, with a
@@ -46,6 +49,8 @@ the `0.x` beta series.
 - System checks `snapadmin.W023` (backups configured but disabled), `W024` (`env` part with no env
   file) and `W025` (masked fields behind a hand-written admin that does not mask).
 - `SnapModel.purge_expired()` returns `SnapPurgeResult`, an `int` with `skipped_protected`.
+- Browser end-to-end tests: Playwright drives the generated admin through the demo, on Unfold and
+  on the stock admin, in a new CI job (`pytest -m e2e` locally, opt-in).
 
 ### Changed
 - `llms.txt` carries the full adoption playbook an assistant needs before writing integration
@@ -86,8 +91,18 @@ the `0.x` beta series.
   `editable=True` on a wrapped `auto_now` field no longer crashes `makemigrations`.
 - An encryption key configured as bytes or a number is an `ImproperlyConfigured`, not an
   `AttributeError`.
+- The system dashboard's chart is drawn again (a multi-line template comment broke it in 0.1.0b6).
+- The outage guard disables Save on Unfold too, and says "Back online" only after an outage.
+- `SnapOneToOneField` / `SnapManyToManyField` with `show_in_form=True` appear in the generated
+  form (a many-to-many with its own `through` model stays out); `autocomplete=True` on a one-to-one
+  is honoured; no reverse relation in `autocomplete_fields`.
+- The audit trail stores a JSON field's list or object as JSON rather than as its Python repr.
+- The rich-text editor no longer widens the form past the window, and gets a full line inside a
+  `row=` group; stock-admin selects show their value.
 
 ### Security
+- The audit trail no longer stores a related object's label (`str(row)`, often a name or an email),
+  which masking could not see.
 - `formatted_id` escapes a non-integer primary key instead of rendering it as markup (stored XSS).
 - Alert webhooks accept only `http`/`https` URLs.
 - `snapadmin_restore` escapes the database name in the SQL it sends to `psql`.

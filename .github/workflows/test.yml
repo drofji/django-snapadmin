@@ -5,7 +5,8 @@ name: Tests
 # matrix jobs mock Elasticsearch / Redis / Celery and use an in-memory SQLite database, so they need
 # no service containers. The seventh job, `real-services`, is the deliberate exception: it runs the
 # same suite against a real PostgreSQL and a live Elasticsearch — see its own comment below. The
-# eighth, `static-analysis`, runs Ruff (lint, format, security rules) and mypy.
+# eighth, `static-analysis`, runs Ruff (lint, format, security rules) and mypy. The ninth,
+# `browser-e2e`, drives the generated admin in a real browser, under both admin themes.
 
 on:
   push:
@@ -219,3 +220,68 @@ jobs:
           SNAPADMIN_TEST_POSTGRES_PASSWORD: snapadmin
           SNAPADMIN_TEST_ES_URL: http://localhost:9200
         run: python -m pytest -m real_es
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # The generated admin, in a real browser.
+  #
+  # Django's test client is not a browser: it cannot run the admin's JavaScript,
+  # load its stylesheets, open a select2 autocomplete or see a chart drawn.
+  # Playwright drives Chromium against the demo project served by pytest-django's
+  # live server — login, navigation, search, filters, pagination, a bulk action,
+  # an inline, validation errors, permission refusals, the dashboard chart and
+  # the outage guard — and fails any page that throws a JavaScript error, loses
+  # an asset or answers 5xx (tests/e2e/conftest.py).
+  #
+  # ONE job, ONE combination, like `real-services`: a browser renders the same
+  # page whatever the interpreter version. It runs the suite twice, because the
+  # admin theme is fixed per process at import time: once on Unfold, once on
+  # Django's stock admin, which the package promises to support just as fully.
+  # Deselected everywhere else (`-m "not ... e2e"` in pytest.ini), so the
+  # everyday local run needs no browser. Flaky is a diagnosis, never a retry —
+  # no rerun plugin, no raised timeout; a failed scenario uploads its trace.
+  browser-e2e:
+    name: Browser E2E · py3.12 · Django 5.2
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        # Playwright is pinned exactly: each release pins the browser build it
+        # drives, so a floating version would change the browser under the
+        # suite without a commit saying so.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r demo/requirements.txt
+          pip install "Django~=5.2.0" "playwright==1.63.0"
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Browser E2E · Unfold admin
+        run: python -m pytest -m e2e
+
+      - name: Browser E2E · stock Django admin
+        # Runs even when the Unfold pass failed, so one red run shows both.
+        if: ${{ !cancelled() }}
+        env:
+          SNAPADMIN_TEST_ADMIN_THEME: stock
+        run: python -m pytest -m e2e
+
+      - name: Keep the traces of failed scenarios
+        # One zip per failed test: open it with `playwright show-trace <zip>`
+        # to replay the run step by step, DOM and network included. Only test
+        # data is in them — the fixtures' throwaway users and rows.
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-e2e-traces
+          path: test-results/e2e/
+          retention-days: 7
+          if-no-files-found: ignore

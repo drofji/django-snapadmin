@@ -73,6 +73,18 @@ def _recent_activity() -> list[dict[str, Any]]:
     return rows
 
 
+@register.simple_tag
+def demo_admin_theme() -> str:
+    """``"unfold"`` or ``"stock"`` — whichever admin SnapAdmin actually built.
+
+    Read from the package's own flag rather than re-derived from settings, so the
+    demo's index and the generated ModelAdmins can never disagree about the theme.
+    """
+    from snapadmin.admin import UNFOLD_INSTALLED
+
+    return "unfold" if UNFOLD_INSTALLED else "stock"
+
+
 @register.inclusion_tag("demo/_dashboard_body.html")
 def demo_dashboard() -> dict[str, Any]:
     """Collect the live figures rendered by the demo's admin index panel."""

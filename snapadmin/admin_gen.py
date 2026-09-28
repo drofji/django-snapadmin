@@ -236,6 +236,30 @@ def _group_fields_by_row(model, field_names: list[str]) -> list:
     return [tuple(item) if isinstance(item, list) else item for item in grouped]
 
 
+def _forward_fields(model) -> list:
+    """The fields a change form can edit, in declaration order.
+
+    Every forward field — a foreign key, a one-to-one and a many-to-many
+    included — sorted the way Django's own ``ModelForm`` sorts them. The
+    changelist's column set is built from a narrower list that leaves relations
+    out, and the form used to share it, so a ``SnapOneToOneField`` or
+    ``SnapManyToManyField`` declared ``show_in_form=True`` was silently missing
+    from the form: a profile could be saved without its owner, and a product's
+    tags could not be edited in the admin at all (found by the browser suite,
+    #QA1e). Reverse relations are not listed here, so they never reach a form,
+    and neither does a many-to-many with a ``through`` model of its own.
+    """
+    editable_many_to_many = [
+        field
+        for field in model._meta.many_to_many
+        # A many-to-many through a model of the project's own cannot be edited
+        # by a model form at all; Django refuses it in fields/fieldsets
+        # (admin.E013), so letting one through would stop the admin booting.
+        if field.remote_field.through._meta.auto_created
+    ]
+    return sorted([*model._meta.fields, *editable_many_to_many], key=lambda f: f.creation_counter)
+
+
 def _fieldsets_for(model, form_fields: list[str]) -> list:
     """The form's fieldsets: one per ``tab=`` name, plus the untabbed fields."""
     tabs: dict[str, list[str]] = {}
@@ -326,17 +350,19 @@ class AdminGenMixin:
             for f in cls._meta.get_fields()
             if hasattr(f, "name") and not (f.one_to_many or f.one_to_one or f.many_to_many)
         }
-        meta_fields_related = {
-            f.name: f
-            for f in cls._meta.get_fields()
-            if hasattr(f, "name") and (f.many_to_one or f.many_to_many)
-        }
+        forward_fields = _forward_fields(cls)
+        # The relations the form can edit: forward foreign keys, one-to-ones
+        # and many-to-manys. Built from get_fields() it also took in reverse
+        # many-to-many relations (a Tag admin listed its products' reverse
+        # accessor as an autocomplete field) and left forward one-to-ones out
+        # (`autocomplete=True` on a SnapOneToOneField did nothing).
+        meta_fields_related = {f.name: f for f in forward_fields if f.is_relation}
         attr_fields = {fn: fo for fn, fo in cls.__dict__.items()}
 
         form_fields = [
-            fn
-            for fn, fo in meta_fields.items()
-            if getattr(fo, SnapFieldAttributeEnum.SHOW_IN_FORM.value, None)
+            f.name
+            for f in forward_fields
+            if getattr(f, SnapFieldAttributeEnum.SHOW_IN_FORM.value, None)
         ]
         list_display = [
             fn
@@ -387,7 +413,12 @@ class AdminGenMixin:
         autocomplete_fields = [
             fn
             for fn, fo in meta_fields_related.items()
-            if getattr(fo, SnapFieldAttributeEnum.AUTOCOMPLETE.value, True)
+            # A field without the SnapField flag (a plain Django relation) keeps
+            # the long-standing default of True for a foreign key or a
+            # many-to-many. A one-to-one never took part before, and a plain one
+            # would demand a searchable admin on its target (admin.E039/E040) —
+            # so it joins only when it asks, with autocomplete=True.
+            if getattr(fo, SnapFieldAttributeEnum.AUTOCOMPLETE.value, not fo.one_to_one)
         ]
 
         # A rich-text column renders HTML, so it is shown through a generated,

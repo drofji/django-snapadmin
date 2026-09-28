@@ -116,14 +116,41 @@ ASSERTION_FREE_TESTS = frozenset(
 
 
 def _test_functions():
-    """(file name, function node) for every test in the suite."""
-    for path in sorted(TESTS_ROOT.glob("test_*.py")):
+    """(file name, function node) for every test in the suite.
+
+    Walks subdirectories too, so the browser suite under ``tests/e2e/`` is held
+    to the same rules; a file there is named by its path relative to
+    ``tests/`` (``e2e/test_x.py``), a top-level one by its bare name as before.
+    """
+    for path in sorted(TESTS_ROOT.rglob("test_*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
+        file_name = path.relative_to(TESTS_ROOT).as_posix()
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(
                 "test_"
             ):
-                yield path.name, node
+                yield file_name, node
+
+
+def _uses_web_first_assertion(function: ast.AST) -> bool:
+    """Whether ``function`` asserts through Playwright's ``expect(...)``.
+
+    ``expect(locator).to_have_count(2)`` fails the test like an ``assert`` does,
+    but carries no ``assert`` keyword. Only a call of a ``to_*`` / ``not_to_*``
+    method made directly on the result of ``expect(...)`` counts — a bare
+    ``expect(...)`` with no matcher asserts nothing and is not accepted.
+    """
+    for node in ast.walk(function):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr.startswith(("to_", "not_to_"))
+            and isinstance(node.func.value, ast.Call)
+            and isinstance(node.func.value.func, ast.Name)
+            and node.func.value.func.id == "expect"
+        ):
+            return True
+    return False
 
 
 def _is_truthy_constant(node: ast.AST) -> bool:
@@ -176,6 +203,8 @@ class TestEveryTestAssertsSomething:
         for file_name, fn in _test_functions():
             if any(isinstance(node, ast.Assert) for node in ast.walk(fn)):
                 continue
+            if _uses_web_first_assertion(fn):
+                continue
             source = ast.dump(fn)
             if any(helper in source for helper in _ASSERTION_HELPERS):
                 continue
@@ -201,3 +230,23 @@ class TestEveryTestAssertsSomething:
     def test_the_list_only_ever_shrinks(self):
         """A ceiling, so the shape cannot spread while the list is being burned down."""
         assert len(ASSERTION_FREE_TESTS) <= 51, len(ASSERTION_FREE_TESTS)
+
+
+class TestWebFirstAssertionsAreRecognisedExactly:
+    """The browser suite asserts through ``expect(...).to_*()``; the guard must
+    accept exactly that and nothing that merely looks like it."""
+
+    @pytest.mark.parametrize(
+        "body, recognised",
+        [
+            ("expect(page).to_have_url('/admin/')", True),
+            ("expect(rows).not_to_be_visible()", True),
+            ("expect(page)", False),
+            ("result.to_have_count(1)", False),
+            ("helpers.expect(page).to_have_url('/')", False),
+        ],
+    )
+    def test_only_a_matcher_called_on_expect_counts(self, body, recognised):
+        function = ast.parse(f"def test_x():\n    {body}\n").body[0]
+
+        assert _uses_web_first_assertion(function) is recognised

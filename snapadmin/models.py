@@ -744,19 +744,31 @@ class SnapSaveMixin:
             from snapadmin import audit
 
             created = {
-                name: audit.change_entry(type(obj), name, None, form.cleaned_data.get(name))
+                name: audit.change_entry(
+                    type(obj),
+                    name,
+                    None,
+                    audit.relation_value(type(obj), name, form.cleaned_data.get(name)),
+                )
                 for name in form.cleaned_data
             }
             audit.record_audit(request, audit.CREATE, obj, created or None)
             return
+        from snapadmin import audit
+
         change_lines = []
         changes = {}
         for field_name in form.changed_data:
-            old_val = form.initial.get(field_name)
-            new_val = form.cleaned_data.get(field_name)
+            # Both sides in one shape first: a relation's initial value is a key
+            # and its cleaned value a row (or a list and a queryset), which would
+            # otherwise always compare unequal and record two different formats.
+            # Keys, not labels — see audit.relation_value for why.
+            old_val = audit.relation_value(self.model, field_name, form.initial.get(field_name))
+            new_val = audit.relation_value(
+                self.model, field_name, form.cleaned_data.get(field_name)
+            )
             if old_val != new_val:
                 verbose = _(self.model._meta.get_field(field_name).verbose_name)
-                from snapadmin import audit
 
                 # Django's own LogEntry message is a second copy of the diff and
                 # is shown in the admin's history view, so it gets the same
@@ -764,7 +776,9 @@ class SnapSaveMixin:
                 if audit.field_is_encrypted(self.model, field_name):
                     change_lines.append(f"{verbose}: {audit.REDACTED} -> {audit.REDACTED}")
                 else:
-                    change_lines.append(f"{verbose}: '{old_val}' -> '{new_val}'")
+                    change_lines.append(
+                        f"{verbose}: '{audit.log_text(old_val)}' -> '{audit.log_text(new_val)}'"
+                    )
                 changes[field_name] = audit.change_entry(self.model, field_name, old_val, new_val)
         super().save_model(request, obj, form, change)
         if change_lines:
@@ -779,8 +793,6 @@ class SnapSaveMixin:
             # this object so log_change() can suppress Django's generic duplicate.
             request._snap_logged_change = True
         if changes:
-            from snapadmin import audit
-
             audit.record_audit(request, audit.UPDATE, obj, changes)
 
     def delete_model(self, request, obj):

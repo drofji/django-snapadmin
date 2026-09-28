@@ -47,6 +47,14 @@ ul.object-tools a[href*="/add/"] {
     box-sizing: border-box !important;
 }
 
+/* A rich-text field grouped into a `row=` takes the row's full width, on a line
+   of its own. Unfold lays a row out as equal grid columns with each label beside
+   its control, which left an editor a sliver of its third — its toolbar reduced
+   to the "more" button (found by the browser suite, #QA1e). */
+.field-row.grid > :has(.ck-editor-container) {
+    grid-column: 1 / -1;
+}
+
 /* Unfold renders a themed <select>: `appearance-none`, a right gutter and its
    own chevron span. Guarantee both halves of that contract survive any other
    stylesheet on the page — without them the browser paints its native arrow

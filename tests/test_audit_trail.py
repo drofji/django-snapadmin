@@ -92,6 +92,22 @@ class TestHelpers:
         assert audit.format_value(1.5) == 1.5
         assert audit.format_value("42") == "42"
 
+    def test_format_value_keeps_json_containers_as_json(self):
+        """A JSON field's value and a many-to-many's keys are JSON already; they
+        used to be stored as their Python repr (``"[{'a': 1}]"``)."""
+        from decimal import Decimal
+        assert audit.format_value([3, 7]) == [3, 7]
+        assert audit.format_value([1, Decimal("2.5"), None]) == [1, "2.5", None]
+        assert audit.format_value({"a": [1, {"b": Decimal("1.0")}], 2: True}) == {
+            "a": [1, {"b": "1.0"}], "2": True,
+        }
+
+    def test_log_text_writes_containers_as_json(self):
+        assert audit.log_text([3, 7]) == "[3, 7]"
+        assert audit.log_text({"b": 1, "a": 2}) == '{"a": 2, "b": 1}'
+        assert audit.log_text("Lamp") == "Lamp"
+        assert audit.log_text(None) is None
+
     def test_format_value_stringifies_the_rest(self):
         from decimal import Decimal
         assert audit.format_value(Decimal("1.20")) == "1.20"
@@ -213,6 +229,181 @@ class TestAdminCapture:
         from demo.apps.shop.models import Product
         self._product_admin().delete_queryset(_request(admin_user), Product.objects.all())
         assert SnapadminAuditLog.objects.filter(action="delete").count() == len(many_products)
+
+
+# ── Relations are recorded by key, in one shape on both sides (#QA1e) ───────
+
+@pytest.mark.django_db
+class TestRelationsAreRecordedByKey:
+    """A form hands a relation's two sides over differently: a foreign key's
+    initial value is the related row's key while its cleaned value is the row
+    itself, and a many-to-many arrives as a list of rows on one side and a
+    queryset on the other. Stored as given, a change read
+    ``{"old": 1, "new": "Jones, Bob"}`` and a many-to-many became two Python
+    reprs (``"<QuerySet [<Tag: sale>]>"``). Both sides carry keys now.
+
+    Keys and not labels: a label is ambiguous (two customers named alike), and
+    it is whatever the related model's ``__str__`` prints — a name, an email —
+    which masking never sees, because masking knows only this model's own
+    field names. Found once the browser suite made generated forms save
+    many-to-many fields at all; the label half was found in review."""
+
+    def test_a_changed_foreign_key_records_both_keys(self, admin_client, customer, customer_inactive):
+        from django.contrib.admin.models import LogEntry
+
+        from demo.apps.shop.models import CustomerProfile
+
+        profile = CustomerProfile.objects.create(customer=customer, bio="b")
+
+        admin_client.post(
+            f"/admin/demo/customerprofile/{profile.pk}/change/",
+            {"customer": customer_inactive.pk, "newsletter": "false", "bio": "b"},
+        )
+
+        row = SnapadminAuditLog.objects.get(action="update")
+        assert row.changes == {"customer": {"old": customer.pk, "new": customer_inactive.pk}}
+        assert LogEntry.objects.get().change_message == (
+            f"Customer: '{customer.pk}' -> '{customer_inactive.pk}'"
+        )
+
+    def test_a_foreign_key_moved_to_a_namesake_is_still_recorded(self, admin_client, customer):
+        from demo.apps.shop.models import Customer, CustomerProfile
+
+        namesake = Customer.objects.create(
+            first_name=customer.first_name, last_name=customer.last_name, email="other@example.com"
+        )
+        assert str(namesake) == str(customer)
+        profile = CustomerProfile.objects.create(customer=customer, bio="b")
+
+        admin_client.post(
+            f"/admin/demo/customerprofile/{profile.pk}/change/",
+            {"customer": namesake.pk, "newsletter": "false", "bio": "b"},
+        )
+
+        row = SnapadminAuditLog.objects.get(action="update")
+        assert row.changes == {"customer": {"old": customer.pk, "new": namesake.pk}}
+
+    def test_no_related_label_reaches_the_trail(self, admin_client, customer):
+        """The related customer's name and email are masked elsewhere; the
+        trail of a *profile* must not become the place they can be read."""
+        admin_client.post(
+            "/admin/demo/customerprofile/add/", {"customer": customer.pk, "bio": "b"},
+        )
+
+        row = SnapadminAuditLog.objects.get(action="create")
+        assert row.changes["customer"] == {"old": None, "new": customer.pk}
+        stored = json.dumps(row.changes)
+        assert customer.last_name not in stored and customer.email not in stored
+
+    def test_a_created_many_to_many_records_the_sorted_keys(self, admin_client):
+        from demo.apps.shop.models import Tag
+
+        sale, new = Tag.objects.create(name="sale"), Tag.objects.create(name="new")
+
+        admin_client.post(
+            "/admin/demo/product/add/",
+            {"name": "Lamp", "price": "5.00", "available": "true", "tags": [new.pk, sale.pk]},
+        )
+
+        row = SnapadminAuditLog.objects.get(action="create")
+        assert row.changes["tags"] == {"old": None, "new": sorted([sale.pk, new.pk])}
+
+    def test_a_changed_many_to_many_records_both_key_lists(self, admin_client):
+        from django.contrib.admin.models import LogEntry
+
+        from demo.apps.shop.models import Product, Tag
+
+        sale, new = Tag.objects.create(name="sale"), Tag.objects.create(name="new")
+        product = Product.objects.create(name="Lamp", price=5, available=True)
+        product.tags.set([sale])
+
+        admin_client.post(
+            f"/admin/demo/product/{product.pk}/change/",
+            {"name": "Lamp", "price": "5.00", "available": "true", "tags": [new.pk, sale.pk]},
+        )
+
+        row = SnapadminAuditLog.objects.get(action="update")
+        assert row.changes == {"tags": {"old": [sale.pk], "new": [sale.pk, new.pk]}}
+        assert LogEntry.objects.get().change_message == (
+            f"Tags: '[{sale.pk}]' -> '[{sale.pk}, {new.pk}]'"
+        )
+
+    def test_the_same_many_to_many_resubmitted_records_no_change(self, admin_client):
+        from demo.apps.shop.models import Product, Tag
+
+        sale, new = Tag.objects.create(name="sale"), Tag.objects.create(name="new")
+        product = Product.objects.create(name="Lamp", price=5, available=True)
+        product.tags.set([sale, new])
+
+        admin_client.post(
+            f"/admin/demo/product/{product.pk}/change/",
+            {"name": "Lamp", "price": "5.00", "available": "true", "tags": [new.pk, sale.pk]},
+        )
+
+        assert SnapadminAuditLog.objects.filter(action="update").count() == 0
+
+
+@pytest.mark.django_db
+class TestRelationValue:
+    def test_a_related_row_becomes_its_key(self, customer, django_assert_num_queries):
+        from demo.apps.shop.models import Order
+
+        with django_assert_num_queries(0):
+            assert audit.relation_value(Order, "customer", customer) == customer.pk
+
+    def test_a_foreign_key_to_another_field_records_that_field(self):
+        """The key a foreign key stores is its ``to_field``, not always the pk."""
+        from django.db import models
+        from django.test.utils import isolate_apps
+
+        with isolate_apps("demo"):
+            class Currency(models.Model):
+                code = models.CharField(max_length=3, unique=True)
+
+                class Meta:
+                    app_label = "demo"
+
+            class Price(models.Model):
+                currency = models.ForeignKey(Currency, on_delete=models.CASCADE, to_field="code")
+
+                class Meta:
+                    app_label = "demo"
+
+            assert audit.relation_value(Price, "currency", Currency(pk=7, code="EUR")) == "EUR"
+
+    def test_a_key_stays_a_key_without_a_query(self, django_assert_num_queries):
+        from demo.apps.shop.models import Order
+
+        with django_assert_num_queries(0):
+            assert audit.relation_value(Order, "customer", 404) == 404
+
+    def test_a_many_to_many_becomes_its_sorted_keys(self):
+        from demo.apps.shop.models import Product, Tag
+
+        sale, new = Tag.objects.create(name="sale"), Tag.objects.create(name="new")
+
+        assert audit.relation_value(Product, "tags", [new, sale]) == sorted([sale.pk, new.pk])
+        assert audit.relation_value(Product, "tags", Tag.objects.all()) == sorted([sale.pk, new.pk])
+        assert audit.relation_value(Product, "tags", [new.pk, sale.pk]) == sorted([sale.pk, new.pk])
+        assert audit.relation_value(Product, "tags", []) == []
+
+    @pytest.mark.parametrize(
+        "model_name, field_name, value",
+        [
+            ("Product", "name", "Lamp"),                 # not a relation
+            ("Product", "customer_notes", "free text"),  # a form-only field, no model field behind it
+            ("Product", "category", None),               # an empty relation
+            ("Customer", "profile", "anything"),         # a reverse accessor, never a form field
+        ],
+    )
+    def test_everything_else_is_returned_unchanged(self, model_name, field_name, value):
+        from django.apps import apps
+
+        model = apps.get_model("demo", model_name)
+
+        assert audit.relation_value(model, field_name, value) == value
+
+
 
 
 # ── Read-only admin ──────────────────────────────────────────────────────────

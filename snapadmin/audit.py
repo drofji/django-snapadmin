@@ -33,9 +33,12 @@ SIEM with ``manage.py snapadmin_audit_export``.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from math import isfinite
+from typing import Any, cast
 
 from django.core.exceptions import FieldDoesNotExist
+from django.db import models
 
 from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
@@ -85,6 +88,47 @@ def change_entry(model, field_name: str, old, new) -> dict:
     return {"old": format_value(old), "new": format_value(new)}
 
 
+def relation_value(model, field_name: str, value: object) -> object:
+    """One side of a relation's diff: the related row's key, in one shape.
+
+    A model form hands the two sides of a relation over differently: the
+    initial value of a foreign key or one-to-one is the related row's key while
+    the cleaned value is the row itself, and a many-to-many is a list of rows on
+    one side and a queryset on the other. Both sides are reduced to keys here —
+    a foreign key to the value it stores (its ``to_field``, the primary key by
+    default), a many-to-many to the sorted list of primary keys, so a
+    reordered but identical selection compares equal and is not recorded.
+
+    Keys and never labels, deliberately. A label (``str(row)``) is ambiguous —
+    two customers can both be "Smith, John", and re-pointing an order from one
+    to the other must still be recorded — and it is a way around masking: it is
+    whatever the related model's ``__str__`` prints, often a name or an email,
+    and masking only knows this model's own field names. The trail records
+    *which* row, and the row itself stays behind its own permissions.
+
+    Anything that is not a forward foreign key, one-to-one or many-to-many of
+    ``model`` — a plain field, a form-only field, ``None`` — is returned
+    unchanged. No query is run.
+    """
+    try:
+        field = model._meta.get_field(field_name)
+    except FieldDoesNotExist:
+        return value
+    if value is None:
+        return value
+    if isinstance(field, models.ManyToManyField):
+        # A form's many-to-many side is always a list or a queryset of rows.
+        rows = cast("Iterable[object]", value)
+        # Primary keys of one model share one orderable type (int, str, UUID).
+        keys: list[Any] = [row.pk if isinstance(row, models.Model) else row for row in rows]
+        return sorted(keys)
+    if isinstance(field, models.ForeignKey):
+        if isinstance(value, models.Model):
+            return getattr(value, field.target_field.attname)
+        return value
+    return value
+
+
 def audit_enabled() -> bool:
     """Whether administrative actions are recorded to the audit trail."""
     return bool(get_setting("SNAPADMIN_AUDIT_LOG_ENABLED", True))
@@ -118,6 +162,10 @@ def format_value(value) -> object | None:
     * ``float`` → unchanged when finite. ``inf`` / ``nan`` have no JSON
       literal and are rejected by strict JSON columns, so they fall back to
       their string form;
+    * a ``list`` or a ``dict`` (a JSON field's value, a many-to-many's keys —
+      see :func:`relation_value`) → the same container, every item formatted
+      by these same rules, so it is stored as JSON rather than as its Python
+      repr (dict keys become text, as JSON requires);
     * anything else (``Decimal``, ``date``, ``UUID``, a model instance, …) →
       ``str(value)``, exactly as before.
 
@@ -128,6 +176,10 @@ def format_value(value) -> object | None:
         return value
     if isinstance(value, float):
         return value if isfinite(value) else str(value)
+    if isinstance(value, list):
+        return [format_value(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): format_value(item) for key, item in value.items()}
     return str(value)
 
 
@@ -147,6 +199,18 @@ def display_value(value) -> str:
     if isinstance(value, (list, dict)):
         return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
     return str(value)
+
+
+def log_text(value: object) -> object:
+    """A diff side as it appears in Django's own admin history message.
+
+    Scalars keep the ``str()`` form that message has always used; a list or a
+    dict (a many-to-many's keys, a JSON value) is written as compact JSON rather
+    than as a Python repr full of nested quotes.
+    """
+    if isinstance(value, (list, dict)):
+        return display_value(value)
+    return value
 
 
 def diff_rows(changes: dict | None) -> list[dict]:

@@ -200,6 +200,9 @@ hypothesis = ">=6.100"
 # Mutation testing (#QA1d), advisory: scripts/mutation.py + .github/workflows/mutation.yml.
 # BSD-3-Clause, dev-only.
 mutmut = ">=3.8"
+# Browser E2E over the generated admin (tests/e2e/, `pytest -m e2e`; #QA1e).
+# Apache-2.0, dev-only; CI pins the exact version. Needs `playwright install chromium`.
+playwright = ">=1.45"
 faker = "^25.0.0"
 # Dev extras (installed via demo/requirements.txt)
 # The suite exercises the REST API and GraphQL end to end; the package core

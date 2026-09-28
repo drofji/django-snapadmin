@@ -40,6 +40,24 @@ div.form-row label {
     font-weight: 600 !important;
 }
 
+/* A rich-text field's label and editor share Django's `.flex-container` row.
+   Let that one row wrap, so the editor gets a full-width line under its label
+   like every other control here instead of splitting the row with it. */
+div.form-row .flex-container:has(> .ck-editor-container) {
+    flex-wrap: wrap;
+}
+
+/* The same editor grouped into a `row=` sits in one of the row's field boxes,
+   each sized to its content — and a contained editor has none to offer. Give
+   that box a full-width line of its own, and the editor the whole box. */
+div.form-row .form-multiline > div:has(.ck-editor-container) {
+    flex: 1 1 100%;
+}
+
+div.form-row div.fieldBox.flex-container:has(.ck-editor-container) {
+    align-items: stretch !important;
+}
+
 div.fieldBox.flex-container {
     display: flex !important;
     flex-direction: column !important;
@@ -88,6 +106,12 @@ textarea {
 
 select:not([multiple]) {
     padding: 12px 36px 12px 16px !important;
+    /* Django's base.css fixes a select at 1.875rem (30px). Under this padding
+       that left a 6px content box, so the chosen value — "Yes" on a boolean,
+       "---------" on the action picker — rendered invisibly: every select on
+       the stock admin looked empty while holding a value (found by the
+       browser suite, #QA1e). The box must grow with its padding. */
+    height: auto !important;
 }
 
 /* Keep the dropdown options readable: the selected option was rendering as

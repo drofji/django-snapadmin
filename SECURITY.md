@@ -432,6 +432,12 @@ Key protections:
   *replaced* in `readonly_fields`, which pushed the real field back into the form where Django
   rendered it read-only and unmasked next to the masked copy (fixed in the current release).
 - **Immutable audit trail** (`SNAPADMIN_AUDIT_LOG_ENABLED`) records every admin create/update/delete.
+  A relation is recorded by its key — a foreign key as the key it holds, a many-to-many as the
+  sorted list of primary keys — never by the related object's label: a label is whatever that
+  model's `__str__` prints (often a name or an email), which the trail's masking cannot see because
+  it only knows the audited model's own fields, and two objects can share one. Earlier releases
+  stored labels (and mixed a key with a label on a changed foreign key); fixed in the current
+  release, rows already written keep what they stored.
   Retention is enforced two ways against the same `SNAPADMIN_AUDIT_RETENTION_DAYS` (default **365**,
   on by default): automatically, by `snapadmin.purge_expired_data` (the audit log is not a
   `SnapModel`, so this is an explicit step in that task/command, not the generic per-model sweep),

@@ -78,6 +78,29 @@ else:
         },
     }
 
+# ── Admin theme: Unfold by default, Django's stock admin on request ──────────
+# SnapAdmin builds every generated ModelAdmin on Unfold's classes when 'unfold'
+# is in INSTALLED_APPS and on Django's own otherwise, and the choice is made
+# once, at import time — so one process can only ever render one of the two.
+# The browser suite (tests/e2e/) is run once per theme in CI to prove both
+# admins work in a real browser; SNAPADMIN_TEST_ADMIN_THEME=stock is how the
+# second run asks for the stock one. Anything but the two known values is a
+# typo, and a typo that silently ran the themed admin would report the stock
+# admin as tested when it never was.
+_ADMIN_THEME = os.environ.get("SNAPADMIN_TEST_ADMIN_THEME", "unfold")
+if _ADMIN_THEME == "stock":
+    INSTALLED_APPS = [  # noqa: F405
+        app for app in INSTALLED_APPS  # noqa: F405
+        if app != "unfold" and not app.startswith("unfold.")
+    ]
+elif _ADMIN_THEME != "unfold":
+    from django.core.exceptions import ImproperlyConfigured
+
+    raise ImproperlyConfigured(
+        f"SNAPADMIN_TEST_ADMIN_THEME={_ADMIN_THEME!r}: expected 'unfold' (the default) "
+        "or 'stock'."
+    )
+
 # ── Field encryption: a fixed test keyset ────────────────────────────────────
 # CustomerProfile.tax_id is encrypted, and an encrypted field with no keyset is
 # a startup error by design. Pinned here rather than inherited so the suite is

@@ -54,6 +54,22 @@ def _revealed(original: str, masked: str) -> int:
     return sum(1 for a, b in zip(original, masked) if a == b and b != "*")
 
 
+def _second_pass_hides_at_least_as_much(original, once, twice) -> bool:
+    """Leaf by leaf: a string may be masked further, never revealed; the rest is stable."""
+    if isinstance(original, list):
+        return len(once) == len(twice) == len(original) and all(
+            map(_second_pass_hides_at_least_as_much, original, once, twice)
+        )
+    if isinstance(original, dict):
+        return once.keys() == twice.keys() == original.keys() and all(
+            _second_pass_hides_at_least_as_much(original[key], once[key], twice[key])
+            for key in original
+        )
+    if isinstance(original, str):
+        return _revealed(original, twice) <= _revealed(original, once)
+    return twice == once
+
+
 class TestBuiltInMasker:
     @given(value=NO_AT)
     def test_a_plain_string_reveals_at_most_two_characters_at_each_end(self, value):
@@ -108,14 +124,16 @@ class TestBuiltInMasker:
         grows, the data does not come back. (Found by hypothesis; there is no
         pipeline that masks twice, each surface masks the raw value once.) The
         guarantee that matters is one-directional: a second pass can only hide
-        more."""
+        more.
+
+        Checked leaf by leaf, because the same holds for a string *inside* a
+        list or a dict: the first version only allowed it for a top-level
+        string and demanded equality for every container, which hypothesis
+        refuted with ``["@"]`` — the law was too broad, not the masker wrong."""
         once = mask_value(value)
         twice = mask_value(once)
 
-        if isinstance(value, str):
-            assert _revealed(value, twice) <= _revealed(value, once)
-        else:
-            assert twice == once
+        assert _second_pass_hides_at_least_as_much(value, once, twice)
 
     @given(value=st.text().filter(lambda s: "@" not in s))
     def test_masking_a_plain_string_twice_is_masking_it_once(self, value):

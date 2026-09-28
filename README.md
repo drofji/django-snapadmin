@@ -561,6 +561,8 @@ Concretely, on the current release:
   and 6.0, six jobs. A release is gated on the same matrix: the tag-triggered publish workflow runs
   it before anything reaches PyPI.
 - **A seventh job runs the same suite against real services**, not mocks — see below.
+- **Another job drives the generated admin in a real browser**, once per admin theme — see
+  [the admin in a real browser](#the-admin-in-a-real-browser).
 
 ## How those tests are written
 
@@ -600,10 +602,43 @@ So one CI job (Python 3.12 · Django 5.2) runs against the real thing:
 These tests are deselected by default (`-m "not real_es"`), so cloning the repo and running `pytest`
 needs no Docker.
 
+## The admin in a real browser
+
+Django's test client is not a browser: it cannot run the admin's JavaScript, apply its stylesheets,
+open an autocomplete or draw a chart. So one more CI job (Python 3.12 · Django 5.2) drives the
+generated admin with **Playwright and Chromium** against the demo project, served over real HTTP —
+twice, once on Unfold and once on Django's stock admin, because the package supports both and a
+process can only render one.
+
+- **What it walks:** signing in, the index to a changelist, search, a filter, pagination, a bulk
+  delete behind its confirmation page, an order saved with an autocomplete customer and an inline
+  line item, a model rule refusing a save, view-only and permission-less staff refused, relations
+  saved from the form, the dashboard chart, and the outage guard that disables Save while the
+  backend is down — `tests/e2e/test_admin_flows.py`, `tests/e2e/test_admin_forms.py`,
+  `tests/e2e/test_connectivity.py` and two more.
+- **What every page is held to**, whatever the scenario asserts: an uncaught JavaScript error, an
+  asset the site does not serve, or any 5xx fails the test.
+- **What its first run found**, past every test-client test: a dashboard chart not drawn since
+  0.1.0b6, an outage guard that did nothing on Unfold, one-to-one and many-to-many fields missing
+  from generated forms since the first release, a rich-text editor that pushed the page sideways,
+  and stock-admin selects that showed no value. Each is fixed and pinned by a fast test as well.
+
+Deselected by default like the Elasticsearch tests. To run it:
+
+```bash
+pip install "playwright>=1.45" && playwright install chromium
+pytest -m e2e                                    # Unfold admin
+SNAPADMIN_TEST_ADMIN_THEME=stock pytest -m e2e   # Django's stock admin
+```
+
+A failed scenario leaves a replayable trace in `test-results/e2e/`. Flaky is a diagnosis, never a
+retry: no rerun plugin, no sleeps, no raised timeouts.
+
 ## The layers, and what each one protects
 
 Not one pyramid but several overlapping ones, because a library fails in more ways than an
-application does. Each layer below exists today and runs in the same `pytest` invocation:
+application does. Each layer below exists today and runs on every push; the live datastore and the
+browser layers need a service or a browser, so a plain local `pytest` deselects them by marker:
 
 | Layer | What it protects | Named examples |
 |---|---|---|
@@ -624,6 +659,7 @@ application does. Each layer below exists today and runs in the same `pytest` in
 | **Performance / query count** | no N+1 on the changelist with relations, the REST list endpoint, the audit timeline and masked output — each surface counted at two row counts (the numbers must match) and pinned exactly, so a new query on a hot path is a decision, not an accident · plus the list-view knobs and estimated-count pagination | `tests/test_query_counts.py`, `tests/test_performance.py`, `tests/test_pagination.py` |
 | **Process-level E2E** | `snapadmin-new` generates a project and that project really boots — a real `subprocess`, real `check` and `migrate` | `tests/test_scaffold_e2e.py` |
 | **End-to-end smoke** | the seam *between* the layers: admin form POST → database row → audit entry → REST read, in one walk | `tests/test_critical_path_smoke.py` |
+| **Browser E2E** | the generated admin in a real browser under both themes — its JavaScript, stylesheets, autocompletes, inlines, chart and outage guard; every page also fails on a JavaScript error, a missing asset or a 5xx | `tests/e2e/test_admin_flows.py`, `tests/e2e/test_admin_forms.py`, `tests/e2e/test_connectivity.py` |
 | **Live datastore** | the Elasticsearch query DSL against a real cluster, where a mock cannot judge it | `tests/test_elasticsearch_live.py` |
 
 ## Backward compatibility is a test, not a promise
@@ -687,7 +723,8 @@ and none will be claimed here until it actually runs in CI:
 
 | Missing | What it would add | Status |
 |---|---|---|
-| **Browser E2E** | A real browser driving the generated admin: navigation, filters, pagination, actions, validation errors. Today the admin is reached only through Django's test client, which is not a browser | Planned. No Playwright, no Cypress |
+| **Load testing** | Throughput and latency under many concurrent users, against the API's real page sizes, filters and throttles. A library has no traffic of its own to measure, so this belongs in a project built on it; the query-count pins are the part a library can own | Not in this repository. No Locust, no k6 |
+| **Firefox and WebKit in CI** | The browser suite runs on Chromium in CI; Playwright drives the other two engines from the same tests (`SNAPADMIN_E2E_BROWSER=firefox`), but only locally so far | Local only |
 
 <details>
 <summary>Where the rest of the coverage goes</summary>

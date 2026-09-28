@@ -83,6 +83,21 @@ def test_dashboard_loads_no_external_asset_hosts(admin_client):
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize("url", ["/dashboard/", "/"], ids=["package-dashboard", "demo-landing"])
+def test_dashboard_renders_no_template_comment_as_page_text(admin_client, url):
+    """Regression (#QA1e): a two-line ``{# #}`` above the chart data rendered as
+    text containing a literal ``<script>``, which opened a script element the
+    page never closed and swallowed the chart's JSON — the chart was never drawn
+    from 0.1.0b6 on. Every script element the page opens, it must also close,
+    and no comment syntax may reach the page."""
+    html = admin_client.get(url).content.decode()
+
+    assert "{#" not in html and "#}" not in html
+    assert html.count("<script") == html.count("</script>")
+    assert '<script id="snap-chart-data" type="application/json">' in html
+
+
+@pytest.mark.django_db
 def test_dashboard_version_read_from_package_metadata(admin_client):
     # The version is no longer hardcoded — it must match the package's __version__.
     import snapadmin

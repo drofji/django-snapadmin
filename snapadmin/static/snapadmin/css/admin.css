@@ -120,6 +120,28 @@ td.field-formatted_id a:hover {
     max-width: 100%;
 }
 
+/* `width: 100%` alone never held the editor inside its column: the toolbar's
+   buttons sit on one unwrapped line, so the wrapper's *intrinsic* width is the
+   whole toolbar, and every flex item and <fieldset> above it (both default to
+   growing to fit their content) grew with it. The page then scrolled sideways
+   on Unfold and clipped the toolbar on the stock admin, and CKEditor never saw
+   a narrow toolbar, so it never grouped the overflow into its "more" menu.
+   Containing the wrapper's inline size cuts that chain: its width comes from
+   the column, the toolbar measures that width and groups what does not fit
+   (found by the browser suite, #QA1e). `flex` only applies where the wrapper
+   is itself a flex item — the stock admin's label/field row, where it takes a
+   line of its own under the label (admin-stock.css lets that row wrap). */
+.ck-editor-container {
+    contain: inline-size;
+    flex: 1 1 100%;
+    /* The floor the containment would otherwise take away. Where the column is
+       sized from its content — a `row=` group sharing a line with other fields
+       — a contained wrapper contributes nothing, and the editor collapsed to
+       the width of its label. An absolute length on purpose: a percentage here
+       resolves to nothing in exactly that content-sized case. */
+    min-width: 20rem;
+}
+
 .ck-content {
     min-height: 200px;
 }

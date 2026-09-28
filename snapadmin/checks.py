@@ -1449,7 +1449,9 @@ def check_empty_admin_forms(app_configs, **kwargs):
     all: ``register_admin()`` then generates ``fields = []`` and the add/
     change form renders with nothing in it, no error, no warning. This
     mirrors :meth:`~snapadmin.models.SnapModel.get_admin_fields`'s
-    ``form_fields`` computation directly rather than calling it: that
+    ``form_fields`` computation — through the same ``_forward_fields`` helper,
+    so the two cannot disagree about which fields a form can hold — rather
+    than calling it: that
     classmethod also mutates ``admin_overrides`` as a side effect (building
     the generated display callables), which a read-only system check must
     not trigger.
@@ -1460,6 +1462,8 @@ def check_empty_admin_forms(app_configs, **kwargs):
     to ``show_in_form``, and warning about it is noise a project can only silence
     by hiding the genuine cases along with it.
     """
+    from snapadmin.admin_gen import _forward_fields
+
     empty = sorted(
         model._meta.label
         for model in apps.get_models()
@@ -1467,11 +1471,7 @@ def check_empty_admin_forms(app_configs, **kwargs):
         and hasattr(model, "register_admin")
         and getattr(model, "admin_enabled", True)
         and _generated_admin_would_render(model)
-        and not any(
-            getattr(f, "show_in_form", None)
-            for f in model._meta.get_fields()
-            if hasattr(f, "name") and not (f.one_to_many or f.one_to_one or f.many_to_many)
-        )
+        and not any(getattr(f, "show_in_form", None) for f in _forward_fields(model))
     )
     if not empty:
         return []

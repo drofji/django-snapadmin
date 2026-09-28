@@ -12,7 +12,7 @@ Every release carries a `Breaking` heading, including a pre-release. If nothing 
 Breaking
 --------
 
-Ten entries from the second round of production field reports and the quality work behind them. Each is a deliberate change of
+Eleven entries from the second round of production field reports and the quality work behind them. Each is a deliberate change of
 something that was silently wrong; each comes with a one-line way back.
 
 * **``snapadmin.E027`` can stop ``manage.py check``.** It fires when ``SnapModel``'s own
@@ -67,6 +67,17 @@ something that was silently wrong; each comes with a one-line way back.
   ``non_field_errors`` reads it from ``filters`` instead. ``__in`` now takes a list; a string there
   used to match its individual characters.
 
+* **The audit trail records a relation by its key.** A foreign key or one-to-one is stored as the
+  key it holds (``{"old": 3, "new": 7}``) and a many-to-many as the sorted list of primary keys,
+  on both sides of a change and on a created entry. A created entry used to store the related
+  object's label (``str(row)``), and a changed foreign key mixed the two —
+  ``{"old": 1, "new": "Jones, Bob"}``. A label is ambiguous (two customers can share a name, and
+  moving an order from one to the other was not recorded at all once both sides were compared as
+  labels) and it is a way around masking: it is whatever the related model's ``__str__`` prints,
+  and masking only knows the audited model's own field names. Django's admin history message
+  follows the same keys. Rows already written keep what they stored. Way back: resolve a key
+  against the related model when a label is needed for display.
+
 Added
 -----
 
@@ -108,6 +119,17 @@ Added
   ``snapadmin.E027`` (see Breaking).
 * **``SnapPurgeResult``** — what ``SnapModel.purge_expired()`` now returns: still an ``int`` (the
   purged count), with a ``skipped_protected`` attribute. Existing callers are unaffected.
+
+* **Browser end-to-end tests over the generated admin.** Playwright drives Chromium through the
+  demo project's admin over real HTTP — signing in, search, filters, pagination, a bulk delete, an
+  order saved with an autocomplete customer and an inline line item, validation errors, permission
+  refusals, relations saved from a form, the dashboard chart and the outage guard — and every page
+  it opens also fails its test on an uncaught JavaScript error, a missing asset or a 5xx. A new CI
+  job runs it once on Unfold and once on Django's stock admin (``SNAPADMIN_TEST_ADMIN_THEME=stock``),
+  and releases are gated on it. Locally it is opt-in and needs no browser otherwise:
+  ``pip install "playwright>=1.45" && playwright install chromium`` then ``pytest -m e2e``.
+  Its first run found the defects listed under Fixed below, each of which every test-client test
+  had passed; each is also pinned by a fast regression test in the ordinary run.
 
 Changed
 -------
@@ -229,8 +251,53 @@ Fixed
   ``SnapFileField``/``SnapImageField`` the upload limits are recorded in ``deconstruct()`` the way
   Django records ``validators=``, so changing one is an ``AlterField`` that runs no SQL.
 
+* **The dashboard chart is drawn again.** Since 0.1.0b6 the "Data Distribution" chart on the
+  system dashboard stayed empty: a two-line ``{# #}`` comment above the chart data — a form Django
+  only recognises on a single line — was rendered as page text, and that text contained a literal
+  ``<script>``, so the browser opened a script element there and swallowed the chart's JSON into
+  it. The comments are ``{% comment %}`` blocks now, and a test fails on any multi-line ``{# #}`` in
+  a shipped template.
+* **The outage guard works on Unfold.** ``connectivity.js`` disables every Save button and blocks
+  form submits while ``/api/health/`` keeps failing, so nobody types into a form that cannot be
+  saved. On Unfold — the default theme — it did nothing at all: it looked for Django's
+  ``.submit-row`` inside the ``<form>``, and Unfold renders ``#submit-row`` in a footer outside it,
+  its buttons tied to the form with a ``form=`` attribute. Both layouts are found now.
+* **"Back online" is announced only after an outage.** The toast meant for a recovery appeared on
+  every healthy page load, because the first-probe check read a flag that had already been set.
+* **Forward one-to-one and many-to-many fields reach the generated form.** A
+  ``SnapOneToOneField`` or ``SnapManyToManyField`` declared ``show_in_form=True`` was silently left
+  out of the add/change form since the first release — a many-to-many could not be edited in the
+  admin at all, and a one-to-one row could only be saved without its target. Form fields now
+  follow declaration order, as in Django's own ``ModelForm``. A many-to-many with a ``through``
+  model of its own stays out, as Django requires (``admin.E013``). ``autocomplete=True`` on a
+  ``SnapOneToOneField`` is honoured; a one-to-one without the flag — a plain ``OneToOneField``, a
+  multi-table parent link — is not made an autocomplete field, so no admin on its target is
+  suddenly required. A reverse many-to-many accessor is no longer listed in a model's
+  ``autocomplete_fields``. ``snapadmin.W015`` (a form that would render empty) counts these
+  fields too. No migration.
+* **The audit trail stores JSON values as JSON.** A ``JSONField`` holding a list or an object
+  was stored as its Python repr (``"[{'a': 1}]"``) although the trail's own contract is that
+  JSON-native values keep their type; lists and objects are stored as JSON now, item by item.
+* **The rich-text editor stays inside its column.** Its toolbar made the whole form wider than the
+  window on Unfold, and was clipped on the stock admin, so CKEditor never grouped the buttons that
+  did not fit into its "more" menu. On the stock admin the editor now takes a full-width line under
+  its label, and an editor grouped into a ``row=`` takes a full-width line of its own in both
+  themes instead of a sliver of the row (the demo's ``Showcase`` shows one).
+* **Selects on the stock admin show their value.** Every single-choice select — a boolean, a
+  foreign key, the changelist's action picker — rendered its chosen value invisibly: the stock
+  admin's fixed 30px height left no room inside SnapAdmin's padding.
+* **Demo project.** ``/admin/`` answered 500 when Unfold was removed from ``INSTALLED_APPS`` (the
+  demo's index extended an Unfold-only layout); it now renders under either theme. The Unfold
+  settings no longer reference a login background and a favicon that were never shipped.
+
 Security
 --------
+
+* **The audit trail no longer stores a related object's label.** A relation's diff held
+  ``str(row)`` of the related object — typically a name or an email — which the trail's masking
+  could not see, because masking applies to the audited model's own fields; a reader allowed the
+  audit log but not the related model's PII read it there. Relations are stored as keys now (see
+  Breaking).
 
 Found by the new static-analysis pass (Ruff's bandit rules), each fixed with a regression test:
 

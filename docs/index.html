@@ -832,9 +832,12 @@ snapadmin-init --json             # machine-readable, for your own tooling</code
   Test the permission matrix as a matrix, not one happy path. Assert the fail-closed defaults stay
   fail-closed after every dependency upgrade. And make a restore drill part of the schedule,
   asserted by row count rather than by the absence of an error message.</p>
-  <p><strong>What SnapAdmin's own suite does not have, and a high-load project probably should:</strong>
-  browser E2E over the admin's critical flows, and load tests against the API's real page sizes and
-  filters.</p>
+  <p><strong>What SnapAdmin's own suite cannot do for you:</strong> it drives its generated admin in
+  a real browser (<a href="#testing-e2e">browser E2E</a>), but over the demo's models. A production
+  project should keep browser E2E over its <em>own</em> critical admin flows — the same harness shape
+  works, a live server plus Playwright with a check for JavaScript errors and missing assets on every
+  page — and load tests against the API's real page sizes and filters, which a library has no traffic
+  to run.</p>
 
   <h3 id="playbook-scale">4. Production readiness and high load</h3>
   <p>Where the library helps, and where it deliberately stops. Every number below is the shipped
@@ -4308,7 +4311,13 @@ python manage.py snapadmin_audit_export --purge   # also prune rows past retenti
   <p>The diff is stored as <code>{"field": {"old": …, "new": …}}</code> and rendered in the admin as a
   field-level table: one row per field, the value before, the value after. Values keep their
   JSON-native type, so <code>42</code> stays distinguishable from <code>"42"</code>; anything without a
-  JSON representation (<code>Decimal</code>, dates, UUIDs, related objects) is stored as text. The
+  JSON representation (<code>Decimal</code>, dates, UUIDs) is stored as text, and a JSON field's list
+  or object is stored as JSON. A relation is stored by its key on both sides
+  (<code>{"old": 3, "new": 7}</code>) and a many-to-many as the sorted list of primary keys
+  (<code>{"old": [2], "new": [2, 5]}</code>) — so re-saving the same selection in another order records
+  nothing, and moving a row to a namesake still does. Keys, never the related object's label: a label
+  is whatever that model's <code>__str__</code> prints, often a name or an email, and the trail's
+  masking only knows the audited model's own fields. The
   <code>old</code>/<code>new</code> key names are part of the on-disk format and will not change.</p>
   <p>Each entry's <strong>Object</strong> column links to that object's <strong>timeline</strong> —
   every change ever recorded for it, newest first, each as the same diff table:</p>
@@ -5167,7 +5176,8 @@ class Invoice(snap_models.SnapModel):
 
   <h3 id="testing-layers">The layers, and what each one protects</h3>
   <p>Not one pyramid but several overlapping ones, because a library fails in more ways than an
-  application does. Every layer below runs inside the same <code>pytest</code> invocation.</p>
+  application does. Every layer below runs on every push; two of them — the live datastore and the
+  browser — need a service or a browser, so a plain local <code>pytest</code> deselects them by marker.</p>
   <table>
     <thead><tr><th>Layer</th><th>What it protects</th><th>Named examples</th></tr></thead>
     <tbody>
@@ -5188,6 +5198,7 @@ class Invoice(snap_models.SnapModel):
       <tr><td><strong>Asset-truth</strong></td><td>every shipped CSS/JS/SVG reference resolves to a file inside the package</td><td><code>tests/test_static_asset_references.py</code>, <code>tests/test_admin_js_asset.py</code></td></tr>
       <tr><td><strong>Process-level E2E</strong></td><td><code>snapadmin-new</code> generates a project and that project really boots — a real <code>subprocess</code>, a real <code>check</code> and <code>migrate</code></td><td><code>tests/test_scaffold_e2e.py</code></td></tr>
       <tr><td><strong>End-to-end smoke</strong></td><td>the seam <em>between</em> the layers: admin form POST → database row → audit entry → REST read, in one walk</td><td><code>tests/test_critical_path_smoke.py</code></td></tr>
+      <tr><td><strong>Browser E2E</strong></td><td>the generated admin in a real browser (Playwright, Chromium), under both admin themes — its JavaScript, stylesheets, autocompletes, inlines, the dashboard chart and the outage guard; every page also fails its test on an uncaught JavaScript error, a missing asset or a 5xx. Opt-in locally: <code>pytest -m e2e</code></td><td><code>tests/e2e/test_admin_flows.py</code>, <code>tests/e2e/test_admin_forms.py</code>, <code>tests/e2e/test_connectivity.py</code></td></tr>
       <tr><td><strong>Live datastore</strong></td><td>the Elasticsearch query DSL against a real cluster, where a mock cannot judge it</td><td><code>tests/test_elasticsearch_live.py</code></td></tr>
     </tbody>
   </table>
@@ -5452,6 +5463,60 @@ SNAPADMIN_TEST_ES_URL=http://localhost:9200 pytest -m real_es</code></pre>
     <code>_PASSWORD</code>) at a PostgreSQL server to run the whole suite against it instead of SQLite.
   </div>
 
+  <h4 id="testing-e2e">Browser E2E — Playwright, under both admin themes</h4>
+  <p><strong>What runs:</strong> a separate job, one combination (Python 3.12 · Django 5.2), with
+  Playwright driving Chromium against the <code>demo/</code> project, which pytest-django's live
+  server serves over real HTTP. The job runs the suite twice — once on Unfold, once with
+  <code>SNAPADMIN_TEST_ADMIN_THEME=stock</code> on Django's own admin — because SnapAdmin picks the
+  admin classes it builds on at import time, so one process can only ever render one of the two, and
+  the package supports both. A release is gated on this job like on every other.
+  <strong>What it walks:</strong> signing in (a wrong password refused, <code>?next=</code> honoured),
+  the index to a changelist, search, a filter, pagination, a row to its change form, a bulk delete
+  behind its confirmation page, an order saved with a select2 autocomplete customer and an inline line
+  item, a model rule refusing a save, view-only and permission-less staff refused
+  (<code>tests/e2e/test_admin_flows.py</code>); a many-to-many and a one-to-one saved from the form,
+  the rich-text editor fitting the window, every select showing its value
+  (<code>tests/e2e/test_admin_forms.py</code>); the dashboard chart drawn with the live counts
+  (<code>tests/e2e/test_dashboard.py</code>); the outage guard — no toast on a healthy load, Save
+  disabled while <code>/api/health/</code> fails and given back when it answers
+  (<code>tests/e2e/test_connectivity.py</code>); exactly one theme stylesheet per page
+  (<code>tests/e2e/test_themes.py</code>).
+  <strong>What every page is also held to</strong>, whatever the scenario asserts: an uncaught
+  JavaScript exception, a script, stylesheet, image or icon of the site answered with an error, or any
+  response of the site answered with a 5xx fails the test at teardown. Those are exactly the defects a
+  test-client suite is blind to, and they would otherwise pass every scenario that did not happen to
+  look at the broken widget.
+  <strong>How it stays isolated:</strong> every test gets a fresh browser and a flushed database, and
+  Playwright starts and stops inside the test. Its synchronous API keeps an event loop marked as running
+  for as long as it is started, and Django refuses ORM calls while one is — so the escape hatch that
+  allows them is switched on for exactly one test, never left behind for the next. Text assertions run
+  under a pinned English locale, UTC and a fixed window size.
+  <strong>What it found on its first run</strong> — defects every test-client test had passed, each
+  now fixed and also pinned by a fast test in the ordinary run: the dashboard chart had not been drawn
+  since 0.1.0b6 (a two-line <code>{# #}</code> comment rendered as page text containing a literal
+  <code>&lt;script&gt;</code>); the outage guard did nothing at all on Unfold, whose Save buttons sit
+  outside the <code>&lt;form&gt;</code>; the guard announced "Back online" on every healthy page load;
+  a <code>SnapOneToOneField</code> or <code>SnapManyToManyField</code> declared
+  <code>show_in_form=True</code> was missing from the generated form since the first release, while a
+  reverse relation was listed as an autocomplete field; the rich-text editor pushed the page sideways
+  on Unfold and clipped its toolbar on the stock admin; every single-choice select on the stock admin
+  showed no value; and, in the demo, <code>/admin/</code> answered 500 without Unfold and two
+  configured static files did not exist.
+  <strong>Flaky is a diagnosis:</strong> no rerun plugin, no sleeps, no raised timeouts. Timing is
+  Playwright's auto-waiting <code>expect</code>; a failed scenario uploads a trace (DOM, network and
+  a screenshot per step) as a job artifact for seven days.</p>
+
+  <div class="callout callout-info">
+    <strong>Running the browser suite yourself</strong>
+    <pre><code>pip install "playwright&gt;=1.45" &amp;&amp; playwright install chromium
+pytest -m e2e                                    # the Unfold admin
+SNAPADMIN_TEST_ADMIN_THEME=stock pytest -m e2e   # Django's stock admin</code></pre>
+    <code>SNAPADMIN_E2E_BROWSER=firefox</code> (or <code>webkit</code>, after
+    <code>playwright install &lt;engine&gt;</code>) swaps the engine and <code>SNAPADMIN_E2E_HEADED=1</code>
+    shows the window. A failed test leaves <code>test-results/e2e/&lt;test&gt;.zip</code>;
+    <code>playwright show-trace</code> replays it step by step.
+  </div>
+
   <h4>Documentation-truth tests</h4>
   <p><strong>What runs:</strong> 145 tests across four files that read the documentation as data.
   <code>tests/test_docs_completeness.py</code> asserts that every <code>SNAPADMIN_*</code> setting the
@@ -5486,14 +5551,20 @@ SNAPADMIN_TEST_ES_URL=http://localhost:9200 pytest -m real_es</code></pre>
     <thead><tr><th>Check</th><th>How it will work, and what it will verify</th><th>Status</th></tr></thead>
     <tbody>
       <tr>
-        <td><strong>Browser E2E</strong></td>
-        <td>A real browser, driven by Playwright against the <code>demo/</code> project, walking the
-        scenarios the Django test client cannot reach: opening the generated admin, navigation, form
-        widgets, filters, search, pagination, bulk actions, permission denials and validation errors —
-        including the JavaScript layer, which no test here currently executes. Planned as one job, one
-        combination, marker-gated and deselected by default so the everyday run stays at forty seconds.
-        A flaky browser test will be diagnosed, never retried.</td>
-        <td>Planned. No Playwright, no Cypress</td>
+        <td><strong>Load testing</strong></td>
+        <td>Throughput and latency under many concurrent users — the REST API at its real page sizes,
+        filters and throttles, a changelist on a table of millions of rows. A library has no production
+        traffic of its own to measure, so this belongs in a project built on it (the
+        <a href="#playbook-testing">playbook</a> says how); what a library can own is the query-count
+        pins above, which keep a hot path from growing a query per row.</td>
+        <td>Not in this repository. No Locust, no k6</td>
+      </tr>
+      <tr>
+        <td><strong>Firefox and WebKit in CI</strong></td>
+        <td>The browser suite runs on Chromium in CI. Playwright drives Firefox and WebKit from the
+        same tests (<code>SNAPADMIN_E2E_BROWSER=firefox</code>), which works locally, but no job runs
+        them yet.</td>
+        <td>Local only</td>
       </tr>
     </tbody>
   </table>

@@ -95,6 +95,30 @@ that aren't obvious from the code.
   CI runs both of the above in one job, on one Python/Django combination — a backend difference
   does not depend on the interpreter version, so spreading it across the matrix would cost six
   times the minutes to learn the same thing.
+- **Browser E2E** (`tests/e2e/`, marker `e2e`, deselected by default) drives the generated admin
+  in a real browser against the demo project on pytest-django's live server. Playwright is a
+  dev-only tool; install it and its browser once, then run the suite once per admin theme — the
+  theme is fixed per process, and CI runs both:
+
+  ```bash
+  pip install "playwright>=1.45" && playwright install chromium
+  pytest -m e2e                                    # the Unfold admin
+  SNAPADMIN_TEST_ADMIN_THEME=stock pytest -m e2e   # Django's stock admin
+  ```
+
+  `SNAPADMIN_E2E_BROWSER=firefox|webkit` swaps the engine (after `playwright install <engine>`),
+  `SNAPADMIN_E2E_HEADED=1` shows the window. A failing test leaves a trace in
+  `test-results/e2e/` — `playwright show-trace <zip>` replays every step with its DOM, network
+  and a screenshot. Every page a test opens also fails it on an uncaught JavaScript error, a
+  missing asset or a 5xx, so a new scenario gets those checks for free.
+  Writing one: arrange and assert through the ORM (the harness allows it for exactly the length
+  of one test), sign in with the `log_in` fixture unless the login form is the subject, assert
+  with `expect(...)` from `tests/e2e/support.py`, and find elements by what a user sees or by a
+  URL — not by theme-specific classes — so the same test holds under both themes. When the two
+  themes genuinely differ (Unfold's filter panel), take each theme's path and assert the same
+  outcome. A flaky scenario gets its cause found: no sleeps, no retries, no raised timeouts. And
+  a browser test is not a substitute for a fast one — a defect it finds also gets a regression
+  test in the ordinary suite.
 - **Migrations:** after any model change, run `python demo/manage.py makemigrations` and commit
   the generated migration; never edit an existing migration.
 

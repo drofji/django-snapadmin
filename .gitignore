@@ -13,6 +13,9 @@ ENV/
 env.bak/
 venv.bak/
 
+# Browser E2E traces of failed scenarios (tests/e2e/conftest.py)
+test-results/
+
 # Django
 *.log
 *.pot

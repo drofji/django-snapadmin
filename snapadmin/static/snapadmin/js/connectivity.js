@@ -269,12 +269,23 @@
     }
 
     function guardedForms() {
-        // Add/change forms expose a .submit-row; the changelist filter form does not.
-        var rows = document.querySelectorAll(".submit-row");
+        // Add/change forms expose their Save buttons in a submit row; the
+        // changelist filter form has none. Django's stock admin renders it as
+        // `.submit-row` inside the <form>. Unfold renders `#submit-row` in a
+        // sticky footer *outside* the <form>, each button tied back to it with a
+        // `form=` attribute — so the form is found through the buttons too.
+        // Matching only `.submit-row` left the whole guard inert on Unfold: no
+        // button disabled, no submit blocked (found by the browser suite, #QA1e).
+        var rows = document.querySelectorAll(".submit-row, #submit-row");
         var forms = [];
-        rows.forEach(function (row) {
-            var form = row.closest("form");
+        function remember(form) {
             if (form && forms.indexOf(form) === -1) forms.push(form);
+        }
+        rows.forEach(function (row) {
+            remember(row.closest("form"));
+            row.querySelectorAll("button, input[type=submit]").forEach(function (btn) {
+                remember(btn.form);
+            });
         });
         return { forms: forms, rows: rows };
     }
@@ -347,11 +358,15 @@
 
     // Commit a probe result; broadcast + react only when the state actually changes.
     function applyState(up) {
-        var changed = (up !== isBackendUp) || !probed;
+        // Read before `probed` flips: onBackendUp needs to know whether this is
+        // the page's first resolved probe, and asking `probed` from inside it
+        // would always answer "no" (#QA1e found the toast on every page load).
+        var firstProbe = !probed;
+        var changed = (up !== isBackendUp) || firstProbe;
         isBackendUp = up;
         probed = true;
         if (changed) {
-            if (up) onBackendUp(); else onBackendDown();
+            if (up) onBackendUp(firstProbe); else onBackendDown();
             document.dispatchEvent(new CustomEvent("snapadmin:connectivity", { detail: { up: up } }));
         }
         return up;
@@ -367,12 +382,12 @@
         // Offline-capable pages: offline.js owns the reassuring toast + panel.
     }
 
-    function onBackendUp() {
+    function onBackendUp(firstProbe) {
         document.body.classList.remove("snap-offline");
         dismissToast("conn-state");
         dismissToast("conn-blocked");
         setSaveBlocked(false);
-        if (probed) {
+        if (!firstProbe) {
             // Don't announce the very first "up" on a healthy page load.
             showToast("Back online — backend reachable.", { type: "success", id: "conn-state", duration: 3000 });
         }
