@@ -130,6 +130,26 @@ Added
   ``pip install "playwright>=1.45" && playwright install chromium`` then ``pytest -m e2e``.
   Its first run found the defects listed under Fixed below, each of which every test-client test
   had passed; each is also pinned by a fast regression test in the ordinary run.
+* **Every CI gate as one command: ``python scripts/gates.py``.** It runs what CI runs — the suite
+  with its coverage gate, Ruff and mypy, ``pip check``, the browser suite under both themes, and
+  the PostgreSQL + Elasticsearch job when those services are configured; ``security``,
+  ``lowest-deps`` and ``dist`` run by name — and reports a gate it cannot run on this machine as
+  *not run*, with what it needs, never as passed; a gate asked for by name that cannot run fails. ``--list`` prints each gate's commands and the CI job that runs them;
+  ``--release`` adds the sdist/wheel build with ``twine check --strict`` and fails if any gate could
+  not run. A test reads the CI workflow and fails when it gains a step no gate reproduces.
+* **A security regression suite.** ``tests/security_regressions.py`` maps every security fix the
+  package has shipped — each entry of every release note's *Security* section since 0.1.0b1, plus
+  the fail-open fixes published elsewhere — to the tests that fail if it comes back, 31 today;
+  ``pytest -m security_regression`` runs them. A new *Security* note with no registry entry, or a
+  named test that disappears or is skipped, fails the build.
+* **The declared minimum versions are tested.** Every CI job installed the newest release of each
+  dependency, so the lower bounds ``pyproject.toml`` publishes (Django 5.2, DRF 3.15,
+  django-unfold 0.40, …) were never run by anything. A new ``lowest-deps`` job installs each one at
+  its lowest allowed version on Python 3.10 and runs the suite, and fails when a declared minimum
+  cannot be installed with the rest. Tests also pin the Python/Django classifiers to the CI matrix,
+  and that CI installs every declared dependency at the declared range.
+* **A model change without its migration fails CI.** ``makemigrations --check`` ran only in a local
+  checklist; it is a test now, in every matrix job and on PostgreSQL.
 
 Changed
 -------

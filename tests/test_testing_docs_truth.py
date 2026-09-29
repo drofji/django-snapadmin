@@ -637,6 +637,45 @@ class TestChecksDocumentedAsAbsentReallyAreAbsent:
             missing = [name for name in named if not (REPO_ROOT / name).is_file()]
             assert not missing, f"{document} names browser test file(s) that do not exist: {missing}"
 
+    def test_the_ci_job_count_the_docs_quote_is_the_workflow_s(self):
+        """The docs site quotes how many jobs a push starts, and llms.txt says it in
+        words. It read 8 while CI ran 9 — nothing checked it. Counted from the
+        workflow: the matrix expands to its pairs, every other job is one."""
+        import yaml
+
+        workflow = yaml.safe_load(_read(WORKFLOWS / "test.yml"))
+        matrix = workflow["jobs"]["test"]["strategy"]["matrix"]
+        pairs = len(matrix["python"]) * len(matrix["django"]) - len(matrix.get("exclude", []))
+        jobs = pairs + len(workflow["jobs"]) - 1
+        words = {9: "Nine", 10: "Ten", 11: "Eleven", 12: "Twelve"}
+
+        assert f"<tr><td>CI jobs per push</td><td><strong>{jobs}</strong>" in _read(DOCS_INDEX)
+        for copy in ("llms.txt", "docs/llms.txt"):
+            assert f"{words[jobs]} CI jobs per push" in _read(REPO_ROOT / copy), copy
+
+    def test_the_one_gate_command_runs_as_the_docs_describe(self):
+        """#QA1f — four pages promise one command for every CI gate, a security
+        regression suite selected by marker, a job at the declared minimum
+        versions, and pip check. Pin every half of it."""
+        assert (REPO_ROOT / "scripts" / "gates.py").is_file(), "the docs name scripts/gates.py"
+        assert "\n    security_regression:" in _read(PYTEST_INI), "the marker is not registered"
+        workflow = _read(WORKFLOWS / "test.yml")
+        assert "\n  lowest-deps:" in workflow, "the docs describe a lowest-deps job"
+        job = workflow.split("\n  lowest-deps:", 1)[1]
+        assert "python scripts/gates.py lowest-deps" in job
+        assert 'python-version: "3.10"' in job, "the docs say it runs on the lowest Python"
+        assert "continue-on-error" not in job, "the docs say the job is blocking"
+        assert "run: python -m pip check" in workflow, "the docs say pip check runs in CI"
+
+        from tests.security_regressions import REGISTRY
+
+        assert len(REGISTRY) >= 30, "README.md and docs/index.html say 30+ security fixes"
+        for document in ("README.md", "docs/index.html", "llms.txt", "CONTRIBUTING.md"):
+            text = _read(REPO_ROOT / document)
+            assert "python scripts/gates.py" in text, f"{document} does not give the command"
+            assert "security_regression" in text, f"{document} omits the security suite"
+            assert "lowest-deps" in text, f"{document} omits the lowest-deps job"
+
     @pytest.mark.parametrize("document", ["README.md", "docs/index.html"])
     def test_a_running_check_is_not_listed_as_absent(self, document):
         """The inverse of the gap list: once a layer runs, the "not in place

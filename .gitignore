@@ -16,6 +16,9 @@ venv.bak/
 # Browser E2E traces of failed scenarios (tests/e2e/conftest.py)
 test-results/
 
+# scripts/gates.py's throwaway environments (the lowest-dependency venv)
+.gates/
+
 # Django
 *.log
 *.pot

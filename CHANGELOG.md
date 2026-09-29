@@ -51,6 +51,12 @@ the `0.x` beta series.
 - `SnapModel.purge_expired()` returns `SnapPurgeResult`, an `int` with `skipped_protected`.
 - Browser end-to-end tests: Playwright drives the generated admin through the demo, on Unfold and
   on the stock admin, in a new CI job (`pytest -m e2e` locally, opt-in).
+- `python scripts/gates.py` reproduces every CI gate in one command; a gate it cannot run is
+  reported as not run, never passed, and `--release` fails on it.
+- A security regression suite (`pytest -m security_regression`): every shipped security fix mapped
+  to the tests that pin it; a Security note without one fails the build.
+- A `lowest-deps` CI job runs the suite with every dependency at its declared minimum;
+  `makemigrations --check` and `pip check` run in CI.
 
 ### Changed
 - `llms.txt` carries the full adoption playbook an assistant needs before writing integration

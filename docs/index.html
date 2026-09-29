@@ -5137,7 +5137,7 @@ class Invoice(snap_models.SnapModel):
       <tr><td>The everyday run</td><td>5,357 passed, 6 skipped, 12 deselected, <strong>~45 s</strong></td><td><code>pytest</code></td></tr>
       <tr><td>Line coverage of <code>snapadmin/</code></td><td><strong>100%</strong> — 11,702 statements, 0 missing</td><td><code>pytest --cov=snapadmin --cov-branch --cov-fail-under=100</code></td></tr>
       <tr><td>Branch coverage of <code>snapadmin/</code></td><td><strong>100%</strong> — 3,464 branches, 0 partial <em>(gated)</em></td><td><code>pytest --cov=snapadmin --cov-branch --cov-fail-under=100</code></td></tr>
-      <tr><td>CI jobs per push</td><td><strong>8</strong> — a 6-way Python × Django matrix, one real-services job and one static-analysis job</td><td><code>.github/workflows/test.yml</code></td></tr>
+      <tr><td>CI jobs per push</td><td><strong>10</strong> — a 6-way Python × Django matrix, one real-services job, one static-analysis job, one browser-E2E job and one lowest-dependencies job</td><td><code>.github/workflows/test.yml</code></td></tr>
     </tbody>
   </table>
 
@@ -5207,6 +5207,8 @@ class Invoice(snap_models.SnapModel):
       <tr><td><strong>End-to-end smoke</strong></td><td>the seam <em>between</em> the layers: admin form POST → database row → audit entry → REST read, in one walk</td><td><code>tests/test_critical_path_smoke.py</code></td></tr>
       <tr><td><strong>Browser E2E</strong></td><td>the generated admin in a real browser (Playwright, Chromium), under both admin themes — its JavaScript, stylesheets, autocompletes, inlines, the dashboard chart and the outage guard; every page also fails its test on an uncaught JavaScript error, a missing asset or a 5xx. Opt-in locally: <code>pytest -m e2e</code></td><td><code>tests/e2e/test_admin_flows.py</code>, <code>tests/e2e/test_admin_forms.py</code>, <code>tests/e2e/test_connectivity.py</code></td></tr>
       <tr><td><strong>Live datastore</strong></td><td>the Elasticsearch query DSL against a real cluster, where a mock cannot judge it</td><td><code>tests/test_elasticsearch_live.py</code></td></tr>
+      <tr><td><strong>Security regression</strong></td><td>every shipped security fix, each mapped to the tests that fail if it returns; the release notes are checked against the map (<a href="#testing-security-regressions">below</a>)</td><td><code>tests/security_regressions.py</code>, <code>tests/test_security_regressions.py</code></td></tr>
+      <tr><td><strong>Dependency compatibility</strong></td><td>the declared minimum of every dependency, installed and run; the classifiers equal the CI matrix; CI installs every declared dependency at the declared range (<a href="#testing-dependencies">below</a>)</td><td><code>tests/test_dependency_compat.py</code>, <code>tests/test_gates_script.py</code></td></tr>
     </tbody>
   </table>
 
@@ -5523,6 +5525,60 @@ SNAPADMIN_TEST_ADMIN_THEME=stock pytest -m e2e   # Django's stock admin</code></
     shows the window. A failed test leaves <code>test-results/e2e/&lt;test&gt;.zip</code>;
     <code>playwright show-trace</code> replays it step by step.
   </div>
+
+  <h4 id="testing-gates">One command for every gate — <code>scripts/gates.py</code></h4>
+  <p><strong>What runs:</strong> <code>python scripts/gates.py</code> runs, in order, the gates CI
+  runs: <code>suite</code> (the full suite with the 100% line + branch gate and the CI hypothesis
+  profile), <code>static</code> (Ruff lint, Ruff format, mypy), <code>deps</code>
+  (<code>pip check</code>), <code>e2e</code> (the browser suite, once per admin theme) and
+  <code>services</code> (the suite on PostgreSQL, then the live-Elasticsearch tests).
+  <code>security</code> (the security regression suite on its own line), <code>lowest-deps</code>
+  and <code>dist</code> (build the sdist and wheel, <code>twine check --strict</code>) run by name
+  or under <code>--release</code>.
+  <strong>What it never does:</strong> report a gate it could not run as passed. Playwright missing,
+  no <code>SNAPADMIN_TEST_POSTGRES</code>/<code>SNAPADMIN_TEST_ES_URL</code>, no <code>uv</code> —
+  the gate is listed as <em>not run</em> with what it needs. An ordinary run still exits 0 then, so a
+  contributor without a browser can check everything else; a gate asked for by name fails (CI's
+  <code>lowest-deps</code> job asks by name, so a missing <code>uv</code> there is red, not green),
+  and <code>--release</code> is the release gate and fails on any. The six-job Python × Django matrix is the one thing no single machine
+  reproduces, and the summary says so.
+  <strong>How it stays equal to CI:</strong> each command is spelled exactly as
+  <code>.github/workflows/test.yml</code> spells it, and <code>tests/test_gates_script.py</code>
+  reads the workflow: a CI step that is neither runner setup nor a gate's command fails the suite,
+  and so does a gate whose command its CI job stopped running.
+  <code>python scripts/gates.py --list</code> prints every gate's commands and job.</p>
+
+  <h4 id="testing-security-regressions">The security regression suite</h4>
+  <p><strong>What runs:</strong> <code>pytest -m security_regression</code> — the tests
+  <code>tests/security_regressions.py</code> names for each security fix the package has shipped,
+  30+ of them since 0.1.0b1: the dashboard's staff gate, rich-text sanitizing, the dynamic API's
+  model allowlist, GraphQL relation permissions, the mass-assignment guard, masking on every
+  surface, the SSO open redirect, export-filter traversal, the SFTP host key, the encryption leak
+  surfaces, the audit trail's labels, CSV formula injection, DSN password redaction and the rest.
+  <code>tests/conftest.py</code> applies the marker from the registry, so nobody decorates a test by
+  hand. <strong>What fails the build:</strong> an entry in any release note's <em>Security</em>
+  section with no registry entry (the notes are read as data, so a new note is checked without anyone
+  remembering a list); a named test that no longer exists or carries <code>skip</code>,
+  <code>skipif</code> or <code>xfail</code>; a registry smaller than its recorded floor.
+  <strong>What a contributor does:</strong> a security fix gets its regression test, its note under
+  <em>Security</em> and a registry entry naming the test, in the same change.</p>
+
+  <h4 id="testing-dependencies">Dependency compatibility — the declared minimums, run</h4>
+  <p><strong>The gap it closes:</strong> every other job installs <code>demo/requirements.txt</code>,
+  whose <code>&gt;=</code> specifiers resolve to the newest release of everything — so the lower
+  bounds <code>pyproject.toml</code> publishes were never run by anything, while an adopter pinning
+  one of them runs exactly that. <strong>What runs:</strong> the <code>lowest-deps</code> job
+  (Python 3.10, the lowest supported) executes <code>python scripts/gates.py lowest-deps</code>: a
+  fresh environment, every declared dependency resolved to its lowest allowed version with
+  <code>uv pip install --resolution lowest-direct</code>, <code>pip check</code>, then the suite. A
+  declared minimum that cannot be installed with the rest is a failure naming the version that did
+  install — the bound was a promise nobody could keep, and the fix is to raise it.
+  <strong>Also checked on every run</strong> (<code>tests/test_dependency_compat.py</code>): the
+  Python and Django classifiers are exactly the CI matrix, and the lowest of each is the declared
+  lower bound; every declared dependency is installed by CI at the declared range (one written
+  exception, <code>boto3</code>, whose client the S3 tests stub); <code>pip check</code> runs in the
+  static-analysis job; <code>makemigrations --check</code> runs as a test in every job, so a model
+  change without its migration fails CI.</p>
 
   <h4>Documentation-truth tests</h4>
   <p><strong>What runs:</strong> 145 tests across four files that read the documentation as data.

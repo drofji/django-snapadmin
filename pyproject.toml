@@ -296,7 +296,8 @@ also_copy = ["demo", "pytest.ini", "conftest.py"]
 # mutmut runs the suite from a copy in mutants/ whose functions are rewritten
 # into dispatch "trampolines". Tests that read the repository's documents or
 # the package's own source text as data (docs truth, the AST surface snapshot,
-# version sync, the sdist manifest) cannot run there and assert nothing about
+# version sync, the sdist manifest, the CI workflow, the security registry
+# against the release notes) cannot run there and assert nothing about
 # behaviour a mutant could change, so they are left out of mutation runs only.
 pytest_add_cli_args = [
     "-p", "no:randomly", "-p", "no:cacheprovider", "-q",
@@ -306,8 +307,11 @@ pytest_add_cli_args = [
     "--ignore=tests/test_ai_entry_points.py",
     "--ignore=tests/test_distribution_contents.py",
     "--ignore=tests/test_docs_completeness.py",
+    "--ignore=tests/test_dependency_compat.py",
     "--ignore=tests/test_docs_site.py",
+    "--ignore=tests/test_gates_script.py",
     "--ignore=tests/test_public_surface_snapshot.py",
+    "--ignore=tests/test_security_regressions.py",
     "--ignore=tests/test_testing_docs_truth.py",
     "--ignore=tests/test_version_sync.py",
     "--deselect=tests/test_api_surface_defaults.py::TestNoGuideClaimsTheOldDefault::test_the_doc_scan_sees_the_guides",

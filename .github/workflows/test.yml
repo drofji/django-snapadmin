@@ -5,8 +5,12 @@ name: Tests
 # matrix jobs mock Elasticsearch / Redis / Celery and use an in-memory SQLite database, so they need
 # no service containers. The seventh job, `real-services`, is the deliberate exception: it runs the
 # same suite against a real PostgreSQL and a live Elasticsearch — see its own comment below. The
-# eighth, `static-analysis`, runs Ruff (lint, format, security rules) and mypy. The ninth,
-# `browser-e2e`, drives the generated admin in a real browser, under both admin themes.
+# eighth, `static-analysis`, runs Ruff (lint, format, security rules), mypy and `pip check`. The
+# ninth, `browser-e2e`, drives the generated admin in a real browser, under both admin themes. The
+# tenth, `lowest-deps`, runs the suite with every dependency at the minimum pyproject.toml declares.
+#
+# Every one of these commands is reproduced locally by `python scripts/gates.py`
+# (tests/test_gates_script.py fails if a step here has no gate there).
 
 on:
   push:
@@ -133,6 +137,11 @@ jobs:
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: mypy
+
+      - name: The installed dependency set is consistent
+        # Fails when two installed packages declare incompatible requirements
+        # of a third — what pip's resolver can leave behind across two installs.
+        run: python -m pip check
 
   real-services:
     name: Real services · py3.12 · Django 5.2
@@ -285,3 +294,38 @@ jobs:
           path: test-results/e2e/
           retention-days: 7
           if-no-files-found: ignore
+
+  # ───────────────────────────────────────────────────────────────────────────
+  # Every dependency at the minimum pyproject.toml declares.
+  #
+  # Every other job installs demo/requirements.txt, whose `>=` specifiers
+  # resolve to the NEWEST release of everything — so the lower bounds the
+  # package publishes (Django 5.2, DRF 3.15, django-unfold 0.40, …) were never
+  # run by anything, while an adopter pinning one of them runs exactly that.
+  # This job resolves each declared dependency to its lowest allowed version
+  # (`uv --resolution lowest-direct`), on the lowest supported Python, and runs
+  # the suite. It also fails when a declared minimum cannot be installed with
+  # the rest (the resolver would silently raise it): the bound is a lie then,
+  # and the fix is to raise it in pyproject.toml.
+  #
+  # ONE job, ONE combination, blocking. The command is the same one a
+  # contributor runs locally (scripts/gates.py), so the two cannot drift.
+  lowest-deps:
+    name: Lowest dependencies · py3.10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        run: python -m pip install uv
+
+      - name: Install the age CLI (binary backend for AGE-encrypted backups)
+        run: sudo apt-get update && sudo apt-get install -y age
+
+      - name: The suite, every dependency at its declared minimum
+        run: python scripts/gates.py lowest-deps

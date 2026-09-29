@@ -634,6 +634,30 @@ SNAPADMIN_TEST_ADMIN_THEME=stock pytest -m e2e   # Django's stock admin
 A failed scenario leaves a replayable trace in `test-results/e2e/`. Flaky is a diagnosis, never a
 retry: no rerun plugin, no sleeps, no raised timeouts.
 
+## One command runs every gate
+
+```bash
+python scripts/gates.py            # everything CI checks that this machine can run
+python scripts/gates.py --list     # each gate's exact commands, and the CI job that runs them
+python scripts/gates.py --release  # the release gate: every gate must run, and pass
+```
+
+The suite with its coverage gate, Ruff and mypy, `pip check`, the browser suite under both themes,
+and the PostgreSQL + Elasticsearch job when those services are configured; `security`,
+`lowest-deps` and `dist` by name or under `--release`. A gate that cannot run on this machine is
+reported **not run**, with what it needs — never as passed — and a gate you asked for by name fails. A test reads `.github/workflows/test.yml` and fails if CI gains a step no gate
+reproduces. What it cannot reproduce, and says so: the six-job Python × Django matrix.
+
+- **Every security fix ever shipped keeps a named test** (30+): `tests/security_regressions.py`
+  maps each entry of every release note's *Security* section to the tests that fail if it comes
+  back, `pytest -m security_regression` runs them, and a new security note without a test fails
+  the build.
+- **The declared minimum versions are tested.** Every other job installs the newest release of
+  everything; the `lowest-deps` job (Python 3.10) installs each dependency at the lowest version
+  `pyproject.toml` allows — Django 5.2, DRF 3.15, django-unfold 0.40, … — runs the suite, and fails
+  if a declared minimum cannot even be installed with the rest.
+- **A model change without its migration fails CI** (`tests/test_migrations_complete.py`).
+
 ## The layers, and what each one protects
 
 Not one pyramid but several overlapping ones, because a library fails in more ways than an
@@ -661,6 +685,8 @@ browser layers need a service or a browser, so a plain local `pytest` deselects 
 | **End-to-end smoke** | the seam *between* the layers: admin form POST → database row → audit entry → REST read, in one walk | `tests/test_critical_path_smoke.py` |
 | **Browser E2E** | the generated admin in a real browser under both themes — its JavaScript, stylesheets, autocompletes, inlines, chart and outage guard; every page also fails on a JavaScript error, a missing asset or a 5xx | `tests/e2e/test_admin_flows.py`, `tests/e2e/test_admin_forms.py`, `tests/e2e/test_connectivity.py` |
 | **Live datastore** | the Elasticsearch query DSL against a real cluster, where a mock cannot judge it | `tests/test_elasticsearch_live.py` |
+| **Security regression** | every shipped security fix, each mapped to the tests that fail if it returns; the release notes are checked against the map | `tests/security_regressions.py`, `tests/test_security_regressions.py` |
+| **Dependency compatibility** | the declared minimum of every dependency, installed and run; the classifiers equal the CI matrix; CI installs every declared dependency at the declared range | `tests/test_dependency_compat.py`, `tests/test_gates_script.py` |
 
 ## Backward compatibility is a test, not a promise
 

@@ -314,3 +314,22 @@ def snapadmin_urls_under():
     finally:
         importlib.reload(snapadmin_urls)
         clear_url_caches()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The security regression suite (tests/security_regressions.py)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def pytest_collection_modifyitems(items):
+    """Mark every test the security registry names ``security_regression``.
+
+    The marker comes from the registry rather than from a decorator on each
+    test, so ``python -m pytest -m security_regression`` runs exactly the tests
+    the registry lists, and the registry's own tests prove each one exists.
+    """
+    from tests.security_regressions import is_security_regression, node_ids
+
+    registered = node_ids()
+    for item in items:
+        if is_security_regression(item.nodeid, registered):
+            item.add_marker(pytest.mark.security_regression)

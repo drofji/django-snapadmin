@@ -11,6 +11,18 @@ that aren't obvious from the code.
 - **Running things:** the demo's `manage.py` lives in `demo/`; run it from the repo root as
   `python demo/manage.py <command>` (it puts the repo root on `sys.path` itself). Docker runs
   via `docker compose -f demo/docker-compose.yml up --build`. See [`demo/README.md`](demo/README.md).
+- **Before you push — one command runs every gate CI runs:** `python scripts/gates.py`. It runs
+  the suite with the coverage gate, Ruff + mypy, `pip check`, the browser suite under both themes
+  and — when `SNAPADMIN_TEST_POSTGRES`/`SNAPADMIN_TEST_ES_URL`
+  point at running services — the PostgreSQL and Elasticsearch job. A gate this machine cannot run
+  is reported as **not run** with what it needs, never as passed; a gate you name that cannot run
+  fails. `--list` shows each gate's exact commands and the CI job that runs them. By name:
+  `security` (the security regression suite on its own), `lowest-deps` (needs `uv`: the suite with
+  every dependency at its declared minimum, as CI's `lowest-deps` job runs it) and `dist`;
+  `--release` runs all of them plus the sdist/wheel build and `twine check`, and fails if any gate
+  could not run. The only thing
+  it cannot reproduce is the six-job Python × Django matrix. `tests/test_gates_script.py` fails
+  when a CI step appears that no gate reproduces.
 - **Static analysis:** `ruff check snapadmin && ruff format --check snapadmin` must be clean (CI
   blocks on it); `PYTHONPATH=. mypy` must be clean too — CI blocks on it, and `encryption/`,
   `crypto.py`, `sharding/`, `backup.py`, `validators.py`, `logging_config.py` and `quickstart/` run
@@ -120,7 +132,17 @@ that aren't obvious from the code.
   a browser test is not a substitute for a fast one — a defect it finds also gets a regression
   test in the ordinary suite.
 - **Migrations:** after any model change, run `python demo/manage.py makemigrations` and commit
-  the generated migration; never edit an existing migration.
+  the generated migration; never edit an existing migration. `tests/test_migrations_complete.py`
+  runs `makemigrations --check` in every CI job, so a forgotten migration fails the build.
+- **Security fixes:** a fix ships with its regression test **and** an entry in
+  `tests/security_regressions.py` naming that test, next to its note under *Security* in
+  `docs/releases/Unreleased.txt`. `tests/test_security_regressions.py` fails when a Security
+  entry has no registry entry, and when a named test disappears or is skipped;
+  `python -m pytest -m security_regression` runs the whole set.
+- **Dependencies:** a dependency declared in `pyproject.toml` is also listed in
+  `demo/requirements.txt` (what CI installs) with the same specifier —
+  `tests/test_dependency_compat.py` checks it, and that the Python/Django classifiers are exactly
+  the CI matrix. Raising or lowering a lower bound is a promise the `lowest-deps` job then checks.
 
 ## Releasing to PyPI
 
