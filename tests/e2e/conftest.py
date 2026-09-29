@@ -67,7 +67,12 @@ if TYPE_CHECKING:
     from pytest_django.live_server_helper import LiveServer
 
 E2E_DIR = Path(__file__).resolve().parent
-ARTIFACTS_DIR = E2E_DIR.parent.parent / "test-results" / "e2e"
+#: Where a failed scenario's trace goes. ``SNAPADMIN_E2E_ARTIFACTS_DIR``
+#: redirects it — the harness's own test uses that to look at one run's output.
+ARTIFACTS_DIR = Path(
+    os.environ.get("SNAPADMIN_E2E_ARTIFACTS_DIR")
+    or E2E_DIR.parent.parent / "test-results" / "e2e"
+)
 
 _BROWSER_ENGINES = ("chromium", "firefox", "webkit")
 #: Requests a scenario itself may expect to be refused (a page it has no
@@ -80,6 +85,10 @@ _INSTALL_HINT = (
     'pip install "playwright>=1.45" && playwright install chromium'
 )
 _reports_key = pytest.StashKey[dict]()
+#: Set by the ``page`` fixture when its teardown is about to fail the test. The
+#: ``context`` fixture tears down after ``page`` but before pytest has built the
+#: teardown report, so without this flag it cannot know the test failed.
+_page_problems_key = pytest.StashKey[bool]()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,6 +118,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo) -> Itera
 
 
 def _test_failed(item: pytest.Item) -> bool:
+    if item.stash.get(_page_problems_key, False):
+        return True
     return any(report.failed for report in item.stash.get(_reports_key, {}).values())
 
 
@@ -179,6 +190,9 @@ class PageProblems:
     broken_assets: list[str] = field(default_factory=list)
     server_errors: list[str] = field(default_factory=list)
 
+    def any(self) -> bool:
+        return bool(self.uncaught_errors or self.broken_assets or self.server_errors)
+
     def record_response(self, response: Response, origin: str) -> None:
         if not response.url.startswith(origin):
             return
@@ -193,13 +207,18 @@ class PageProblems:
 
 
 @pytest.fixture
-def page(context: BrowserContext, live_server: LiveServer) -> Iterator[Page]:
+def page(
+    context: BrowserContext, live_server: LiveServer, request: pytest.FixtureRequest
+) -> Iterator[Page]:
     """A tab that fails the test if any page it visits throws, loses an asset or 5xxs."""
     tab = context.new_page()
     problems = PageProblems()
     tab.on("pageerror", lambda error: problems.uncaught_errors.append(f"{tab.url}: {error}"))
     tab.on("response", lambda response: problems.record_response(response, live_server.url))
     yield tab
+    if problems.any():
+        # Tell ``context`` before failing, so the trace of this failure is kept.
+        request.node.stash[_page_problems_key] = True
     assert problems.uncaught_errors == [], (
         f"uncaught JavaScript error(s) on the page: {problems.uncaught_errors}"
     )

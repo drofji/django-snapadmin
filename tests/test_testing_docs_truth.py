@@ -470,6 +470,28 @@ _DOCUMENTED_AS_ABSENT = {
 }
 
 
+def _mentions_tool(text: str, tool: str) -> bool:
+    """Whether ``text`` names ``tool`` as a word of its own.
+
+    Not a substring test: "k6" is two characters, and a runner label or an
+    artifact name can carry them without anything running load tests.
+    """
+    return re.search(rf"\b{re.escape(tool)}\b", text.lower()) is not None
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("uses: grafana/k6-action@v0.3", True),
+        ("run: k6 run load.js", True),
+        ("name: bench-k6x", False),
+        ("runs-on: ubuntu-k64", False),
+    ],
+)
+def test_a_tool_is_found_only_as_a_word_of_its_own(text, expected):
+    assert _mentions_tool(text, "k6") is expected
+
+
 class TestChecksDocumentedAsAbsentReallyAreAbsent:
     """The direction that actually rots. Adding a tool is a happy event; adding
     it while two documents still say it does not exist is how a page starts
@@ -488,7 +510,7 @@ class TestChecksDocumentedAsAbsentReallyAreAbsent:
     @pytest.mark.parametrize("tool", sorted(_DOCUMENTED_AS_ABSENT))
     def test_no_ci_job_runs_the_tool(self, tool):
         for workflow in sorted(WORKFLOWS.glob("*.yml")):
-            assert tool not in _read(workflow).lower(), (
+            assert not _mentions_tool(_read(workflow), tool), (
                 f"{workflow.name} now runs {tool!r}, but both documents still list it under "
                 f"{_DOCUMENTED_AS_ABSENT[tool]!r} as not in place. Document the job in the same "
                 f"change — a gate nobody documented is a gate nobody runs."

@@ -106,14 +106,25 @@ class TestDemoDashboardTag:
 # The index works under either admin theme (#QA1e)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _unfold_installed(monkeypatch, installed: bool) -> None:
+    """Answer ``apps.is_installed("unfold")`` with ``installed``, and nothing else."""
+    from django.apps import apps
+
+    real = apps.is_installed
+    monkeypatch.setattr(
+        apps, "is_installed", lambda name: installed if name == "unfold" else real(name)
+    )
+
+
 @pytest.mark.django_db
 class TestAdminIndexUnderEitherTheme:
     """The demo's index used to extend ``unfold/layouts/base.html`` directly, so
     ``/admin/`` answered 500 on the stock admin the package promises to support.
-    It now extends the next ``admin/index.html`` in the loader chain and asks the
-    package which admin it built. The real stock-admin page is rendered by the
-    browser suite's stock run; here the package's flag is flipped in-process to
-    pin the template's two branches."""
+    It now extends the next ``admin/index.html`` in the loader chain and shows
+    the Unfold-only panel only when that chain is Unfold's — when ``unfold`` is
+    an installed app. The real stock-admin page is rendered by the browser
+    suite's stock run; here the answer is flipped in-process to pin the
+    template's two branches."""
 
     PANEL_HEADING = "SnapAdmin Custom Dashboard"
 
@@ -123,7 +134,7 @@ class TestAdminIndexUnderEitherTheme:
         assert self.PANEL_HEADING in html
 
     def test_the_stock_admin_keeps_the_app_list_instead(self, admin_client, monkeypatch):
-        monkeypatch.setattr("snapadmin.admin.UNFOLD_INSTALLED", False)
+        _unfold_installed(monkeypatch, False)
 
         response = admin_client.get("/admin/")
 
@@ -133,7 +144,9 @@ class TestAdminIndexUnderEitherTheme:
         assert 'href="/admin/demo/product/"' in html
 
     @pytest.mark.parametrize("unfold_installed, expected", [(True, "unfold"), (False, "stock")])
-    def test_the_theme_tag_reports_the_package_flag(self, monkeypatch, unfold_installed, expected):
-        monkeypatch.setattr("snapadmin.admin.UNFOLD_INSTALLED", unfold_installed)
+    def test_the_theme_tag_follows_the_installed_apps(
+        self, monkeypatch, unfold_installed, expected
+    ):
+        _unfold_installed(monkeypatch, unfold_installed)
 
         assert tag_module.demo_admin_theme() == expected

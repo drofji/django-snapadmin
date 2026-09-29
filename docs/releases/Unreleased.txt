@@ -261,7 +261,9 @@ Fixed
   form submits while ``/api/health/`` keeps failing, so nobody types into a form that cannot be
   saved. On Unfold — the default theme — it did nothing at all: it looked for Django's
   ``.submit-row`` inside the ``<form>``, and Unfold renders ``#submit-row`` in a footer outside it,
-  its buttons tied to the form with a ``form=`` attribute. Both layouts are found now.
+  its buttons tied to the form with a ``form=`` attribute. The guard now finds the add/change form
+  itself (``<form id="<model>_form">``, the same in both themes) and every Save button tied to it,
+  so Unfold's related-object popups — where that footer has no id at all — are guarded too.
 * **"Back online" is announced only after an outage.** The toast meant for a recovery appeared on
   every healthy page load, because the first-probe check read a flag that had already been set.
 * **Forward one-to-one and many-to-many fields reach the generated form.** A
@@ -286,7 +288,8 @@ Fixed
   window on Unfold, and was clipped on the stock admin, so CKEditor never grouped the buttons that
   did not fit into its "more" menu. On the stock admin the editor now takes a full-width line under
   its label, and an editor grouped into a ``row=`` takes a full-width line of its own in both
-  themes instead of a sliver of the row (the demo's ``Showcase`` shows one).
+  themes instead of a sliver of the row (the demo's ``Showcase`` shows one). Its minimum width
+  never exceeds a phone's window.
 * **Selects on the stock admin show their value.** Every single-choice select — a boolean, a
   foreign key, the changelist's action picker — rendered its chosen value invisibly: the stock
   admin's fixed 30px height left no room inside SnapAdmin's padding.
@@ -302,9 +305,6 @@ Security
   could not see, because masking applies to the audited model's own fields; a reader allowed the
   audit log but not the related model's PII read it there. Relations are stored as keys now (see
   Breaking).
-
-Found by the new static-analysis pass (Ruff's bandit rules), each fixed with a regression test:
-
 * **An audit row's object label is masked like the fields it is made of.** ``object_repr`` is
   ``str(instance)`` at the moment of the change — for a customer, typically a name or an email —
   and every audit surface printed it raw: the changelist column, the change form, the entry's own
@@ -324,6 +324,9 @@ Found by the new static-analysis pass (Ruff's bandit rules), each fixed with a r
   ``SNAPADMIN_MASKING_RULES`` was written raw. It is stored masked now, through the field's own
   rule — the message is stored text with no reader to decide for, so it is masked for everyone.
   The SnapAdmin trail keeps the raw diff and masks it per reader.
+
+Found by the new static-analysis pass (Ruff's bandit rules), each fixed with a regression test:
+
 * **``formatted_id`` escaped a non-integer primary key into the changelist as markup.** A
   character primary key is data — possibly user-supplied — and was rendered through
   ``mark_safe``, a stored-XSS path for any changelist using that column. It is now escaped.

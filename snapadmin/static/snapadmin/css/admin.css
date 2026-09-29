@@ -138,8 +138,10 @@ td.field-formatted_id a:hover {
        sized from its content — a `row=` group sharing a line with other fields
        — a contained wrapper contributes nothing, and the editor collapsed to
        the width of its label. An absolute length on purpose: a percentage here
-       resolves to nothing in exactly that content-sized case. */
-    min-width: 20rem;
+       resolves to nothing in exactly that content-sized case. Capped by the
+       window, less the admin's gutters: a bare 20rem is wider than a phone's
+       column, and pushed the page sideways again (found in review). */
+    min-width: min(20rem, calc(100vw - 4rem));
 }
 
 .ck-content {

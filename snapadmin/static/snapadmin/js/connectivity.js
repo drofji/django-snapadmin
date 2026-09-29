@@ -269,25 +269,35 @@
     }
 
     function guardedForms() {
-        // Add/change forms expose their Save buttons in a submit row; the
-        // changelist filter form has none. Django's stock admin renders it as
-        // `.submit-row` inside the <form>. Unfold renders `#submit-row` in a
-        // sticky footer *outside* the <form>, each button tied back to it with a
-        // `form=` attribute — so the form is found through the buttons too.
-        // Matching only `.submit-row` left the whole guard inert on Unfold: no
-        // button disabled, no submit blocked (found by the browser suite, #QA1e).
-        var rows = document.querySelectorAll(".submit-row, #submit-row");
+        // The add/change form is `<form id="<model>_form">` in both themes, and
+        // that id is what the guard keys on. The submit row is only where the
+        // buttons sit: Django's stock admin renders `.submit-row` inside the
+        // <form>; Unfold renders `#submit-row` in a sticky footer *outside* it,
+        // each button tied back with a `form=` attribute — and drops that id
+        // altogether in a related-object popup. Matching `.submit-row` alone
+        // left the guard inert on Unfold (found by the browser suite, #QA1e);
+        // matching `#submit-row` too still missed every Unfold popup (found in
+        // review). `form.elements` includes buttons tied to the form from
+        // outside it, so the Save buttons are found wherever they are drawn.
         var forms = [];
         function remember(form) {
             if (form && forms.indexOf(form) === -1) forms.push(form);
         }
+        document.querySelectorAll('form[id$="_form"]').forEach(remember);
+        var rows = document.querySelectorAll(".submit-row, #submit-row");
         rows.forEach(function (row) {
             remember(row.closest("form"));
             row.querySelectorAll("button, input[type=submit]").forEach(function (btn) {
                 remember(btn.form);
             });
         });
-        return { forms: forms, rows: rows };
+        var buttons = [];
+        forms.forEach(function (form) {
+            Array.prototype.forEach.call(form.elements, function (el) {
+                if (el.type === "submit" && buttons.indexOf(el) === -1) buttons.push(el);
+            });
+        });
+        return { forms: forms, rows: rows, buttons: buttons };
     }
 
     function setSaveBlocked(on) {
@@ -295,9 +305,9 @@
         var g = guardedForms();
         g.rows.forEach(function (row) {
             row.classList.toggle("snap-save-disabled", on);
-            row.querySelectorAll("button, input[type=submit]").forEach(function (btn) {
-                btn.disabled = on;
-            });
+        });
+        g.buttons.forEach(function (btn) {
+            btn.disabled = on;
         });
     }
 

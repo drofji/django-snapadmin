@@ -95,3 +95,22 @@ def test_an_outage_blocks_saving_and_the_recovery_gives_it_back(watched_page):
         "This page is read-only until you reconnect.",
         "Back online — backend reachable.",
     ]
+
+
+def test_an_outage_blocks_saving_in_a_related_object_popup(watched_page):
+    """The "+" next to a relation opens the add form as a popup. Unfold drops the
+    ``id="submit-row"`` there (``{% if not is_popup %}``), so a guard that found
+    the form only through that id left every popup form unguarded (found in
+    review, #QA1e). The guard finds the change form itself now."""
+    page = watched_page
+    page.goto(f"{PRODUCT_ADD_URL}?_popup=1")
+    page.wait_for_function("() => window.snapConnectivityStates.length >= 1").dispose()
+    save = page.locator('[name="_save"]').first
+    expect(save).to_be_enabled()
+
+    page.route(HEALTH_ROUTE, lambda route: route.abort())
+
+    expect(save).to_be_disabled()
+    assert page.evaluate(
+        "() => [...document.querySelectorAll('[name=_save]')].every(button => button.disabled)"
+    )

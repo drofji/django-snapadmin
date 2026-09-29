@@ -108,7 +108,10 @@ def relation_value(model, field_name: str, value: object) -> object:
 
     Anything that is not a forward foreign key, one-to-one or many-to-many of
     ``model`` — a plain field, a form-only field, ``None`` — is returned
-    unchanged. No query is run.
+    unchanged. No query is run for rows, lists of rows or an already evaluated
+    queryset — which is what a ``ModelMultipleChoiceField`` hands over, having
+    evaluated it to validate the choice. An unevaluated queryset is evaluated
+    here, one query, as iterating it anywhere would.
     """
     try:
         field = model._meta.get_field(field_name)
@@ -122,10 +125,8 @@ def relation_value(model, field_name: str, value: object) -> object:
         # Primary keys of one model share one orderable type (int, str, UUID).
         keys: list[Any] = [row.pk if isinstance(row, models.Model) else row for row in rows]
         return sorted(keys)
-    if isinstance(field, models.ForeignKey):
-        if isinstance(value, models.Model):
-            return getattr(value, field.target_field.attname)
-        return value
+    if isinstance(field, models.ForeignKey) and isinstance(value, models.Model):
+        return getattr(value, field.target_field.attname)
     return value
 
 

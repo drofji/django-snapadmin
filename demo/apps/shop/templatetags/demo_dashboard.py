@@ -75,14 +75,16 @@ def _recent_activity() -> list[dict[str, Any]]:
 
 @register.simple_tag
 def demo_admin_theme() -> str:
-    """``"unfold"`` or ``"stock"`` — whichever admin SnapAdmin actually built.
+    """``"unfold"`` or ``"stock"`` — whose ``admin/index.html`` the demo's index extends.
 
-    Read from the package's own flag rather than re-derived from settings, so the
-    demo's index and the generated ModelAdmins can never disagree about the theme.
+    The demo's index extends the *next* ``admin/index.html`` in the template
+    loader chain, and that is Unfold's exactly when ``unfold`` is an installed
+    app. The panel is Unfold markup, so that — not an import-time flag of one
+    SnapAdmin module or another — is what decides whether it can be shown.
     """
-    from snapadmin.admin import UNFOLD_INSTALLED
+    from django.apps import apps
 
-    return "unfold" if UNFOLD_INSTALLED else "stock"
+    return "unfold" if apps.is_installed("unfold") else "stock"
 
 
 @register.inclusion_tag("demo/_dashboard_body.html")

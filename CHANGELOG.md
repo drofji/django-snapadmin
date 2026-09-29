@@ -92,22 +92,23 @@ the `0.x` beta series.
 - An encryption key configured as bytes or a number is an `ImproperlyConfigured`, not an
   `AttributeError`.
 - The system dashboard's chart is drawn again (a multi-line template comment broke it in 0.1.0b6).
-- The outage guard disables Save on Unfold too, and says "Back online" only after an outage.
+- The outage guard disables Save on Unfold too — related-object popups included — and says
+  "Back online" only after an outage.
 - `SnapOneToOneField` / `SnapManyToManyField` with `show_in_form=True` appear in the generated
   form (a many-to-many with its own `through` model stays out); `autocomplete=True` on a one-to-one
   is honoured; no reverse relation in `autocomplete_fields`.
 - The audit trail stores a JSON field's list or object as JSON rather than as its Python repr.
-- The rich-text editor no longer widens the form past the window, and gets a full line inside a
-  `row=` group; stock-admin selects show their value.
+- The rich-text editor no longer widens the form past the window (a phone's included), and gets a
+  full line inside a `row=` group; stock-admin selects show their value.
 
 ### Security
 - The audit trail no longer stores a related object's label (`str(row)`, often a name or an email),
   which masking could not see.
-- `formatted_id` escapes a non-integer primary key instead of rendering it as markup (stored XSS).
 - An audit row's object label (`str(instance)`) is shown as `"<Model> #<pk>"` — in the audit
   changelist, search, change form, timeline and export — on a model with masked fields, to anyone
   without raw access to all of them.
 - Django's admin history message stores a masked field's before/after values masked.
+- `formatted_id` escapes a non-integer primary key instead of rendering it as markup (stored XSS).
 - Alert webhooks accept only `http`/`https` URLs.
 - `snapadmin_restore` escapes the database name in the SQL it sends to `psql`.
 - CSV exports and the CSV audit export neutralise spreadsheet formulas (CWE-1236).

@@ -129,3 +129,30 @@ def test_every_single_choice_select_shows_its_value(page, log_in, admin_user):
     assert {select["name"] for select in selects} >= {"available"}
     cramped = [select for select in selects if select["contentHeight"] < select["fontSize"]]
     assert cramped == [], f"select(s) with no room to show their value: {cramped}"
+
+
+@pytest.mark.parametrize("form_url", WIDE_FORMS)
+def test_a_rich_text_editor_fits_a_phone_width_window(page, log_in, admin_user, form_url):
+    """The editor's floor (``min-width``) keeps it usable where its column is
+    sized from its content — but an absolute floor wider than a phone's column
+    pushed the page sideways again, the defect the floor sat next to (found in
+    review, #QA1e). The floor may never exceed the window."""
+    page.set_viewport_size({"width": 360, "height": 800})
+    log_in(admin_user)
+
+    page.goto(form_url)
+    expect(page.locator(".ck-editor").first).to_be_visible()
+
+    layout = page.evaluate(
+        """() => ({
+            documentWidth: document.documentElement.scrollWidth,
+            windowWidth: document.documentElement.clientWidth,
+            editorRights: [...document.querySelectorAll('.ck-editor')]
+                .map(editor => editor.getBoundingClientRect().right),
+        })"""
+    )
+    assert all(right <= layout["windowWidth"] for right in layout["editorRights"]), layout
+    assert layout["documentWidth"] == layout["windowWidth"], (
+        f"the form scrolls sideways: {layout['documentWidth']}px of content in a "
+        f"{layout['windowWidth']}px window"
+    )
