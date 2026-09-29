@@ -313,6 +313,7 @@ pytest_add_cli_args = [
     "--ignore=tests/test_public_surface_snapshot.py",
     "--ignore=tests/test_security_regressions.py",
     "--ignore=tests/test_testing_docs_truth.py",
+    "--ignore=tests/test_translation_lint.py",
     "--ignore=tests/test_version_sync.py",
     "--deselect=tests/test_api_surface_defaults.py::TestNoGuideClaimsTheOldDefault::test_the_doc_scan_sees_the_guides",
     "--deselect=tests/test_es_mapping_completeness.py::TestTheDocumentedExampleWouldWork::test_every_dual_or_es_only_docs_example_declares_a_mapping",

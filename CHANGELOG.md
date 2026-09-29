@@ -57,6 +57,8 @@ the `0.x` beta series.
   to the tests that pin it; a Security note without one fails the build.
 - A `lowest-deps` CI job runs the suite with every dependency at its declared minimum;
   `makemigrations --check` and `pip check` run in CI.
+- A lint over all twenty translation catalogs (placeholders, newlines, markup, plural forms,
+  headers, a `.mo` matching its `.po`); the docs say which locales are native-reviewed (`en`, `ru`).
 
 ### Changed
 - `llms.txt` carries the full adoption playbook an assistant needs before writing integration

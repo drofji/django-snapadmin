@@ -5859,6 +5859,25 @@ path("i18n/", include("django.conf.urls.i18n")),</code></pre>
 
   <p>It posts to Django's <code>set_language</code> view and renders nothing when only one language is configured. The switcher builds its option list from Django's own <code>get_available_languages</code>, so it follows your <code>LANGUAGES</code> setting rather than a catalog shipped by SnapAdmin.</p>
 
+  <div class="callout callout-warn" id="i18n-review">
+    <strong>Which translations a native speaker has reviewed</strong>
+    <p>Native-reviewed: <code>en</code> (the source language) and <code>ru</code>.
+    Machine-assisted, awaiting a native speaker's review: <code>de</code>, <code>de_CH</code>,
+    <code>es</code>, <code>fr</code>, <code>fr_CH</code>, <code>it</code>, <code>nl</code>,
+    <code>pl</code>. Those read correctly but may not read naturally; a correction is a small
+    pull request: the edited <code>snapadmin/locale/&lt;locale&gt;/LC_MESSAGES/django.po</code> and
+    the <code>django.mo</code> that <code>compilemessages</code> rebuilds from it. Native speakers
+    are warmly invited to review a whole catalog.</p>
+    <p>What a machine can decide is checked on every run, in every one of the twenty catalogs
+    (<code>tests/test_translation_lint.py</code> and <code>tests/test_i18n.py</code>, the class of
+    defects <code>msgfmt --check</code> reports): no untranslated or <code>fuzzy</code> entry, every
+    placeholder of the source kept with its conversion — a misspelt <code>%(name)s</code> is a
+    <code>KeyError</code> when the string renders, <code>%(n)d</code> for <code>%(n)s</code> a
+    <code>TypeError</code> — the same leading and trailing newlines and HTML tags, a header naming
+    its own locale in UTF-8 and declaring the language's plural rule, and a compiled
+    <code>django.mo</code> that holds exactly what its <code>django.po</code> says.</p>
+  </div>
+
   <div class="callout callout-info">
     <strong>Only the package UI is translated</strong>
     The catalogs cover SnapAdmin's own strings — model labels, help texts, validator messages, dashboard copy. Your models' <code>verbose_name</code>s and field labels are yours to translate in your project's catalogs.

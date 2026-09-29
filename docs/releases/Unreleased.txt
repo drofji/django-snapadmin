@@ -148,6 +148,14 @@ Added
   its lowest allowed version on Python 3.10 and runs the suite, and fails when a declared minimum
   cannot be installed with the rest. Tests also pin the Python/Django classifiers to the CI matrix,
   and that CI installs every declared dependency at the declared range.
+* **A lint over every translation catalog.** Whether a German sentence reads naturally needs a German
+  speaker; what a machine can decide is now checked on every run, over all twenty catalogs (the
+  package's and the demo's): every placeholder of the source kept (``%(name)s`` misspelt is a
+  ``KeyError`` when the string renders), the same leading and trailing newlines and HTML tags, a
+  header naming its own locale in UTF-8 and declaring its plural rule, every plural form filled, no
+  untranslated entry, and a compiled ``django.mo`` that holds exactly what its ``django.po`` says. The docs now say which
+  catalogs a native speaker has reviewed — ``en`` and ``ru`` — and which are machine-assisted and
+  await one (de, de_CH, es, fr, fr_CH, it, nl, pl).
 * **A model change without its migration fails CI.** ``makemigrations --check`` ran only in a local
   checklist; it is a test now, in every matrix job and on PostgreSQL.
 
@@ -310,6 +318,12 @@ Fixed
   its label, and an editor grouped into a ``row=`` takes a full-width line of its own in both
   themes instead of a sliver of the row (the demo's ``Showcase`` shows one). Its minimum width
   never exceeds a phone's window.
+* **Every translation catalog declares its language and plural rule.** Nine demo catalogs still
+  carried the template header ``makemessages`` writes into a new file — an empty ``Language``, a
+  ``fuzzy`` header, ``PACKAGE VERSION`` — and none of the package's ten declared ``Plural-Forms``,
+  so gettext would have applied English plural rules to the first Russian or Polish plural string.
+  Found by the new catalog lint; the headers now carry the language and the plural rule Django
+  itself uses for it, and every catalog is recompiled.
 * **Selects on the stock admin show their value.** Every single-choice select — a boolean, a
   foreign key, the changelist's action picker — rendered its chosen value invisibly: the stock
   admin's fixed 30px height left no room inside SnapAdmin's padding.

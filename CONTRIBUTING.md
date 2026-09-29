@@ -134,6 +134,18 @@ that aren't obvious from the code.
 - **Migrations:** after any model change, run `python demo/manage.py makemigrations` and commit
   the generated migration; never edit an existing migration. `tests/test_migrations_complete.py`
   runs `makemigrations --check` in every CI job, so a forgotten migration fails the build.
+- **Translations:** a changed translatable string means regenerating the catalogs, **never from
+  the repository root** (there `makemessages` also walks `tests/` and rewrites the package
+  catalogs destructively). Package strings: `cd snapadmin`, then
+  `python ../demo/manage.py makemessages -l <locale> --no-location` for each locale but `en`
+  (English is the source; its catalog stays header-only), then
+  `python ../demo/manage.py compilemessages`. Demo strings: the same from `cd demo`.
+  `makemessages -a` does nothing in this repository.
+  `tests/test_translation_lint.py` fails on an untranslated, fuzzy or placeholder-breaking entry
+  (with `tests/test_i18n.py`) and on a `django.mo` that no longer matches its `.po` — commit both
+  files. **Native speakers wanted:** only `en` and
+  `ru` have been reviewed by one; `de`, `de_CH`, `es`, `fr`, `fr_CH`, `it`, `nl` and `pl` are
+  machine-assisted — a review of any of them is one of the most useful contributions there is.
 - **Security fixes:** a fix ships with its regression test **and** an entry in
   `tests/security_regressions.py` naming that test, next to its note under *Security* in
   `docs/releases/Unreleased.txt`. `tests/test_security_regressions.py` fails when a Security
