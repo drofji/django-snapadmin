@@ -4101,7 +4101,12 @@ SNAPADMIN_ANALYTICS_DB_ALIAS = "read_replica"</code></pre>
   caller (silently ignored, not a 400), the async export (<code>POST /api/exports/</code>) masks
   rows unless the requester holds PII access, and the audit trail's <code>changes</code> diff is
   masked in the admin and in <code>snapadmin_audit_export</code> (pass <code>--reveal-pii</code>
-  for the raw diff).</p>
+  for the raw diff). An audit row's object label is <code>str(instance)</code> — often a name or an
+  email — so on a model with any masked field it reads <code>Customer #12</code> instead, in the
+  audit changelist, its search, the change form, the timeline and the export, for anyone who may
+  not see every masked field of that model raw. Django's own history message stores a masked
+  field's values masked. A JSON field is masked value by value and keeps its keys; a rule's
+  constant <code>replacement</code> replaces each value, not the object.</p>
   <pre><code># settings.py
 SNAPADMIN_MASKED_FIELDS = {
     "users.UserModel": ["email", "phone_number"],
@@ -4325,7 +4330,9 @@ python manage.py snapadmin_audit_export --purge   # also prune rows past retenti
   <p>Both views mask through <code>SNAPADMIN_MASKED_FIELDS</code> and
   <a href="#masking-rules"><code>SNAPADMIN_MASKING_RULES</code></a>, and both are gated on the audit
   log's own view permission — the same one that already lists these rows — so reading the trail is
-  never a way around masking. A long history is capped at the 100 most recent entries per page
+  never a way around masking. That includes the entry's object label: on a model with a masked
+  field it is shown as <code>&lt;Model&gt; #&lt;pk&gt;</code> to a reader who may not see that
+  model's PII, and is not searchable for them. A long history is capped at the 100 most recent entries per page
   (override <code>timeline_max_entries</code> on the model admin);
   <code>snapadmin_audit_export</code> remains the way to read all of it.</p>
 

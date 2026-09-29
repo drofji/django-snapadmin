@@ -277,7 +277,11 @@ Fixed
   fields too. No migration.
 * **The audit trail stores JSON values as JSON.** A ``JSONField`` holding a list or an object
   was stored as its Python repr (``"[{'a': 1}]"``) although the trail's own contract is that
-  JSON-native values keep their type; lists and objects are stored as JSON now, item by item.
+  JSON-native values keep their type; lists and objects are stored as JSON now, item by item. A
+  masked JSON field is therefore masked in the audit trail the way the admin, REST, GraphQL and
+  exports already masked it — value by value, keys kept — where the old repr string was masked
+  as one opaque string. Masking a JSON value whose *keys* are personal data needs a rule of its
+  own on the surfaces that serve it; the trail follows the same policy as every other surface.
 * **The rich-text editor stays inside its column.** Its toolbar made the whole form wider than the
   window on Unfold, and was clipped on the stock admin, so CKEditor never grouped the buttons that
   did not fit into its "more" menu. On the stock admin the editor now takes a full-width line under
@@ -301,6 +305,25 @@ Security
 
 Found by the new static-analysis pass (Ruff's bandit rules), each fixed with a regression test:
 
+* **An audit row's object label is masked like the fields it is made of.** ``object_repr`` is
+  ``str(instance)`` at the moment of the change — for a customer, typically a name or an email —
+  and every audit surface printed it raw: the changelist column, the change form, the entry's own
+  title and breadcrumb, the per-object timeline and ``snapadmin_audit_export``; the admin search
+  answered for it too, which confirms a name as surely as printing it. Which fields ``__str__``
+  uses cannot be known, so on a model with any masked field the label is treated as covering all
+  of them: a reader who may see every masked field of that model raw (a superuser, a holder of
+  ``snapadmin.view_raw_pii``, or of every per-field rule ``permission``) reads it; anyone else,
+  and the export unless ``--reveal-pii`` is passed, reads ``"Customer #12"`` instead, and the
+  label is not searchable for them. Rows already written are covered, since the label is masked
+  when it is read. New public helpers: ``snapadmin.masking.mask_object_repr``,
+  ``object_repr_hidden`` and ``hidden_object_repr_models``.
+* **Django's own admin history message stores a masked field masked.** Next to the SnapAdmin trail,
+  the generated admin writes a ``"Field: 'old' -> 'new'"`` message into Django's ``LogEntry``,
+  which the object's *History* page shows to anyone who may view the object. Encrypted fields were
+  already redacted there; a field listed in ``SNAPADMIN_MASKED_FIELDS`` or
+  ``SNAPADMIN_MASKING_RULES`` was written raw. It is stored masked now, through the field's own
+  rule — the message is stored text with no reader to decide for, so it is masked for everyone.
+  The SnapAdmin trail keeps the raw diff and masks it per reader.
 * **``formatted_id`` escaped a non-integer primary key into the changelist as markup.** A
   character primary key is data — possibly user-supplied — and was rendered through
   ``mark_safe``, a stored-XSS path for any changelist using that column. It is now escaped.

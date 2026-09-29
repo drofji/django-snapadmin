@@ -573,3 +573,92 @@ def mask_changes(
         )
         for field, diff in changes.items()
     }
+
+
+def object_repr_hidden(app_label: str, model_name: str, user: UserLike = None) -> bool:
+    """Whether an audit row's ``object_repr`` must be withheld from ``user``.
+
+    ``object_repr`` is ``str(instance)`` at the moment of the change — for a
+    customer, typically a name or an email: the very data masking hides on every
+    other surface, printed by whatever the model's ``__str__`` returns. Which of
+    the model's fields it contains is unknowable from here, so on a model with
+    at least one masked field it is treated as covering all of them: shown only
+    to a viewer who may see *every* masked field of that model raw. Without a
+    viewer in hand the answer is always "hidden". A model with no masked field
+    has nothing to hide.
+    """
+    masked = get_masked_fields(app_label, model_name)
+    if not masked:
+        return False
+    if user is None:
+        return True
+    return not all(
+        user_can_view_pii(user, name, app_label=app_label, model_name=model_name) for name in masked
+    )
+
+
+def mask_object_repr(
+    app_label: str,
+    model_name: str,
+    object_id: str,
+    object_repr: str,
+    user: UserLike = None,
+) -> str:
+    """An audit row's object label as ``user`` may see it.
+
+    ``object_repr`` itself when :func:`object_repr_hidden` allows it, otherwise
+    the neutral ``"<Model> #<pk>"`` (``"Customer #12"``) — the model's verbose
+    name when it is still installed, the stored model name when it is not. The
+    primary key identifies *which* row without saying anything about it, and the
+    row itself stays behind its own admin permissions.
+
+    The single choke point for every surface that shows an audit row's label:
+    the audit changelist, change form and search, the per-object timeline, the
+    row's own ``__str__`` and ``snapadmin_audit_export``.
+    """
+    if not object_repr_hidden(app_label, model_name, user):
+        return object_repr
+    from django.apps import apps
+    from django.core.exceptions import AppRegistryNotReady
+    from django.utils.text import capfirst
+
+    try:
+        label = str(capfirst(apps.get_model(app_label, model_name)._meta.verbose_name))
+    except (LookupError, ValueError, AppRegistryNotReady):
+        label = model_name
+    return f"{label} #{object_id}" if object_id else label
+
+
+def _models_with_masked_fields() -> set[tuple[str, str]]:
+    """``(app_label, model_name)`` of every model that may have a masked field.
+
+    Every installed model carrying one, plus every model the two masking
+    settings name — including one no longer installed, whose audit rows still
+    hold the labels it wrote. Both halves lower-cased, as the settings are
+    matched.
+    """
+    from django.apps import apps
+
+    candidates = {
+        (model._meta.app_label.lower(), model._meta.model_name or "") for model in apps.get_models()
+    }
+    for setting in ("SNAPADMIN_MASKED_FIELDS", "SNAPADMIN_MASKING_RULES"):
+        raw = get_setting(setting, None) or {}
+        if isinstance(raw, dict):
+            for key in raw:
+                app_label, _, model_name = str(key).lower().partition(".")
+                if model_name:
+                    candidates.add((app_label, model_name))
+    return {pair for pair in candidates if get_masked_fields(*pair)}
+
+
+def hidden_object_repr_models(user: UserLike = None) -> list[tuple[str, str]]:
+    """The ``(app_label, model_name)`` pairs whose audit labels ``user`` may not read.
+
+    What a query needs to apply :func:`object_repr_hidden` to many rows at once —
+    the audit changelist's search and its label column. Sorted, so the filter
+    built from it is stable.
+    """
+    return sorted(
+        pair for pair in _models_with_masked_fields() if object_repr_hidden(*pair, user=user)
+    )

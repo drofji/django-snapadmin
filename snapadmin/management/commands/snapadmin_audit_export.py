@@ -131,10 +131,14 @@ class Command(BaseCommand):
     @staticmethod
     def _row(entry, reveal_pii: bool) -> dict:
         changes = entry.changes
+        object_repr = entry.object_repr
         if not reveal_pii:
-            from snapadmin.masking import mask_changes
+            from snapadmin.masking import mask_changes, mask_object_repr
 
             changes = mask_changes(entry.app_label, entry.model, changes)
+            object_repr = mask_object_repr(
+                entry.app_label, entry.model, entry.object_id, object_repr
+            )
         return {
             "id": entry.id,
             "timestamp": entry.timestamp.isoformat(),
@@ -146,7 +150,7 @@ class Command(BaseCommand):
             "app_label": entry.app_label,
             "model": entry.model,
             "object_id": entry.object_id,
-            "object_repr": entry.object_repr,
+            "object_repr": object_repr,
             "changes": changes,
         }
 

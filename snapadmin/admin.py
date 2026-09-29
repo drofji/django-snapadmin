@@ -14,11 +14,13 @@ classes those build on.
 from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
+from django.db.models import Case, Q, Value, When
 from django.template.loader import render_to_string
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
+from django.utils.text import smart_split, unescape_string_literal
 from django.utils.translation import gettext_lazy as _
 
 try:
@@ -232,7 +234,10 @@ class SnapadminAuditLogAdmin(ModelAdmin):
     field-level table rather than raw JSON, and every object links to
     :meth:`timeline_view` — its full change history on one page, newest first.
     Both are masked through ``snapadmin.masking.mask_changes``, so reading the
-    trail never becomes a way around ``SNAPADMIN_MASKED_FIELDS``.
+    trail never becomes a way around ``SNAPADMIN_MASKED_FIELDS``. So is each
+    row's object label (``object_repr`` — ``str(instance)``, often a name or an
+    email), through ``snapadmin.masking.mask_object_repr``: in the list column,
+    the change form, the search and the timeline header alike.
     """
 
     #: Entries rendered on one timeline page. The view is a diff reader, not a
@@ -282,7 +287,69 @@ class SnapadminAuditLogAdmin(ModelAdmin):
     def get_queryset(self, request):
         # #FUT1b: hide a row naming an object outside the current tenant —
         # see snapadmin.audit.visible_audit_queryset for the fail-closed rule.
-        return audit.visible_audit_queryset(super().get_queryset(request))
+        queryset = audit.visible_audit_queryset(super().get_queryset(request))
+        # Whether this viewer may read each row's object label, decided once per
+        # request for every row, so the list column and the change form — which
+        # see only the row — answer for the viewer rather than for nobody.
+        hidden = self._hidden_label_filter(request.user)
+        return queryset.annotate(
+            snap_object_repr_hidden=(
+                Case(When(hidden, then=Value(True)), default=Value(False))
+                if hidden is not None
+                else Value(False)
+            )
+        )
+
+    @staticmethod
+    def _hidden_label_filter(user) -> Q | None:
+        """The rows whose object label ``user`` may not read, or ``None`` for none."""
+        from snapadmin.masking import hidden_object_repr_models
+
+        condition = None
+        for app_label, model_name in hidden_object_repr_models(user):
+            pair = Q(app_label__iexact=app_label, model__iexact=model_name)
+            condition = pair if condition is None else condition | pair
+        return condition
+
+    def get_search_fields(self, request):
+        # A label this viewer may not read must not be searchable either: a
+        # search that answers "one row" for "Smith" confirms the name as surely
+        # as printing it. The label is searched separately, below, over the
+        # rows whose label this viewer may read.
+        fields = list(super().get_search_fields(request))
+        if self._hidden_label_filter(request.user) is None:
+            return fields
+        return [name for name in fields if name != "object_repr"]
+
+    def get_search_results(self, request, queryset, search_term):
+        results, may_have_duplicates = super().get_search_results(request, queryset, search_term)
+        hidden = self._hidden_label_filter(request.user)
+        if (
+            hidden is None
+            or not search_term
+            or "object_repr" not in super().get_search_fields(request)
+        ):
+            return results, may_have_duplicates
+        label_matches = Q()
+        for bit in smart_split(search_term):
+            if bit[:1] in {'"', "'"} and bit[-1:] == bit[:1]:
+                bit = unescape_string_literal(bit)
+            label_matches &= Q(object_repr__icontains=bit)
+        return results | queryset.filter(label_matches).exclude(hidden), may_have_duplicates
+
+    @staticmethod
+    def _object_label(obj: SnapadminAuditLog) -> str:
+        """``obj.object_repr``, or its neutral stand-in where the viewer may not read it.
+
+        The viewer's answer comes from :meth:`get_queryset`'s annotation. A row
+        that did not come through it — a display method called directly — is
+        answered for no viewer at all, which hides every masked model's label.
+        """
+        from snapadmin.masking import mask_object_repr
+
+        if getattr(obj, "snap_object_repr_hidden", None) is False:
+            return obj.object_repr
+        return mask_object_repr(obj.app_label, obj.model, obj.object_id, obj.object_repr)
 
     @staticmethod
     def _object_visible_to_tenant(app_label: str, model_name: str, object_id: str) -> bool:
@@ -330,6 +397,8 @@ class SnapadminAuditLogAdmin(ModelAdmin):
         :meth:`_object_visible_to_tenant`) — a direct/bookmarked URL must not
         reach a timeline the changelist itself would have hidden.
         """
+        from snapadmin.masking import mask_object_repr
+
         if not self.has_view_permission(request):
             raise PermissionDenied
         if not self._object_visible_to_tenant(app_label, model, object_id):
@@ -350,7 +419,13 @@ class SnapadminAuditLogAdmin(ModelAdmin):
             "opts": self.model._meta,
             "title": _("Audit timeline"),
             "target": f"{app_label}.{model} #{object_id}",
-            "target_repr": items[0]["entry"].object_repr if items else "",
+            "target_repr": (
+                mask_object_repr(
+                    app_label, model, object_id, items[0]["entry"].object_repr, request.user
+                )
+                if items
+                else ""
+            ),
             "entries": items,
             "total": total,
             "limit": self.timeline_max_entries,
@@ -406,7 +481,8 @@ class SnapadminAuditLogAdmin(ModelAdmin):
         # it), so Django puts it in the form — and a view-only user gets every
         # field rendered read-only from the model, printing the *unmasked* diff
         # next to the masked one.
-        return [*(super().get_exclude(request, obj) or []), "changes"]
+        # "object_repr" likewise: it is swapped for the viewer-aware label below.
+        return [*(super().get_exclude(request, obj) or []), "changes", "object_repr"]
 
     def get_readonly_fields(self, request, obj=None):
         # Swap the raw "changes" field for a rendered diff — masked unless the
@@ -416,7 +492,13 @@ class SnapadminAuditLogAdmin(ModelAdmin):
 
         fields = list(super().get_readonly_fields(request, obj))
         rendered = "changes_diff" if user_can_view_pii(request.user) else "masked_changes"
-        return [rendered if f == "changes" else f for f in fields]
+        swaps = {"changes": rendered, "object_repr": "object_label"}
+        return [swaps.get(f, f) for f in fields]
+
+    @display(description=_("Object"))
+    def object_label(self, obj: SnapadminAuditLog) -> str:
+        """The object label on the change form, as this viewer may see it."""
+        return self._object_label(obj)
 
     @display(description=_("Changes"))
     def changes_diff(self, obj: SnapadminAuditLog):
@@ -446,7 +528,7 @@ class SnapadminAuditLogAdmin(ModelAdmin):
     @display(description=_("Object"))
     def object_timeline(self, obj: SnapadminAuditLog):
         """The object column, linked to that object's diff timeline."""
-        label = obj.object_repr or obj.object_id or "—"
+        label = self._object_label(obj) or obj.object_id or "—"
         url = self.timeline_url(obj)
         if url is None:
             return label

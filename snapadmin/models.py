@@ -423,7 +423,13 @@ class SnapadminAuditLog(models.Model):
         ordering = ["-timestamp"]
 
     def __str__(self) -> str:
-        return f"{self.get_action_display()} {self.object_repr} by {self.actor_repr or 'anonymous'}"
+        # The change page's title and breadcrumb print this. With no viewer in
+        # hand, a masked model's label is never part of it — see
+        # snapadmin.masking.mask_object_repr.
+        from snapadmin.masking import mask_object_repr
+
+        label = mask_object_repr(self.app_label, self.model, self.object_id, self.object_repr)
+        return f"{self.get_action_display()} {label} by {self.actor_repr or 'anonymous'}"
 
     def save(self, *args, **kwargs):
         # Append-only: a persisted row (pk already set) can never be re-saved.
@@ -756,6 +762,10 @@ class SnapSaveMixin:
             return
         from snapadmin import audit
 
+        from snapadmin.masking import get_masked_fields, mask_field
+
+        app_label, model_name = self.model._meta.app_label, self.model._meta.model_name or ""
+        masked_names = set(get_masked_fields(app_label, model_name))
         change_lines = []
         changes = {}
         for field_name in form.changed_data:
@@ -775,6 +785,16 @@ class SnapSaveMixin:
                 # redaction as the SnapAdmin trail rather than only one of them.
                 if audit.field_is_encrypted(self.model, field_name):
                     change_lines.append(f"{verbose}: {audit.REDACTED} -> {audit.REDACTED}")
+                elif field_name in masked_names:
+                    # Stored text, shown to anyone who may view the object: no
+                    # viewer to decide for, so a masked field is always masked
+                    # here. The SnapAdmin trail keeps the raw diff and masks it
+                    # per viewer when it is read.
+                    old_text, new_text = (
+                        mask_field(app_label, model_name, field_name, audit.log_text(side))
+                        for side in (old_val, new_val)
+                    )
+                    change_lines.append(f"{verbose}: '{old_text}' -> '{new_text}'")
                 else:
                     change_lines.append(
                         f"{verbose}: '{audit.log_text(old_val)}' -> '{audit.log_text(new_val)}'"

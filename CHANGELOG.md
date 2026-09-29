@@ -104,6 +104,10 @@ the `0.x` beta series.
 - The audit trail no longer stores a related object's label (`str(row)`, often a name or an email),
   which masking could not see.
 - `formatted_id` escapes a non-integer primary key instead of rendering it as markup (stored XSS).
+- An audit row's object label (`str(instance)`) is shown as `"<Model> #<pk>"` — in the audit
+  changelist, search, change form, timeline and export — on a model with masked fields, to anyone
+  without raw access to all of them.
+- Django's admin history message stores a masked field's before/after values masked.
 - Alert webhooks accept only `http`/`https` URLs.
 - `snapadmin_restore` escapes the database name in the SQL it sends to `psql`.
 - CSV exports and the CSV audit export neutralise spreadsheet formulas (CWE-1236).

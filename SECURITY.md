@@ -307,7 +307,12 @@ Key protections:
   async export (`POST /api/exports/`, masked unless the requesting user holds PII access; a masked
   field is also rejected as an export `filters` key, since a match/no-match on `job.total_rows` is
   itself an oracle), the audit trail's `changes` diff (masked in the admin display and in
-  `snapadmin_audit_export` unless `--reveal-pii` is passed), and the auto-generated REST
+  `snapadmin_audit_export` unless `--reveal-pii` is passed), each audit row's object label
+  (`object_repr` is `str(instance)` — often a name or an email — so on a model with any masked
+  field it is replaced by `"<Model> #<pk>"` in the audit changelist, change form, search, timeline
+  and export for anyone who may not read *every* masked field of that model raw, and is not
+  searchable for them), Django's own admin history message (a masked field's before/after values
+  are stored masked there, since that text is shown to anyone who may view the object), and the auto-generated REST
   filter/ordering/search parameters — a masked field is silently excluded from `?field=`,
   `?ordering=field` and `?search=` for a caller without PII access, so match/no-match, sort order or
   search hits can't be used as an oracle to recover the value a masked response body never reveals raw.
