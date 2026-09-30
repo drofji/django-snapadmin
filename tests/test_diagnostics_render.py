@@ -102,11 +102,11 @@ class TestFlagGrouping:
 
     def test_every_flag_is_listed(self):
         text = _render(self.FLAGS)
-        for label in ("Rest api", "Graphql", "Backups", "Sso"):
+        for label in ("REST API", "GraphQL", "Backups", "SSO"):
             assert label in text
 
     def test_no_key_value_lines_for_grouped_flags(self):
-        assert "Rest api:" not in _render(self.FLAGS)
+        assert "REST API:" not in _render(self.FLAGS)
 
     def test_all_on_emits_only_the_on_line(self):
         text = _render({f"f{i}": True for i in range(4)})
@@ -135,6 +135,18 @@ class TestFlagGrouping:
         # Continuation lines are indented past the "✓ on" marker, not back to the margin.
         indent = len(lines[1]) - len(lines[1].lstrip())
         assert indent >= lines[0].index("✓ on") + len("✓ on")
+
+    def test_a_wrapped_run_never_splits_a_name(self):
+        # Regression: textwrap broke at any space, printing "Pii" at the end of
+        # one line and "masking" at the start of the next.
+        flags = {f"capability_number_{i}": True for i in range(20)}
+        expected = [f"Capability number {i}" for i in range(20)]
+
+        lines = _render(flags).splitlines()[1:]
+        names = [name for line in lines
+                 for name in line.strip().removeprefix("✓ on").strip().rstrip(" ·").split(" · ")]
+
+        assert names == expected
 
 
 # ── unchanged conventions ────────────────────────────────────────────────────

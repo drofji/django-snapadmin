@@ -273,8 +273,14 @@ class TestRenderer:
         assert render._format_scalar("") == "—"
         assert render._format_scalar("txt") == "txt"
 
-    def test_humanise(self):
-        assert render._humanise("rest_api") == "Rest api"
+    @pytest.mark.parametrize(
+        "key, expected",
+        [("rest_api", "REST API"), ("graphql", "GraphQL"), ("api_tokens", "API tokens"),
+         ("pii_masking", "PII masking"), ("sso", "SSO"), ("gdpr_subject_access", "GDPR subject access"),
+         ("workers_online", "Workers online"), ("ok", "Ok")],
+    )
+    def test_humanise_spells_acronyms(self, key, expected):
+        assert render._humanise(key) == expected
 
 
 # ── version collector ─────────────────────────────────────────────────────────
@@ -398,7 +404,7 @@ class TestSnapadminInfoCommand:
         text = _run(brief=True, sections=["version"])
         assert "Version & Status" in text
         # Feature flags live under a nested dict, hidden in brief mode.
-        assert "Rest api" not in text
+        assert "REST API" not in text
 
     def test_verbose(self):
         text = _run(verbose=True)

@@ -477,6 +477,27 @@ def _resolve() -> Keyset | None:
     return None
 
 
+def configured_source() -> KeySource | None:
+    """The source :func:`_resolve` would read, judged from configuration alone.
+
+    Same order and the same normalisation as :func:`_resolve`, but nothing is
+    resolved: no provider is called, no file is read, no key is parsed — safe
+    inside ``django.setup()``, where a ``KEY_PROVIDER`` reaching a KMS is not.
+    ``None`` when encryption is unconfigured. Raises ``ImproperlyConfigured``
+    for a ``SNAPADMIN_ENCRYPTION`` that is not a dict, as the resolver does.
+    """
+    options = encryption_settings()
+    if str(options.get("KEY_PROVIDER") or "").strip():
+        return KeySource.PROVIDER
+    if configured_key_file():
+        return KeySource.FILE
+    if _strip_quotes(os.environ.get(ENV_KEYS, "")):
+        return KeySource.ENV
+    if options.get("KEYS"):
+        return KeySource.SETTINGS
+    return None
+
+
 def get_keyset() -> Keyset | None:
     """The project's keyset, or ``None`` when encryption is unconfigured.
 

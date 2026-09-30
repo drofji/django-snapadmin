@@ -59,8 +59,16 @@ the `0.x` beta series.
   `makemigrations --check` and `pip check` run in CI.
 - A lint over all twenty translation catalogs (placeholders, newlines, markup, plural forms,
   headers, a `.mo` matching its `.po`); the docs say which locales are native-reviewed (`en`, `ru`).
+- A startup report: under `DEBUG`, `runserver` prints to stderr which capabilities are on, off,
+  misconfigured or switched on without their extra, plus the licence verdict — configuration only,
+  never a secret.
+  `SNAPADMIN_STARTUP_REPORT` (`"auto"` / `True` / `False`, invalid values are `snapadmin.W027`),
+  `SNAPADMIN_STARTUP_REPORT_PROBES`, and `snapadmin_info --startup` for the same block; the
+  `features` section lists such capabilities under `needs_extra`.
 
 ### Changed
+- `snapadmin_info` text labels spell acronyms (`REST API`, `GraphQL`, `PII masking`, `SSO`) and a
+  wrapped on/off run never splits a name; `--json` keys are unchanged.
 - `llms.txt` carries the full adoption playbook an assistant needs before writing integration
   code: the configuration interview grew from 12 to 18 questions (identity and `AUTH_USER_MODEL`,
   what guards the login, database posture and encrypted columns, what the audit trail does and

@@ -6,6 +6,7 @@ Report SnapAdmin's configuration, connected services and health in one place.
     python manage.py snapadmin_info --section version # one section (repeatable)
     python manage.py snapadmin_info --brief           # top-level values only
     python manage.py snapadmin_info --health-check    # probes only; non-zero exit on failure
+    python manage.py snapadmin_info --startup         # the block runserver prints at startup
 
 Each section is produced by a collector in :mod:`snapadmin.diagnostics`; new sections plug in as
 new modules there. Secrets (passwords, keys, token values) are never printed.
@@ -55,6 +56,12 @@ class Command(BaseCommand):
             help="Include extra per-section detail.",
         )
         parser.add_argument(
+            "--startup",
+            action="store_true",
+            help="Print the startup summary runserver shows (configuration only, "
+            "plus health probes if SNAPADMIN_STARTUP_REPORT_PROBES is set).",
+        )
+        parser.add_argument(
             "--health-check",
             action="store_true",
             dest="health_check",
@@ -62,6 +69,24 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        if options.get("startup"):
+            from snapadmin.diagnostics.startup import probes_requested, startup_report
+
+            for flag, option in (
+                ("--json", "as_json"),
+                ("--brief", "brief"),
+                ("--health-check", "health_check"),
+                ("--section", "sections"),
+                ("--verbose", "verbose"),
+            ):
+                if options.get(option):
+                    raise CommandError(
+                        f"--startup cannot be combined with {flag}: it prints the fixed "
+                        "startup block. Drop --startup for the full report."
+                    )
+
+            self.stdout.write(startup_report(probes=probes_requested()))
+            return
         sections = options.get("sections")
         if sections:
             known = {collector.name for collector in get_collectors()}

@@ -180,6 +180,7 @@ SNAPSHOT: dict[str, list[str]] = {
     ],
     "snapadmin.checks": [
         "check_admin_sections_deprecated",
+        "check_startup_report_setting",
         "check_analytics_db_alias",
         "check_api_extras_installed",
         "check_api_read_only",

@@ -91,3 +91,9 @@ class SnapAdminConfig(AppConfig):
         from snapadmin.auth_admin import apply_unfold_auth_admin
 
         apply_unfold_auth_admin()
+
+        # Last, once everything above is wired: what is switched on (#DX1).
+        # Prints only where SNAPADMIN_STARTUP_REPORT says so, and never raises.
+        from snapadmin.diagnostics import startup
+
+        startup.emit_startup_report()

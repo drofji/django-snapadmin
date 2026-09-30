@@ -688,6 +688,22 @@ SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES = int(
     os.getenv('SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES', '60')
 )
 
+# Startup report: one block on stderr saying which SnapAdmin capabilities are on, off,
+# or switched on without their extra installed, plus the dependency-licence verdict.
+# "auto" (default) prints it for runserver under DEBUG only; True prints it in every
+# process except machine-read commands (as one JSON line, event `snapadmin.startup`,
+# when stderr is not a terminal and DEBUG is off); False never. Configuration
+# only — PROBES = True adds the DB / Elasticsearch / API health probes (a connection
+# each, at boot). `manage.py snapadmin_info --startup` prints the same block.
+# An unrecognised spelling is passed through so snapadmin.W027 names it.
+_startup_report = os.getenv('SNAPADMIN_STARTUP_REPORT', 'auto').strip()
+SNAPADMIN_STARTUP_REPORT = {
+    '': 'auto', 'auto': 'auto',
+    '1': True, 'true': True, 'yes': True, 'on': True,
+    '0': False, 'false': False, 'no': False, 'off': False,
+}.get(_startup_report.lower(), _startup_report)
+SNAPADMIN_STARTUP_REPORT_PROBES = env_bool('SNAPADMIN_STARTUP_REPORT_PROBES', False)
+
 # Alert channels: the three alerts above (spike, digest, health) are delivered by
 # email *and* by any chat webhook listed here — Slack, Discord and Teams incoming
 # webhooks, the Telegram Bot API, or a plain JSON POST ({'type': 'json'}). Posted

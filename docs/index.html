@@ -4903,6 +4903,8 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset — no p
     <tr><td><code>SNAPADMIN_SHOW_IN_FORM_DEFAULT</code></td><td><code>False</code></td><td>Project-wide default for every <code>Snap*Field</code>'s <code>show_in_form</code> — raise it when adopting SnapAdmin onto models that never set the flag per field; an explicit per-field value still wins (<code>snapadmin.W015</code> flags a model whose form would render empty regardless of the cause)</td></tr>
     <tr><td><code>SNAPADMIN_CONNECTIVITY_ENABLED</code></td><td><code>False</code></td><td>Load the admin-wide health-poll/save-guard/sidebar-badge layer (<code>snapadmin/js/connectivity.js</code>) — only takes effect when at least one registered model also has <code>offline_mode = True</code> (see <a href="#offline">Offline Mode</a>)</td></tr>
     <tr><td><code>SNAPADMIN_LIMITS_CACHE_ALIAS</code></td><td><code>"default"</code></td><td>Which <code>CACHES</code> entry <code>snapadmin.limits.reserve()</code> stores its window/concurrency/cooldown counters in — point it at a shared backend before relying on quotas across more than one worker process (see <a href="#quotas">Quotas &amp; Rate Limits</a>)</td></tr>
+    <tr><td><code>SNAPADMIN_STARTUP_REPORT</code></td><td><code>"auto"</code></td><td>Print what SnapAdmin has switched on when the development server starts — <code>"auto"</code> (under <code>DEBUG</code>, dev server only), <code>True</code> (every process but machine-read commands), <code>False</code> (never); see <a href="#startup-report">Startup report</a></td></tr>
+    <tr><td><code>SNAPADMIN_STARTUP_REPORT_PROBES</code></td><td><code>False</code></td><td>Add the health probes to the startup report (a connection each, at boot)</td></tr>
   </table>
   <h3>API behaviour, auth &amp; limits</h3>
   <table>
@@ -5652,7 +5654,8 @@ SNAPADMIN_TEST_ADMIN_THEME=stock pytest -m e2e   # Django's stock admin</code></
 snapadmin-info --json            # machine-readable (monitoring / CI)
 snapadmin-info --section version # one section (repeatable)
 snapadmin-info --brief           # top-level values only
-snapadmin-info --health-check    # probes only; non-zero exit on failure</code></pre>
+snapadmin-info --health-check    # probes only; non-zero exit on failure
+snapadmin-info --startup         # the short block runserver prints at startup</code></pre>
 
   <div class="callout callout-info">
     <strong>Two spellings work.</strong>
@@ -5677,6 +5680,7 @@ snapadmin-info --health-check    # probes only; non-zero exit on failure</code><
       <tr><td><code>--brief</code></td><td>Show only the top-level scalar values of each section, hiding nested detail.</td></tr>
       <tr><td><code>--verbose</code></td><td>Include extra per-section detail — the online Celery workers, per-capability adoption counts, and the full text of every system-check message.</td></tr>
       <tr><td><code>--health-check</code></td><td>Run only the health probes (system checks, database, Elasticsearch, REST API, GraphQL — each skipped when its feature toggle is off) and <strong>exit non-zero</strong> if any fails — usable as a readiness/liveness check.</td></tr>
+      <tr><td><code>--startup</code></td><td>Print the <a href="#startup-report">startup report</a> — the same block <code>runserver</code> shows when it starts, byte for byte. Configuration only, unless <code>SNAPADMIN_STARTUP_REPORT_PROBES</code> is on. It takes no other flag: combined with <code>--json</code>, <code>--section</code>, <code>--brief</code>, <code>--verbose</code> or <code>--health-check</code> it stops with an error rather than ignore it.</td></tr>
     </tbody>
   </table>
 
@@ -5684,7 +5688,7 @@ snapadmin-info --health-check    # probes only; non-zero exit on failure</code><
   <ul>
     <li><strong>System checks</strong> — a per-severity <em>count</em> of Django's system checks, not their text. Django normally prints every message in full before any management command runs, which buried this report behind a screen of advisory text, so <code>snapadmin_info</code> opts out of that pass and summarises here instead: <code>--verbose</code> prints the messages, and <strong>errors are always listed</strong> because they block a working deployment (they also make <code>--health-check</code> fail). Run <code>manage.py check</code> for the full text with hints.</li>
     <li><strong>Version &amp; Status</strong> — SnapAdmin version, the Django/Python runtime, and every <code>SNAPADMIN_*</code> feature toggle at its effective value. Run from inside a tree extracted by <a href="#snapadmin-demo"><code>snapadmin-demo</code></a>, it also reports which release that tree came from, and says so plainly when the tree is older (or newer) than the installed package — a mismatch that otherwise shows up only as behaviour you thought was already fixed.</li>
-    <li><strong>Feature adoption</strong> — a commerce-readiness <code>✓</code>/<code>✗</code> checklist of which business-important capabilities are actually on or in use in <em>this</em> project: backups, retention-based deletion, audit trail, PII masking, the REST/GraphQL APIs, API tokens, Elasticsearch, background tasks, health/error alerting, rate limiting, the read-only / write-allowlist / delete guards, plain models opted in with <code>@snap_model</code> (these are the ones the reindex and the retention purge skip) and SSO. Where a capability is adopted per-model or per-field (retention, masking, read-only models, …), <code>--verbose</code> adds a one-line count. Unlike the toggle list above, the signal here is <em>adoption</em> — a model actually declaring retention, a masked field actually configured — so you can see at a glance what is protected and what is left open.</li>
+    <li><strong>Feature adoption</strong> — a commerce-readiness <code>✓</code>/<code>✗</code> checklist of which business-important capabilities are actually on or in use in <em>this</em> project: backups, retention-based deletion, audit trail, PII masking, the REST/GraphQL APIs, API tokens, Elasticsearch, background tasks, health/error alerting, rate limiting, the read-only / write-allowlist / delete guards, plain models opted in with <code>@snap_model</code> (these are the ones the reindex and the retention purge skip) and SSO. Where a capability is adopted per-model or per-field (retention, masking, read-only models, …), <code>--verbose</code> adds a one-line count. Unlike the toggle list above, the signal here is <em>adoption</em> — a model actually declaring retention, a masked field actually configured — so you can see at a glance what is protected and what is left open. A capability switched on whose optional package is missing (<code>SNAPADMIN_GRAPHQL_ENABLED = True</code> without the <code>[graphql]</code> extra, say) is listed again under <code>needs_extra</code> with the <code>pip install</code> line — it reads as on, but its first request would fail.</li>
     <li><strong>Database</strong> — engine, name, host, port and user (never the password), reachability, table count and — where the backend exposes it — on-disk size.</li>
     <li><strong>Elasticsearch</strong> — collapses to <code>disabled</code> when off; otherwise cluster reachability, status and index count, plus the <code>DB_ONLY</code> / <code>DUAL</code> / <code>ES_ONLY</code> tally of your models.</li>
     <li><strong>Celery &amp; Broker</strong> — broker and result-backend URLs with the password redacted, the number of online workers, and the configured Beat schedule (collapses to <code>disabled</code> when Celery isn't installed).</li>
@@ -5718,9 +5722,9 @@ snapadmin-info --health-check    # probes only; non-zero exit on failure</code><
   Django: 6.0.6
   Python: 3.12.4
 🧩 Feature adoption
-  ✓ on   Rest api · Graphql · Audit trail · Retention purge · Pii masking · Api tokens ·
+  ✓ on   REST API · GraphQL · Audit trail · Retention purge · PII masking · API tokens ·
          Read only models · Write allowlist
-  ✗ off  Backups · Elasticsearch · Health alerts · Delete guard · Sso
+  ✗ off  Backups · Elasticsearch · Health alerts · Delete guard · SSO
 🗄 Database
   Engine: postgresql
   Name: snapadmin_db
@@ -5760,6 +5764,54 @@ snapadmin-info --health-check    # probes only; non-zero exit on failure</code><
     structured snapshot to a dashboard; a cron running <code>snapadmin_info --health-check</code> turns
     the non-zero exit into an alert when the database or an enabled Elasticsearch cluster goes down.
   </div>
+
+  <h3 id="startup-report">Startup report — what is switched on, said when the server starts</h3>
+  <p>A capability that is installed but switched off is invisible: nobody runs a diagnostics command
+  for a feature they have forgotten exists. So when the development server starts, SnapAdmin prints
+  one short block to <strong>stderr</strong> — what is on, what is off, what is switched on without
+  its optional package, whether the installed dependencies allow commercial use, and how to see more
+  or silence it:</p>
+  <pre><code>SnapAdmin 0.1.0b10 · Django 5.2.7 · Python 3.12.4
+  ✓ on           REST API · Audit trail · Error monitoring · Retention purge · PII masking ·
+                 Field encryption · Background tasks · Rate limiting · Write allowlist · …
+  ✗ off          Backups · Elasticsearch · Health alerts · Delete guard · SSO
+  ⚠ misconfigured Sharding — run manage.py check
+  ⚠ needs extra  GraphQL is switched on but not installed — pip install 'django-snapadmin[graphql]'
+  ? not checked  API tokens (needs the database)
+  Licences: every installed dependency allows commercial use
+  Configuration only — health probes skipped (SNAPADMIN_STARTUP_REPORT_PROBES = True runs them).
+  More: manage.py snapadmin_info · silence: SNAPADMIN_STARTUP_REPORT = False</code></pre>
+  <p>It is the <a href="#snapadmin-info">Feature adoption</a> section in its configuration-only mode —
+  one implementation, so the boot block and <code>snapadmin_info --startup</code> cannot disagree.
+  It runs inside <code>django.setup()</code>, so it <strong>issues no query, opens no connection and
+  never resolves an encryption keyset</strong> (a <code>KEY_PROVIDER</code> may call a KMS): API-token
+  use needs the database and is marked <code>?</code>, and field encryption is judged from the
+  settings and the encrypted fields declared, not from keys that load. Whether the keys actually
+  resolve is what <code>snapadmin_info</code> and <code>snapadmin.E019</code> answer.</p>
+  <table>
+    <tr><th>Setting</th><th>Default</th><th>Effect</th></tr>
+    <tr><td><code>SNAPADMIN_STARTUP_REPORT</code></td><td><code>"auto"</code></td><td><code>"auto"</code>: under <code>DEBUG</code>, for a development server only (<code>runserver</code>, <code>runserver_plus</code>, <code>runsslserver</code>) — not a production worker, not every <code>migrate</code> of a dev box. <code>True</code>: every process (a staging box whose operator wants the facts in the logs), except commands whose output a program reads or that report the same facts (<code>snapadmin_info</code>, <code>dumpdata</code>, <code>shell</code>, <code>dbshell</code>, <code>diffsettings</code>, the <code>sql*</code> commands, <code>inspectdb</code>, <code>test</code>, <code>help</code>, anything with <code>--json</code>, shell completion). <code>False</code>: never. Any other value is read as <code>"auto"</code> and reported as <code>snapadmin.W027</code>.</td></tr>
+    <tr><td><code>SNAPADMIN_STARTUP_REPORT_PROBES</code></td><td><code>False</code></td><td>Also run the health probes (database, Elasticsearch, REST API, GraphQL) and add one <code>Health:</code> line — a connection each, at every boot. Off, the block says the probes were skipped, so it is never mistaken for a health check.</td></tr>
+  </table>
+  <ul>
+    <li><strong>Once per process.</strong> <code>runserver</code>'s autoreloader parent only watches
+    files; the child that serves requests prints. Never under pytest, so a test suite's output stays
+    clean.</li>
+    <li><strong>Text or one JSON line.</strong> Text when <code>DEBUG</code> is on or stderr is a
+    terminal; otherwise (gunicorn, a container's captured stderr) one JSON line on stderr,
+    <code>{"event": "snapadmin.startup", "level": "info", "timestamp": …}</code>, carrying the same
+    facts as fields. It is written to the stream directly rather than through logging, because
+    SnapAdmin's logging writes to stdout — where a piped command's output goes.</li>
+    <li><strong>Misconfigured is not off.</strong> A capability switched on whose configuration
+    cannot resolve (a <code>SNAPADMIN_SHARDING</code> the router rejects, a
+    <code>SNAPADMIN_ENCRYPTION</code> that is not a dict) gets its own
+    <code>⚠ misconfigured</code> line pointing at <code>manage.py check</code>.</li>
+    <li><strong>Nothing secret.</strong> Booleans, capability names, extra names and package names
+    only — never a key, a key id, a DSN, a host, a URL, an e-mail address or a token.</li>
+    <li><strong>Never fatal.</strong> A report that cannot be built logs
+    <code>snapadmin.startup.report_failed</code> (credentials stripped from the message) and the
+    boot carries on.</li>
+  </ul>
 
   <!-- ── Licence Audit (snapadmin_license_check) ─────────────────────────── -->
   <h2 id="license-check">⚖️ Licence Audit — <code>snapadmin_license_check</code></h2>
@@ -6144,7 +6196,7 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
     no JavaScript. It states what SnapAdmin is, carries the three-step quickstart, lists the facts an
     assistant should not have to infer — snap-only field kwargs add no migration, import paths are the
     public contract, the Unfold theme is optional, misconfiguration surfaces as
-    <code>snapadmin.W001</code>–<code>W026</code> and <code>snapadmin.E001</code>–<code>E028</code> —
+    <code>snapadmin.W001</code>–<code>W027</code> and <code>snapadmin.E001</code>–<code>E028</code> —
     and then links every section of this page with a
     line describing what it covers.
   </p>

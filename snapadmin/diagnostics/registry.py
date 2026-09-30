@@ -28,7 +28,7 @@ logger = get_logger("snapadmin.diagnostics")
 CollectorFn = Callable[..., dict]
 
 #: Submodules of this package that are infrastructure, not collectors.
-_NON_COLLECTOR_MODULES = frozenset({"registry", "render"})
+_NON_COLLECTOR_MODULES = frozenset({"registry", "render", "startup"})
 
 #: ``scheme://user:password@host`` inside free text — exception messages quote whole DSNs.
 _URL_CREDENTIALS = re.compile(

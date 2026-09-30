@@ -22,6 +22,8 @@ Nothing here prints a secret — only booleans and counts.
 
 from __future__ import annotations
 
+import re
+
 from django.apps import apps
 from django.conf import settings
 from django.db.models import Model
@@ -44,6 +46,11 @@ def _count(n: int, noun: str) -> str:
     if not n:
         return ""
     return f"{n} {noun}{'' if n == 1 else 's'}"
+
+
+#: The detail of a capability that is switched on but cannot resolve its own
+#: configuration. The startup report groups these apart from "off".
+MISCONFIGURED = "misconfigured — run manage.py check"
 
 
 def _extra_missing_detail(*module_names: str, extra: str) -> str:
@@ -218,7 +225,7 @@ def _encryption() -> tuple[bool, str]:
         # other rows too — the exact failure `snapadmin_info` exists to prevent.
         # `manage.py check` reports the specifics (snapadmin.E019); the audit's
         # job is to not claim a capability is on when it cannot even resolve.
-        return False, "misconfigured — run manage.py check"
+        return False, MISCONFIGURED
     if keyset is None:
         return False, ""
     return True, (
@@ -281,7 +288,7 @@ def _sharding() -> tuple[bool, str]:
         # a DSN shape the parser trips over, raises more than ImproperlyConfigured.
         # `manage.py check` reports the specifics (snapadmin.E013); the audit's
         # job is to not claim a capability is on when it cannot even resolve.
-        return False, "misconfigured — run manage.py check"
+        return False, MISCONFIGURED
     replicas = sum(len(shard.replica_dsns) for shard in shards.values())
     strategy = get_sharding_config().get("STRATEGY", "modulo")
     return True, (
@@ -289,8 +296,35 @@ def _sharding() -> tuple[bool, str]:
     )
 
 
-def _capabilities() -> list[tuple[str, bool, str]]:
-    """Every audited capability as ``(key, enabled, detail)`` in report order."""
+def _encryption_configured() -> tuple[bool, str]:
+    """Field encryption judged from configuration alone — the startup report's probe.
+
+    :func:`_encryption` resolves the keyset, and a project's ``KEY_PROVIDER``
+    may fetch keys from a KMS over the network: not something to do inside
+    ``django.setup()``. "On" here means an encrypted field exists or the setting
+    names key material; whether the keys actually resolve is what
+    ``snapadmin_info`` (and ``snapadmin.E019``) answer.
+    """
+    from snapadmin.encryption.keys import configured_source
+
+    try:
+        # Which of the four key sources is named — never what it holds.
+        configured = configured_source() is not None
+    except Exception:
+        # Broad for the reason `_encryption` gives: one probe never blanks the report.
+        return False, MISCONFIGURED
+    fields = _encrypted_field_count()
+    return configured or fields > 0, _count(fields, "field")
+
+
+def _capabilities(*, live: bool = True) -> list[tuple[str, bool | None, str]]:
+    """Every audited capability as ``(key, enabled, detail)`` in report order.
+
+    ``live=False`` answers from configuration alone — no query, no connection,
+    no key resolution — for the startup report, which runs inside
+    ``django.setup()``. A capability that cannot be judged that way is
+    ``enabled=None`` with the reason as its detail.
+    """
     from snapadmin.models import SnapadminAuditLog
 
     models = _concrete_snap_models()
@@ -391,9 +425,9 @@ def _capabilities() -> list[tuple[str, bool, str]]:
             ),
         ),
         ("pii_masking", masked_fields > 0, _masking_detail(masked_fields, ruled_fields)),
-        ("field_encryption", *_encryption()),
+        ("field_encryption", *(_encryption() if live else _encryption_configured())),
         ("sharding", *_sharding()),
-        ("api_tokens", *_api_tokens()),
+        ("api_tokens", *(_api_tokens() if live else (None, "needs the database"))),
         ("elasticsearch", es_enabled, _count(es_models, "indexed model") if es_enabled else ""),
         ("background_tasks", bool(getattr(settings, "CELERY_BROKER_URL", None)), ""),
         ("health_alerts", bool(recipients), _count(len(recipients), "recipient")),
@@ -425,14 +459,43 @@ def _capabilities() -> list[tuple[str, bool, str]]:
             tenant_scoped_models > 0,
             _count(tenant_scoped_models, "tenant-scoped model"),
         ),
+        ("startup_report", *_startup_report()),
     ]
+
+
+def _startup_report() -> tuple[bool, str]:
+    """Whether this process's configuration prints the startup report (#DX1)."""
+    from snapadmin.diagnostics.startup import report_mode
+
+    mode = report_mode()
+    if mode == "auto":
+        debug = bool(getattr(settings, "DEBUG", False))
+        return debug, '"auto": the development server, under DEBUG'
+    return bool(mode), ""
+
+
+def needs_extra(caps: list[tuple[str, bool | None, str]]) -> dict[str, str]:
+    """``{capability: extra}`` for each one switched on whose extra is not installed."""
+    found = {}
+    for key, enabled, detail in caps:
+        match = re.fullmatch(r"\[([\w-]+)\] extra not installed", detail)
+        if enabled and match:
+            found[key] = match[1]
+    return found
 
 
 @register("features", title="Feature adoption", icon="🧩", order=15)
 def collect(*, verbose: bool) -> dict:
     """Collect the feature-adoption checklist section."""
     caps = _capabilities()
-    result: dict = {key: enabled for key, enabled, _detail in caps}
+    result: dict = {key: bool(enabled) for key, enabled, _detail in caps}
+    missing = needs_extra(caps)
+    if missing:
+        # Flagged beside the on/off run: "✓ on" alone, for a surface whose
+        # packages are missing, would read as working until its first request.
+        result["needs_extra"] = [
+            f"{key} — pip install 'django-snapadmin[{extra}]'" for key, extra in missing.items()
+        ]
     if verbose:
         details = {key: detail for key, _enabled, detail in caps if detail}
         if details:

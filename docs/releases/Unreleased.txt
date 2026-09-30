@@ -158,9 +158,32 @@ Added
   await one (de, de_CH, es, fr, fr_CH, it, nl, pl).
 * **A model change without its migration fails CI.** ``makemigrations --check`` ran only in a local
   checklist; it is a test now, in every matrix job and on PostgreSQL.
+* **The development server says what SnapAdmin has switched on.** A capability that is installed but
+  switched off is invisible — nobody runs a diagnostics command for a feature they have forgotten
+  exists. Under ``DEBUG``, ``runserver`` now prints one short block to stderr: the capabilities that
+  are on, the ones that are off, any switched on without their optional package (with the
+  ``pip install`` line), whether the installed dependencies allow commercial use, and how to see
+  more or silence it. It is built from the ``features`` collector in a configuration-only mode — no
+  query, no connection, no key resolution, because it runs inside ``django.setup()`` — and never
+  contains a secret. ``SNAPADMIN_STARTUP_REPORT`` decides when: ``"auto"`` (the default: the
+  development server under ``DEBUG``, printed once, by the process that serves requests), ``True``
+  (every process except commands whose output a program reads — as one JSON line on stderr,
+  ``{"event": "snapadmin.startup", …}``, when stderr is not a terminal and ``DEBUG`` is off) or
+  ``False``; any other value is ``snapadmin.W027``. A capability that is switched on but cannot
+  resolve its configuration is shown as misconfigured, not as off.
+  ``SNAPADMIN_STARTUP_REPORT_PROBES = True`` adds the health probes. ``manage.py snapadmin_info
+  --startup`` prints the identical block, and the ``features`` section now also lists a capability
+  switched on without its extra under ``needs_extra``, with the ``pip install`` line.
 
 Changed
 -------
+
+* **``snapadmin_info`` spells its labels the way the docs do.** Keys rendered as ``Rest api``,
+  ``Graphql``, ``Pii masking``, ``Api tokens`` and ``Sso``; they now read ``REST API``, ``GraphQL``,
+  ``PII masking``, ``API tokens`` and ``SSO``, the same labels the new startup report uses (one
+  shared helper, so the two cannot drift). A wrapped on/off run also no longer splits a name across
+  two lines (``Pii`` at the end of one, ``masking`` at the start of the next). Text output only —
+  ``--json`` keys are unchanged.
 
 * **``llms.txt`` is now an operating manual, not only a docs map.** Both copies (the repository root,
   shipped in the sdist, and ``docs/llms.txt``, published at ``/llms.txt``) carry four new layers for an

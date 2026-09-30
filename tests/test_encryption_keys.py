@@ -269,6 +269,51 @@ def provider_returns_garbage():
 _HERE = "tests.test_encryption_keys"
 
 
+class TestConfiguredSourceAgreesWithTheResolver:
+    """``configured_source()`` judges from configuration alone (the startup report
+    must not call a KMS inside ``django.setup()``); it must never disagree with
+    the resolver about *which* source is in use, or whether there is one."""
+
+    @pytest.mark.parametrize(
+        "configured, environ",
+        [
+            ({}, {}),
+            ({"KEY_PROVIDER": "   "}, {}),
+            ({}, {keymod.ENV_KEYS: '""'}),
+            ({}, {keymod.ENV_KEYS: "  "}),
+            ({"KEYS": []}, {}),
+            ({"KEY_PROVIDER": f"{_HERE}.provider_two_keys"}, {keymod.ENV_KEYS: f"env:{KEY_A}"}),
+            ({"KEYS": [{"id": "s", "key": KEY_B}]}, {keymod.ENV_KEYS: f"'env:{KEY_A}'"}),
+            ({"KEYS": [{"id": "s", "key": KEY_B}]}, {}),
+        ],
+    )
+    def test_same_source_as_resolution(self, configured, environ, monkeypatch, settings):
+        for name, value in environ.items():
+            monkeypatch.setenv(name, value)
+        settings.SNAPADMIN_ENCRYPTION = configured
+
+        judged = keymod.configured_source()
+        resolved = keymod.get_keyset()
+
+        assert judged == (resolved.source if resolved is not None else None)
+
+    def test_a_key_file_is_named_without_being_read(self, monkeypatch, settings):
+        settings.SNAPADMIN_ENCRYPTION = {"KEY_FILE": "/nonexistent/keys"}
+
+        assert keymod.configured_source() is keymod.KeySource.FILE
+
+    def test_a_provider_is_named_without_being_called(self, settings):
+        settings.SNAPADMIN_ENCRYPTION = {"KEY_PROVIDER": f"{_HERE}.provider_returns_garbage"}
+
+        assert keymod.configured_source() is keymod.KeySource.PROVIDER
+
+    def test_a_setting_of_the_wrong_shape_raises_like_the_resolver(self, settings):
+        settings.SNAPADMIN_ENCRYPTION = "not-a-dict"
+
+        with pytest.raises(ImproperlyConfigured, match="must be a dict"):
+            keymod.configured_source()
+
+
 class TestResolutionSources:
     def test_unconfigured_project_resolves_to_no_keyset(self, settings):
         settings.SNAPADMIN_ENCRYPTION = {}

@@ -439,12 +439,19 @@ snapadmin-init --api --graphql               # also check the REST / GraphQL con
 snapadmin-info --section features            # just the ✓/✗ capability checklist
 snapadmin-info --health-check                # probes only; non-zero exit if one fails
 snapadmin-info --json                        # the same report for CI / monitoring
+snapadmin-info --startup                     # the short block runserver prints at boot
 
 snapadmin-license-check --critical-only      # only what blocks commercial use
 ```
 
 `snapadmin-info` and `snapadmin-license-check` inspect a live project, so run them from inside one.
 Every spelling works — `snapadmin-info` ≡ `python manage.py snapadmin_info`.
+
+You also see the short version without asking: under `DEBUG`, `runserver` prints one block to
+stderr saying which capabilities are on, which are off, which are switched on without their extra
+installed, and whether your dependencies allow commercial use. It reads configuration only — no
+query, no connection, never a secret. `SNAPADMIN_STARTUP_REPORT = False` silences it; `True` prints
+it in every process but machine-read commands ([Startup report](https://drofji.github.io/django-snapadmin/#startup-report)).
 
 Opt-in background commands, none of which run on their own: `snapadmin_reindex`,
 `snapadmin_import`, `snapadmin_health_alert`, `snapadmin_db_backup`, `snapadmin_send_error_digest`,
@@ -1027,7 +1034,7 @@ PyPI — only `snapadmin/` is.
 | Getting started | [Installation](https://drofji.github.io/django-snapadmin/#installation) · [New project](https://drofji.github.io/django-snapadmin/#scaffold) · [Existing project](https://drofji.github.io/django-snapadmin/#snapadmin-init) · [SnapModel](https://drofji.github.io/django-snapadmin/#snap-model) · [Field types](https://drofji.github.io/django-snapadmin/#snap-fields) · [Admin registration](https://drofji.github.io/django-snapadmin/#admin-registration) |
 | APIs | [REST](https://drofji.github.io/django-snapadmin/#api-rest) · [GraphQL](https://drofji.github.io/django-snapadmin/#api-graphql) · [Tokens](https://drofji.github.io/django-snapadmin/#api-tokens) · [Bulk import](https://drofji.github.io/django-snapadmin/#bulk-import) · [Auth / JWT / ETL](https://drofji.github.io/django-snapadmin/#integrating) |
 | Search | [Elasticsearch modes](https://drofji.github.io/django-snapadmin/#elasticsearch) · [Query routing](https://drofji.github.io/django-snapadmin/#es-routing) · [Filters](https://drofji.github.io/django-snapadmin/#es-filter) · [Facets](https://drofji.github.io/django-snapadmin/#es-aggregate) · [Deep scan](https://drofji.github.io/django-snapadmin/#es-scan) |
-| Operations | [Diagnostics](https://drofji.github.io/django-snapadmin/#snapadmin-info) · [Licence audit](https://drofji.github.io/django-snapadmin/#license-check) · [Celery & scheduling](https://drofji.github.io/django-snapadmin/#celery) · [GDPR](https://drofji.github.io/django-snapadmin/#gdpr) · [Backups](https://drofji.github.io/django-snapadmin/#backups) · [Error monitoring](https://drofji.github.io/django-snapadmin/#error-monitoring) · [Performance](https://drofji.github.io/django-snapadmin/#performance) |
+| Operations | [Diagnostics](https://drofji.github.io/django-snapadmin/#snapadmin-info) · [Startup report](https://drofji.github.io/django-snapadmin/#startup-report) · [Licence audit](https://drofji.github.io/django-snapadmin/#license-check) · [Celery & scheduling](https://drofji.github.io/django-snapadmin/#celery) · [GDPR](https://drofji.github.io/django-snapadmin/#gdpr) · [Backups](https://drofji.github.io/django-snapadmin/#backups) · [Error monitoring](https://drofji.github.io/django-snapadmin/#error-monitoring) · [Performance](https://drofji.github.io/django-snapadmin/#performance) |
 | Reference | [All settings](https://drofji.github.io/django-snapadmin/#env-vars) · [Theming](https://drofji.github.io/django-snapadmin/#theming) · [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) · [Extending](https://drofji.github.io/django-snapadmin/#extending) · [Migration guides](https://drofji.github.io/django-snapadmin/#migration-guides) |
 
 **Working with an AI assistant?** Two entry points ship for exactly that, and both are pinned by

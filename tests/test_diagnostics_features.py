@@ -34,7 +34,9 @@ class TestRegistration:
     def test_every_capability_is_a_bool(self):
         data = _collect()
         assert data  # non-empty checklist
-        assert all(isinstance(v, bool) for k, v in data.items() if k != "details")
+        assert all(
+            isinstance(v, bool) for k, v in data.items() if k not in {"details", "needs_extra"}
+        )
 
     def test_count_helper_singular_and_plural(self):
         assert features_collector._count(0, "model") == ""
@@ -623,6 +625,88 @@ class TestProfile:
         assert data["details"]["profile"] == "admin"
 
 
+class TestStartupReportCapability:
+    """#DX1 — whether this configuration prints the startup report."""
+
+    @override_settings(SNAPADMIN_STARTUP_REPORT="auto", DEBUG=True)
+    def test_auto_is_on_under_debug_and_says_where(self):
+        data = _collect(verbose=True)
+        assert data["startup_report"] is True
+        assert data["details"]["startup_report"] == '"auto": the development server, under DEBUG'
+
+    @override_settings(SNAPADMIN_STARTUP_REPORT="auto", DEBUG=False)
+    def test_auto_is_off_without_debug(self):
+        assert _collect()["startup_report"] is False
+
+    @override_settings(SNAPADMIN_STARTUP_REPORT=True, DEBUG=False)
+    def test_true_is_on(self):
+        assert _collect()["startup_report"] is True
+
+    @override_settings(SNAPADMIN_STARTUP_REPORT=False, DEBUG=True)
+    def test_false_is_off(self):
+        assert _collect()["startup_report"] is False
+
+
+class TestNeedsExtra:
+    """A surface switched on whose packages are missing is listed on its own."""
+
+    @override_settings(SNAPADMIN_GRAPHQL_ENABLED=True)
+    def test_a_switched_on_surface_without_its_extra_is_listed(self, monkeypatch):
+        monkeypatch.setattr(
+            features_collector, "_extra_missing_detail",
+            lambda *names, extra: "[graphql] extra not installed" if extra == "graphql" else "",
+        )
+        assert _collect()["needs_extra"] == ["graphql — pip install 'django-snapadmin[graphql]'"]
+
+    @override_settings(SNAPADMIN_GRAPHQL_ENABLED=False)
+    def test_a_switched_off_surface_is_not_listed(self, monkeypatch):
+        monkeypatch.setattr(
+            features_collector, "_extra_missing_detail",
+            lambda *names, extra: f"[{extra}] extra not installed",
+        )
+        data = _collect()
+        assert "graphql" not in " ".join(data.get("needs_extra", []))
+
+    def test_nothing_is_listed_when_every_extra_is_installed(self):
+        assert "needs_extra" not in _collect()
+
+
+class TestConfigurationOnlyMode:
+    """``_capabilities(live=False)`` — the startup report's probe set (#DX1)."""
+
+    def _caps(self):
+        return {key: (enabled, detail) for key, enabled, detail in
+                features_collector._capabilities(live=False)}
+
+    def test_api_tokens_are_not_checked(self):
+        assert self._caps()["api_tokens"] == (None, "needs the database")
+
+    @override_settings(SNAPADMIN_ENCRYPTION={"KEYS": [{"id": "k", "key": "x"}]})
+    def test_encryption_named_in_settings_is_on(self, monkeypatch):
+        monkeypatch.setattr(features_collector, "_encrypted_field_count", lambda: 0)
+        assert self._caps()["field_encryption"] == (True, "")
+
+    @override_settings(SNAPADMIN_ENCRYPTION=None)
+    def test_encryption_from_the_environment_is_on(self, monkeypatch):
+        monkeypatch.setattr(features_collector, "_encrypted_field_count", lambda: 0)
+        monkeypatch.setenv("SNAPADMIN_ENCRYPTION_KEY_FILE", "/run/secrets/k")
+        assert self._caps()["field_encryption"] == (True, "")
+
+    @override_settings(SNAPADMIN_ENCRYPTION=None)
+    def test_no_key_source_and_no_encrypted_field_is_off(self, monkeypatch):
+        monkeypatch.setattr(features_collector, "_encrypted_field_count", lambda: 0)
+        monkeypatch.delenv("SNAPADMIN_ENCRYPTION_KEY_FILE", raising=False)
+        monkeypatch.delenv("SNAPADMIN_ENCRYPTION_KEYS", raising=False)
+        assert self._caps()["field_encryption"] == (False, "")
+
+    @override_settings(SNAPADMIN_ENCRYPTION=None)
+    def test_an_encrypted_field_alone_is_on_and_counted(self, monkeypatch):
+        monkeypatch.setattr(features_collector, "_encrypted_field_count", lambda: 2)
+        monkeypatch.delenv("SNAPADMIN_ENCRYPTION_KEY_FILE", raising=False)
+        monkeypatch.delenv("SNAPADMIN_ENCRYPTION_KEYS", raising=False)
+        assert self._caps()["field_encryption"] == (True, "2 fields")
+
+
 class TestVerboseAndDetails:
     def test_default_has_no_details_block(self):
         assert "details" not in _collect(verbose=False)
@@ -644,8 +728,8 @@ class TestFeaturesInCommand:
         text = self._run(sections=["features"])
         assert "Feature adoption" in text
         assert "✓ on" in text and "✗ off" in text
-        assert "Rest api" in text                       # a listed capability
-        assert "Rest api:" not in text                  # …not as its own key/value line
+        assert "REST API" in text                       # a listed capability
+        assert "REST API:" not in text                  # …not as its own key/value line
         # Two group lines plus their wrapped continuations — far fewer than one per flag.
         assert len(text.strip().splitlines()) < 16
 

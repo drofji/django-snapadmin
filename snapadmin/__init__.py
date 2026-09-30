@@ -299,7 +299,8 @@ Operations
         backups configured while ``SNAPADMIN_BACKUP_ENABLED`` is off, ``W024``
         an ``env`` part with no file behind ``SNAPADMIN_BACKUP_ENV_FILE``,
         ``W025`` a model with masked fields behind a hand-written admin that
-        does not mask, ``W026`` the deprecated ``admin_sections``. ``E027`` is
+        does not mask, ``W026`` the deprecated ``admin_sections``, ``W027`` a
+        ``SNAPADMIN_STARTUP_REPORT`` that is not ``"auto"``/``True``/``False``. ``E027`` is
         ``SnapModel``'s ``EsManager`` and a project's own ``objects`` manager
         replacing each other silently — a mixin's scoping manager hidden, or a
         ``tenant_scoped`` model's ``EsManager`` hidden. ``E008``
@@ -353,7 +354,10 @@ Operations
 Tooling
     ``snapadmin.diagnostics``
         Collectors behind ``manage.py snapadmin_info`` — runtime, database, API,
-        Elasticsearch and the feature-adoption inventory.
+        Elasticsearch and the feature-adoption inventory. ``diagnostics.startup``
+        is the startup report: the block ``runserver`` prints under ``DEBUG``
+        (what is on, off, or on without its extra), built from configuration
+        alone; ``snapadmin_info --startup`` prints the same block.
     ``snapadmin.licensing``
         Dependency-licence data behind ``manage.py snapadmin_license_check``.
     ``snapadmin.scaffold`` · ``snapadmin.quickstart`` · ``snapadmin.integrate`` ·
@@ -427,7 +431,10 @@ variables configure the same thing without touching settings),
 explicit ``SHARDS`` mapping — unset or ``ENABLED: False`` is a complete
 no-op),
 ``SNAPADMIN_EXPORT_*``,
-``SNAPADMIN_SSO_*``, plus layout keys (``SNAPADMIN_URL_PREFIX``,
+``SNAPADMIN_SSO_*``, ``SNAPADMIN_STARTUP_REPORT`` / ``SNAPADMIN_STARTUP_REPORT_PROBES``
+(the block printed when the development server starts — ``"auto"`` by default,
+so it is the one family on without being asked, and only under ``DEBUG``),
+plus layout keys (``SNAPADMIN_URL_PREFIX``,
 ``SNAPADMIN_APP_LABELS``, ``SNAPADMIN_HIDDEN_APPS``, ``SNAPADMIN_NESTED_APPS``,
 ``SNAPADMIN_THEME_AUTH_ADMIN``, ``SNAPADMIN_SHOW_IN_FORM_DEFAULT`` — raises
 every ``Snap*Field``'s ``show_in_form`` default project-wide; an explicit

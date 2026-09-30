@@ -2287,6 +2287,26 @@ def check_admin_sections_deprecated(app_configs, **kwargs) -> list[CheckMessage]
     ]
 
 
+def check_startup_report_setting(app_configs, **kwargs) -> list[CheckMessage]:
+    """Warn: ``SNAPADMIN_STARTUP_REPORT`` is not ``"auto"``, ``True`` or ``False``.
+
+    Any other value is read as ``"auto"`` (#DX1) — a project that wrote ``"on"``
+    meaning "always" would otherwise get the development-only default and never
+    learn why its staging logs stay silent.
+    """
+    value = get_setting("SNAPADMIN_STARTUP_REPORT", "auto")
+    if value is True or value is False or value == "auto":
+        return []
+    return [
+        Warning(
+            f"SNAPADMIN_STARTUP_REPORT = {value!r} is not one of \"auto\", True, False; "
+            "it is treated as \"auto\" (the report prints for runserver under DEBUG only).",
+            hint='Set "auto" (the default), True (every process) or False (never).',
+            id="snapadmin.W027",
+        )
+    ]
+
+
 ALL_CHECKS = [
     check_analytics_db_alias,
     check_masked_fields,
@@ -2327,6 +2347,7 @@ ALL_CHECKS = [
     check_backup_env_file_present,
     check_masked_models_use_masking_admin,
     check_admin_sections_deprecated,
+    check_startup_report_setting,
 ]
 
 

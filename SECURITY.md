@@ -267,6 +267,17 @@ Key protections:
 - The **system dashboard is staff-gated by default** (it surfaces hostname, processor, OS, database
   name, service health and `ALLOWED_HOSTS`). Anonymous callers are redirected to login and non-staff
   get `403`. Opt into a public status page only deliberately with `SNAPADMIN_DASHBOARD_PUBLIC = True`.
+- **The startup report never carries a secret.** The block `runserver` prints under `DEBUG`
+  (`SNAPADMIN_STARTUP_REPORT`, default `"auto"`) and its JSON-line form (`snapadmin.startup`)
+  hold booleans, capability names, extra names and package names only — never a key, a key id or
+  fingerprint, a DSN, a host, a webhook URL, an e-mail address or a token value (pinned by a test
+  that configures each of those and searches the output). Both forms go to **stderr**, never stdout
+  and never through logging (which SnapAdmin sends to stdout), so it cannot leak into a command's
+  machine-read output, and it is silent for `dumpdata`, `shell`,
+  `diffsettings`, `--json` and the other commands whose output a program reads. It runs no query,
+  opens no connection and never resolves the encryption keyset; the health probes run only with
+  `SNAPADMIN_STARTUP_REPORT_PROBES = True`. With `DEBUG` off it prints nothing unless
+  `SNAPADMIN_STARTUP_REPORT = True`.
 - **`api_exclude_fields`** hides sensitive columns from every API surface (REST, GraphQL, schema
   introspection) while the admin keeps showing them.
 - **`api_write_fields`** guards against mass assignment: when set, only the listed fields accept a

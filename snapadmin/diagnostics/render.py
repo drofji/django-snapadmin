@@ -112,16 +112,7 @@ def _render_flag_groups(flags: dict[str, bool], *, depth: int) -> list[str] | No
         if not names:
             continue
         prefix = f"{pad}{marker}  "
-        body = " · ".join(names)
-        wrapped = textwrap.wrap(
-            body,
-            width=max(_WRAP_WIDTH, len(prefix) + 20),
-            initial_indent=prefix,
-            subsequent_indent=" " * len(prefix),
-            break_long_words=False,
-            break_on_hyphens=False,
-        )
-        lines.extend(wrapped)
+        lines.extend(_wrap_names(prefix, names, width=max(_WRAP_WIDTH, len(prefix) + 20)))
     return lines or None
 
 
@@ -159,8 +150,39 @@ def _render_table(items: list, *, depth: int) -> list[str] | None:
     return lines
 
 
+#: Words the snake_case keys spell in lower case that read wrong capitalised.
+_ACRONYMS = {
+    "api": "API",
+    "rest": "REST",
+    "graphql": "GraphQL",
+    "pii": "PII",
+    "gdpr": "GDPR",
+    "sso": "SSO",
+}
+
+
 def _humanise(key: str) -> str:
-    return key.replace("_", " ").capitalize()
+    words = [_ACRONYMS.get(word, word) for word in key.split("_")]
+    first = words[0] if words[0] in _ACRONYMS.values() else words[0].capitalize()
+    return " ".join([first, *words[1:]])
+
+
+def _wrap_names(prefix: str, names: list[str], *, width: int) -> list[str]:
+    """``names`` joined by `` · `` and wrapped under ``prefix`` with a hanging indent.
+
+    A no-break space inside each name and before each separator: a line breaks
+    only after a ``·`` — never inside "PII masking", never before a ``·``.
+    """
+    joined = "\xa0· ".join(name.replace(" ", "\xa0") for name in names)
+    lines = textwrap.wrap(
+        joined,
+        width=width,
+        initial_indent=prefix,
+        subsequent_indent=" " * len(prefix),
+        break_long_words=False,
+        break_on_hyphens=False,
+    )
+    return [line.replace("\xa0", " ") for line in lines]
 
 
 def _format_scalar(value: Any) -> str:
