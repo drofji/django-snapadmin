@@ -241,6 +241,33 @@ Changed
   ``None`` (``SnapFileValidator``'s three upload limits, ``SnapStatusBadgeField``'s ``verbose_name``
   and ``style_arguments``) — a documentation fix, not a behaviour change.
 
+* **The README is half as long, nothing in it is collapsed, and its quickstarts now work as
+  written.** It had grown to over a thousand lines behind ten ``<details>`` blocks — which a PyPI
+  page renders as a bare arrow and a plain-text reader never opens. It now starts with the 60-second
+  try, then shows both ways in, each complete and visible: ``SnapModel`` in three steps for a new
+  project, and ``@snap_model`` for an existing one you cannot rewrite, including the
+  ``INSTALLED_APPS``, URL and setting lines it needs. The pitch, the cheat sheet, the command table,
+  the proof and enterprise tables and every quality claim stay; reference material moved to the
+  documentation site, which gained *The smallest install that works* (``#installed-apps-minimal``),
+  *SnapAdmin and admin themes* (``#vs-themes``) and the per-area test floors
+  (``#testing-breakdown``). Most README section anchors survive; those of sections that merged or
+  moved are gone — ``#getting-started``, ``#start-where-you-are``, ``#your-first-model--3-steps``,
+  ``#already-have-models-you-cannot-rewrite``, ``#install``, ``#configuration``,
+  ``#database-sharding-and-replica-routing``, ``#encrypted-model-fields`` and the subsections of
+  *Quality & compatibility* (whose full text lives at the documentation site's ``#testing``). Every
+  link into the documentation site is unchanged.
+
+  Rewriting it found four things the old README told a reader that were not true, all fixed: the
+  60-second try installed the bare package, but the project ``snapadmin-new`` generates lists the
+  ``[api]`` and ``[graphql]`` apps and cannot start without them; neither example ``Product``
+  declared ``subject_path``, so ``snapadmin.E011`` stopped ``migrate`` right after "That is the
+  whole setup"; the result table promised a ``/dashboard/`` that only the demo project mounts; and
+  the minimal install's ``urls.py`` comment promised a health check that ``snapadmin.urls`` serves
+  only with the REST API on. ``tests/test_readme_quickstarts.py`` now executes both example models
+  against the subject-access check and the REST search surface, and holds the install line to what
+  the generated project requires. The Testing section also stopped saying mutation testing does not
+  run yet — it runs, advisory, as the next entry describes.
+
 * **Mutation testing, advisory.** ``mutmut`` now answers the question coverage cannot: would a test
   *notice* the code being wrong? One command runs it — ``python scripts/mutation.py diff`` mutates
   only the functions a change touched (minutes, and what CI runs on every push), ``python

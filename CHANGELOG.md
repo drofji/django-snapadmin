@@ -91,6 +91,14 @@ the `0.x` beta series.
   over the modules where a wrong answer costs most: `python scripts/mutation.py diff|modules`.
 - The type check is blocking: `mypy` over `snapadmin/` is clean, and `encryption/`, `crypto.py`,
   `sharding/`, `backup.py`, `validators.py`, `logging_config.py` and `quickstart/` run strictly.
+- The README is about half as long and has no collapsed `<details>` blocks: it opens with the
+  60-second try and shows both quickstarts in full (`SnapModel` for a new project, `@snap_model` +
+  `snap_field()` for an existing one). Reference material moved to the documentation site, which
+  gains *The smallest install that works*, *SnapAdmin and admin themes* and the per-area test floors.
+  The quickstarts now work as written: the 60-second try installs `[api,graphql]` (the generated
+  project needs them), both example models declare `subject_path` (`snapadmin.E011`), the result
+  table no longer promises a `/dashboard/` only the demo mounts, and the minimal `urls.py` no longer
+  promises a health check the admin-only install does not serve.
 
 ### Fixed
 - A due row held by a `PROTECT`/`RESTRICT` foreign key no longer aborts the model's retention purge,

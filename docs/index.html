@@ -423,6 +423,41 @@
   own wrapper), and bulk async operations (<code>abulk_create</code> / <code>abulk_update</code>).
   GraphQL resolvers need nothing extra — Graphene already handles async resolvers transparently.</p>
 
+  <h3 id="installed-apps-minimal">The smallest install that works</h3>
+  <p>A bare <code>pip install django-snapadmin</code> is already enough for the generated admin,
+  because <strong>the REST API and GraphQL are off by default</strong>
+  (<code>SNAPADMIN_REST_API_ENABLED</code> / <code>SNAPADMIN_GRAPHQL_ENABLED</code>, both
+  <code>False</code> unless you set them):</p>
+  <pre><code>INSTALLED_APPS = [
+    "django.contrib.admin",          # SnapAdmin generates ModelAdmins into this site
+    "django.contrib.auth",           # permissions gate both the admin and the API
+    "django.contrib.contenttypes",   # required by auth; the audit trail keys off it
+    "django.contrib.sessions",       # admin login
+    "django.contrib.messages",       # admin "saved successfully" banners
+    "django.contrib.staticfiles",    # serves SnapAdmin's CSS/JS
+    "snapadmin",
+    "myapp",                         # …your own apps
+]
+
+# urls.py
+from django.contrib import admin
+from django.urls import include, path
+
+urlpatterns = [
+    path("admin/", admin.site.urls),
+    path("api/", include("snapadmin.urls")),   # the surfaces you turn on (REST adds /api/health/)
+]</code></pre>
+  <p>That is a working admin-only install. With the REST API off, <code>snapadmin.urls</code> mounts
+  nothing — so an admin-only container probes <code>/admin/login/</code>, as the
+  <code>snapadmin-new --admin-only</code> Dockerfile does, not <code>/api/health/</code>. For the REST API and GraphQL, install their extras
+  (<code>pip install "django-snapadmin[api,graphql]"</code>), add <code>rest_framework</code>,
+  <code>drf_spectacular</code>, <code>django_filters</code> and <code>graphene_django</code> to
+  <code>INSTALLED_APPS</code>, and switch the surfaces on — individually, or both at once with
+  <code>SNAPADMIN_PROFILE = "api"</code> (Swagger follows the REST setting unless set
+  explicitly). Installing the extras without the settings serves nothing;
+  the settings without the extras are caught at <code>manage.py check</code>
+  (<code>snapadmin.E010</code>) rather than at the first request.</p>
+
   <h3>Configuring <code>INSTALLED_APPS</code></h3>
   <p>The <strong>Unfold theme is optional</strong> (<code>pip install django-snapadmin[theme]</code>) — with it you get the themed UI, without it SnapAdmin renders on Django's built-in admin. If you use Unfold, its contrib apps must come <em>before</em> <code>django.contrib.admin</code>. <code>manage.py check</code> surfaces the stock-admin fallback as one informational message (<code>snapadmin.I001</code>, never an error) so it is never silently mistaken for a bug.</p>
   <pre><code>INSTALLED_APPS = [
@@ -456,11 +491,25 @@
     "snapadmin",
 
     # Optional — only with the [celery] extra
-    # "django_celery_beat",
-    # "django_celery_results",
+    # "django_celery_beat",            # edit the schedule from the admin
+    # "django_celery_results",         # store task results in the database
+
+    # Optional — only with the [extra-settings] extra. SnapAdmin does not use it;
+    # add it for a runtime key/value Setting model in the admin (the demo shows it).
+    # "extra_settings",
+
+    # Optional — only with the [autocomplete-filter] extra (LGPL), for your own
+    # AutocompleteFilter admin filters; SnapAdmin core never imports it.
+    # "admin_auto_filters",
 
     # Your apps …
 ]</code></pre>
+  <p><strong>Elasticsearch needs no app entry</strong> — install the <code>[elasticsearch]</code>
+  extra and set <code>ELASTICSEARCH_ENABLED = True</code>. The supported server is
+  <strong>Elasticsearch 8.x</strong>, and the extra pins the client to match
+  (<code>&gt;=8,&lt;9</code>). The same goes for <code>[backup]</code>, <code>[s3]</code>,
+  <code>[age]</code>, <code>[xlsx]</code> and <code>[encryption]</code>: a dependency, not an
+  app.</p>
   <p>A bare <code>pip install django-snapadmin</code> pulls only Django, structlog and nh3. <code>djangorestframework</code>, <code>drf-spectacular</code> and <code>django-filter</code> come via the <code>[api]</code> extra, and <code>graphene-django</code> via <code>[graphql]</code> — both features default to <strong>off</strong> (<code>SNAPADMIN_REST_API_ENABLED</code> / <code>SNAPADMIN_GRAPHQL_ENABLED</code>), so install <code>pip install django-snapadmin[api,graphql]</code> (or <code>[all]</code>) once you turn either on. Turning a feature on with its extra missing fails loudly, both at <code>manage.py check</code> (<code>snapadmin.E010</code>) and, if that step is skipped, the moment <code>snapadmin.urls</code> is imported. <code>django-unfold</code> is <strong>not</strong> installed by the base package — add the <code>[theme]</code> extra for the Unfold-themed admin; without it the admin renders on stock Django. <code>django-ckeditor-5</code> is likewise <strong>not</strong> installed by default (it bundles CKEditor 5, a GPL/commercial editor) — add it via the <code>[wysiwyg]</code> extra only if you use rich-text fields.</p>
 
   <details class="info">
@@ -5040,6 +5089,28 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset — no p
   versions themselves — and for how the whole suite is built and what it does and does not
   verify — see <a href="#testing">Testing &amp; Quality Engineering</a>.</p>
 
+  <h3 id="vs-themes">SnapAdmin and admin themes (Unfold, Jazzmin, Grappelli)</h3>
+  <p>Those are <strong>themes</strong>: they restyle the admin you already wrote — you still write
+  the <code>ModelAdmin</code>, the <code>list_display</code>, the <code>search_fields</code>.
+  SnapAdmin <strong>generates</strong> that admin from your field declarations, and the REST API,
+  the GraphQL schema and the search mapping from the same ones. It is not a competing theme — it
+  sits a layer above, and uses <strong>Unfold as its optional theme</strong> (the
+  <code>[theme]</code> extra).</p>
+  <table>
+    <thead><tr><th></th><th>Themes</th><th>SnapAdmin</th></tr></thead>
+    <tbody>
+      <tr><td>Admin look</td><td>✅ their whole point</td><td>Unfold's, via the <code>[theme]</code> extra</td></tr>
+      <tr><td>Who writes the <code>ModelAdmin</code></td><td>you</td><td>generated</td></tr>
+      <tr><td>REST API + Swagger</td><td>—</td><td>generated</td></tr>
+      <tr><td>GraphQL</td><td>—</td><td>generated</td></tr>
+      <tr><td>Elasticsearch</td><td>—</td><td>generated</td></tr>
+      <tr><td>Audit, GDPR, backups, health</td><td>—</td><td>built in</td></tr>
+    </tbody>
+  </table>
+  <p><strong>If you only want a better-looking admin, use a theme</strong> — it is less machinery.
+  SnapAdmin earns its place when the same models must also be an API, a search index and an
+  auditable system of record.</p>
+
   <h3>The two rules that make SnapAdmin safe by default</h3>
   <ol>
     <li><strong>SnapAdmin only auto-registers <code>SnapModel</code> subclasses.</strong> Every other
@@ -5144,10 +5215,11 @@ class Invoice(snap_models.SnapModel):
   </table>
 
   <div class="callout callout-info">
-    <strong>The 100% is <em>line</em> coverage, and that is a floor rather than an achievement.</strong>
-    It proves every statement in the shipped package was executed by some test. It does not prove any
-    test would notice if that statement were wrong — that is what mutation testing measures, and
-    SnapAdmin does not run it yet. The 6 skips are <code>tomllib</code> gates below Python 3.11 and
+    <strong>The 100% is line and branch coverage, and that is a floor rather than an achievement.</strong>
+    It proves every statement and every branch in the shipped package was executed by some test. It
+    does not prove any test would notice if that statement were wrong — that is what
+    <a href="#testing-mutation">mutation testing</a> measures, and it reports rather than blocks.
+    The 6 skips are <code>tomllib</code> gates below Python 3.11 and
     backend-capability gates; the 12 deselected tests need a live Elasticsearch.
   </div>
 
@@ -5156,6 +5228,22 @@ class Invoice(snap_models.SnapModel):
   the demo project it runs against, the docs it checks for truth and <code>pytest.ini</code>. Unpack
   it and run <code>python -m pytest</code> inside to hold an installed version to the same checks
   CI runs — without cloning the repository.</p>
+
+  <p id="testing-breakdown"><strong>Where the tests go.</strong> Beyond the contract and docs
+  suites, the heaviest areas are the ones with the most ways to go wrong — each figure a
+  <strong>floor</strong>, checked against a collection run by
+  <code>tests/test_testing_docs_truth.py</code>: field behaviour and encrypted fields (250+), the
+  REST surface (190+), field-level encryption end to end (400+ across the cipher, the keyset, the
+  blind index, every leak surface and the conversion command), export (130+), backups (170+) and
+  restore (90+ including the pre-restore snapshot), PII masking (120+), settings resolution (90+),
+  API tokens (100+ across issuing, hashing and validation), internationalisation (110+ across the
+  package and the demo), data retention (80+), bulk import (70+), alert channels (70+), the audit
+  trail (60+), multi-tenancy (60+ across the model, admin, audit and Elasticsearch layers) and
+  offline mode (60+). Accessibility (WCAG 2.1 AA) and GraphQL permission enforcement have their own
+  suites. The operator tooling is held to the same bar: the diagnostics report behind
+  <code>snapadmin-info</code> (220+ across eleven files, 80+ of them in the feature-adoption audit, where
+  every capability probe runs switched both on and off), the startup system checks (200+) and the
+  licence audit and its command (60+).</p>
 
   <h3 id="testing-method">How the tests are written</h3>
   <p>The rules below are the project's own engineering standard, applied to every change:</p>

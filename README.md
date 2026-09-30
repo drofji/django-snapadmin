@@ -17,237 +17,10 @@ index — automatically.**
 🔒 [Security](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md) ·
 🧭 [llms.txt](https://drofji.github.io/django-snapadmin/llms.txt)
 
----
-
-## Start where you are
-
-| You are | Read this | Time |
-|---|---|---|
-| **Deciding whether to adopt it** — CTO, tech lead, architect | [Why this exists](#why-this-exists) → [Proof it holds up](#proof-it-holds-up) → [Enterprise checklist](#for-teams-and-enterprise) | ~3 min |
-| **Shipping something today** — developer, intern, new joiner | [60-second try](#try-it--60-seconds-no-setup) → [Your first model](#your-first-model--3-steps) → [Cheat sheet](#the-cheat-sheet--the-kwargs-youll-actually-use) | ~5 min |
-| **Already using it** | [Changelog](https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md) · [Upgrade guides](https://github.com/drofji/django-snapadmin/tree/main/docs/migrations) · [All settings](https://drofji.github.io/django-snapadmin/#env-vars) | — |
-
----
-
-# Why this exists
-
-Every internal tool needs the same four things: a screen where staff manage the data, an API for the
-mobile app, an API for the frontend team, and a search box. Today each one is written and maintained
-separately — **four descriptions of the same data**, four places to update when a field changes, four
-chances to leak a field you meant to keep private.
-
-SnapAdmin generates all four from **one** description.
-
-> **In one sentence for a decision maker:** it turns weeks of internal-tool plumbing into a
-> declaration your developers write once, and keeps the admin panel, the APIs and the search in sync
-> automatically — so a field is defined in exactly one place.
-
-|  | Without | With SnapAdmin |
-|---|---|---|
-| Admin panel | you write it | generated |
-| REST API + Swagger docs | you write it | generated |
-| GraphQL | you write it | generated |
-| Search index | you write it | generated |
-| Audit trail, GDPR retention, PII masking, backups | you write it (or you don't) | built in |
-| Field defined in | 4 places | **1 place** |
-
-**What that buys you, concretely.** The admin screen your ops team asks for on Friday is a keyword
-argument, not a sprint. A new field reaches the API, the search index and the audit log the moment
-it reaches the model — there is no second ticket, and no "we forgot to add it to the serializer"
-incident. And the fields you *don't* want exposed are excluded once, in the model, rather than
-re-excluded in every surface by whoever writes it next.
-
-**What it is not.** It is not a theme, not a framework, and not a lock-in. Underneath it is ordinary
-Django — models, `ModelAdmin`, DRF viewsets. Override any generated piece, or stop using it, without
-rewriting your data layer. Your hand-written `ModelAdmin` classes are never replaced: SnapAdmin
-skips any model you registered yourself — and `manage.py check` tells you when one of them shows
-masked fields unmasked (`snapadmin.W025`), so add `PIIMaskingAdminMixin` to it.
-
-<details>
-<summary>How is this different from Unfold, Jazzmin or Grappelli?</summary>
-
-Those are **themes**. They restyle the admin you already wrote — you still write the `ModelAdmin`,
-the `list_display`, the `search_fields`, and they make it look modern.
-
-SnapAdmin **generates** that admin from your field declarations, and generates the REST API, the
-GraphQL schema and the search mapping from the same ones. It is not a competing theme — it sits a
-layer above, and it uses **Unfold as its optional theme**.
-
-|  | Themes | SnapAdmin |
-|---|---|---|
-| Admin look | ✅ their whole point | Unfold's, via the `[theme]` extra |
-| Who writes the `ModelAdmin` | you | generated |
-| REST API + Swagger | — | generated |
-| GraphQL | — | generated |
-| Elasticsearch | — | generated |
-| Audit, GDPR, backups, health | — | built in |
-
-**If you only want a better-looking admin, use a theme** — it is less machinery. SnapAdmin earns its
-place when the same models must also be an API, a search index and an auditable system of record.
-
-</details>
-
----
-
-## Proof it holds up
-
-Adoption risk is the real question, so every answer below is something you can verify yourself
-rather than take on trust.
-
-| Question | Evidence |
-|---|---|
-| **Is it tested?** | **5,000+ tests** across **153 files** and **100% line coverage** on the shipped package (11,000+ statements), enforced in CI — the build fails below 100% |
-| **On our Python and Django?** | Every push runs the full matrix: **Python 3.10–3.13 × Django 5.2 / 6.0** |
-| **Against a real database, or only SQLite?** | A separate CI job runs the **whole suite against PostgreSQL 16**, and a marker-gated suite against a **live Elasticsearch 8.13.0** — the same image the demo ships. A mocked client cannot reject a malformed query; a real cluster does |
-| **Do the tests lean on each other?** | Every run is in **random order** (`pytest-randomly`), locally and in CI, so a test that depends on another having run first fails instead of passing quietly |
-| **Will an upgrade break us?** | **340+ tests exist only to fail** if a public name, signature or default changes — a breaking change cannot ship by accident |
-| **Are the docs actually true?** | **140+ tests** assert that the README, the docs site and the in-package module map describe the code that really ships |
-| **Does the whole pipeline still connect?** | An end-to-end smoke test posts the real admin form, then proves the REST API serves that same row and the audit trail recorded it |
-| **Is `snapadmin-info` telling the truth?** | **220+ tests** cover the diagnostics report; every capability probe is tested both switched **on and off**, so the readiness audit cannot report a false green |
-| **Can we ship it commercially?** | MIT. The base install carries **only** permissive licences (MIT/BSD/Apache); anything copyleft is an opt-in extra. `snapadmin-license-check` audits what you actually installed |
-
-→ [The full quality story](#quality--compatibility), with the names of the test files, so a reviewer
-can read them.
-
----
-
-## For teams and enterprise
-
-The questions a tech lead or a manager asks before approving a dependency:
-
-| Question | Answer |
-|---|---|
-| **Can we use it commercially?** | Yes. MIT, and the base install carries **only** permissive licences (MIT/BSD/Apache). Anything copyleft is an opt-in extra, never installed by default |
-| **How do we prove that?** | `snapadmin-license-check` audits what you actually installed and returns a verdict. Full inventory in [THIRD_PARTY_NOTICES.md](https://github.com/drofji/django-snapadmin/blob/main/THIRD_PARTY_NOTICES.md) |
-| **Who changed that record?** | An [immutable audit trail](https://drofji.github.io/django-snapadmin/#audit-trail) with per-field `old → new` diffs and a per-object timeline |
-| **GDPR / data retention?** | Declare `data_retention_days` per model — or [`data_retention_date_field`](https://drofji.github.io/django-snapadmin/#retention-per-row) when each row carries its own expiry date (+ `data_retention_files` to take uploaded files with the row); the same purge also covers the audit log and, if you opt in, finished export/reindex job files. [Full purge table](https://drofji.github.io/django-snapadmin/#retention-table) |
-| **A subject requests everything about them?** | `manage.py snapadmin_subject_request export\|delete` walks every model's declared `subject_path` — unmasked export (optionally AGE-encrypted), or a dry-run-by-default deletion that refuses up front if a protected relation would block it. [Details](https://drofji.github.io/django-snapadmin/#gdpr-subject-request) |
-| **Personal data in the API?** | [PII masking](https://drofji.github.io/django-snapadmin/#pii-masking) — declare a field sensitive once and it is masked in the admin, REST, GraphQL, exports **and** the audit trail (diff and object labels). Per-field rules can unlock one field for one permission |
-| **Only HR should see salary?** | [`api_field_permissions`](https://drofji.github.io/django-snapadmin/#field-permissions) gates a field's very presence, per Django permission — absent from a response for anyone lacking it, an explicit `400` naming the field on a denied write, orthogonal to masking (which only controls display) |
-| **Multi-tenant SaaS?** | [Row-level tenant isolation](https://drofji.github.io/django-snapadmin/#multi-tenancy) — opt a model in with `tenant_scoped = True` plus a tenant column, and every generated surface (admin, REST, GraphQL, Elasticsearch routing, exports, imports, the offline cache) becomes unreachable without a bound tenant: default-deny, not opt-out. Logical isolation, not physical — the limitation is documented as plainly as the feature |
-| **Is it tested?** | **100% line coverage** on the shipped package, enforced in CI, across 5,000+ tests in random order. The matrix runs Python 3.10–3.13 × Django 5.2/6.0 on every push, and a further job runs the same suite against a real PostgreSQL and a live Elasticsearch. [What those tests cover, and what is not covered yet](#quality--compatibility) |
-| **Will it break on upgrade?** | A written [API-stability policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md), covered by semantic versioning as of `1.0`: deprecations warn before removal and name their replacement — and a [contract suite](#backward-compatibility-is-a-test-not-a-promise) fails the build if a public name changes |
-| **Will it survive our load?** | Read-replica routing, estimated counts, paging caps, streaming exports, and a reusable [quota primitive](https://drofji.github.io/django-snapadmin/#quotas) (`snapadmin.limits.reserve()`) for per-tenant windows, concurrency caps and outbound-call cooldowns. [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) |
-| **Single sign-on?** | [SSO / OAuth2 login helper](https://drofji.github.io/django-snapadmin/#enterprise-config); auth is pluggable — JWT, session, or your own |
-| **How do we know it is up?** | Health probes, error-spike alerts and daily digests to email, Slack, Discord, Teams or Telegram. `snapadmin-info --health-check` exits non-zero for your monitoring |
-| **Backups?** | [3-2-1 database backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, offsite over FTPS/SFTP/S3-compatible (AWS, MinIO, Backblaze B2, Hetzner Object Storage, Wasabi — [Storage Box is SFTP, not S3](https://drofji.github.io/django-snapadmin/#storage-box)), optionally **AGE-encrypted** in-stream so a compromised destination never sees plaintext — and `manage.py check` warns (`snapadmin.W021`) if you ship off-host without it. SFTP takes an explicit `SNAPADMIN_BACKUP_SFTP_KNOWN_HOSTS` so host-key verification does not depend on which user's `HOME` the process happens to have. `SNAPADMIN_BACKUP_INCLUDE` optionally bundles media and an encrypted `.env` alongside the database, with a checksummed manifest and a [restore command](https://drofji.github.io/django-snapadmin/#restore) — dry-run by default, with an automatic pre-restore snapshot and a matching [rollback command](https://drofji.github.io/django-snapadmin/#restore-rollback) |
-| **Are we locked in?** | No. It is ordinary Django underneath — models, `ModelAdmin`, DRF viewsets. Override any piece, or stop using the generated ones. Your models need not even inherit from ours: [`@snap_model`](https://drofji.github.io/django-snapadmin/#snap-model-decorator) opts a plain `models.Model` in from the outside |
-| **Outgrowing one database?** | [Declarative sharding and read-replica routing](#database-sharding-and-replica-routing) — any number of shards/replicas from one settings dict, opt-in per model, with automatic failover. [Details](https://drofji.github.io/django-snapadmin/#sharding) |
-| **What is coming next?** | Whatever lands next follows the rule everything here follows: **additive, opt-in and completely inert until you configure it** — an install that ignores a new feature is byte-for-byte unaffected, with no new setting required and no migration from the package itself. [Changelog](https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md) for what has actually shipped |
-
-<details>
-<summary>How fast is it?</summary>
-
-**There are no published benchmark numbers, so this README will not quote any.** What ships instead
-is the means to measure it on your own hardware and data:
-
-```bash
-python demo/manage.py seed_large            # 100,000 customers and orders
-python demo/manage.py benchmark_list_view   # query count + wall time
-```
-
-What is *designed in* rather than measured is documented under
-[large-dataset tuning](https://drofji.github.io/django-snapadmin/#performance): automatic
-`list_select_related` (no admin N+1), estimated counts instead of `COUNT(*)` on large tables, paging
-caps, and streaming exports that hold memory flat regardless of result size.
-
-</details>
-
-## Database sharding and replica routing
-
-Outgrowing a single PostgreSQL or MySQL instance today usually means hand-rolling Django
-`DATABASES` and `DATABASE_ROUTERS`. `SNAPADMIN_SHARDING` replaces that with one settings dict, at
-two levels of effort — and is **completely inert** until you set `ENABLED: True`: no new
-`DATABASES` entry, no extra router, no query overhead for an install that ignores it.
-
-```python
-# settings.py — the simple path: a flat list of DSNs, sliced automatically
-SNAPADMIN_SHARDING = {
-    "ENABLED": True,
-    "SHARDING_ENABLED": True,    # partition data across shards
-    "MIRRORING_ENABLED": True,   # give each shard read replicas
-    "REPLICAS_PER_SHARD": 1,
-    "DATABASES": [
-        "postgres://user:pass@s1-primary:5432/db", "postgres://user:pass@s1-replica:5432/db",
-        "postgres://user:pass@s2-primary:5432/db", "postgres://user:pass@s2-replica:5432/db",
-    ],
-}
-```
-
-Or name every shard's primary/replicas explicitly (`SHARDS = {"shard_1": {"PRIMARY": ..., "REPLICAS": [...]}}`)
-for full manual control, with `STRATEGY` picking how a row's shard is resolved — `modulo`, `hash`,
-`range`, or your own `CUSTOM_ROUTER_FUNC`.
-
-A model opts in with `shard_key` — a field name, or `True` for the project-wide default — mirroring
-exactly how `tenant_scoped` opts a model into multi-tenancy above, so nothing (including Django's
-own `auth`/`sessions`/`admin` tables) is ever routed across shards without asking:
-
-```python
-class Order(SnapModel):
-    shard_key = "customer_id"
-```
-
-`snap_master_only()` / `snap_target(shard="shard_2", replica=True)` force routing for one block of
-code — both work as a context manager or a decorator, on a plain function or an `async def` one
-alike. `manage.py snap_migrate` migrates every shard's **primary** only (sequentially, or all at
-once with `--parallel`), and `manage.py snapadmin_db_backup` backs up every shard's primary too —
-neither command ever touches a replica. `HA_SETTINGS` controls failover (promote a live replica to
-serve writes when the primary is down) and fallback (read from the primary once every replica is
-down, or refuse outright if you'd rather protect the primary from that traffic). Full reference:
-[Database sharding](https://drofji.github.io/django-snapadmin/#sharding).
-
-## Encrypted model fields
-
-PII masking hides a value at render time and encrypted backups protect the whole artefact. Neither
-protects the **column**: a stolen dump, a rogue read-replica or an over-broad `SELECT` still sees
-everything. `SnapEncrypted*Field` closes that — **ciphertext at rest, the ordinary Python value in
-your code**, and nothing above the field changes:
-
-```python
-from snapadmin import fields as snap, models as snap_models
-
-class Patient(snap_models.SnapModel):
-    name  = snap.SnapCharField(max_length=200, searchable=True)
-    ssn   = snap.SnapEncryptedCharField(max_length=32, show_in_list=False)
-    email = snap.SnapEncryptedEmailField(blind_index=True)   # still findable by value
-
-Patient.objects.create(name="A. Wiese", ssn="123-45-6789")
-# the ssn column now holds: snap1.2026-09.<nonce>.<ciphertext>
-Patient.objects.get(email="a@example.org").ssn      # → "123-45-6789"
-```
-
-Eight types — `Char`, `Text`, `Email`, `JSON`, `Integer`, `Decimal`, `Date`, `DateTime` — each its
-plain counterpart plus encryption, keeping its own form widget, validation and Python type.
-AES-256-GCM behind the optional `[encryption]` extra, a fresh random nonce on every write, and each
-value bound to its own `app.model.field` so a ciphertext copied into another column fails to
-decrypt instead of quietly relocating a secret. Keys come from a KMS/Vault provider, a mounted
-secret, the environment or settings — never `SECRET_KEY`, which a startup check refuses outright —
-and rotation is prepending one key: every ciphertext records the id that opens it.
-
-**What it costs, stated up front.** The database cannot compare, order or index a column it cannot
-read. `icontains`, `gt`, `startswith` and `ORDER BY` are impossible, and each raises a `FieldError`
-naming the field rather than returning an empty queryset — encrypted data silently becoming
-invisible data is the failure that matters here. `blind_index=True` buys back `__exact` / `__in`
-and `unique=True` through an HMAC sibling column, at the documented cost that equality becomes
-observable to anyone who can read that column: fine for an email address, wrong for a national ID.
-
-Encrypted values are excluded from Elasticsearch, redacted in the audit trail, masked by default in
-REST/GraphQL/exports/the changelist through the existing PII permission model, and emitted as
-ciphertext by `dumpdata`. `manage.py snapadmin_encrypt_fields` adopts an existing plaintext column,
-rotates rows onto a new key and rebuilds blind indexes — batched, resumable, and writing nothing
-without `--apply`. Full reference:
-[Field encryption](https://drofji.github.io/django-snapadmin/#field-encryption).
-
----
-
----
-
-# Getting started
-
 ## Try it — 60 seconds, no setup
 
 ```bash
-pip install django-snapadmin
+pip install "django-snapadmin[api,graphql]"
 snapadmin-new myshop
 cd myshop
 python manage.py migrate
@@ -256,18 +29,25 @@ python manage.py runserver
 ```
 
 Open <http://127.0.0.1:8000/admin/>. The admin, the REST API (`/api/docs/`) and GraphQL
-(`/api/graphql/`) are already running against a working example model. SQLite, no Docker, nothing to
-edit by hand.
+(`/api/graphql/`) are already running against a working example model — SQLite, no Docker, nothing
+to edit by hand. Only want to look around? `snapadmin-demo` downloads a fully-loaded demo (search,
+audit trail, background jobs); log in with `admin` / `admin`.
 
-**Just want to look around first?** `snapadmin-demo` downloads a fully-loaded demo — search, audit
-trail, background jobs, the works. Log in at `/admin/` with `admin` / `admin`.
+| You are | Read this |
+|---|---|
+| **Shipping something today** | [New project: `SnapModel` in 3 steps](#a-new-project-or-an-mvp--snapmodel-in-3-steps) · [Existing project: `@snap_model`](#an-existing-project-you-cannot-rewrite--snap_model) · [Cheat sheet](#the-cheat-sheet--the-kwargs-youll-actually-use) |
+| **Deciding whether to adopt it** | [Why this exists](#why-this-exists) → [Proof it holds up](#proof-it-holds-up) → [For teams and enterprise](#for-teams-and-enterprise) |
+| **Already using it** | [Changelog](https://github.com/drofji/django-snapadmin/blob/main/CHANGELOG.md) · [Upgrade guides](https://github.com/drofji/django-snapadmin/tree/main/docs/migrations) · [All settings](https://drofji.github.io/django-snapadmin/#env-vars) |
 
 ---
 
-## Your first model — 3 steps
+# Quickstart
 
-You add keyword arguments to your fields. They describe how the field should *behave*, and they
-**add no database migration**.
+There are two ways in, and they end in the same place. Neither adds a database migration of its own.
+
+## A new project or an MVP — `SnapModel` in 3 steps
+
+The declarative route: your fields say how they behave, and every surface is generated from them.
 
 **1. Declare the model.**
 
@@ -281,6 +61,7 @@ class Product(snap_models.SnapModel):
     available = snap.SnapBooleanField(default=True, filterable=True, show_in_form=True)
 
     api_write_fields = ["name", "price", "available"]   # what an API client may set
+    subject_path = None   # no personal data here — snapadmin.E011 asks every model
 ```
 
 **2. Turn on the surfaces you want.**
@@ -304,32 +85,74 @@ SnapModel.register_all_admins()
 
 | URL | What is there |
 |---|---|
-| `/admin/` | List with a search box on `name`, sidebar filters on `price` and `available`, add/edit forms, change history |
+| `/admin/` | List with a search box on `name` (and the id), sidebar filters on `price` and `available`, add/edit forms, change history |
 | `/api/models/shop/Product/` | REST create · read · update · delete, with filters, pagination and token auth |
 | `/api/docs/` | Swagger UI + ReDoc |
 | `/api/graphql/` | GraphQL schema, permission-checked |
-| `/dashboard/` | Row counts, service health, scheduled jobs |
 
-```
-┌────────────────────────────────────────────────────────────┐
-│  SnapAdmin                           🔍 Search...    admin ▾│
-├──────────────┬─────────────────────────────────────────────┤
-│  SHOP        │  Products                         + Add     │
-│  Categories  │ ┌──────────────────────────────────────────┐│
-│  Products    │ │ Name            Price  In Stock  Category ││
-│  Customers   │ │ Premium Laptop  $249   ● Active   Audio   ││
-│  Orders      │ │ Ergonomic Mouse $89    ● Active   Access. ││
-│  SYSTEM      │ │ USB-C Hub       $49    ○ Out      Electr. ││
-│  Dashboard   │ └──────────────────────────────────────────┘│
-└──────────────┴─────────────────────────────────────────────┘
+`snapadmin-new` already wired `INSTALLED_APPS` and `urls.py` for you. By hand, it is
+[the minimal install](https://drofji.github.io/django-snapadmin/#installed-apps-minimal) plus the
+four API apps; `subject_path` is the GDPR subject-access declaration every model answers
+([what to put there](https://drofji.github.io/django-snapadmin/#gdpr-subject-request)).
+
+## An existing project you cannot rewrite — `@snap_model`
+
+A brownfield schema, a base class from a third-party package, fields from `django-money` or
+`phonenumber_field`: opt the model in from the outside. No inheritance change, and — because the
+decorator adds no field and no attribute — **no migration**.
+
+**1. Install, and let `snapadmin-init` tell you what is missing.** It reads your project and prints
+the exact snippets to paste; it never edits a file.
+
+```bash
+pip install "django-snapadmin[api]"
+snapadmin-init --api
 ```
 
----
+**2. Add the apps and the routes it names.**
+
+```python
+# settings.py
+INSTALLED_APPS += ["rest_framework", "drf_spectacular", "django_filters", "snapadmin"]
+SNAPADMIN_REST_API_ENABLED = True
+
+# urls.py  (from django.urls import include, path)
+urlpatterns += [path("api/", include("snapadmin.urls"))]
+```
+
+**3. Decorate the model.**
+
+```python
+from django.db import models
+from snapadmin import snap_model
+
+@snap_model(
+    api_write_fields=["name", "price"],   # what an API client may set
+    api_exclude_fields=["cost_price"],    # never leaves the server
+    search_fields=["name"],               # what ?search= matches on
+    subject_path=None,                    # no personal data here — snapadmin.E011 asks every model
+)
+class Product(models.Model):
+    name       = models.CharField(max_length=200)
+    price      = models.DecimalField(max_digits=10, decimal_places=2)
+    cost_price = models.DecimalField(max_digits=10, decimal_places=2)
+```
+
+You get the REST API (`/api/models/<app_label>/Product/`, documented at `/api/docs/`), GraphQL
+with the `[graphql]` extra, the offline endpoints, the system checks and the `snapadmin-info`
+inventory. You keep **your own** `ModelAdmin` — the parts that need `SnapModel`'s machinery
+(Elasticsearch mirroring, the retention purge, the generated admin) skip a decorated model rather
+than half-work — so the decorator reads `search_fields` from its own keyword, not from field
+flags. When you later move a model onto `SnapModel`, `snap_field()` gives a field you already have
+(a `django-money` or `phonenumber_field` column) the Snap flags without changing its class, and
+bare, wrapped and `Snap*Field` fields mix freely in one class body.
+[Which capability lives where, side by side](https://drofji.github.io/django-snapadmin/#two-ways) ·
+[`snap_field()`](https://drofji.github.io/django-snapadmin/#snap-field-wrapper) ·
+[mixing fields](https://drofji.github.io/django-snapadmin/#mixing-fields).
 
 ## The cheat sheet — the kwargs you'll actually use
 
-Six keyword arguments cover most of what a new joiner needs on day one. None of them touch the
-database, so you can change your mind without a migration.
+None of these touch the database except `required`, so you can change your mind without a migration.
 
 | Kwarg | Default | What it does |
 |---|---|---|
@@ -346,152 +169,82 @@ On the model itself:
 |---|---|
 | `api_write_fields = [...]` | The allowlist of fields an API client may set |
 | `api_exclude_fields = [...]` | Fields that never leave the server, on any surface |
-| `data_retention_days = 365` | The GDPR purge deletes rows older than this |
-| `data_retention_date_field = "delete_at"` | A per-row deadline instead of a model-wide age: each row expires on the date it carries. Combines with `data_retention_days`, which becomes the fallback for rows whose date is `NULL` |
+| `data_retention_days = 365` | The GDPR purge deletes rows older than this — or `data_retention_date_field = "delete_at"` for a per-row deadline |
 | `es_storage_mode = EsStorageMode.DUAL` | Mirror rows to Elasticsearch. Pair it with `es_mapping` or `es_auto_mapping = True` — a mirror with neither would index ids only, so `snapadmin.E026` refuses it |
 | `tenant_scoped = True` | Row-level isolation: unreachable without a bound tenant |
 
-More kwargs — `tab` / `row` layout, `autocomplete`, `wysiwyg`, upload validation — in
-[the field reference](https://drofji.github.io/django-snapadmin/#snap-fields). There are 30+ field
-types, from `SnapCharField` to `SnapPhoneField`, `SnapColorField` and `SnapStatusBadgeField`.
-
----
-
-## Already have models you cannot rewrite?
-
-Subclassing `SnapModel` is the full route, and it is the natural choice for a new model. If your
-model layer already exists — a brownfield schema, a base class from a third-party package, fields
-from `django-money` or `phonenumber_field` — opt in from the outside instead. `@snap_model` adds no
-field and no attribute, so it needs **no migration**:
-
-```python
-from django.db import models
-from snapadmin import snap_model
-
-@snap_model(
-    api_write_fields=["name", "price"],   # what an API client may set
-    api_exclude_fields=["cost_price"],    # never leaves the server
-    search_fields=["name"],               # what ?search= matches on
-)
-class Product(models.Model):
-    name       = models.CharField(max_length=200)
-    price      = models.DecimalField(max_digits=10, decimal_places=2)
-    cost_price = models.DecimalField(max_digits=10, decimal_places=2)
-```
-
-You get the REST API, the GraphQL schema, the offline endpoints, the system checks and the
-`snapadmin-info` inventory. You **do not** get the parts that need `SnapModel`'s machinery —
-Elasticsearch mirroring, the retention purge, the generated admin — and those sweeps skip the model
-rather than half-work. [The full comparison
-table](https://drofji.github.io/django-snapadmin/#two-ways) says exactly which is which.
-
-<details>
-<summary>Just one field? Use <code>snap_field()</code></summary>
-
-Need this for one field rather than a whole model — a single `django-money` or `phonenumber_field`
-column on an otherwise ordinary model? `snap_field()` is the same idea at field scope:
-
-```python
-from django.db import models
-from snapadmin.fields import snap_field
-
-class Product(models.Model):
-    name = snap_field(models.CharField(max_length=255), searchable=True, filterable=True)
-```
-
-It sets the same attributes a `Snap*Field` sets on itself, on a field instance you already have —
-every reader treats the result identically, and it adds no migration either.
-
-You never have to convert a whole model at once, either — a `SnapModel` is a normal Django model, so
-bare fields, `snap_field()`-wrapped fields and `Snap*Field`s freely mix in the same class body; only
-the fields that need Snap behaviour get it. [Worked example](https://drofji.github.io/django-snapadmin/#mixing-fields).
-
-</details>
-
-→ [Field types](https://drofji.github.io/django-snapadmin/#snap-fields) ·
-[SnapModel reference](https://drofji.github.io/django-snapadmin/#snap-model) ·
-[`@snap_model` for plain models](https://drofji.github.io/django-snapadmin/#snap-model-decorator) ·
-[`snap_field()` for one field](https://drofji.github.io/django-snapadmin/#snap-field-wrapper) ·
-[Mixing Snap & plain fields](https://drofji.github.io/django-snapadmin/#mixing-fields)
-
----
+30+ field types (`SnapPhoneField`, `SnapColorField`, `SnapStatusBadgeField`, …) and the layout kwargs
+(`tab`, `row`, `autocomplete`, `wysiwyg`, upload validation) are in
+[the field reference](https://drofji.github.io/django-snapadmin/#snap-fields).
 
 ## The commands
 
 | Command | Use it when |
 |---|---|
-| `snapadmin-new myshop` | **Starting a new project.** Generates one you keep. `--full` adds Docker, PostgreSQL, Redis, Elasticsearch |
+| `snapadmin-new myshop` | **Starting a new project.** `--full` adds Docker, PostgreSQL, Redis, Elasticsearch; `--admin-only` leaves out the APIs |
 | `snapadmin-demo` | **You want to see it first.** Downloads and serves a throwaway demo |
-| `snapadmin-init` | **Adding it to a project you already have.** Read-only — prints what is missing and the exact code to paste. Never edits your files |
-| `snapadmin-info` | **Is everything configured and healthy?** Versions, database, search, queues, plus a ✓/✗ feature checklist |
-| `snapadmin-license-check` | **Can we ship this commercially?** Every dependency's licence, with a verdict |
+| `snapadmin-init` | **Adding it to a project you already have.** Read-only — prints what is missing and the exact code to paste |
+| `snapadmin-info` | **Is everything configured and healthy?** `--section features` for the ✓/✗ checklist, `--health-check` exits non-zero for monitoring, `--json` for CI |
+| `snapadmin-license-check` | **Can we ship this commercially?** Every dependency's licence, with a verdict; `--critical-only` for the blockers |
 
-<details>
-<summary>More flags, and the scheduled-job commands</summary>
+`snapadmin-info` ≡ `python manage.py snapadmin_info`, and both inspect a live project. You also see
+the short version without asking: under `DEBUG`, `runserver` prints one block to stderr saying which
+capabilities are on, which are off, which lack their extra, and whether your dependencies allow
+commercial use — configuration only, never a query or a secret. `SNAPADMIN_STARTUP_REPORT = False`
+silences it ([startup report](https://drofji.github.io/django-snapadmin/#startup-report)).
 
-```bash
-snapadmin-new myshop --app-name storefront   # name the example app yourself
-snapadmin-new myshop --full                  # + Dockerfile, compose, Postgres/Redis/ES
-snapadmin-new myshop --admin-only            # the admin alone — no REST API, no GraphQL
-
-snapadmin-init --api --graphql               # also check the REST / GraphQL config
-
-snapadmin-info --section features            # just the ✓/✗ capability checklist
-snapadmin-info --health-check                # probes only; non-zero exit if one fails
-snapadmin-info --json                        # the same report for CI / monitoring
-snapadmin-info --startup                     # the short block runserver prints at boot
-
-snapadmin-license-check --critical-only      # only what blocks commercial use
-```
-
-`snapadmin-info` and `snapadmin-license-check` inspect a live project, so run them from inside one.
-Every spelling works — `snapadmin-info` ≡ `python manage.py snapadmin_info`.
-
-You also see the short version without asking: under `DEBUG`, `runserver` prints one block to
-stderr saying which capabilities are on, which are off, which are switched on without their extra
-installed, and whether your dependencies allow commercial use. It reads configuration only — no
-query, no connection, never a secret. `SNAPADMIN_STARTUP_REPORT = False` silences it; `True` prints
-it in every process but machine-read commands ([Startup report](https://drofji.github.io/django-snapadmin/#startup-report)).
-
-Opt-in background commands, none of which run on their own: `snapadmin_reindex`,
-`snapadmin_import`, `snapadmin_health_alert`, `snapadmin_db_backup`, `snapadmin_send_error_digest`,
-`snapadmin_purge_expired_data`, `snapadmin_audit_export`, `snapadmin_encryption_key`
-(generates a field-encryption key and prints it once) and `snapadmin_encrypt_fields`
-(`--adopt` an existing plaintext column, `--rotate` rows onto a new key, `--reindex` blind-index
-columns — reports only unless given `--apply`); see
-[Field encryption](https://drofji.github.io/django-snapadmin/#field-encryption).
-
-> ⏱ **Nothing runs on a schedule by itself.** SnapAdmin ships no daemon — backups, digests and the
-> data purge need a Celery Beat entry or a cron line.
+> ⏱ **Nothing runs on a schedule by itself.** Backups, digests and the data purge are management
+> commands (`snapadmin_db_backup`, `snapadmin_purge_expired_data`, `snapadmin_send_error_digest`, …)
+> that need a Celery Beat entry or a cron line.
 > → [Background tasks & scheduling](https://drofji.github.io/django-snapadmin/#celery)
-
-</details>
-
----
 
 ## Is your integration actually correct?
 
-A runnable checklist — every row names the command that proves it, not just the thing to remember.
-`snapadmin-init` prints this itself, with a ✅/❌/⚠️ per row (⚠️ = needs a running project to check,
-never a false green):
+`snapadmin-init` prints this checklist itself, with a ✅/❌/⚠️ per row (⚠️ = needs a running project
+to check, never a false green):
 
 | Check | Verify |
 |---|---|
 | App boots, models registered | `manage.py check` · `snapadmin_info --section inventory` |
 | Migrations applied | `manage.py migrate --check` |
 | Auth on the API, PII masked where it matters | `snapadmin_info --section features` |
-| Backups on, **2+ destinations**, encryption (**strongly recommended**) | `snapadmin_info --section features` · `manage.py check` warns (`snapadmin.W021`) when a destination that leaves the host has no `SNAPADMIN_BACKUP_AGE_RECIPIENTS` |
-| Have you actually run a restore? | `snapadmin_restore <bundle> --database <drill-alias> --confirm` restores into a throwaway database and prints the row count per table — an untested backup is the most common form of not having one |
+| Backups on, **2+ destinations**, encrypted | `snapadmin_info --section features` · `manage.py check` warns (`snapadmin.W021`) when an off-host destination has no `SNAPADMIN_BACKUP_AGE_RECIPIENTS` |
+| Have you actually run a restore? | `snapadmin_restore <bundle> --database <drill-alias> --confirm` restores into a throwaway database — an untested backup is the most common form of not having one |
 
-→ [Full checklist](https://drofji.github.io/django-snapadmin/#integration-checklist) — Must work /
-Should be configured / Data safety / Optional, with a "why it matters" column.
-
-→ [Production playbook](https://drofji.github.io/django-snapadmin/#playbook) — the layer above it:
-the decisions to settle with whoever owns the project (identity and login, database posture, what
-the audit trail does *not* record), the order to build in, what your own test suite should cover,
-and which shipped defaults stop being the right ones under load.
+→ [Full checklist](https://drofji.github.io/django-snapadmin/#integration-checklist) ·
+[Production playbook](https://drofji.github.io/django-snapadmin/#playbook) — the decisions to settle
+before the first migration, the build order, what your own test suite should cover, and which
+defaults stop being right under load.
 
 ---
+
+# Why this exists
+
+Every internal tool needs the same four things: a screen where staff manage the data, an API for the
+mobile app, an API for the frontend team, and a search box. Today each one is written and maintained
+separately — **four descriptions of the same data**, four places to update when a field changes, four
+chances to leak a field you meant to keep private. SnapAdmin generates all four from **one**.
+
+|  | Without | With SnapAdmin |
+|---|---|---|
+| Admin panel | you write it | generated |
+| REST API + Swagger docs | you write it | generated |
+| GraphQL | you write it | generated |
+| Search index | you write it | generated |
+| Audit trail, GDPR retention, PII masking, backups | you write it (or you don't) | built in |
+| Field defined in | 4 places | **1 place** |
+
+The admin screen your ops team asks for on Friday is a keyword argument, not a sprint. A new field
+reaches the API, the search index and the audit log the moment it reaches the model, and the fields
+you *don't* want exposed are excluded once, in the model, rather than in every surface.
+
+**What it is not.** Not a theme, not a framework, not a lock-in. Underneath it is ordinary Django —
+models, `ModelAdmin`, DRF viewsets — so you can override any generated piece, or stop using it,
+without rewriting your data layer. Your hand-written `ModelAdmin` classes are never replaced, and
+`manage.py check` tells you when one of them shows masked fields unmasked (`snapadmin.W025`).
+Unfold, Jazzmin and Grappelli *restyle* an admin you still write; SnapAdmin *generates* it — and uses
+Unfold as its optional theme. If a better-looking admin is all you need, a theme is less machinery
+([the comparison](https://drofji.github.io/django-snapadmin/#vs-themes)).
 
 # What you get
 
@@ -503,527 +256,197 @@ connection
 **🔌 APIs** — [REST CRUD](https://drofji.github.io/django-snapadmin/#api-rest) with Swagger and
 auto-derived filters · [GraphQL](https://drofji.github.io/django-snapadmin/#api-graphql) with
 permissions on every traversed relation ·
-[API tokens](https://drofji.github.io/django-snapadmin/#api-tokens) hashed at rest · per-model and
-[per-field](https://drofji.github.io/django-snapadmin/#field-permissions) guards for what may be
-read and written · [`@snap_action`](https://drofji.github.io/django-snapadmin/#snap-action) exposes
-a business operation — approve, refund, recalculate — as a permission-checked endpoint, not just CRUD ·
-a model rule that rejects a write answers
-[`400` naming the field](https://drofji.github.io/django-snapadmin/#api-validation-errors), never an
-HTML `500`, and [`api_full_clean`](https://drofji.github.io/django-snapadmin/#api-full-clean) makes
-your `Model.clean()` cross-field rules hold for API clients, not just in the admin
+[API tokens](https://drofji.github.io/django-snapadmin/#api-tokens) hashed at rest ·
+[per-field](https://drofji.github.io/django-snapadmin/#field-permissions) read/write guards ·
+[`@snap_action`](https://drofji.github.io/django-snapadmin/#snap-action) exposes approve / refund /
+recalculate as a permission-checked endpoint · a rejected write answers
+[`400` naming the field](https://drofji.github.io/django-snapadmin/#api-validation-errors), and
+[`api_full_clean`](https://drofji.github.io/django-snapadmin/#api-full-clean) runs your
+`Model.clean()` for API clients too
 
 **🔍 Search** *(optional)* — [Elasticsearch](https://drofji.github.io/django-snapadmin/#elasticsearch)
-with the index mapping derived from your fields · `?search=`
+with the mapping derived from your fields · `?search=`
 [routed to ES automatically](https://drofji.github.io/django-snapadmin/#es-routing), falling back to
 the database when ES is down · [resumable bulk reindex](https://drofji.github.io/django-snapadmin/#bulk-reindex-command) ·
-[deletes keep the index in step](https://drofji.github.io/django-snapadmin/#es-delete-sync), including a bulk
-`QuerySet.delete()` and rows removed by a cascade
+[deletes keep the index in step](https://drofji.github.io/django-snapadmin/#es-delete-sync), cascades
+included
 
 **⚙️ Operations** — [audit trail](https://drofji.github.io/django-snapadmin/#audit-trail) ·
 [GDPR retention](https://drofji.github.io/django-snapadmin/#gdpr) ·
 [PII masking](https://drofji.github.io/django-snapadmin/#pii-masking) ·
 [backups](https://drofji.github.io/django-snapadmin/#backups) ·
-[error and health alerts](https://drofji.github.io/django-snapadmin/#alert-channels) to email, Slack,
-Discord, Teams or Telegram · [structured logging](https://drofji.github.io/django-snapadmin/#logging) ·
-10 languages
+[alerts](https://drofji.github.io/django-snapadmin/#alert-channels) to email, Slack, Discord, Teams
+or Telegram · [structured logging](https://drofji.github.io/django-snapadmin/#logging) · 10 languages
+
+**🔐 Encrypted model fields** — `SnapEncrypted*Field` (eight types, behind the `[encryption]` extra)
+stores AES-256-GCM ciphertext in the column and hands your code the ordinary value; keys come from a
+KMS/Vault provider, a mounted secret, the environment or settings — never `SECRET_KEY` — and rotate by
+prepending one. **The cost is stated up front:** the database cannot compare, order or index what it
+cannot read, so `icontains`, `gt` and `ORDER BY` raise a `FieldError` naming the field rather than
+returning nothing, and `blind_index=True` buys back `__exact` / `__in` / `unique` at the documented
+price that equality becomes observable. [Field encryption](https://drofji.github.io/django-snapadmin/#field-encryption)
+
+**🗄 Sharding and replica routing** — `SNAPADMIN_SHARDING` replaces hand-rolled `DATABASES` /
+`DATABASE_ROUTERS` with one settings dict: a flat list of DSNs or named shards, `modulo` / `hash` /
+`range` / custom strategies, opt-in per model with `shard_key`, failover in `HA_SETTINGS`, and
+`snap_migrate` / `snapadmin_db_backup` that only ever touch primaries. Completely inert until
+`ENABLED: True`. [Database sharding](https://drofji.github.io/django-snapadmin/#sharding)
 
 **🧭 Operability** — misconfiguration surfaces **at startup** as a Django system check
 (`snapadmin.E0xx` / `W0xx`), not as a mystery at request time · `snapadmin-info` reports what is
-switched on, what is actually in use, and what is unreachable · `snapadmin-license-check` answers
-the legal question in one command
+switched on, what is in use and what is unreachable · `snapadmin-license-check` answers the legal
+question in one command
+
+---
+
+## Proof it holds up
+
+Adoption risk is the real question, so every answer below is something you can verify yourself.
+
+| Question | Evidence |
+|---|---|
+| **Is it tested?** | **5,000+ tests** across **153 files** and **100% line and branch coverage** on the shipped package (11,000+ statements), enforced in CI — the build fails below 100% |
+| **On our Python and Django?** | Every push runs the full matrix: **Python 3.10–3.13 × Django 5.2 / 6.0** |
+| **Against a real database, or only SQLite?** | A separate CI job runs the **whole suite against PostgreSQL 16**, and a marker-gated suite against a **live Elasticsearch 8.13.0** — the same image the demo ships |
+| **Do the tests lean on each other?** | Every run is in **random order** (`pytest-randomly`), so a test that depends on another having run first fails instead of passing quietly |
+| **Will an upgrade break us?** | **340+ tests exist only to fail** if a public name, signature or default changes, under a written [API-stability policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md): deprecations warn before removal and name their replacement |
+| **Are the docs actually true?** | **140+ tests** assert that the README, the docs site and the in-package module map describe the code that really ships |
+| **Does the whole pipeline still connect?** | An end-to-end smoke test posts the real admin form, then proves the REST API serves that same row and the audit trail recorded it |
+| **Is `snapadmin-info` telling the truth?** | **220+ tests** cover the diagnostics report; every capability probe is tested both switched **on and off**, so the readiness audit cannot report a false green |
+| **Can we ship it commercially?** | MIT. The base install carries **only** permissive licences (MIT/BSD/Apache); anything copyleft is an opt-in extra. `snapadmin-license-check` audits what you actually installed ([THIRD_PARTY_NOTICES.md](https://github.com/drofji/django-snapadmin/blob/main/THIRD_PARTY_NOTICES.md)) |
+
+## For teams and enterprise
+
+| Question | Answer |
+|---|---|
+| **Who changed that record?** | An [immutable audit trail](https://drofji.github.io/django-snapadmin/#audit-trail) with per-field `old → new` diffs and a per-object timeline |
+| **GDPR / data retention?** | `data_retention_days` per model, or [`data_retention_date_field`](https://drofji.github.io/django-snapadmin/#retention-per-row) for a per-row expiry; the same purge covers the audit log and, if you opt in, finished export and reindex job files. [Every purge](https://drofji.github.io/django-snapadmin/#retention-table) |
+| **A subject requests everything about them?** | [`snapadmin_subject_request export\|delete`](https://drofji.github.io/django-snapadmin/#gdpr-subject-request) walks every model's declared `subject_path` — deletion is dry-run by default and refuses up front if a protected relation would block it |
+| **Personal data in the API?** | [PII masking](https://drofji.github.io/django-snapadmin/#pii-masking) — declared once, masked in the admin, REST, GraphQL, exports **and** the audit trail |
+| **Only HR should see salary?** | [`api_field_permissions`](https://drofji.github.io/django-snapadmin/#field-permissions) — the field is absent for anyone lacking the permission, and a denied write answers `400` naming it |
+| **Multi-tenant SaaS?** | [Row-level tenant isolation](https://drofji.github.io/django-snapadmin/#multi-tenancy) with `tenant_scoped = True`: every generated surface is default-deny without a bound tenant. Logical isolation, not physical — and documented as plainly as the feature |
+| **Will it survive our load?** | Read-replica routing, estimated counts, paging caps, streaming exports and a [quota primitive](https://drofji.github.io/django-snapadmin/#quotas). There are **no published benchmark numbers**; `seed_large` + `benchmark_list_view` in the demo measure it on your hardware ([performance](https://drofji.github.io/django-snapadmin/#performance)) |
+| **Single sign-on?** | [SSO / OAuth2 login helper](https://drofji.github.io/django-snapadmin/#enterprise-config); auth is pluggable — JWT, session, or your own |
+| **How do we know it is up?** | Health probes, error-spike alerts and daily digests; `snapadmin-info --health-check` exits non-zero for your monitoring |
+| **Backups?** | [3-2-1 backups](https://drofji.github.io/django-snapadmin/#backups) — local, network share, offsite over FTPS / SFTP / S3-compatible, optionally **AGE-encrypted** in-stream, with media and `.env` in a checksummed bundle, a dry-run-by-default [restore](https://drofji.github.io/django-snapadmin/#restore) and a [rollback](https://drofji.github.io/django-snapadmin/#restore-rollback) |
+| **Are we locked in?** | No. Ordinary Django underneath, and your models need not even inherit from ours: [`@snap_model`](https://drofji.github.io/django-snapadmin/#snap-model-decorator) opts a plain `models.Model` in from the outside |
+| **What is coming next?** | Whatever lands follows the rule everything here follows: **additive, opt-in and inert until configured** — no new required setting, no migration from the package itself |
 
 ---
 
 # Quality & compatibility
 
 This is a package other people's products depend on, so the test suite is treated as part of the
-product rather than as developer hygiene. Every count below is a **floor**, read off a real
-`pytest --collect-only -q` run rather than kept current by arithmetic — and [what is *not* in place
-yet](#what-is-not-in-place-yet) is part of this section rather than an omission from it.
+product. Every count is a **floor**, read off a real `pytest --collect-only -q` run rather than kept
+current by arithmetic. The full account — every layer, how each check works, where the tests go —
+is [Testing & Quality Engineering](https://drofji.github.io/django-snapadmin/#testing).
 
-Concretely, on the current release:
+- **5,000+ tests across 153 files**, in random order on every run. Twelve need a live Elasticsearch
+  and are deselected by default, so cloning the repository and typing `pytest` starts no container
+  and takes about forty seconds.
+- **100% line and branch coverage** of the shipped `snapadmin/` package, gated in CI
+  (`pytest --cov=snapadmin --cov-branch --cov-fail-under=100`) — never closed with
+  `# pragma: no branch`. **Seventeen lines across twelve modules carry a `# pragma: no cover`**, each
+  with a written reason (abstract methods, `if TYPE_CHECKING:` blocks, optional-import branches);
+  that list is pinned by a test so it cannot quietly grow.
+- **Every push runs, in CI**: the six-way Python × Django matrix; the whole suite on
+  **PostgreSQL 16** plus the live **Elasticsearch 8.13.0** tests; Ruff + mypy, clean and blocking;
+  the generated admin driven in a **real browser** under both admin themes; and `lowest-deps`, which
+  installs every dependency at its declared minimum. A release is gated on the same jobs.
+- **Property-based and fuzz tests** (`hypothesis`, 100 examples per test locally, 300 in CI) state
+  laws that must hold for every generated input — `deconstruct()` round-trips, the encryption
+  envelope, masking rules — and throw hostile input at the request-facing surfaces.
+- **Mutation testing** (`mutmut`, `scripts/mutation.py`) proves the tests can *detect* a wrong
+  change, not merely run the line — per push over the functions the push changed, weekly over the
+  modules where a wrong answer costs most. Advisory: it reports, never blocks.
+- **Every security fix ever shipped keeps a named test** (30+, `pytest -m security_regression`), and
+  a new security note without one fails the build.
+- **Ten translation catalogs, linted mechanically** (placeholders, plurals, markup, a `.mo` matching
+  its `.po`) by `tests/test_translation_lint.py`. Only `en` and `ru` are native-reviewed; the other
+  eight [await a native speaker](https://drofji.github.io/django-snapadmin/#i18n-review).
 
-- **5,000+ tests across 153 files**, run on every push. Twelve of them need a live Elasticsearch, so
-  they carry a marker and are deselected by default: cloning the repository and typing `pytest`
-  starts no container and takes about **forty seconds**.
-- **100% line and branch coverage** on the shipped `snapadmin/` package — 11,700+ statements and
-  3,400+ branches, 0 missing, 0 partial. CI runs `pytest --cov=snapadmin --cov-branch
-  --cov-fail-under=100`, so a pull request that adds an untested line or a half-tested conditional
-  fails.
-  **Seventeen lines across twelve modules carry a `# pragma: no cover`**, each with a written reason:
-  abstract methods that only raise, `if TYPE_CHECKING:` blocks, and the import-time branch taken
-  when an optional dependency is absent. That list is pinned by a test so it cannot quietly grow.
-  There used to be eighteen: six "defensive, unreachable" guards turned out to be reachable — one of
-  them had switched PII masking **off** for a hand-written serializer — and are now tested instead.
-  They are still exclusions, and this page will not claim there are none.
-- **Branch coverage is a gate, since the partials were closed one test at a time** — never with
-  `# pragma: no branch`. Closing them found real defects: an ES search result whose `delete()` removed
-  nothing while reporting every row deleted, an `ES_ONLY` delete that counted an Elasticsearch
-  failure as success, and two tasks that could return without a `status`.
-- **Random order on every run.** `pytest-randomly` reshuffles the suite on each invocation, locally
-  and in CI. A test that quietly depends on another one having run first fails instead of passing,
-  and a seed-dependent failure is treated as a real defect in the tests — never as a reason to pin
-  the order.
-- **The full compatibility matrix on every push** — Python 3.10 / 3.11 / 3.12 / 3.13 × Django 5.2
-  and 6.0, six jobs. A release is gated on the same matrix: the tag-triggered publish workflow runs
-  it before anything reaches PyPI.
-- **A seventh job runs the same suite against real services**, not mocks — see below.
-- **Another job drives the generated admin in a real browser**, once per admin theme — see
-  [the admin in a real browser](#the-admin-in-a-real-browser).
+**How the tests are written.** Test-first, with a regression test pinned to the exact input for
+every bug fix. Assertions state a contract — the value, the status code, the query count — and a
+guard (`tests/test_assertions_can_fail.py`) fails on an assertion no outcome could falsify. No test
+is ever weakened, skipped or mocked into silence to get green. No test assumes a backend: where
+SQLite and PostgreSQL genuinely differ, both halves are written.
 
-## How those tests are written
-
-The count is the least interesting part, so here is the method behind it.
-
-- **Test-first.** A behaviour change or a bug fix starts with a test that fails for the right
-  reason; the fix comes second. Every bug fix ships a regression test pinned to the specific input
-  that broke.
-- **Assertions state a contract, not a pulse.** `assert result is not None` is treated as a defect
-  in the test: the suite asserts the value, the status code, the exception type and message, the
-  row that was written, the query count. A guard test (`tests/test_assertions_can_fail.py`) reads
-  the suite with `ast` and fails on assertions no outcome could falsify — `assert True`,
-  `assert x or True`, and tests whose entire claim is "it did not raise".
-- **No test is ever weakened to get a green build.** Not a loosened assertion, not a `skip`, not an
-  `xfail`, not an extra mock, not an edited expected value. When code and test disagree the
-  question of which one is *right* is answered first.
-- **Order-independent by construction** — no shared mutable state, no ambient settings, no reliance
-  on the wall clock or on a previously created row. Random order is what proves it.
-- **The backend is never assumed.** The suite runs on SQLite locally and PostgreSQL in CI, so no
-  test may hard-code one. Where behaviour genuinely differs, both halves are written and each skips
-  on a *capability* (`connection.features.supports_json_field_contains`), never on a vendor name.
-
-## Where the mocks stop and real services start
-
-Elasticsearch, Redis and Celery are stubbed in the everyday run, which keeps it at forty seconds and
-service-free — but a `MagicMock` accepts any call with any arguments, so the query DSL those methods
-exist to build is exactly what a mocked test cannot check. A malformed `terms` clause or a
-wrongly-shaped `search_after` cursor passes a mock and answers `400` from a cluster.
-
-So one CI job (Python 3.12 · Django 5.2) runs against the real thing:
-
-| Service | What it proves |
-|---|---|
-| **PostgreSQL 16**, the whole suite | The backend-specific code paths real users get — `EstimatedCountPaginator`'s `reltuples` estimate, the `pg_dump` backup path, the sharding DSNs — are exercised on PostgreSQL rather than inferred from SQLite. The first run of this job found three tests that had silently assumed SQLite, one of which pinned behaviour that exists *only* on the backend without native JSON containment |
-| **Elasticsearch 8.13.0**, `pytest -m real_es` | The generated query DSL is accepted by a real cluster — filters, aggregations, deep `search_after` scans and the mapping. It is the same image `demo/docker-compose.yml` ships, and `tests/test_version_sync.py` fails if the two ever drift apart or leave the `[elasticsearch]` extra's supported range |
-
-These tests are deselected by default (`-m "not real_es"`), so cloning the repo and running `pytest`
-needs no Docker.
-
-## The admin in a real browser
-
-Django's test client is not a browser: it cannot run the admin's JavaScript, apply its stylesheets,
-open an autocomplete or draw a chart. So one more CI job (Python 3.12 · Django 5.2) drives the
-generated admin with **Playwright and Chromium** against the demo project, served over real HTTP —
-twice, once on Unfold and once on Django's stock admin, because the package supports both and a
-process can only render one.
-
-- **What it walks:** signing in, the index to a changelist, search, a filter, pagination, a bulk
-  delete behind its confirmation page, an order saved with an autocomplete customer and an inline
-  line item, a model rule refusing a save, view-only and permission-less staff refused, relations
-  saved from the form, the dashboard chart, and the outage guard that disables Save while the
-  backend is down — `tests/e2e/test_admin_flows.py`, `tests/e2e/test_admin_forms.py`,
-  `tests/e2e/test_connectivity.py` and two more.
-- **What every page is held to**, whatever the scenario asserts: an uncaught JavaScript error, an
-  asset the site does not serve, or any 5xx fails the test.
-- **What its first run found**, past every test-client test: a dashboard chart not drawn since
-  0.1.0b6, an outage guard that did nothing on Unfold, one-to-one and many-to-many fields missing
-  from generated forms since the first release, a rich-text editor that pushed the page sideways,
-  and stock-admin selects that showed no value. Each is fixed and pinned by a fast test as well.
-
-Deselected by default like the Elasticsearch tests. To run it:
-
-```bash
-pip install "playwright>=1.45" && playwright install chromium
-pytest -m e2e                                    # Unfold admin
-SNAPADMIN_TEST_ADMIN_THEME=stock pytest -m e2e   # Django's stock admin
-```
-
-A failed scenario leaves a replayable trace in `test-results/e2e/`. Flaky is a diagnosis, never a
-retry: no rerun plugin, no sleeps, no raised timeouts.
-
-## One command runs every gate
-
-```bash
-python scripts/gates.py            # everything CI checks that this machine can run
-python scripts/gates.py --list     # each gate's exact commands, and the CI job that runs them
-python scripts/gates.py --release  # the release gate: every gate must run, and pass
-```
-
-The suite with its coverage gate, Ruff and mypy, `pip check`, the browser suite under both themes,
-and the PostgreSQL + Elasticsearch job when those services are configured; `security`,
-`lowest-deps` and `dist` by name or under `--release`. A gate that cannot run on this machine is
-reported **not run**, with what it needs — never as passed — and a gate you asked for by name fails. A test reads `.github/workflows/test.yml` and fails if CI gains a step no gate
-reproduces. What it cannot reproduce, and says so: the six-job Python × Django matrix.
-
-- **Every security fix ever shipped keeps a named test** (30+): `tests/security_regressions.py`
-  maps each entry of every release note's *Security* section to the tests that fail if it comes
-  back, `pytest -m security_regression` runs them, and a new security note without a test fails
-  the build.
-- **The declared minimum versions are tested.** Every other job installs the newest release of
-  everything; the `lowest-deps` job (Python 3.10) installs each dependency at the lowest version
-  `pyproject.toml` allows — Django 5.2, DRF 3.15, django-unfold 0.40, … — runs the suite, and fails
-  if a declared minimum cannot even be installed with the rest.
-- **A model change without its migration fails CI** (`tests/test_migrations_complete.py`).
-
-## The layers, and what each one protects
-
-Not one pyramid but several overlapping ones, because a library fails in more ways than an
-application does. Each layer below exists today and runs on every push; the live datastore and the
-browser layers need a service or a browser, so a plain local `pytest` deselects them by marker:
-
-| Layer | What it protects | Named examples |
-|---|---|---|
-| **Unit** | one function or class in isolation, with Elasticsearch and sockets stubbed | `tests/test_fields.py`, `tests/test_conf.py`, `tests/test_registry.py` |
-| **Integration** | the Django stack wired together — ORM, generated admin, HTTP, Celery run in-process | `tests/test_model_api.py`, `tests/test_admin_site.py`, `tests/test_backup.py` |
-| **Security** | authentication, authorisation, tenancy, PII masking, field encryption, stored XSS, token storage, the audit log | `tests/test_pii_masking.py`, `tests/test_encryption_leak_surfaces.py`, `tests/test_tenancy.py` |
-| **Contract** | the public import surface: names, signatures, defaults — plus an AST backstop that reads the source rather than a hand-kept list | `tests/test_public_contract.py`, `tests/test_public_surface_snapshot.py`, `tests/test_api_surface_defaults.py` |
-| **Documentation-truth** | that this README, the docs site, `llms.txt` and the in-package module map describe the code that really ships | `tests/test_docs_completeness.py`, `tests/test_ai_entry_points.py`, `tests/test_docs_site.py` |
-| **Regression** | one named past bug each, pinned to the exact input that broke | `tests/test_widget_security.py`, `tests/test_es_delete_sync.py`, `tests/test_api_validation_errors.py` |
-| **Adversarial** | malformed input, hostile settings, conflicting kwargs, wrong permissions — asserting the *right* refusal, not merely the absence of a crash | `tests/test_wysiwyg_sanitize.py`, `tests/test_scaffold_validate.py`, `tests/test_sharding_registration.py` |
-| **Compatibility** | the core still imports with DRF, Graphene, Celery or Unfold absent | `tests/test_api_optional.py`, `tests/test_celery_optional.py`, `tests/test_unfold_optional.py` |
-| **Diagnostics** | every `snapadmin_info` collector renders, and reports honestly on and off | `tests/test_diagnostics_features.py` and ten more |
-| **i18n** | ten catalogs compile, strings are wrapped, switching language works · a lint over all twenty catalogs: placeholders, newlines, markup, plural forms, headers, and a `.mo` that matches its `.po`. Only `en` and `ru` are native-reviewed; the other eight [await a native speaker](https://drofji.github.io/django-snapadmin/#i18n-review) | `tests/test_i18n.py`, `tests/test_demo_i18n.py`, `tests/test_translation_lint.py` |
-| **Accessibility** | WCAG 2.1 AA assertions on the dashboard and the SSO partial | `tests/test_accessibility.py` |
-| **Property-based** | laws that must hold for *every* generated input (`hypothesis`, 100 examples per test locally, 300 in CI) — `deconstruct()` round-trips, the encryption envelope and blind index, DSN parsing, masking rules, `snap_field()`, export serialization | `tests/test_properties_fields.py`, `tests/test_properties_encryption.py`, `tests/test_properties_exporting.py` |
-| **Fuzz** | generated hostile input against the request-facing surfaces — REST query strings, export filters, masking settings, key configuration, rich-text HTML — asserting the right refusal and the invariant: no 5xx, no widened result, no raw PII, no key material in an error | `tests/test_fuzz_api.py`, `tests/test_fuzz_encryption_config.py`, `tests/test_fuzz_sanitize.py` |
-| **Mutation** | proof that the tests can *detect* a wrong change, not merely run the line: `mutmut` rewrites one function at a time (inverts a boolean, moves a boundary, drops a call) and a survivor means nothing asserted what that line does. Advisory — per push over the functions the push changed, weekly over the modules where a wrong answer costs most | `scripts/mutation.py`, `.github/workflows/mutation.yml` |
-| **Performance / query count** | no N+1 on the changelist with relations, the REST list endpoint, the audit timeline and masked output — each surface counted at two row counts (the numbers must match) and pinned exactly, so a new query on a hot path is a decision, not an accident · plus the list-view knobs and estimated-count pagination | `tests/test_query_counts.py`, `tests/test_performance.py`, `tests/test_pagination.py` |
-| **Process-level E2E** | `snapadmin-new` generates a project and that project really boots — a real `subprocess`, real `check` and `migrate` | `tests/test_scaffold_e2e.py` |
-| **End-to-end smoke** | the seam *between* the layers: admin form POST → database row → audit entry → REST read, in one walk | `tests/test_critical_path_smoke.py` |
-| **Browser E2E** | the generated admin in a real browser under both themes — its JavaScript, stylesheets, autocompletes, inlines, chart and outage guard; every page also fails on a JavaScript error, a missing asset or a 5xx | `tests/e2e/test_admin_flows.py`, `tests/e2e/test_admin_forms.py`, `tests/e2e/test_connectivity.py` |
-| **Live datastore** | the Elasticsearch query DSL against a real cluster, where a mock cannot judge it | `tests/test_elasticsearch_live.py` |
-| **Security regression** | every shipped security fix, each mapped to the tests that fail if it returns; the release notes are checked against the map | `tests/security_regressions.py`, `tests/test_security_regressions.py` |
-| **Dependency compatibility** | the declared minimum of every dependency, installed and run; the classifiers equal the CI matrix; CI installs every declared dependency at the declared range | `tests/test_dependency_compat.py`, `tests/test_gates_script.py` |
-
-## Backward compatibility is a test, not a promise
-
-These suites exist for one purpose only: to fail loudly when a public name, signature or default
-changes, so a breaking change is a deliberate decision rather than a side effect of a refactor.
-**340+ of the tests below can only ever fail that way** — they assert nothing about behaviour, only
-about the shape of the surface you import.
+**The public surface and the docs are tests too.**
 
 | Suite | What it pins |
 |---|---|
-| `tests/test_public_contract.py` | **260+ checks** over the public API surface — every import path (`from snapadmin.backup import …`), every default, every documented signature |
-| `tests/test_public_surface_snapshot.py` | An **AST-derived inventory** of every public class and function actually defined in the package, compared against a frozen snapshot. Unlike a hand-maintained list it is read from the source, not from memory, so a rename or a silent removal cannot slip past it |
-| `tests/test_ecosystem_compat.py` | That the Django ecosystem still composes: `django-import-export`, `reversion`, `simple-history` and `guardian` mixins layer onto a generated admin, and auto-registration never clobbers an admin you registered yourself |
-| `tests/test_api_surface_defaults.py` | An **AST sweep** proving no read site spells an API switch's default inline — every one of them goes through the single named constant, so a default cannot be changed in nine places and missed in the tenth |
-| `tests/test_version_sync.py` | That the version is identical in every place the repo publishes it — `pyproject.toml`, the docs site, `SECURITY.md` and the rest — and that the Elasticsearch image the CI job and the demo compose file use is the same one |
+| `tests/test_public_contract.py` | **260+ checks** over every import path, default and documented signature — part of the **340+** contract tests that can only fail when the public surface changes |
+| `tests/test_public_surface_snapshot.py` | An AST-derived inventory of every public class and function, diffed against a frozen snapshot — a rename or silent removal cannot slip past it |
+| `tests/test_ai_entry_points.py` | **90+ checks** that the in-package module map imports and every `llms.txt` anchor exists |
+| `tests/test_docs_completeness.py` | Every `SNAPADMIN_*` setting is documented and in the demo; every check id is explained; every extra is listed everywhere |
+| `tests/test_critical_path_smoke.py` | One walk across the seams: admin form POST → database row → audit entry → REST read |
 
-Removing or renaming a public name is a **major-version-only** change under the
-[API-stability policy](https://github.com/drofji/django-snapadmin/blob/main/SECURITY.md);
-deprecations warn first and name their replacement.
+**Run every gate yourself** — the same checks CI runs, one command:
 
-## The documentation is tested too
+```bash
+python scripts/gates.py            # everything this machine can run; a gate it cannot is "not run", never "passed"
+python scripts/gates.py --release  # every gate must run, and pass
+pytest -m e2e                                    # the browser suite, Unfold admin
+SNAPADMIN_TEST_ADMIN_THEME=stock pytest -m e2e   # the browser suite, Django's stock admin
+```
 
-Docs rot silently: nothing breaks at import time when a section disappears or a setting is never
-written down, it just teaches the next reader something false. So the docs are asserted, not
-trusted:
-
-| Suite | What it asserts |
-|---|---|
-| `tests/test_docs_completeness.py` | Every `SNAPADMIN_*` setting the code reads (100+ of them) appears in the docs **and** in the demo project · every registered system-check id is explained somewhere a reader will find it · every optional extra is listed consistently across the README, the docs, `THIRD_PARTY_NOTICES.md` and the licence inventory |
-| `tests/test_ai_entry_points.py` | **90+ checks** that the two machine-readable entry points stay true: the module map in the `snapadmin` package docstring (the only docs layer that reaches every `pip install`) names modules that really import, and every docs anchor `llms.txt` links to really exists |
-| `tests/test_docs_site.py` | Structural integrity of the docs site — every section has exactly one sidebar link, and every sidebar link points at a section that exists |
-
-## Automated checks on the operator tooling
-
-`snapadmin-info` is the command an operator runs to answer "is this configured correctly?" — so a
-false green there is worse than no report at all. **220+ tests** across eleven files cover the
-diagnostics package, including **80+ in `tests/test_diagnostics_features.py` alone**, where every
-capability probe in the readiness audit is exercised **both switched on and switched off**. A
-capability cannot ship without a probe, and a probe cannot ship without both tests.
-
-The same standard applies to the rest of the operator surface: **200+ tests** on the startup system
-checks, **60+** on the licence audit and its command, and full suites on the scaffolding
-(`snapadmin-new`), the read-only integrator (`snapadmin-init`) and the demo fetcher
-(`snapadmin-demo`).
-
-## An end-to-end tripwire
-
-Every layer has its own deep suite — and each can keep passing while the seam *between* layers
-quietly breaks. `tests/test_critical_path_smoke.py` walks the whole declarative pipeline in one
-test: it posts the real generated admin add form, then asserts the row that comes out is the same
-one the REST API serves and the same one the audit trail recorded, with the acting user and a
-per-field diff. It is deliberately small — a tripwire for "the pipeline stopped connecting", not a
-second copy of the deep suites.
+The browser scenarios live in `tests/e2e/test_admin_flows.py`, `tests/e2e/test_admin_forms.py` and
+`tests/e2e/test_connectivity.py`; every page also fails on an uncaught JavaScript error, a missing
+asset or a 5xx. Their first run found defects no test-client test could see — a chart not drawn,
+relation fields missing from forms — each now pinned by a fast test as well.
 
 ## What is not in place yet
 
-A quality section that only lists what exists is marketing. These are the layers the project's own
-engineering standard asks for and **does not have today**. None of them is claimed anywhere above,
-and none will be claimed here until it actually runs in CI:
+A quality section that only lists what exists is marketing. None of these is claimed above:
 
-| Missing | What it would add | Status |
-|---|---|---|
-| **Load testing** | Throughput and latency under many concurrent users, against the API's real page sizes, filters and throttles. A library has no traffic of its own to measure, so this belongs in a project built on it; the query-count pins are the part a library can own | Not in this repository. No Locust, no k6 |
-| **Firefox and WebKit in CI** | The browser suite runs on Chromium in CI; Playwright drives the other two engines from the same tests (`SNAPADMIN_E2E_BROWSER=firefox`), but only locally so far | Local only |
-
-<details>
-<summary>Where the rest of the coverage goes</summary>
-
-Beyond the contract and docs suites, the heaviest areas are the ones with the most ways to go
-wrong — each figure below is a **floor**, checked against a collection run rather than kept up to
-date by arithmetic: field behaviour and encrypted fields (250+), the REST surface (190+), field-level
-encryption end to end (400+ across the cipher, the keyset, the blind index, every leak surface and
-the conversion command), export (130+), backups (170+) and restore (90+ including the pre-restore
-snapshot), PII masking (120+), settings resolution (90+), API tokens (100+ across issuing, hashing
-and validation), internationalisation (110+ across the package and the demo), data retention (80+),
-bulk import (70+), alert channels (70+), the audit trail (60+), multi-tenancy (60+ across the model,
-admin, audit and Elasticsearch layers) and offline mode (60+). Accessibility (WCAG 2.1 AA) and
-GraphQL permission enforcement have their own suites.
-
-**The wheel carries only `snapadmin/`** — the published package, with its migrations, templates,
-static files and translations. **The sdist also carries the test suite** and what it runs against
-(the demo project, the docs it checks for truth, `pytest.ini`): unpack it and run
-`python -m pytest` inside to hold an installed version to the same checks CI runs on every push —
-without cloning this repository.
-
-</details>
+| Missing | Status |
+|---|---|
+| **Load testing** — throughput and latency under concurrent users. A library has no traffic of its own; this belongs in a project built on it | Not in this repository. No Locust, no k6 |
+| **Firefox and WebKit in CI** — the same scenarios run on them locally (`SNAPADMIN_E2E_BROWSER=firefox`) | Chromium only in CI |
 
 ---
 
-# Install
+# Install and configure
 
 ```bash
 pip install django-snapadmin
 ```
 
-Requires **Python ≥ 3.10** and **Django ≥ 5.2**. Pin an exact version in production.
+Requires **Python ≥ 3.10** and **Django ≥ 5.2**; pin an exact version in production. A bare install
+brings Django, structlog and nh3 — enough for the generated admin, because **the REST API and
+GraphQL are off by default**. Everything else is an extra, and the base install carries only
+permissive licences:
 
-**Adding it to an existing project?** Run `snapadmin-init`. It inspects your project and prints a
-checklist plus the exact snippets to paste. It edits nothing, so there is nothing to undo. Snap
-fields accept Django's positional label (`SnapCharField("Label", max_length=200)`), so existing
-field declarations switch over unchanged; if your models inherit an `objects` manager from a mixin
-(owner or tenant scoping), `snapadmin.E027` makes sure `SnapModel` does not silently replace it.
+`api` · `graphql` · `theme` (Unfold) · `elasticsearch` (8.x) · `celery` · `backup` (SFTP) · `s3` ·
+`age` (encrypted backups) · `encryption` (encrypted fields) · `xlsx` · `extra-settings` ·
+`autocomplete-filter` (LGPL) · `wysiwyg` (**bundles CKEditor 5, GPL-or-commercial**) · `all`
 
-<details>
-<summary>Minimal <code>INSTALLED_APPS</code> — the smallest thing that works</summary>
+`snapadmin-license-check` tells you what you ended up with.
+→ [Installation](https://drofji.github.io/django-snapadmin/#installation) — the minimal and the full
+`INSTALLED_APPS`, what each [extra](https://drofji.github.io/django-snapadmin/#extras) pulls in, and
+the MySQL driver licence note.
 
-A bare `pip install django-snapadmin` brings Django, structlog and nh3 — nothing else. That is
-already enough for the generated admin, because **the REST API and GraphQL are off by default**
-(`SNAPADMIN_REST_API_ENABLED` / `SNAPADMIN_GRAPHQL_ENABLED`, both `False` unless you set them).
-
-```python
-INSTALLED_APPS = [
-    # ── Django itself ───────────────────────────────────────────────────────
-    "django.contrib.admin",          # SnapAdmin generates ModelAdmins into this site
-    "django.contrib.auth",           # permissions gate both the admin and the API
-    "django.contrib.contenttypes",   # required by auth; the audit trail keys off it
-    "django.contrib.sessions",       # admin login
-    "django.contrib.messages",       # admin "saved successfully" banners
-    "django.contrib.staticfiles",    # serves SnapAdmin's CSS/JS
-
-    # ── SnapAdmin ───────────────────────────────────────────────────────────
-    "snapadmin",
-
-    "myapp",                         # …your own apps
-]
-```
+Every surface is a plain Django setting, and switching one off removes its routes entirely:
 
 ```python
-# urls.py
-from django.contrib import admin
-from django.urls import include, path
-
-urlpatterns = [
-    path("admin/", admin.site.urls),
-    path("api/", include("snapadmin.urls")),   # health check, and any surface you turn on
-]
-```
-
-That is a working admin-only install.
-
-**Want the REST API and GraphQL?** They need their extras — installing them and listing the apps
-without turning the settings on serves nothing, and turning the settings on without the extras is
-caught at `manage.py check` (`snapadmin.E010`) rather than at the first request:
-
-```bash
-pip install "django-snapadmin[api,graphql]"   # or [api] alone, or [all]
-```
-
-```python
-INSTALLED_APPS = [
-    ...,
-    # ── The API stack — [api] + [graphql] extras ────────────────────────────
-    "rest_framework",                # the generated REST endpoints are DRF viewsets
-    "drf_spectacular",               # builds the OpenAPI schema behind /api/docs/
-    "django_filters",                # backs the auto-generated ?field=… query filters
-    "graphene_django",               # the generated GraphQL schema
-    "snapadmin",
-    ...,
-]
-
-# settings.py — the surfaces are opt-in
-SNAPADMIN_REST_API_ENABLED = True
-SNAPADMIN_GRAPHQL_ENABLED = True
-SNAPADMIN_SWAGGER_ENABLED = True      # follows the REST setting unless set explicitly
-```
-
-One line does the same thing: `SNAPADMIN_PROFILE = "api"` turns REST, GraphQL and Swagger on
-together. You still install the extras.
-
-</details>
-
-<details>
-<summary>Full <code>INSTALLED_APPS</code> — everything switched on</summary>
-
-Each block corresponds to one optional extra. Add the block **and** the extra, or neither.
-
-```python
-INSTALLED_APPS = [
-    # ── Themed UI — pip install django-snapadmin[theme] ─────────────────────
-    # MUST come before django.contrib.admin: Unfold overrides admin templates,
-    # and Django resolves templates in INSTALLED_APPS order.
-    "unfold",
-    "unfold.contrib.filters",        # the sidebar range/dropdown filters SnapAdmin generates
-    "unfold.contrib.forms",          # themed form widgets
-    "unfold.contrib.inlines",        # themed inline formsets
-
-    # ── Rich text — pip install django-snapadmin[wysiwyg] ───────────────────
-    # Only needed for wysiwyg=True / SnapRichTextField. Bundles CKEditor 5,
-    # which is GPL-or-commercial — that is why it is not a core dependency.
-    "django_ckeditor_5",
-
-    # ── Django itself ───────────────────────────────────────────────────────
-    "django.contrib.admin",
-    "django.contrib.auth",
-    "django.contrib.contenttypes",
-    "django.contrib.sessions",
-    "django.contrib.messages",
-    "django.contrib.staticfiles",
-
-    # ── REST API — pip install django-snapadmin[api] ────────────────────────
-    # Needed only if you set SNAPADMIN_REST_API_ENABLED/SNAPADMIN_SWAGGER_ENABLED
-    # to True — both default to False.
-    "rest_framework",
-    "drf_spectacular",
-    "django_filters",
-
-    # ── GraphQL — pip install django-snapadmin[graphql] ──────────────────────
-    # Needed only with SNAPADMIN_GRAPHQL_ENABLED = True (default False). Independent of [api].
-    "graphene_django",
-
-    # ── SnapAdmin ───────────────────────────────────────────────────────────
-    "snapadmin",
-
-    # ── Background tasks — pip install django-snapadmin[celery] ─────────────
-    # Needed for the GDPR purge, async exports, error digests and backups.
-    "django_celery_beat",            # edit the schedule from the admin
-    "django_celery_results",         # store task results in the database
-
-    # ── Admin-editable settings — pip install django-snapadmin[extra-settings]
-    # SnapAdmin does not use it; add it if you want a runtime key/value Setting
-    # model in the admin (the demo shows the pattern). If you re-home that admin
-    # with EXTRA_SETTINGS_ADMIN_APP, the value is matched against INSTALLED_APPS
-    # verbatim: pass the entry ("myapps.shop"), never the app label ("shop") —
-    # snapadmin.E025 names the entry to use when the two differ.
-    "extra_settings",
-
-    # ── Autocomplete list filters — [autocomplete-filter] (LGPL) ────────────
-    # For your own AutocompleteFilter admin filters; SnapAdmin core never imports it.
-    "admin_auto_filters",
-
-    "myapp",
-]
-```
-
-> **Elasticsearch needs no app entry** — `pip install django-snapadmin[elasticsearch]` and set
-> `ELASTICSEARCH_ENABLED = True`. The supported server is **Elasticsearch 8.x**, and the extra
-> pins the client to match (`>=8,<9`). Same for `[backup]` (SFTP offsite backups) and `[age]`
-> (encrypted backups): a dependency, not an app.
-
-</details>
-
-<details>
-<summary>Optional extras and their licences</summary>
-
-The base install is self-contained and carries **only permissive licences** (MIT/BSD/Apache), so it
-is safe for commercial and proprietary use. Everything with a licence caveat is opt-in:
-
-| Extra | Pulls in | Gives you |
-|-------|----------|-----------|
-| `api` | `djangorestframework`, `drf-spectacular`, `django-filter` | The REST API + OpenAPI schema/Swagger/ReDoc — needed once you set `SNAPADMIN_REST_API_ENABLED`/`SNAPADMIN_SWAGGER_ENABLED` to `True` (default `False`) |
-| `graphql` | `graphene-django` | The generated GraphQL schema — needed once you set `SNAPADMIN_GRAPHQL_ENABLED` to `True` (default `False`), independent of `api` |
-| `theme` | `django-unfold` | The themed admin UI (stock Django admin without it) |
-| `elasticsearch` | `elasticsearch` (`>=8,<9`) | Full-text search, `DUAL` / `ES_ONLY` models — against an **Elasticsearch 8.x** server |
-| `celery` | `celery`, `django-celery-beat`, `django-celery-results` | Background tasks: async export, GDPR purge, digests, backups |
-| `backup` | `paramiko` | SFTP offsite database backups |
-| `age` | `pyrage` | AGE-encrypted backups (MIT — or skip this extra and use the `age` CLI instead) |
-| `s3` | `boto3` | S3-compatible offsite database backups (AWS, MinIO, Backblaze B2, Hetzner Object Storage, Wasabi) |
-| `extra-settings` | `django-extra-settings` | An in-admin dynamic key/value `Setting` model |
-| `wysiwyg` | `django-ckeditor-5` | Rich-text fields — **bundles CKEditor 5 (GPL-or-commercial)** |
-| `autocomplete-filter` | `django-admin-autocomplete-filter` | `AutocompleteFilter` list filters (LGPL) |
-| `xlsx` | `openpyxl` | XLSX output for the async export API (MIT — optional for size, not licence) |
-| `encryption` | `cryptography` | Field-level encryption — `SnapEncrypted*Field` columns (Apache-2.0/BSD — optional for weight, not licence) |
-| `all` | everything above | — |
-
-Run `snapadmin-license-check` after installing to see exactly what you ended up with and whether it
-is still proprietary-safe.
-
-→ [Full installation guide](https://drofji.github.io/django-snapadmin/#installation) — compatibility
-matrix, extras gotchas, and the MySQL driver licence note.
-
-</details>
-
----
-
-# Configuration
-
-Every surface is a plain Django setting. Switching one off removes its routes entirely:
-
-```python
-SNAPADMIN_REST_API_ENABLED       = True    # REST CRUD endpoints — off by default, opt in explicitly
-SNAPADMIN_GRAPHQL_ENABLED        = True    # GraphQL endpoint — same, off by default
+SNAPADMIN_REST_API_ENABLED       = True    # REST CRUD endpoints — off by default
+SNAPADMIN_GRAPHQL_ENABLED        = True    # GraphQL endpoint — off by default
 SNAPADMIN_SWAGGER_ENABLED        = True    # Swagger UI + ReDoc
 SNAPADMIN_URL_PREFIX             = ""      # relocate the whole API surface
 SNAPADMIN_CONNECTIVITY_ENABLED   = False   # admin-wide health poll + offline save-guard (opt-in)
 ```
 
-The first two default to `False` — a plain-admin migration that never asked for an API doesn't get
-one by accident. Set them to `True` to serve REST and/or GraphQL.
+Don't want to decide all ~110 of them? `SNAPADMIN_PROFILE = "admin"` (or `"api"` / `"full"`) sets
+the handful that matter; an explicit setting always wins. Snap fields accept Django's positional
+label (`SnapCharField("Label", max_length=200)`), so existing declarations switch over unchanged, and
+`snapadmin.E027` stops `SnapModel` from silently replacing an `objects` manager your mixins provide.
 
-Don't want to decide all ~110 of them? `SNAPADMIN_PROFILE = "admin"` (or `"api"` / `"full"`) picks
-sane defaults for the handful that actually matter — an explicit setting always overrides it.
-
-Misconfiguration shows up **at startup** as a Django system check (`snapadmin.W0xx` / `E0xx`), not
-as a mystery at request time.
-
-→ [Every setting, with defaults](https://drofji.github.io/django-snapadmin/#env-vars) ·
-[SNAPADMIN_PROFILE presets](https://drofji.github.io/django-snapadmin/#profiles)
-
-<details>
-<summary>Extending it — SnapAdmin is meant to be customised, not forked</summary>
-
-- **Add field types** — subclass `SnapField` with your own admin introspection
-- **Extend a `SnapModel`** — override `save()`, add managers, mix in your own behaviour
-- **Add or override REST endpoints** — mount your router before SnapAdmin's
-- **Swap auth, permissions and the ES client** — configuration, no code
-- **Override admin templates and the dashboard** — standard Django template resolution
-
-→ [Extending & Overriding guide](https://drofji.github.io/django-snapadmin/#extending)
-
-</details>
-
-<details>
-<summary>Running the demo from a clone (full Docker stack)</summary>
-
-`snapadmin-demo` is the fast path. From a clone you also get PostgreSQL, Redis and Elasticsearch:
-
-```bash
-git clone https://github.com/drofji/django-snapadmin.git
-cd django-snapadmin
-cp demo/dist.env demo/.env
-docker compose -f demo/docker-compose.yml up --build
-```
-
-Then open <http://localhost:8000/admin/> (`admin` / `admin`). The demo lives under
-[`demo/`](https://github.com/drofji/django-snapadmin/tree/main/demo) and is **not** published to
-PyPI — only `snapadmin/` is.
-
-→ [Demo guide](https://drofji.github.io/django-snapadmin/#demo-setup)
-
-</details>
+→ [Every setting](https://drofji.github.io/django-snapadmin/#env-vars) ·
+[Profiles](https://drofji.github.io/django-snapadmin/#profiles) ·
+[Extending & overriding](https://drofji.github.io/django-snapadmin/#extending) — your own field
+types, endpoints, auth and templates, without forking ·
+[The full demo from a clone](https://drofji.github.io/django-snapadmin/#demo-setup) — Docker with
+PostgreSQL, Redis and Elasticsearch
 
 ---
 
@@ -1035,14 +458,11 @@ PyPI — only `snapadmin/` is.
 | APIs | [REST](https://drofji.github.io/django-snapadmin/#api-rest) · [GraphQL](https://drofji.github.io/django-snapadmin/#api-graphql) · [Tokens](https://drofji.github.io/django-snapadmin/#api-tokens) · [Bulk import](https://drofji.github.io/django-snapadmin/#bulk-import) · [Auth / JWT / ETL](https://drofji.github.io/django-snapadmin/#integrating) |
 | Search | [Elasticsearch modes](https://drofji.github.io/django-snapadmin/#elasticsearch) · [Query routing](https://drofji.github.io/django-snapadmin/#es-routing) · [Filters](https://drofji.github.io/django-snapadmin/#es-filter) · [Facets](https://drofji.github.io/django-snapadmin/#es-aggregate) · [Deep scan](https://drofji.github.io/django-snapadmin/#es-scan) |
 | Operations | [Diagnostics](https://drofji.github.io/django-snapadmin/#snapadmin-info) · [Startup report](https://drofji.github.io/django-snapadmin/#startup-report) · [Licence audit](https://drofji.github.io/django-snapadmin/#license-check) · [Celery & scheduling](https://drofji.github.io/django-snapadmin/#celery) · [GDPR](https://drofji.github.io/django-snapadmin/#gdpr) · [Backups](https://drofji.github.io/django-snapadmin/#backups) · [Error monitoring](https://drofji.github.io/django-snapadmin/#error-monitoring) · [Performance](https://drofji.github.io/django-snapadmin/#performance) |
-| Reference | [All settings](https://drofji.github.io/django-snapadmin/#env-vars) · [Theming](https://drofji.github.io/django-snapadmin/#theming) · [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) · [Extending](https://drofji.github.io/django-snapadmin/#extending) · [Migration guides](https://drofji.github.io/django-snapadmin/#migration-guides) |
+| Reference | [All settings](https://drofji.github.io/django-snapadmin/#env-vars) · [Theming](https://drofji.github.io/django-snapadmin/#theming) · [Enterprise config](https://drofji.github.io/django-snapadmin/#enterprise-config) · [Extending](https://drofji.github.io/django-snapadmin/#extending) · [Testing](https://drofji.github.io/django-snapadmin/#testing) · [Migration guides](https://drofji.github.io/django-snapadmin/#migration-guides) |
 
-**Working with an AI assistant?** Two entry points ship for exactly that, and both are pinned by
-tests so they cannot drift from the code: the module map in the `snapadmin` package docstring
-(`help(snapadmin)` — no network needed) and
+**Working with an AI assistant?** Two entry points ship for exactly that, both pinned by tests: the
+module map in the `snapadmin` package docstring (`help(snapadmin)` — no network needed) and
 [llms.txt](https://drofji.github.io/django-snapadmin/llms.txt).
-
----
 
 # Security
 
@@ -1054,16 +474,11 @@ supported-versions row and the production-hardening checklist.
 # Contributing
 
 See [CONTRIBUTING.md](https://github.com/drofji/django-snapadmin/blob/main/CONTRIBUTING.md). The
-suite lives at [`tests/`](https://github.com/drofji/django-snapadmin/tree/main/tests) in the source
-repository and must stay green with 100% coverage on `snapadmin/`:
-
-```bash
-pytest
-```
-
-Regression tests for a specific reported issue live next to the subsystem they cover (e.g.
-`tests/test_fields.py` for a field validator, `tests/test_pii_masking.py` for masking) — if you hit
-a bug, check there before filing one that might already be covered.
+suite lives at [`tests/`](https://github.com/drofji/django-snapadmin/tree/main/tests) and must stay
+green with 100% line and branch coverage on `snapadmin/`; `pytest` runs it. The sdist carries the
+suite too, so an installed version can be held to the same checks without cloning. Regression tests
+live next to the subsystem they cover (`tests/test_fields.py`, `tests/test_pii_masking.py`, …) —
+check there before filing a bug that might already be covered.
 
 # License
 
