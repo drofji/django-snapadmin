@@ -12,6 +12,15 @@ the `0.x` beta series.
 
 ## Unreleased
 
+_Nothing yet._
+
+## 0.1.0b10 — 2026-10-02
+
+Hardening from a second round of production field reports, a startup report of what is switched on,
+and the full quality program running on every push. Read `Breaking` first — `snapadmin.E027` and
+`snapadmin.E028` can stop `manage.py check`, an unmapped REST action is now refused, and five
+dependency minimums rise.
+
 ### Breaking
 - Declared minimums rise to the lowest versions that work: `django-filter>=24.1` (24.0 was never
   published), `django-celery-beat>=2.8.0` (earlier ones require Django < 5.2),
@@ -110,6 +119,7 @@ the `0.x` beta series.
   parse re-nests, so every save rewrote an unchanged value and logged a change nobody made.
 - The *Two Ways to Declare a Model* docs no longer claim `snap_field(searchable=True)` makes a
   decorated plain model searchable; the example declares `search_fields` and `subject_path`.
+- `THIRD_PARTY_NOTICES.md` no longer claims the REST API and GraphQL default to on.
 - `snapadmin-new`'s *Next steps* include `pip install -r requirements.txt` before `migrate`: the
   generated project imports the `[api,graphql]` extras, which a bare install lacks.
 - A due row held by a `PROTECT`/`RESTRICT` foreign key no longer aborts the model's retention purge,

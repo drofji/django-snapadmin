@@ -250,7 +250,7 @@
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <h2>⚡ SnapAdmin</h2>
-    <span>Documentation v0.1.0b9</span>
+    <span>Documentation v0.1.0b10</span>
   </div>
   <div class="nav-search">
     <input type="search" id="navSearch" placeholder="Filter sections…" autocomplete="off">
@@ -338,24 +338,23 @@
     <p class="subtitle">Automatic, beautiful, production-ready Django Admin — zero boilerplate. REST &amp; GraphQL, Elasticsearch, offline mode and GDPR retention, all from your model definitions.</p>
 
     <div class="callout callout-success" style="text-align: left; margin: 18px auto 0;">
-      <strong>What's New in v0.1.0b9 — ninth beta</strong>
-      <a href="#field-encryption">Field-level encryption</a> now has its cipher and its field types:
-      eight <code>SnapEncrypted*Field</code>s storing AES-256-GCM envelopes behind the
-      <a href="#extras"><code>[encryption]</code></a> extra, lookup guards with an opt-in blind index
-      for equality, a tested default on every surface that could re-emit a plaintext, and
-      <code>manage.py snapadmin_encrypt_fields</code> for data already in the table.
-      <a href="#retention-per-row"><code>data_retention_date_field</code></a> gives a row its own
-      deletion date, and <code>api_full_clean</code> makes a model's cross-field
-      <code>clean()</code> rule hold on the API write path as it already did in the admin.
-      <a href="#testing">Testing &amp; Quality Engineering</a> is a new section describing how the
-      suite is built, what each check verifies — and what is deliberately not in place yet.
-      <strong>Breaking changes to know about before upgrading:</strong> a model that mirrors to
-      Elasticsearch with no mapping now fails <code>manage.py check</code>
-      (<code>snapadmin.E026</code>) — its search has silently never worked; the
-      <code>[elasticsearch]</code> extra is capped to the 8.x client; a model
-      <code>ValidationError</code> on an API write answers <code>400</code> rather than
-      <code>500</code>; and deleting rows of a mirrored model gives up Django's fast-delete path so
-      the index stays honest. All five are listed in the release notes under <code>Breaking</code>.
+      <strong>What's New in v0.1.0b10 — tenth beta</strong>
+      The development server now says what SnapAdmin has switched on — which capabilities are on,
+      which are off and which lack their extra (<a href="#startup-report">startup report</a>).
+      A second round of production field reports closed eleven places that failed silently: a
+      manager replacing a mixin's own (<code>snapadmin.E027</code>), masking settings in the wrong
+      shape (<code>snapadmin.E028</code>), an unmapped REST action reachable with read-only rights,
+      purges and Elasticsearch deletes that reported success after failing, spreadsheet formulas in
+      CSV exports, and audit labels that slipped past masking. <a href="#restore-drill">Restore
+      drills</a> restore a backup into a throwaway database and count its rows.
+      <a href="#testing">Testing &amp; Quality Engineering</a> now runs in full on every push —
+      branch coverage, property-based and fuzz tests, mutation testing, browser end-to-end tests on
+      both themes and every dependency at its declared minimum, all reproduced by
+      <code>python scripts/gates.py</code>.
+      <strong>Breaking changes to know about before upgrading:</strong> two new system checks can
+      stop <code>manage.py check</code>, an action missing from the REST permission map is refused,
+      and five dependency minimums rise — all twelve are listed in the release notes under
+      <code>Breaking</code>.
     </div>
 
     <div class="card-grid">
@@ -5632,8 +5631,9 @@ SNAPADMIN_TEST_ADMIN_THEME=stock pytest -m e2e   # Django's stock admin</code></
   and <code>dist</code> (build the sdist and wheel, <code>twine check --strict</code>) run by name
   or under <code>--release</code>.
   <strong>What it never does:</strong> report a gate it could not run as passed. Playwright missing,
-  no <code>SNAPADMIN_TEST_POSTGRES</code>/<code>SNAPADMIN_TEST_ES_URL</code>, no <code>uv</code> —
-  the gate is listed as <em>not run</em> with what it needs. An ordinary run still exits 0 then, so a
+  no <code>SNAPADMIN_TEST_POSTGRES</code>/<code>SNAPADMIN_TEST_ES_URL</code>, no
+  <code>pg_dump</code>/<code>psql</code> (the PostgreSQL run executes a real backup round trip), no
+  <code>uv</code> — the gate is listed as <em>not run</em> with what it needs. An ordinary run still exits 0 then, so a
   contributor without a browser can check everything else; a gate asked for by name fails (CI's
   <code>lowest-deps</code> job asks by name, so a missing <code>uv</code> there is red, not green),
   and <code>--release</code> is the release gate and fails on any. The six-job Python × Django matrix is the one thing no single machine
@@ -5641,7 +5641,9 @@ SNAPADMIN_TEST_ADMIN_THEME=stock pytest -m e2e   # Django's stock admin</code></
   <strong>How it stays equal to CI:</strong> each command is spelled exactly as
   <code>.github/workflows/test.yml</code> spells it, and <code>tests/test_gates_script.py</code>
   reads the workflow: a CI step that is neither runner setup nor a gate's command fails the suite,
-  and so does a gate whose command its CI job stopped running.
+  and so does a gate whose command its CI job stopped running. The service variables reach the
+  <code>services</code> gate only — CI gives the databases to that one job, so exporting them for it
+  never moves the suite or the browser run onto PostgreSQL.
   <code>python scripts/gates.py --list</code> prints every gate's commands and job.</p>
 
   <h4 id="testing-security-regressions">The security regression suite</h4>
@@ -5811,7 +5813,7 @@ snapadmin-info --startup         # the short block runserver prints at startup</
   Ok: ✓
   Detail: run `manage.py check` for the full text
 📦 Version &amp; Status
-  Version: 0.1.0b9
+  Version: 0.1.0b10
   Status: pre-release
   Django: 6.0.6
   Python: 3.12.4
@@ -6272,7 +6274,7 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
   </table>
 
   <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
-    SnapAdmin v0.1.0b9 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
+    SnapAdmin v0.1.0b10 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
   </div>
 
   <!-- ── AI Assistants ─────────────────────────────────────────────────────── -->

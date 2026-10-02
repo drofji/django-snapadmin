@@ -182,7 +182,7 @@ REGISTRY: tuple[SecurityFix, ...] = (
         in_release_notes=False,
         origin="#CRYPT1 review, fixed before 0.1.0b9 shipped the encryption subsystem",
     ),
-    # ── Unreleased ──────────────────────────────────────────────────────────
+    # ── 0.1.0b10 ────────────────────────────────────────────────────────────
     SecurityFix(
         "The serializer mixins mask and gate a hand-built ``ModelSerializer`` too",
         ("tests/test_serializer_mixins_hand_built.py",),
