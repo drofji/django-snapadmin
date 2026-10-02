@@ -127,3 +127,32 @@ class TestTheSixtySecondTry:
         assert steps.index("pip install -r requirements.txt") < steps.index(
             "python manage.py migrate"
         )
+
+
+class TestTheDocsSiteTwoWaysExample:
+    """``docs/index.html#two-ways`` shows one model both ways; both must work.
+
+    Its decorator half used to rely on ``snap_field(searchable=True)`` alone,
+    which a plain model's REST search never reads, and neither half declared
+    ``subject_path``.
+    """
+
+    @pytest.fixture(params=["(snap_models.SnapModel)", "@snap_model("])
+    def product(self, request):
+        import html as html_module
+
+        page = (REPO_ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+        section = page.split('<h2 id="two-ways">', 1)[1].split("<h2 ", 1)[0]
+        blocks = [
+            html_module.unescape(block)
+            for block in re.findall(r"<pre><code>(.*?)</code></pre>", section, re.DOTALL)
+            if request.param in block
+        ]
+        assert len(blocks) == 1, f"expected one #two-ways block with {request.param!r}"
+        return _execute_model_snippet(blocks[0])
+
+    def test_it_passes_the_subject_access_check(self, product):
+        assert _subject_path_errors(product) == []
+
+    def test_rest_search_matches_name(self, product):
+        assert "name" in DynamicModelViewSet._db_search_fields(product)

@@ -108,6 +108,8 @@ the `0.x` beta series.
 ### Fixed
 - Sanitising rich text is idempotent: nh3 could leave a `<p>` nested in a `<p>` that the next
   parse re-nests, so every save rewrote an unchanged value and logged a change nobody made.
+- The *Two Ways to Declare a Model* docs no longer claim `snap_field(searchable=True)` makes a
+  decorated plain model searchable; the example declares `search_fields` and `subject_path`.
 - `snapadmin-new`'s *Next steps* include `pip install -r requirements.txt` before `migrate`: the
   generated project imports the `[api,graphql]` extras, which a bare install lacks.
 - A due row held by a `PROTECT`/`RESTRICT` foreign key no longer aborts the model's retention purge,

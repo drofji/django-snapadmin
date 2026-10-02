@@ -963,7 +963,8 @@ class Product(snap_models.SnapModel):
     cost_price = snap.SnapDecimalField(max_digits=10, decimal_places=2)
 
     api_write_fields = ["name", "price"]
-    api_exclude_fields = ["cost_price"]</code></pre>
+    api_exclude_fields = ["cost_price"]
+    subject_path = None   # snapadmin.E011 asks every registered model</code></pre>
     </div>
     <div>
       <h4>Decorator — opt an existing model in</h4>
@@ -974,6 +975,8 @@ from snapadmin.fields import snap_field
 @snap_model(
     api_write_fields=["name", "price"],
     api_exclude_fields=["cost_price"],
+    search_fields=["name"],      # a plain model's ?search= reads this, not field flags
+    subject_path=None,
 )
 class Product(models.Model):
     name = snap_field(models.CharField(max_length=200), searchable=True)
@@ -981,8 +984,10 @@ class Product(models.Model):
     cost_price = models.DecimalField(max_digits=10, decimal_places=2)</code></pre>
     </div>
   </div>
-  <p>Both register the same model, with the same API write allowlist and the same searchable/
-  filterable fields. Neither needs a migration: the decorator adds no field or attribute, and
+  <p>Both register the same model, with the same API write allowlist and the same REST search.
+  On the decorated side that search comes from <code>search_fields</code>: a plain model has no
+  generated admin, so its <code>searchable</code>/<code>filterable</code> flags reach no surface by
+  themselves (REST query filters are generated for every column either way). Neither needs a migration: the decorator adds no field or attribute, and
   <code>snap_field()</code> sets its metadata after Django's <code>Field.__init__</code> has already
   recorded its constructor arguments.</p>
 
@@ -996,7 +1001,7 @@ class Product(models.Model):
     <tr><th>Capability</th><th>Subclassing <code>SnapModel</code></th><th><code>@snap_model</code> / <code>snap_field()</code></th></tr>
     <tr><td>REST + GraphQL + schema endpoint, API field/verb policy, filters, offline cache</td><td>✅</td><td>✅</td></tr>
     <tr><td>System checks + <code>snapadmin_info</code> inventory</td><td>✅</td><td>✅</td></tr>
-    <tr><td>Field flags — <code>searchable</code>, <code>filterable</code>, layout, wysiwyg sanitize-on-write, <code>required</code>, file-upload validators</td><td>✅</td><td>✅ full parity — every <code>Snap*Field</code> flag is reachable from <code>snap_field()</code></td></tr>
+    <tr><td>Field flags — <code>searchable</code>, <code>filterable</code>, layout, wysiwyg sanitize-on-write, <code>required</code>, file-upload validators</td><td>✅</td><td>✅ every <code>Snap*Field</code> flag is settable through <code>snap_field()</code>; on a decorated plain model the admin-facing ones (<code>searchable</code>, <code>filterable</code>, layout) take effect only once a <code>ModelAdmin</code> or <code>search_fields</code> reads them</td></tr>
     <tr><td>PII masking</td><td>✅</td><td>✅ settings-driven, keyed by model — identical on both routes</td></tr>
     <tr><td><strong>Backups</strong></td><td>✅</td><td>✅ <strong>identical on both routes</strong> — the backup layer dumps the whole database with no model gate at all</td></tr>
     <tr><td>Elasticsearch (<code>es_search()</code>, mirroring on save, <code>snapadmin_reindex</code>)</td><td>✅</td><td>❌ <strong>ES is not identical</strong> — no <code>EsManager</code> is attached; tracked as <a href="#rfc1g-gap">#RFC1g row 1</a>, retrofittable with an opt-in <code>EsMirrorMixin</code>, not yet shipped</td></tr>

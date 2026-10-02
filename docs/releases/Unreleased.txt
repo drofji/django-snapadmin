@@ -301,6 +301,13 @@ Fixed
   built-in sanitizer until the result is stable (at most four passes; every pass is a full
   sanitization). Found by the property test ``test_a_second_pass_changes_nothing`` under the CI
   hypothesis profile, and pinned by an explicit example.
+* **The documentation no longer promises field-flag parity a decorated plain model does not have.**
+  *Two Ways to Declare a Model* said both routes give "the same searchable/filterable fields", and its
+  decorator example relied on ``snap_field(..., searchable=True)`` alone. A plain model registered with
+  ``@snap_model`` has no generated admin, and its REST ``?search=`` reads only the decorator's
+  ``search_fields`` — so that example served an unfiltered search. The example now declares
+  ``search_fields`` (and ``subject_path``, which ``snapadmin.E011`` requires on both sides), and the
+  capability table says which flags need a reader.
 * **``snapadmin-new``'s *Next steps* install the project's requirements.** The generated
   ``requirements.txt`` names the ``[api,graphql]`` extras the generated settings import; the steps
   went straight from ``cd`` to ``migrate``, which fails on a bare install. The documentation site's
