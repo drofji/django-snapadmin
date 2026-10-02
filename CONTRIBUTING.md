@@ -14,7 +14,9 @@ that aren't obvious from the code.
 - **Before you push — one command runs every gate CI runs:** `python scripts/gates.py`. It runs
   the suite with the coverage gate, Ruff + mypy, `pip check`, the browser suite under both themes
   and — when `SNAPADMIN_TEST_POSTGRES`/`SNAPADMIN_TEST_ES_URL`
-  point at running services — the PostgreSQL and Elasticsearch job. A gate this machine cannot run
+  point at running services, and `pg_dump`/`psql` are on `PATH` (the PostgreSQL run executes a real
+  backup round trip) — the PostgreSQL and Elasticsearch job. Those variables reach that gate only,
+  as in CI; every other gate runs on SQLite. A gate this machine cannot run
   is reported as **not run** with what it needs, never as passed; a gate you name that cannot run
   fails. `--list` shows each gate's exact commands and the CI job that runs them. By name:
   `security` (the security regression suite on its own), `lowest-deps` (needs `uv`: the suite with

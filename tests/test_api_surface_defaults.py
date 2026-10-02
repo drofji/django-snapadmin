@@ -59,7 +59,16 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 #: Docs that tell a reader what to *do*. Release notes (``docs/releases/``) and the changelog are
 #: deliberately absent: their job is to describe a past release, so "used to default to ``True``"
 #: is correct there and must stay writable.
-PRESCRIPTIVE_DOCS = ("README.md", "llms.txt", "docs/llms.txt", "docs/index.html")
+#: ``THIRD_PARTY_NOTICES.md`` joined after shipping "both default to ``True``" two releases past the
+#: flip: it tells a reader which extras to install, which is as prescriptive as the README.
+PRESCRIPTIVE_DOCS = (
+    "README.md",
+    "llms.txt",
+    "docs/llms.txt",
+    "docs/index.html",
+    "THIRD_PARTY_NOTICES.md",
+    "SECURITY.md",
+)
 
 #: A claim that something *defaults* to on — "default True", "defaults to `True`", "default is
 #: True", "True by default", "on by default". Not a plain ``SETTING = True``, which is an

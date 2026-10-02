@@ -187,6 +187,9 @@ GATES: tuple[Gate, ...] = (
         ci="test.yml · real-services",
         ci_job="real-services",
         needs_env=SERVICE_VARIABLES,
+        # The PostgreSQL run executes pg_dump and psql for real (the backup
+        # round trip); the CI runner image ships both.
+        needs_executables=("pg_dump", "psql"),
     ),
     Gate(
         name="lowest-deps",
@@ -339,6 +342,11 @@ def run_gate(gate: Gate, runner: Runner, environ: Mapping[str, str]) -> Outcome:
     missing = missing_requirements(gate, environ)
     if missing:
         return Outcome(gate, "not run", "needs " + ", ".join(missing))
+    if not set(SERVICE_VARIABLES) & set(gate.needs_env):
+        # CI gives the databases to `real-services` alone; every other job runs
+        # on SQLite, so a gate exported for the services run must not switch the
+        # rest onto PostgreSQL.
+        environ = {key: value for key, value in environ.items() if key not in SERVICE_VARIABLES}
     started = time.monotonic()
     needs_scratch = any("{dist}" in step.command for step in gate.steps)
     with tempfile.TemporaryDirectory(prefix="snapadmin-gate-") if needs_scratch else _no_scratch() as dist:

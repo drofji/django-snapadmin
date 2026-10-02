@@ -194,7 +194,9 @@ def test_a_failing_step_fails_the_gate_and_stops_it(tools_installed):
     assert len(runner.calls) == 2  # mypy never ran
 
 
-def test_a_gate_missing_its_services_is_not_run_and_says_what_it_needs():
+def test_a_gate_missing_its_services_is_not_run_and_says_what_it_needs(monkeypatch):
+    # The PostgreSQL client is present, so the answer is about the variables alone.
+    monkeypatch.setattr(gates.shutil, "which", lambda executable: "/usr/bin/" + executable)
     runner = FakeRunner()
 
     outcome = gates.run_gate(gates.GATES_BY_NAME["services"], runner, {})
@@ -428,3 +430,59 @@ def test_verify_lowest_passes_at_the_minimums(monkeypatch, capsys):
 def test_the_installed_version_of_a_missing_package_is_none():
     assert gates._installed_version("no-such-package-anywhere") is None
     assert gates._installed_version("pytest") == pytest.__version__
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# The service variables reach the services gate only — as in CI
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SERVICES_ENVIRON = {
+    "SNAPADMIN_TEST_POSTGRES": "localhost",
+    "SNAPADMIN_TEST_ES_URL": "http://localhost:9200",
+    "KEEP_ME": "1",
+}
+
+
+@pytest.mark.parametrize("name", ["suite", "e2e", "security", "lowest-deps"])
+def test_a_gate_ci_runs_on_sqlite_never_sees_the_service_variables(name, tools_installed, monkeypatch):
+    """CI runs the matrix, the browser job and the lowest-deps job on SQLite;
+    only ``real-services`` gets a database. Exported for the services gate, the
+    variables used to switch every other gate onto PostgreSQL too — the suite
+    then needed ``pg_dump`` and the browser harness's child run collided with
+    its parent's test database, neither of which CI ever does."""
+    monkeypatch.setattr(gates.shutil, "which", lambda executable: "/usr/bin/" + executable)
+    runner = FakeRunner()
+
+    outcome = gates.run_gate(gates.GATES_BY_NAME[name], runner, _SERVICES_ENVIRON)
+
+    assert outcome.status == "passed"
+    for _argv, env in runner.calls:
+        assert "SNAPADMIN_TEST_POSTGRES" not in env
+        assert "SNAPADMIN_TEST_ES_URL" not in env
+        assert env["KEEP_ME"] == "1"
+
+
+def test_the_services_gate_gets_the_service_variables(tools_installed, monkeypatch):
+    monkeypatch.setattr(gates.shutil, "which", lambda executable: "/usr/bin/" + executable)
+    runner = FakeRunner()
+
+    outcome = gates.run_gate(gates.GATES_BY_NAME["services"], runner, _SERVICES_ENVIRON)
+
+    assert outcome.status == "passed"
+    assert all(env["SNAPADMIN_TEST_POSTGRES"] == "localhost" for _argv, env in runner.calls)
+    assert all(env["SNAPADMIN_TEST_ES_URL"] == "http://localhost:9200" for _argv, env in runner.calls)
+
+
+def test_the_services_gate_without_the_postgres_client_is_not_run(tools_installed, monkeypatch):
+    """The PostgreSQL run executes ``pg_dump`` and ``psql`` for real (the backup
+    round trip); a machine without them would report a failure that is not one."""
+    monkeypatch.setattr(
+        gates.shutil, "which", lambda executable: None if executable in {"pg_dump", "psql"} else "/x"
+    )
+    runner = FakeRunner()
+
+    outcome = gates.run_gate(gates.GATES_BY_NAME["services"], runner, _SERVICES_ENVIRON)
+
+    assert outcome.status == "not run"
+    assert outcome.detail == "needs `pg_dump` on PATH, `psql` on PATH"
+    assert runner.calls == []

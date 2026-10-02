@@ -40,8 +40,8 @@ Nothing here is installed by a base `pip install`. Install via, e.g., `pip insta
 
 | Extra | Package(s) | Licence | | Purpose |
 |-------|------------|---------|---|---------|
-| `api` | djangorestframework, drf-spectacular, django-filter | BSD-3 / BSD-3 / BSD-3 | 🟢 | The REST API (`SNAPADMIN_REST_API_ENABLED`) and its OpenAPI schema/Swagger/ReDoc (`SNAPADMIN_SWAGGER_ENABLED`) — **both default to `True`**, so most installs want this extra |
-| `graphql` | graphene-django | MIT | 🟢 | The generated GraphQL schema (`SNAPADMIN_GRAPHQL_ENABLED`, default `True`) — independent of `api`; graphene-django pulls Django + graphene + graphql-core, none of the REST packages |
+| `api` | djangorestframework, drf-spectacular, django-filter | BSD-3 / BSD-3 / BSD-3 | 🟢 | The REST API (`SNAPADMIN_REST_API_ENABLED`) and its OpenAPI schema/Swagger/ReDoc (`SNAPADMIN_SWAGGER_ENABLED`) — both **off by default**; install the extra when you switch the REST API on |
+| `graphql` | graphene-django | MIT | 🟢 | The generated GraphQL schema (`SNAPADMIN_GRAPHQL_ENABLED`, **off by default**) — independent of `api`; graphene-django pulls Django + graphene + graphql-core, none of the REST packages |
 | `theme` | django-unfold | MIT | 🟢 | Unfold admin theme / UI (falls back to Django's built-in admin without it) |
 | `elasticsearch` | elasticsearch (`>=8,<9`) | Apache-2.0 | 🟢 | Full-text search (`ES_ONLY` / `DUAL` models) — capped to the 8.x client, which is the server major SnapAdmin supports |
 | `celery` | celery, django-celery-beat, django-celery-results | BSD-3 / BSD / BSD | 🟢 | Background tasks (async export, GDPR purge, digests, backups) |
@@ -52,35 +52,13 @@ Nothing here is installed by a base `pip install`. Install via, e.g., `pip insta
 | `age` | pyrage | MIT | 🟢 | AGE-encrypted backups (`SNAPADMIN_BACKUP_AGE_RECIPIENTS`) |
 | `s3` | boto3 | Apache-2.0 | 🟢 | S3-compatible offsite backup transport (`SNAPADMIN_BACKUP_S3_*`) — AWS, MinIO, Backblaze B2, Hetzner Object Storage, Wasabi |
 | `encryption` | cryptography | Apache-2.0 **or** BSD-3 | 🟢 | Field-level encryption — the AES-256-GCM primitive behind `SnapEncrypted*Field` / `SNAPADMIN_ENCRYPTION` |
-| `wysiwyg` | django-ckeditor-5 (BSD wrapper) **bundling CKEditor 5** | **GPL-2.0+ or commercial** | 🔴 | Rich-text fields (`SnapRichTextField` / `wysiwyg=True`) |
+| `wysiwyg` | django-ckeditor-5 (BSD wrapper) **bundling CKEditor 5**, which pulls Pillow (MIT-CMU) | **GPL-2.0+ or commercial** | 🔴 | Rich-text fields (`SnapRichTextField` / `wysiwyg=True`) |
 
-> **`api` and `graphql` are opt-out, not opt-in, in today's beta line.** Both
-> `SNAPADMIN_REST_API_ENABLED` and `SNAPADMIN_GRAPHQL_ENABLED` default to `True`, so a bare
-> `pip install django-snapadmin` with `snapadmin.urls` included and neither setting turned off
-> needs `pip install django-snapadmin[api,graphql]` (or `[all]`) today. Both flip to default
-> `False` at 1.0 — see the migration guide.
->
-> **`wysiwyg` (CKEditor 5) is the one to watch for commercial use.** The Python wrapper
-> `django-ckeditor-5` is BSD, but it ships **CKEditor 5**, which is dual-licensed **GPL-2.0+ or a
-> commercial licence** (modern versions require a `licenseKey`). It is deliberately **not** a core
-> dependency and is imported lazily; the base package never ships it. If you build a commercial product
-> with rich-text editing, obtain a CKEditor licence (they offer a free tier) or provide your own
-> widget. Using a `wysiwyg=True` field without the extra raises a clear `ImproperlyConfigured`.
->
-> **`backup` (paramiko)** and **`autocomplete-filter` (django-admin-autocomplete-filter)** are LGPL
-> — weak copyleft, fine for proprietary use as unmodified dynamically-imported dependencies, and both
-> are optional so the base tree stays strictly permissive.
->
-> **`encryption` (cryptography) is optional for weight, not for its licence.** `cryptography` is
-> dual-licensed **Apache-2.0 or BSD-3-Clause** — permissive under either, and safe for proprietary
-> use. It is opt-in because it ships compiled wheels (a Rust/OpenSSL core) that a project encrypting
-> no column has no reason to carry. Declaring a `SnapEncrypted*Field` without the extra raises a
-> clear `ImproperlyConfigured` naming it, never a bare `ModuleNotFoundError` from inside a save.
->
-> **`xlsx` (openpyxl) is optional for size, not for its licence.** openpyxl is MIT and would be
-> perfectly at home in the base install; it is opt-in because most deployments export CSV or JSON
-> and have no reason to carry a spreadsheet writer. Requesting `export_format="xlsx"` without it
-> raises a clear `ImproperlyConfigured` (and the REST API answers 400) instead of failing obscurely.
+> **`api` and `graphql` are opt-in.** `SNAPADMIN_REST_API_ENABLED` and
+> `SNAPADMIN_GRAPHQL_ENABLED` are both off by default (since 0.1.0b8), so a bare
+> `pip install django-snapadmin` serves the generated admin alone. Switch a surface on and install
+> its extra with it — `pip install "django-snapadmin[api,graphql]"` (or `[all]`); a surface switched
+> on without its extra fails `manage.py check` (`snapadmin.E010`).
 
 ## Bundled front-end assets (shipped inside the package)
 

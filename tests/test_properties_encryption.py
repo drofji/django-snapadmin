@@ -28,7 +28,7 @@ import re
 import unicodedata
 
 import pytest
-from hypothesis import assume, given
+from hypothesis import assume, example, given
 from hypothesis import strategies as st
 
 from snapadmin.encryption import blind_index
@@ -68,6 +68,18 @@ _B64URL = re.compile(r"\A[A-Za-z0-9_-]*\Z")
 
 #: AES-GCM's authentication tag, appended to every ciphertext.
 GCM_TAG_BYTES = 16
+
+
+def _not_an_envelope_message() -> str:
+    try:
+        Envelope.parse("no dots in here")
+    except DecryptionError as exc:
+        return str(exc)
+    raise AssertionError("a dotless value parsed as an envelope")
+
+
+#: The fixed message for a value with no envelope shape at all.
+_NOT_AN_ENVELOPE_MESSAGE = _not_an_envelope_message()
 
 
 class TestEnvelopeLaws:
@@ -169,14 +181,21 @@ class TestEnvelopeLaws:
             Envelope.parse(value)
 
     @given(text=st.text())
+    # Found under the CI profile: the not-an-envelope message itself contains
+    # "python manage.py", so this text is "in" it without being echoed.
+    @example(text="manage.p")
     def test_parse_either_reads_an_envelope_or_raises_decryption_error(self, text):
         """Arbitrary text — including plaintext somebody stored by mistake —
         must never escape ``parse`` as anything but ``DecryptionError``."""
         try:
             envelope = Envelope.parse(text)
         except DecryptionError as exc:
-            if len(text) >= 8:
-                assert text not in str(exc)  # a rejection never echoes the value
+            # A rejection never echoes the value. Narrowed, not loosened: a text
+            # that is itself part of the fixed not-an-envelope wording (which
+            # interpolates nothing) appears in the message without being echoed,
+            # so containment proves nothing for it.
+            if len(text) >= 8 and text not in _NOT_AN_ENVELOPE_MESSAGE:
+                assert text not in str(exc)
             return
         # Canonical form, not the same string: base64url's last character can
         # carry ignored padding bits, so two spellings may decode alike.
