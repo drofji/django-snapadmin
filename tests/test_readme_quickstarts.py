@@ -113,3 +113,17 @@ class TestTheSixtySecondTry:
         install = re.search(r'pip install "?django-snapadmin\[([^\]]*)\]', try_it)
         assert install, "the 60-second try installs the bare package"
         assert needed <= set(install.group(1).split(","))
+
+    def test_the_docs_site_installs_the_generated_requirements_too(self):
+        """The same walk on the docs site installs the bare package first, so it
+        has to install the generated requirements.txt before ``migrate``."""
+        html = (REPO_ROOT / "docs" / "index.html").read_text(encoding="utf-8")
+        walk = next(
+            block
+            for block in re.findall(r"<pre><code>(.*?)</code></pre>", html, re.DOTALL)
+            if "snapadmin-new myshop\n" in block
+        )
+        steps = [line.split("#", 1)[0].strip() for line in walk.splitlines()]
+        assert steps.index("pip install -r requirements.txt") < steps.index(
+            "python manage.py migrate"
+        )

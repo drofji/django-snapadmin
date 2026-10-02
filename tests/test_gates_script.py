@@ -159,7 +159,21 @@ def test_python_is_this_interpreter_and_the_tools_are_its_modules():
     assert gates.argv_for("uv pip check") == ["uv", "pip", "check"]
 
 
-def test_a_passing_gate_runs_every_step_with_its_environment():
+@pytest.fixture
+def tools_installed(monkeypatch):
+    """Every module a gate needs, present — stated rather than assumed.
+
+    ``run_gate`` asks ``find_spec`` before it runs a step. The tests below are
+    about what happens *after* that check (the steps, their order, where a
+    failure stops them), so they must not depend on which tools the running
+    interpreter happens to carry: the lowest-deps environment has no pip, ruff
+    or mypy, and there these tests reported "not run" instead of exercising
+    the logic they name. Detection itself is pinned by the not-run tests.
+    """
+    monkeypatch.setattr(gates, "find_spec", lambda name: object())
+
+
+def test_a_passing_gate_runs_every_step_with_its_environment(tools_installed):
     runner = FakeRunner()
 
     outcome = gates.run_gate(gates.GATES_BY_NAME["e2e"], runner, {"PLAYWRIGHT": "1"})
@@ -170,7 +184,7 @@ def test_a_passing_gate_runs_every_step_with_its_environment():
     assert runner.calls[1][1]["SNAPADMIN_TEST_ADMIN_THEME"] == "stock"
 
 
-def test_a_failing_step_fails_the_gate_and_stops_it():
+def test_a_failing_step_fails_the_gate_and_stops_it(tools_installed):
     runner = FakeRunner({"ruff format": 1})
 
     outcome = gates.run_gate(gates.GATES_BY_NAME["static"], runner, {})
@@ -271,7 +285,7 @@ def test_a_failed_gate_fails_any_run():
     assert gates.report([_outcome("suite", "failed", "boom")], strict=False) == 1
 
 
-def test_a_gate_without_a_scratch_directory_is_given_none():
+def test_a_gate_without_a_scratch_directory_is_given_none(tools_installed):
     runner = FakeRunner()
 
     gates.run_gate(gates.GATES_BY_NAME["deps"], runner, {})
@@ -297,7 +311,7 @@ def test_the_lowest_environment_checks_consistency_with_uv_not_pip():
     assert not any("-m pip " in command for command in commands)
 
 
-def test_main_runs_the_named_gates_only(capsys):
+def test_main_runs_the_named_gates_only(capsys, tools_installed):
     runner = FakeRunner()
 
     code = gates.main(["deps"], runner=runner)

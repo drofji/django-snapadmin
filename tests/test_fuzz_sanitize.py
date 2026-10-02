@@ -27,7 +27,7 @@ import html
 import re
 from html.parser import HTMLParser
 
-from hypothesis import given
+from hypothesis import example, given
 from hypothesis import strategies as st
 
 from snapadmin.sanitize import sanitize_html
@@ -106,6 +106,9 @@ class TestSanitizerInvariants:
         assert _violations(cleaned) == [], (markup, cleaned)
 
     @given(markup=st.one_of(HOSTILE_HTML, st.text()))
+    # nh3 serialises a <p> nested in a <p> once <object> is unwrapped; the next
+    # parse re-nests it. Found under the CI profile — pinned so every run tries it.
+    @example(markup="<p><p onerror=alert(1)><object><p onerror=alert(1)>")
     def test_a_second_pass_changes_nothing(self, markup):
         once = sanitize_html(markup)
 

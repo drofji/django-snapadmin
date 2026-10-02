@@ -12,8 +12,9 @@ Every release carries a `Breaking` heading, including a pre-release. If nothing 
 Breaking
 --------
 
-Eleven entries from the second round of production field reports and the quality work behind them. Each is a deliberate change of
-something that was silently wrong; each comes with a one-line way back.
+Twelve entries. Eleven come from the second round of production field reports and the quality work behind them: each is a
+deliberate change of something that was silently wrong, and each comes with a one-line way back. The twelfth raises declared
+dependency minimums that could not work, and its way forward is an upgrade.
 
 * **``snapadmin.E027`` can stop ``manage.py check``.** It fires when ``SnapModel``'s own
   ``objects = EsManager()`` silently replaces a manager a mixin declares (``class
@@ -77,6 +78,17 @@ something that was silently wrong; each comes with a one-line way back.
   and masking only knows the audited model's own field names. Django's admin history message
   follows the same keys. Rows already written keep what they stored. Way back: resolve a key
   against the related model when a label is needed for display.
+* **Five declared dependency minimums rise to the lowest version that actually works.** The first
+  run of the lowest-dependencies CI job — every dependency installed at its declared minimum —
+  found five that could not: ``django-filter>=24.1`` (``24.0`` was never published);
+  ``django-celery-beat>=2.8.0`` (``2.6`` and ``2.7`` require Django < 5.2, below SnapAdmin's own
+  floor); ``django-ckeditor-5>=0.2.0`` (earlier releases import ``ugettext_lazy``, which Django 4.0
+  removed, and do not declare the Pillow they import); ``djangorestframework>=3.15.1`` (``3.15.0``
+  formats every validation message with ``%``, so an API filter key containing ``%`` answered
+  ``500`` instead of ``400``); and ``structlog>=24.3.0`` (earlier releases record
+  ``log.exception()`` in ``structlog.testing.capture_logs`` under the level ``exception`` rather
+  than ``error``; production output was already ``error``). A project pinned below one of these
+  must upgrade it — for the first three, no working install was possible below the new floor.
 
 Added
 -----
@@ -265,7 +277,8 @@ Changed
   the minimal install's ``urls.py`` comment promised a health check that ``snapadmin.urls`` serves
   only with the REST API on. ``tests/test_readme_quickstarts.py`` now executes both example models
   against the subject-access check and the REST search surface, and holds the install line to what
-  the generated project requires. The Testing section also stopped saying mutation testing does not
+  the generated project requires (``snapadmin-new``'s own *Next steps* are under Fixed). The
+  Testing section also stopped saying mutation testing does not
   run yet — it runs, advisory, as the next entry describes.
 
 * **Mutation testing, advisory.** ``mutmut`` now answers the question coverage cannot: would a test
@@ -280,6 +293,18 @@ Changed
 
 Fixed
 -----
+
+* **Sanitising rich text twice gives the same HTML as sanitising it once.** nh3 unwraps a
+  disallowed ``<object>`` and can leave a ``<p>`` nested inside a ``<p>``, which the next parse
+  re-nests into siblings — so an unchanged rich-text value was rewritten by every save that ran
+  sanitize-on-write, and its audit entry showed a change nobody made. ``sanitize_html`` now runs the
+  built-in sanitizer until the result is stable (at most four passes; every pass is a full
+  sanitization). Found by the property test ``test_a_second_pass_changes_nothing`` under the CI
+  hypothesis profile, and pinned by an explicit example.
+* **``snapadmin-new``'s *Next steps* install the project's requirements.** The generated
+  ``requirements.txt`` names the ``[api,graphql]`` extras the generated settings import; the steps
+  went straight from ``cd`` to ``migrate``, which fails on a bare install. The documentation site's
+  walk-through had the same gap.
 
 * **A single ``PROTECT``-ed row no longer stops a model's retention purge.** One due row still
   referenced through a ``PROTECT``/``RESTRICT`` foreign key (a tree whose parent is due before its

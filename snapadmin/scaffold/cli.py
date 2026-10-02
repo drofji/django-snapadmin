@@ -55,6 +55,9 @@ def _print_next_steps(dest: Path, *, full: bool) -> None:
     print()
     print("Next steps:")
     print(f"  cd {dest}")
+    # requirements.txt names the extras the generated settings import; skipping
+    # it leaves a bare install that cannot run `migrate`.
+    print("  pip install -r requirements.txt")
     print("  python manage.py migrate")
     print("  python manage.py createsuperuser")
     print("  python manage.py runserver")

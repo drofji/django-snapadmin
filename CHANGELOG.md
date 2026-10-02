@@ -13,6 +13,11 @@ the `0.x` beta series.
 ## Unreleased
 
 ### Breaking
+- Declared minimums rise to the lowest versions that work: `django-filter>=24.1` (24.0 was never
+  published), `django-celery-beat>=2.8.0` (earlier ones require Django < 5.2),
+  `django-ckeditor-5>=0.2.0` (earlier ones import `ugettext_lazy` and omit Pillow),
+  `djangorestframework>=3.15.1` (3.15.0 answers `500` for a `%` in a filter key) and
+  `structlog>=24.3.0`.
 - `snapadmin.E027` fails `manage.py check` when `SnapModel`'s `EsManager` silently replaces a
   mixin's own `objects` manager, or a `tenant_scoped` model's `objects` is not an `EsManager` —
   both cross-scope data leaks. Declare a manager inheriting from both on the model.
@@ -101,6 +106,10 @@ the `0.x` beta series.
   promises a health check the admin-only install does not serve.
 
 ### Fixed
+- Sanitising rich text is idempotent: nh3 could leave a `<p>` nested in a `<p>` that the next
+  parse re-nests, so every save rewrote an unchanged value and logged a change nobody made.
+- `snapadmin-new`'s *Next steps* include `pip install -r requirements.txt` before `migrate`: the
+  generated project imports the `[api,graphql]` extras, which a bare install lacks.
 - A due row held by a `PROTECT`/`RESTRICT` foreign key no longer aborts the model's retention purge,
   and no longer loses its `data_retention_files` while the row stays.
 - `PIIMaskingSerializerMixin` / `FieldPermissionSerializerMixin` mask and gate on a hand-built

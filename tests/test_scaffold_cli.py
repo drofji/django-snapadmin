@@ -60,6 +60,21 @@ class TestMain:
         out = capsys.readouterr().out
         assert "docker compose up --build" in out
 
+    @pytest.mark.parametrize("extra_flags", [[], ["--admin-only"], ["--full"]])
+    def test_next_steps_install_the_requirements_before_migrating(
+        self, tmp_path, capsys, extra_flags
+    ):
+        """The generated requirements.txt names the extras the project imports
+        (``[api,graphql]`` by default). A reader who installed the bare package
+        and followed steps that skipped it got a project that cannot start —
+        ``migrate`` fails on ``import rest_framework`` (#DOC11 f)."""
+        assert cli.main(["myshop", "--path", str(tmp_path), *extra_flags]) == 0
+        steps = [line.strip() for line in capsys.readouterr().out.splitlines()]
+
+        install = steps.index("pip install -r requirements.txt")
+        assert steps[install - 1].startswith("cd ")
+        assert steps[install + 1] == "python manage.py migrate"
+
     def test_admin_only_generates_an_api_free_project(self, tmp_path):
         assert cli.main(["myshop", "--path", str(tmp_path), "--admin-only"]) == 0
         settings = (tmp_path / "myshop" / "myshop" / "settings.py").read_text(encoding="utf-8")

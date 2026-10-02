@@ -84,7 +84,7 @@ snapadmin-license-check = "snapadmin.manage_cli:license_check_main"
 [tool.poetry.dependencies]
 python = ">=3.10"
 Django = ">=5.2"
-structlog = ">=24.1.0"
+structlog = ">=24.3.0"
 # nh3 stays a core dependency (D8/#DEP1e) even though the REST/GraphQL stack below
 # moves to extras: a missing nh3 must fail closed on a security-relevant default
 # (wysiwyg sanitize-on-write), which is not a state a normal install should reach.
@@ -95,9 +95,9 @@ nh3 = ">=0.2.0"
 # (SNAPADMIN_REST_API_ENABLED / SNAPADMIN_SWAGGER_ENABLED). An admin-only install
 # pulls none of these; snapadmin.urls already turns a switched-on-but-missing
 # feature into an ImproperlyConfigured naming this extra, not a bare ImportError.
-djangorestframework = {version = ">=3.15.0", optional = true}
+djangorestframework = {version = ">=3.15.1", optional = true}
 drf-spectacular = {version = ">=0.27.0", optional = true}
-django-filter = {version = ">=24.0", optional = true}
+django-filter = {version = ">=24.1", optional = true}
 
 # Optional: the generated GraphQL schema (SNAPADMIN_GRAPHQL_ENABLED). Independent
 # of [api] — graphene-django pulls Django + graphene + graphql-core, none of the
@@ -120,7 +120,7 @@ elasticsearch = {version = ">=8.0.0,<9.0.0", optional = true}
 
 # Optional: Celery background tasks (required for Celery Beat schedules)
 celery = {version = ">=5.3.0", optional = true}
-django-celery-beat = {version = ">=2.6.0", optional = true}
+django-celery-beat = {version = ">=2.8.0", optional = true}
 django-celery-results = {version = ">=2.5.0", optional = true}
 
 # Optional: SSH/SFTP offsite backup transport (SNAPADMIN_BACKUP_SFTP_*)
@@ -133,7 +133,7 @@ django-extra-settings = {version = ">=0.12.0", optional = true}
 # Optional: wysiwyg rich-text fields (SnapRichTextField / wysiwyg=True). django-ckeditor-5
 # bundles CKEditor 5, which is GPL / commercial-licensed — kept out of the core so the
 # base package carries no GPL/commercial editor unless you opt into rich-text editing.
-django-ckeditor-5 = {version = ">=0.0.12", optional = true}
+django-ckeditor-5 = {version = ">=0.2.0", optional = true}
 
 # Optional: django-admin-autocomplete-filter (LGPL-3.0). The package core does not import
 # it — kept out of core so the base tree is strictly permissive (MIT/BSD/Apache). Add it only
@@ -207,20 +207,20 @@ faker = "^25.0.0"
 # Dev extras (installed via demo/requirements.txt)
 # The suite exercises the REST API and GraphQL end to end; the package core
 # imports both lazily now that they are the [api]/[graphql] extras (#DEP1e).
-djangorestframework = ">=3.15.0"
+djangorestframework = ">=3.15.1"
 drf-spectacular = ">=0.27.0"
-django-filter = ">=24.0"
+django-filter = ">=24.1"
 graphene-django = ">=3.2.0"
 elasticsearch = ">=8.0.0"
 celery = ">=5.3.0"
-django-celery-beat = ">=2.6.0"
+django-celery-beat = ">=2.8.0"
 django-celery-results = ">=2.5.0"
 redis = ">=5.0.0"
 paramiko = ">=3.0.0"
 # Demo uses a dynamic Settings model; the package core does not depend on it.
 django-extra-settings = ">=0.12.0"
 # Demo uses wysiwyg rich-text fields; the package core does not depend on it.
-django-ckeditor-5 = ">=0.0.12"
+django-ckeditor-5 = ">=0.2.0"
 # Listed in the demo project's INSTALLED_APPS; the package core does not import it (LGPL, optional).
 django-admin-autocomplete-filter = ">=0.7.1"
 # The suite covers XLSX export end to end; the package core imports it lazily.

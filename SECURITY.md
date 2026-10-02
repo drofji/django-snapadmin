@@ -215,6 +215,9 @@ Key protections:
   `auto_sanitize=False`, and a custom policy can be supplied via `SNAPADMIN_HTML_SANITIZER` (a dotted
   path to a `Callable[[str], str]`). **`QuerySet.update()` is not covered** — Django does not call
   `pre_save()` for bulk updates, so a caller writing rich text that way must sanitize it themselves.
+  The built-in sanitizer is idempotent — it re-runs nh3 until the output is stable (at most four
+  full passes), because a single pass can serialise nesting the next parse rewrites — so sanitizing
+  on write and again on render agree, and re-saving an unchanged value changes nothing.
 - **Sanitization fails closed if `nh3` cannot be imported.** `nh3` is currently a required core
   dependency, so this cannot happen in a released install today; the guard exists as defense in depth
   ahead of a planned future release that moves `nh3` behind an optional extra. Both call sites — the

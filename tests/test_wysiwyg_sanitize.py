@@ -539,3 +539,67 @@ class TestSnapFieldWysiwygMatchesTheClassRoute:
         obj = wysiwyg_wrapped_model.objects.create(class_route=XSS, wrapper_route=XSS)
         obj.refresh_from_db()
         assert obj.class_route == obj.wrapper_route
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Idempotence — sanitize-on-write re-cleans stored HTML on every save
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: Found by ``test_a_second_pass_changes_nothing`` under the CI hypothesis
+#: profile: nh3 unwraps the disallowed ``<object>`` and serialises a ``<p>``
+#: nested inside a ``<p>``, which the next parse re-nests into siblings — so an
+#: unchanged rich-text value was rewritten by every save.
+RENESTING_MARKUP = "<p><p onerror=alert(1)><object><p onerror=alert(1)>"
+
+
+class _FakeNh3:
+    """An ``nh3`` stand-in whose ``clean`` is scripted, recording its inputs."""
+
+    def __init__(self, clean):
+        self._clean = clean
+        self.calls: list[str] = []
+
+    def clean(self, value: str) -> str:
+        self.calls.append(value)
+        return self._clean(value)
+
+
+@pytest.fixture
+def fake_nh3():
+    """Install a scripted ``nh3`` the way ``nh3_unavailable`` removes the real one."""
+    patcher = None
+
+    def install(clean) -> _FakeNh3:
+        nonlocal patcher
+        module = _FakeNh3(clean)
+        _load_nh3.cache_clear()
+        patcher = mock.patch.dict(sys.modules, {"nh3": module})
+        patcher.start()
+        return module
+
+    yield install
+    if patcher is not None:
+        patcher.stop()
+    _load_nh3.cache_clear()
+
+
+class TestSanitizeHtmlIsIdempotent:
+    def test_markup_nh3_re_nests_is_stable_after_one_sanitize(self):
+        once = sanitize_html(RENESTING_MARKUP)
+
+        assert sanitize_html(once) == once
+        assert "onerror" not in once and "<object" not in once
+
+    def test_an_already_stable_result_costs_one_confirming_pass(self, fake_nh3):
+        nh3 = fake_nh3(lambda value: value.upper())
+
+        assert sanitize_html("<b>x</b>") == "<B>X</B>"
+        assert nh3.calls == ["<b>x</b>", "<B>X</B>"]
+
+    def test_a_result_that_never_settles_stops_at_the_pass_cap(self, fake_nh3):
+        from snapadmin.sanitize import _MAX_PASSES
+
+        nh3 = fake_nh3(lambda value: value + "!")
+
+        assert sanitize_html("x") == "x" + "!" * _MAX_PASSES
+        assert len(nh3.calls) == _MAX_PASSES

@@ -17,12 +17,29 @@ Driven through a child pytest, because the scenario under test has to fail.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PROBE = Path(__file__).with_name("harness_probe.py")
+
+
+def _outcome_counts(output: str) -> dict[str, int]:
+    """The child run's final summary as ``{outcome: count}``, warnings left out.
+
+    Parsed rather than matched as a substring: a warning the environment adds
+    (a fresh checkout has no collected static directory, and whitenoise says
+    so) turns "1 passed, 1 error" into "1 passed, 1 warning, 1 error", while a
+    substring would also have accepted "1 failed, 1 passed, 1 error".
+    """
+    summary = output.strip().splitlines()[-1]
+    counts = {
+        outcome: int(number)
+        for number, outcome in re.findall(r"(\d+) (passed|failed|errors?|skipped|xfailed|xpassed)", summary)
+    }
+    return {("error" if key == "errors" else key): value for key, value in counts.items()}
 
 
 def test_a_teardown_failure_keeps_its_trace(tmp_path):
@@ -44,7 +61,7 @@ def test_a_teardown_failure_keeps_its_trace(tmp_path):
 
     output = child.stdout + child.stderr
     assert child.returncode == 1, output
-    assert "1 passed, 1 error" in output, output
+    assert _outcome_counts(output) == {"passed": 1, "error": 1}, output
     assert "uncaught JavaScript error(s) on the page" in output, output
     traces = sorted(path.name for path in artifacts.glob("*.zip"))
     assert traces == ["tests-e2e-harness_probe.py-test_a_page_that_throws.zip"], output
