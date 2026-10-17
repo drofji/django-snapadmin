@@ -158,6 +158,126 @@ that aren't obvious from the code.
   `tests/test_dependency_compat.py` checks it, and that the Python/Django classifiers are exactly
   the CI matrix. Raising or lowering a lower bound is a promise the `lowest-deps` job then checks.
 
+## Testing methodology
+
+SnapAdmin ships to production installs, so a green suite is only worth what it would catch. The
+how-to bullets above say *which* checks run; this section says *how* tests are designed, what a bug
+fix must contain, and how the suite itself is checked. It borrows from two manufacturing traditions —
+mistake-proofing (Poka-yoke) and standard work (Taylor's scientific management) — and adds the one
+thing neither has: tests that test the tests.
+
+### 1. Mistake-proofing the suite (Poka-yoke)
+
+Poka-yoke ("mistake-proofing", Shigeo Shingo, Toyota Production System) makes a mistake impossible,
+or detects it the moment it is made and at its source, instead of inspecting quality in later. Its
+three detection methods map directly onto kinds of test:
+
+| Poka-yoke method | What it checks | In this repository |
+|---|---|---|
+| **Contact** — the part's shape is wrong | the *structure* of code or tests | `tests/test_assertions_can_fail.py` reads the suite with `ast` and rejects assertions that cannot fail; `tests/test_public_surface_snapshot.py` diffs every top-level name against a frozen snapshot; mypy (blocking) rejects a wrong type shape; Django system checks reject a misconfiguration at startup instead of at the first request |
+| **Fixed-value** — the count is wrong | a number that must match exactly | `tests/test_query_counts.py` (queries at two row counts); the security-regression registry floor (`tests/test_security_regressions.py`); the frozen `# pragma: no cover` ceiling (`tests/test_testing_docs_truth.py`); the version in six places (`tests/test_version_sync.py`) |
+| **Motion-step** — a step was skipped | that every step of a flow happens, in order | `tests/test_critical_path_smoke.py` (admin form POST → row → audit entry → REST read); `python scripts/gates.py` (every CI gate; one that cannot run is never a pass); a release is push → CI green → tag, never a tag first |
+
+The rules that follow from it:
+
+- **Control beats warning.** A guard stops the line — it fails the suite or the CI job. A guard may
+  be advisory only with a written reason; mutation testing is the one advisory layer (section 4).
+- **Detect at the source.** Validate a setting in a system check, not where it is first used;
+  validate a test's shape when it is written, not when a bug escapes past it.
+- **Every guard says what to review.** Its failure message names the next step — "review: …" — so
+  whoever trips it knows what to check without reading the guard's code.
+- **A frozen list only shrinks.** An allowlist, a ceiling or a snapshot changes only deliberately,
+  in the same commit as the code it describes, with the reason — never loosened to get green.
+
+### 2. Standard work (from Taylor's scientific management)
+
+Taylor studied the work, measured it, wrote down one standard way of doing it, decomposed it into
+elementary operations, and separated planning from doing. The parts this project adopts:
+
+- **Plan before doing.** A change starts as a written *Done when* contract; the tests are written
+  from it first (TDD), then the code.
+- **Decompose.** A task splits into subtasks that can each be verified on their own; a bug fix is
+  always the same four operations (section 3).
+- **One standard shape per test.** Arrange-Act-Assert; one behaviour per test; names a reader
+  understands a year later (`admin_user`, `expected_status`, never `obj1`); assertions that state the
+  contract — a value, a status code, an exception type *and* message, a side effect, a query count —
+  never `assert result is not None` where a value is checkable; no shared mutable state, no wall
+  clock, no order dependence (the suite runs in random order every time).
+- **Measure, don't remember.** A count quoted in the docs is re-measured with
+  `pytest --collect-only -q` and written as a floor; the everyday run's speed is a budget, so
+  anything slow goes behind a marker.
+- **Standard checklists.** `python scripts/gates.py` before pushing, `--release` before a tag.
+
+What is deliberately **not** adopted: Taylorism's weak spot is optimising the measurement instead of
+the outcome (Goodhart's law). So 100% line and branch coverage is a floor and a helper metric, not
+the goal; a test is never weakened, skipped, `xfail`ed, mocked into silence or handed a new expected
+value to turn a number green; and when code and test disagree, working out which one is right comes
+first. Ambiguous business logic is a question for the maintainers, never a guess pinned into a test.
+
+### 3. The bug-fix protocol — four operations, every fix
+
+1. **Regression test** — reproduces the report and fails without the fix.
+2. **Same-class sweep** — find every other place the same mistake can happen: the same code
+   pattern, the same input shape, the sibling surfaces (admin, REST, GraphQL, import, export,
+   background jobs; sync and async; both admin themes; every database backend). Fix each one, or
+   prove it unaffected with a test.
+3. **Class guard** — a test that fails on the *next* instance of this kind of bug: generated over
+   every model, surface or field type; an `ast` scan; a call or query budget; a frozen allowlist.
+   Its failure message says what to review.
+4. **Escape analysis** — state why the existing suite did not catch it, using the routes below. A
+   route with no guard yet is exactly the class guard step 3 adds.
+
+### 4. Escape routes — how a green suite misses a real bug
+
+| Escape route | What slips through | Countermeasure |
+|---|---|---|
+| **Homogeneous fixtures** — every test uses one shape (a string tenant column, fields declared on the concrete class) | a bug that only exists on another shape (a `ForeignKey` tenant column, a field inherited from an abstract base) | test models covering each supported shape; suites parametrised over the shapes |
+| **Mocks hide cost and call patterns** — a mock accepts any number of calls, for free | a network round-trip per save, an N+1 against a service | call and query budgets; tests against the real service (`pytest -m real_es`, the PostgreSQL job) |
+| **The test client is not a browser** — it posts whatever the test writes | a widget/parser mismatch (a checkbox posts `on`, never `true`) | browser E2E (`pytest -m e2e`); posting forms back exactly as a browser serialises them |
+| **WSGI only** | sync-only code that blocks or degrades an ASGI deployment | async tests (`AsyncClient`) for every middleware and async-capable view |
+| **Inputs from the environment never tried** | an empty string from an unset variable crashing at request time | hostile-input cases (empty, whitespace, wrong type, very long, Unicode); validation in a system check |
+| **Negative paths and state combinations** | an unknown parameter silently ignored; a crash on a line covered by a different state | explicit negative tests; property-based and fuzz tests. Coverage proves a line ran, not that every state reached it |
+| **Swallowed exceptions** — a broad `except` that logs and carries on | a feature that disappears with nothing but a log line | tests asserting that nothing was logged; every silent fallback justified in writing |
+| **Clean-checkout CI** | a problem that only exists in a working tree (e.g. an ignored local file picked up by a build) | guards comparing build output with the tracked tree |
+| **A test that cannot fail** | everything — it protects nothing and still counts | `tests/test_assertions_can_fail.py`; mutation testing |
+
+### 5. Testing the tests
+
+**Mutation testing** (`mutmut`; how to run it is in the bullet above) is the check that coverage
+cannot give: it changes the code — flips a condition, swaps an operator, removes a call — and asks
+whether any test notices. It runs per push over the functions the push changed and weekly over the
+most dangerous modules (`encryption/`, `crypto.py`, `sharding/router.py`, `masking.py`,
+`api/filters.py`, `backup.py`, `restore.py`, `tasks.py`). It is advisory by design, because some
+mutants are equivalent and cannot be killed — but every survivor in code you changed gets a
+decision: strengthen the assertion until it dies, or write down why it is equivalent. The manual
+form costs a minute and is expected on every new assertion: break the code on purpose, watch the
+test fail, revert. An assertion you have never seen fail is a claim, not a test.
+
+**Tests that check the suite and the docs follow this method:**
+
+- `tests/test_assertions_can_fail.py` — no `assert True`, no `assert … or True`, and no test without
+  an assertion beyond a frozen list that may only shrink.
+- `tests/test_public_contract.py` + `tests/test_public_surface_snapshot.py` — a public name cannot
+  change or disappear silently; `tests/test_critical_path_smoke.py` — the layers still agree end to
+  end.
+- `tests/test_testing_docs_truth.py` — what the docs say about the test layers is true, in both
+  directions (a running check is not listed as missing, a missing one is not claimed).
+- `tests/test_gates_script.py` — every CI step has a local gate.
+- `tests/test_security_regressions.py` — every Security note in the release notes names a live,
+  unskipped test.
+- `tests/test_dependency_compat.py`, `tests/test_migrations_complete.py`,
+  `tests/test_distribution_contents.py`, `tests/test_ai_entry_points.py`, `tests/test_version_sync.py`,
+  `tests/test_translation_lint.py` — declared facts (dependencies, migrations, package contents, docs
+  maps, versions, catalogs) match reality.
+
+**What a machine cannot catch — look for it in review:** `assert x in (200, 403, 404)` (passes
+whatever the code does — decide which answer is right); `assert isinstance(hash(v), int)` (true of
+every hashable object); `assert get_field("x") is not None` (`get_field` raises, so the assertion is
+unreachable when false); containment where the whole set is checkable (`"E021" in ids` stays green
+next to a spurious second message); a test that never reaches the branch it is named after (a
+temporary `raise` in that branch must make it fail); a file named after a metric (`*_coverage.py`,
+`*_extended.py`, `misc_*`) — where weak assertions collect because the goal was a number.
+
 ## Releasing to PyPI
 
 Releases publish automatically. Pushing a version tag (`v*`) runs

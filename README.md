@@ -478,7 +478,9 @@ suite lives at [`tests/`](https://github.com/drofji/django-snapadmin/tree/main/t
 green with 100% line and branch coverage on `snapadmin/`; `pytest` runs it. The sdist carries the
 suite too, so an installed version can be held to the same checks without cloning. Regression tests
 live next to the subsystem they cover (`tests/test_fields.py`, `tests/test_pii_masking.py`, …) —
-check there before filing a bug that might already be covered.
+check there before filing a bug that might already be covered. How the suite is designed — the
+mistake-proofing guards, the four-step bug-fix protocol, mutation testing and the tests that check
+the tests — is the [testing methodology](https://github.com/drofji/django-snapadmin/blob/main/CONTRIBUTING.md#testing-methodology).
 
 # License
 

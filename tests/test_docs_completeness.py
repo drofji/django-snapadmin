@@ -227,11 +227,30 @@ class TestNoDeadLinks:
         relative = [link for link in links if not link.startswith(("http://", "https://", "#", "mailto:"))]
         assert not relative, f"relative (PyPI-broken) link(s) in README.md: {relative}"
 
+    @staticmethod
+    def _markdown_heading_anchors(path: Path) -> set[str]:
+        """The anchors GitHub renders for a Markdown file's headings: lower-cased,
+        punctuation other than ``-`` dropped, spaces turned into ``-``."""
+        headings = re.findall(r"^#{1,6}\s+(.+?)\s*$", path.read_text(encoding="utf-8"), re.MULTILINE)
+        return {re.sub(r"[^\w\- ]", "", heading.lower()).replace(" ", "-") for heading in headings}
+
     def test_every_github_blob_link_in_docs_index_points_at_a_real_file(self):
+        """A link may carry a ``#fragment``: the file part must exist, and in a
+        Markdown file the fragment must name one of its headings, or the link
+        lands at the top of the page instead of the section it promises."""
         html = DOCS_INDEX.read_text(encoding="utf-8")
         links = re.findall(r'https://github\.com/drofji/django-snapadmin/blob/main/([^"\s]+)', html)
-        missing = sorted({path for path in links if not (REPO_ROOT / path).is_file()})
-        assert not missing, f"docs/index.html links to a repo file that does not exist: {missing}"
+        missing = set()
+        for link in links:
+            path, _, fragment = link.partition("#")
+            target = REPO_ROOT / path
+            if not target.is_file():
+                missing.add(link)
+            elif fragment and target.suffix == ".md" and fragment not in self._markdown_heading_anchors(target):
+                missing.add(link)
+        assert not missing, (
+            f"docs/index.html links to a repo file or heading that does not exist: {sorted(missing)}"
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

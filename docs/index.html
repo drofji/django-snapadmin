@@ -5204,6 +5204,12 @@ class Invoice(snap_models.SnapModel):
   <a href="#testing-not-yet">final table</a> is what it deliberately does <em>not</em> do yet, and
   nothing on this page is claimed before it actually runs in CI.</p>
 
+  <p>The method behind the suite — mistake-proofing guards, the four-step bug-fix protocol
+  (regression test, same-class sweep, class guard, escape analysis), mutation testing and the tests
+  that check the tests — is written down in the
+  <a href="https://github.com/drofji/django-snapadmin/blob/main/CONTRIBUTING.md#testing-methodology">testing
+  methodology</a>.</p>
+
   <p>Every count here is a <strong>floor</strong>, read off a real
   <code>pytest --collect-only -q</code> run rather than maintained by arithmetic. Measured
   2026-09-15 on CPython 3.12 / Django 6.0:</p>
