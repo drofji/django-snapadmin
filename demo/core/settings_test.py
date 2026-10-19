@@ -156,8 +156,15 @@ LOG_LEVEL = "CRITICAL"
 from snapadmin.logging_config import configure_logging  # noqa: E402
 configure_logging(log_level="CRITICAL", json_logs=False)
 
-# ── Media / static (in-memory, no filesystem needed) ─────────────────────────
-DEFAULT_FILE_STORAGE = "django.core.files.storage.InMemoryStorage"
+# ── Media (in-memory, no filesystem needed) ──────────────────────────────────
+# Through STORAGES: DEFAULT_FILE_STORAGE was removed in Django 5.1 and is ignored
+# without a word, so this line used to do nothing and every test that saved a file
+# wrote it into MEDIA_ROOT on disk (1,875 leftovers were found there on 2026-10-17).
+# tests/test_settings_hygiene.py fails if default storage ever leaves memory again.
+STORAGES = {  # noqa: F405
+    **STORAGES,  # noqa: F405
+    "default": {"BACKEND": "django.core.files.storage.InMemoryStorage"},
+}
 
 # ── Background export files → throwaway temp dir ─────────────────────────────
 import tempfile as _tempfile  # noqa: E402

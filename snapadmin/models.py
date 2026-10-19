@@ -6,6 +6,7 @@ Core module for SnapAdmin — an auto-registration layer on top of Django's buil
 import hashlib
 import secrets
 import string
+import os
 import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -26,6 +27,7 @@ from django.contrib.admin.models import DELETION as DELETION
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils import timezone
+from django.core.signals import setting_changed
 from django.db.models.signals import post_delete
 from django.utils.html import escape
 from django.utils.safestring import mark_safe
@@ -726,9 +728,9 @@ class SnapSaveMixin:
 
         from snapadmin.tenancy import (
             ALL_TENANTS,
+            _tenant_attname,
             get_current_tenant,
             is_tenant_scoped,
-            tenant_field_name,
         )
 
         model = type(obj)
@@ -740,7 +742,9 @@ class SnapSaveMixin:
                 f"No tenant is bound to this request — {model._meta.label} is "
                 "tenant-scoped and refuses to create a row with no tenant assigned."
             )
-        setattr(obj, tenant_field_name(model), current)
+        # The column, not the field name: a ForeignKey tenant field takes a model
+        # instance under its name and the raw tenant value only under its attname.
+        setattr(obj, _tenant_attname(model), current)
 
     def save_model(self, request, obj, form, change):
         if not change:
@@ -871,6 +875,116 @@ class SnapSaveMixin:
                         "admin_log_entry_failed", model=type(instance).__name__, error=str(exc)
                     )
         super().save_related(request, form, formsets, change)
+
+    def save_formset(self, request, form, formset, change):
+        """Save an inline formset through the same guards as the parent row (#EXT3c).
+
+        Django saves inline children straight from the formset, never through
+        :meth:`save_model` — so a tenant-scoped child created inline used to get
+        no tenant (an orphan the default-deny scoping hides from everyone) and
+        no audit entry. Each new child is stamped exactly like a parent create
+        (refused with no tenant bound), and every child created, changed or
+        deleted inline gets its own audit row, with the same diff shape the
+        parent's would have.
+        """
+        from snapadmin import audit
+
+        instances = formset.save(commit=False)
+        forms_by_instance = {id(inline_form.instance): inline_form for inline_form in formset.forms}
+
+        for deleted in formset.deleted_objects:
+            audit.record_audit(request, audit.DELETE, deleted, None)
+            deleted.delete()
+
+        created = []
+        for instance in instances:
+            if instance._state.adding:
+                self._stamp_tenant(instance)
+                created.append(instance)
+            instance.save()
+        formset.save_m2m()
+
+        for instance in created:
+            inline_form = forms_by_instance.get(id(instance))
+            values = getattr(inline_form, "cleaned_data", {}) or {}
+            fields = {field.name for field in type(instance)._meta.concrete_fields}
+            audit.record_audit(
+                request,
+                audit.CREATE,
+                instance,
+                {
+                    name: audit.change_entry(
+                        type(instance),
+                        name,
+                        None,
+                        audit.relation_value(type(instance), name, values.get(name)),
+                    )
+                    for name in values
+                    if name in fields
+                }
+                or None,
+            )
+        # Django lists a child here only when its form changed, with the changed
+        # field names — relation sides are reduced to keys for the record only.
+        for instance, changed_names in formset.changed_objects:
+            inline_form = forms_by_instance.get(id(instance))
+            initial = getattr(inline_form, "initial", {}) or {}
+            values = getattr(inline_form, "cleaned_data", {}) or {}
+            model = type(instance)
+            audit.record_audit(
+                request,
+                audit.UPDATE,
+                instance,
+                {
+                    name: audit.change_entry(
+                        model,
+                        name,
+                        audit.relation_value(model, name, initial.get(name)),
+                        audit.relation_value(model, name, values.get(name)),
+                    )
+                    for name in changed_names
+                },
+            )
+
+
+# ===========================================================================
+# Process-wide Elasticsearch state (#EXT3k)
+# ===========================================================================
+
+#: One client per cluster configuration, and the indices already ensured. Every
+#: save used to build a fresh ``Elasticsearch`` (a new connection pool and TLS
+#: handshake) and re-send ``indices.exists`` + ``put_mapping`` — a cluster-state
+#: update — before indexing one document. Keyed by pid, so a forked worker
+#: (Celery prefork, gunicorn ``--preload``) never shares its parent's sockets.
+_ES_CLIENTS: dict[tuple, Any] = {}
+_ES_ENSURED: set[tuple[int, str]] = set()
+_ES_STATE_LOCK = threading.Lock()
+
+#: Settings that point at a different cluster or client: changing one forgets
+#: every cached client and ensured index.
+_ES_STATE_SETTINGS = frozenset(
+    {
+        "ELASTICSEARCH_URL",
+        "ELASTICSEARCH_KWARGS",
+        "ELASTICSEARCH_ENABLED",
+        "SNAPADMIN_ES_CLIENT_FACTORY",
+    }
+)
+
+
+def _forget_es_state(**kwargs: Any) -> None:
+    """Drop every cached client and ensured index (a settings change, a test)."""
+    with _ES_STATE_LOCK:
+        _ES_CLIENTS.clear()
+        _ES_ENSURED.clear()
+
+
+def _forget_es_state_on_setting_change(*, setting: str, **kwargs: Any) -> None:
+    if setting in _ES_STATE_SETTINGS:
+        _forget_es_state()
+
+
+setting_changed.connect(_forget_es_state_on_setting_change, dispatch_uid="snapadmin.es_state")
 
 
 # ===========================================================================
@@ -1187,7 +1301,14 @@ class SnapModel(AdminGenMixin, models.Model):
 
         url = getattr(settings, "ELASTICSEARCH_URL", "http://localhost:9200")
         kwargs = {"request_timeout": 5, **getattr(settings, "ELASTICSEARCH_KWARGS", {})}
-        return Elasticsearch([url], **kwargs)
+        # One client per process and configuration (#EXT3k); the factory path
+        # above is the project's own and is called as written — it owns caching.
+        key = (os.getpid(), Elasticsearch, url, repr(sorted(kwargs.items())))
+        with _ES_STATE_LOCK:
+            client = _ES_CLIENTS.get(key)
+            if client is None:
+                client = _ES_CLIENTS[key] = Elasticsearch([url], **kwargs)
+        return client
 
     def api_can_delete(self, request) -> bool:
         """Per-object deletion veto for the REST API (default: allow).
@@ -1330,14 +1451,17 @@ class SnapModel(AdminGenMixin, models.Model):
         return fields
 
     @classmethod
-    def _ensure_es_index_and_mapping(cls):
-        """
-        Create index and update mapping if necessary. Called during post_migrate.
+    def _ensure_es_index_and_mapping(cls) -> bool:
+        """Create the index, or add new fields to its mapping — ``True`` on success.
+
+        Run by ``post_migrate``, the reindex paths, and — at most once per process
+        and index, see :meth:`_ensure_es_index_once` — before a document is indexed.
+        A success is remembered, so the next save does not repeat the round-trips.
         """
         if not (cls.es_index_enabled or cls.es_storage_mode != EsStorageMode.DB_ONLY):
-            return
+            return False
         if not getattr(settings, "ELASTICSEARCH_ENABLED", False):
-            return
+            return False
 
         try:
             es = cls.get_es_client()
@@ -1363,19 +1487,38 @@ class SnapModel(AdminGenMixin, models.Model):
                 index=cls.get_es_index_name(),
                 error=str(exc),
             )
+            return False
+        with _ES_STATE_LOCK:
+            _ES_ENSURED.add((os.getpid(), index_name))
+        return True
+
+    @classmethod
+    def _ensure_es_index_once(cls) -> None:
+        """Ensure the index unless this process already did (#EXT3k).
+
+        An index deleted behind SnapAdmin's back is not noticed until an indexing
+        call fails (which forgets it again) — after deleting one by hand, run
+        ``snapadmin_reindex``, or ES may auto-create it with a dynamic mapping.
+        """
+        with _ES_STATE_LOCK:
+            if (os.getpid(), cls.get_es_index_name()) in _ES_ENSURED:
+                return
+        cls._ensure_es_index_and_mapping()
 
     def index_in_es(self) -> None:
         if not (
             self.es_index_enabled or self.es_storage_mode != EsStorageMode.DB_ONLY
         ) or not getattr(settings, "ELASTICSEARCH_ENABLED", False):
             return
+        index_name = self.get_es_index_name()
         try:
             es = self.get_es_client()
-            index_name = self.get_es_index_name()
-            # Ensure index exists with mapping if provided
-            self._ensure_es_index_and_mapping()
+            self._ensure_es_index_once()
             es.index(index=index_name, id=self.pk, document=self.get_es_document())
         except Exception as exc:
+            # The index may be gone or broken: ensure it again on the next save.
+            with _ES_STATE_LOCK:
+                _ES_ENSURED.discard((os.getpid(), index_name))
             logger.warning(
                 "es_index_document_failed",
                 model=type(self).__name__,
@@ -1677,7 +1820,7 @@ class SnapModel(AdminGenMixin, models.Model):
             ALL_TENANTS,
             get_current_tenant,
             is_tenant_scoped,
-            tenant_field_name,
+            _tenant_model_field_name,
         )
 
         if not is_tenant_scoped(cls):
@@ -1687,7 +1830,8 @@ class SnapModel(AdminGenMixin, models.Model):
             return None
         if current is None:
             return ("_id", "__snapadmin_no_tenant_context__")
-        field_name = tenant_field_name(cls)
+        # The document keys a foreign key by its field name, however tenant_field spells it.
+        field_name = _tenant_model_field_name(cls)
         try:
             es_field = cls._resolve_es_term_field(field_name)
         except ValueError:
@@ -2636,10 +2780,10 @@ class SnapModel(AdminGenMixin, models.Model):
                     continue
                 key = (field_name, path)
                 if key not in checked:
-                    checked[key] = (
-                        cls.objects.filter(**{field_name: path})
-                        .exclude(pk__in=purging_pks)
-                        .exists()
+                    # The rule the replace/delete cleanup shares (#EXT3d): any row
+                    # outside this batch, through the base manager, keeps the file.
+                    checked[key] = snapfields._file_referenced(
+                        cls, field_name, path, exclude_pks=purging_pks
                     )
                 if checked[key]:
                     logger.info(

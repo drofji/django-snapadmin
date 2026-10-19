@@ -51,18 +51,18 @@ def apply_unfold_auth_admin() -> list[str]:
 
     if not get_setting("SNAPADMIN_THEME_AUTH_ADMIN", True):
         return []
-    if not apps.is_installed("unfold") or not apps.is_installed("django.contrib.auth"):
+    from snapadmin.unfold_compat import detect_unfold
+
+    # The shared decision (#EXT3j): an Unfold that fails to import is logged there.
+    if not detect_unfold()[0] or not apps.is_installed("django.contrib.auth"):
         return []
 
-    try:
-        from unfold.admin import ModelAdmin as UnfoldModelAdmin
-        from unfold.forms import (
-            AdminPasswordChangeForm,
-            UserChangeForm,
-            UserCreationForm,
-        )
-    except ImportError:  # pragma: no cover - unreachable once is_installed() passed
-        return []
+    from unfold.admin import ModelAdmin as UnfoldModelAdmin
+    from unfold.forms import (
+        AdminPasswordChangeForm,
+        UserChangeForm,
+        UserCreationForm,
+    )
 
     from django.contrib import admin
     from django.contrib.auth import get_user_model

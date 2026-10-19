@@ -89,6 +89,36 @@ class TestTenantEsTerm:
         with tenancy.use_tenant("acme"):
             assert Model._tenant_es_term() == ("tenant_id.raw", "acme")
 
+    @pytest.mark.parametrize("declared", ["organisation", "organisation_id"])
+    def test_a_foreign_key_tenant_resolves_whichever_name_declares_it(self, declared):
+        # The document stores a foreign key under its field name; a tenant_field
+        # spelled as the column (organisation_id) used to miss the mapping and
+        # deny every row (#EXT3b sweep).
+        @isolate_apps("snapadmin")
+        def build():
+            class Org(django_models.Model):
+                class Meta:
+                    app_label = "snapadmin"
+
+            class OrgWidget(SnapModel):
+                organisation = django_models.ForeignKey(Org, null=True, on_delete=django_models.CASCADE)
+                tenant_scoped = True
+                tenant_field = declared
+                es_storage_mode = EsStorageMode.ES_ONLY
+                es_auto_mapping = True
+                subject_path = None
+
+                class Meta:
+                    app_label = "snapadmin"
+                    managed = False
+
+            return OrgWidget
+
+        model = build()
+
+        with tenancy.use_tenant(7):
+            assert model._tenant_es_term() == ("organisation", 7)
+
     def test_unmapped_tenant_field_fails_closed(self, Model):
         # es_auto_mapping off with no explicit es_mapping -> the tenant field
         # cannot be resolved at all; must still fail closed, not raise and

@@ -29,6 +29,8 @@ from django.conf import settings
 from django.db.models import Model
 
 from snapadmin.conf import (
+    _THROTTLE_SETTINGS,
+    _resolve_throttle_rate,
     GRAPHQL_ENABLED_DEFAULT,
     REST_API_ENABLED_DEFAULT,
     get_setting,
@@ -358,8 +360,11 @@ def _capabilities(*, live: bool = True) -> list[tuple[str, bool | None, str]]:
         get_setting("SNAPADMIN_HEALTH_ALERT_EMAILS", [])
         or get_setting("SNAPADMIN_ERROR_ALERT_EMAILS", [])
     )
-    throttled = bool(
-        get_setting("SNAPADMIN_THROTTLE_ANON", None) or get_setting("SNAPADMIN_THROTTLE_USER", None)
+    # The effective rates (#EXT3f): an unset setting means the default throttle is
+    # on, which the old "is either setting truthy" test reported as off.
+    drf_rates = (getattr(settings, "REST_FRAMEWORK", {}) or {}).get("DEFAULT_THROTTLE_RATES") or {}
+    throttled = any(
+        _resolve_throttle_rate(name, drf_rates) is not None for name in _THROTTLE_SETTINGS
     )
     read_only = sum(1 for m in models if get_model_meta(m, "api_read_only", False))
     # api_full_clean (#EXT1k) — "on" means at least one registered model runs its
@@ -393,6 +398,14 @@ def _capabilities(*, live: bool = True) -> list[tuple[str, bool | None, str]]:
     # tell "no tenants configured" apart from "3 tenant-scoped models" at a
     # glance without reading snapadmin.checks' E009 output.
     tenant_scoped_models = sum(1 for m in models if get_model_meta(m, "tenant_scoped", False))
+    # Stored-file cleanup (#EXT3d) — "on" means at least one file field opted into
+    # removing a replaced file or a deleted row's file.
+    file_cleanup_fields = sum(
+        1
+        for m in models
+        for f in m._meta.concrete_fields
+        if getattr(f, "delete_replaced", False) or getattr(f, "delete_on_delete", False)
+    )
 
     return [
         (
@@ -432,6 +445,11 @@ def _capabilities(*, live: bool = True) -> list[tuple[str, bool | None, str]]:
         ("background_tasks", bool(getattr(settings, "CELERY_BROKER_URL", None)), ""),
         ("health_alerts", bool(recipients), _count(len(recipients), "recipient")),
         ("rate_limiting", throttled, ""),
+        (
+            "strict_query_params",
+            bool(get_setting("SNAPADMIN_API_STRICT_QUERY_PARAMS", True)),
+            "",
+        ),
         ("model_validation", full_clean_models > 0, _count(full_clean_models, "model")),
         ("read_only_models", read_only > 0, _count(read_only, "model")),
         ("write_allowlist", write_allowlist > 0, _count(write_allowlist, "model")),
@@ -459,6 +477,7 @@ def _capabilities(*, live: bool = True) -> list[tuple[str, bool | None, str]]:
             tenant_scoped_models > 0,
             _count(tenant_scoped_models, "tenant-scoped model"),
         ),
+        ("file_cleanup", file_cleanup_fields > 0, _count(file_cleanup_fields, "file field")),
         ("startup_report", *_startup_report()),
     ]
 

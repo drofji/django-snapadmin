@@ -13,6 +13,7 @@ import typing
 from typing import Any, cast
 from enum import Enum
 
+from django import forms
 from django.db import models
 from django.db.backends.utils import format_number
 from django.core import checks
@@ -52,6 +53,8 @@ class SnapFieldAttributeEnum(str, Enum):
     AUTO_SANITIZE = "auto_sanitize"  # Sanitize wysiwyg HTML on write (default: on)
     TAB = "tab"  # Added for Unfold fieldset tabs
     ROW = "row"  # Group fields in one row
+    DELETE_REPLACED = "delete_replaced"  # file fields: drop the old file once replaced
+    DELETE_ON_DELETE = "delete_on_delete"  # file fields: drop the file with its row
 
 
 class DjangoFieldAttributeEnum(str, Enum):
@@ -372,12 +375,18 @@ _SNAP_FIELD_WRAPPER_KWARGS: frozenset[str] = frozenset(
 
 #: The parity drift guard (`tests/test_fields.py::TestSnapFieldWrapperDriftGuard`)
 #: asserts ``set(SnapFieldAttributeEnum) - _SNAP_FIELD_WRAPPER_KWARGS`` equals
-#: exactly this set. Empty today — #PAR1c closed the last four gaps, so every
-#: ``SnapFieldAttributeEnum`` name is reachable from :func:`snap_field`. A future
+#: exactly this set. #PAR1c closed the last four metadata gaps; the two names
+#: below are the stored-file cleanup flags, file-field-only by design. A future
 #: ``SnapFieldAttributeEnum`` member must be added to ``_SNAP_FIELD_WRAPPER_KWARGS``
 #: (wired into :func:`snap_field`) or listed here with a reason before the drift
 #: guard passes again — never silently neither.
-_SNAP_FIELD_WRAPPER_DOCUMENTED_EXCLUSIONS: frozenset[str] = frozenset()
+#: The stored-file cleanup flags (#EXT3d, 0.1.0b11) live on SnapFileField /
+#: SnapImageField only: they wire signal receivers in contribute_to_class, which a
+#: post-construction wrapper on a plain field cannot reach the same way. Plain-model
+#: parity is planned work (a registry meta key), not an oversight.
+_SNAP_FIELD_WRAPPER_DOCUMENTED_EXCLUSIONS: frozenset[str] = frozenset(
+    {"delete_replaced", "delete_on_delete"}
+)
 
 
 def _apply_required_flag(field: models.Field, required: bool) -> None:
@@ -811,12 +820,173 @@ class SnapDurationField(models.DurationField, SnapField):
         super().__init__(**self.handleDjangoKwargs(**kwargs))
 
 
-class SnapFileField(models.FileField, SnapField):
+# ===========================================================================
+# Stored-file cleanup (#EXT3d)
+# ===========================================================================
+
+
+def _file_name(value: object) -> str:
+    """The storage name a file field's raw value stands for, or ``""``.
+
+    A row loaded from the database holds a plain string; a file assigned in
+    memory holds a ``File``/``FieldFile`` whose ``name`` may not be final yet.
+    """
+    if isinstance(value, str):
+        return value
+    return str(getattr(value, "name", "") or "")
+
+
+def _file_referenced(
+    model: type[models.Model],
+    field_name: str,
+    name: str,
+    *,
+    exclude_pks=(),
+    using: str | None = None,
+) -> bool:
+    """Whether any row of ``model`` other than ``exclude_pks`` still stores ``name``.
+
+    Asked through ``_base_manager`` — never a project's or a tenant-scoped
+    default manager — so a row hidden from the current caller still counts: a
+    file is only ever removed when *no* row anywhere names it. The one rule the
+    replace/delete cleanup and the retention purge share.
+    """
+    rows = model._base_manager.db_manager(using).filter(**{field_name: name})
+    if exclude_pks:
+        rows = rows.exclude(pk__in=list(exclude_pks))
+    return rows.exists()
+
+
+def _delete_stored_file(
+    model: type[models.Model], field: models.FileField, name: str, using: str | None
+) -> None:
+    """Remove ``name`` from ``field``'s storage after the current transaction
+    commits, unless a row still names it then. Never raises into the caller: a
+    storage error is logged, the row operation already happened."""
+    from django.db import transaction
+
+    from snapadmin.logging_config import get_logger
+
+    def remove() -> None:
+        logger = get_logger(__name__)
+        try:
+            if _file_referenced(model, field.name, name, using=using):
+                logger.info(
+                    "snapadmin.files.shared_skip", model=model.__name__, field=field.name, path=name
+                )
+                return
+            if field.storage.exists(name):
+                field.storage.delete(name)
+        except Exception as exc:
+            logger.error(
+                "snapadmin.files.delete_failed",
+                model=model.__name__,
+                field=field.name,
+                path=name,
+                error=str(exc),
+            )
+
+    transaction.on_commit(remove, using=using)
+
+
+def _cleanup_fields(model: type[models.Model], flag: str) -> list[models.FileField]:
+    """The model's file fields carrying ``flag`` (only Snap file fields define it)."""
+    return [
+        field
+        for field in model._meta.concrete_fields
+        if isinstance(field, models.FileField) and getattr(field, flag, False)
+    ]
+
+
+def _remember_stored_names(
+    sender: type[models.Model], instance: models.Model, **kwargs: object
+) -> None:
+    """``post_init``: note the stored name of every ``delete_replaced`` field.
+
+    Only a name loaded from the database counts (a plain string in
+    ``__dict__``): a deferred field is absent and skipped — no query is spent,
+    and nothing is ever deleted for it — and a file assigned in memory to a new
+    row is not a stored file yet.
+    """
+    instance._snap_stored_file_names = {  # type: ignore[attr-defined]
+        field.attname: instance.__dict__[field.attname]
+        for field in _cleanup_fields(sender, "delete_replaced")
+        if isinstance(instance.__dict__.get(field.attname), str)
+    }
+
+
+def _delete_replaced_files(
+    sender: type[models.Model],
+    instance: models.Model,
+    created: bool,
+    raw: bool = False,
+    using: str | None = None,
+    **kwargs: object,
+) -> None:
+    """``post_save``: schedule the removal of a file this save replaced."""
+    remembered: dict[str, str] = getattr(instance, "_snap_stored_file_names", None) or {}
+    for field in _cleanup_fields(sender, "delete_replaced"):
+        current = _file_name(getattr(instance, field.attname))
+        previous = remembered.get(field.attname, "")
+        if previous and previous != current and not created and not raw:
+            _delete_stored_file(sender, field, previous, using)
+        if current:
+            remembered[field.attname] = current
+    instance._snap_stored_file_names = remembered  # type: ignore[attr-defined]
+
+
+def _delete_files_of_deleted_row(
+    sender: type[models.Model], instance: models.Model, using: str | None = None, **kwargs: object
+) -> None:
+    """``post_delete`` (fired per row, bulk deletes included): schedule the
+    removal of each ``delete_on_delete`` field's file."""
+    for field in _cleanup_fields(sender, "delete_on_delete"):
+        name = _file_name(instance.__dict__.get(field.attname))
+        if name:
+            _delete_stored_file(sender, field, name, using)
+
+
+def _connect_file_cleanup(model: type[models.Model]) -> None:
+    """Wire the three receivers for ``model`` once (idempotent per model)."""
+    from django.db.models.signals import post_delete, post_init, post_save
+
+    uid = f"snapadmin.file_cleanup.{model._meta.label_lower}"
+    post_init.connect(_remember_stored_names, sender=model, dispatch_uid=f"{uid}.init")
+    post_save.connect(_delete_replaced_files, sender=model, dispatch_uid=f"{uid}.save")
+    post_delete.connect(_delete_files_of_deleted_row, sender=model, dispatch_uid=f"{uid}.delete")
+
+
+class _SnapFileCleanupMixin:
+    """``delete_replaced`` / ``delete_on_delete`` for the Snap file fields.
+
+    Both are Snap-only flags: stripped before Django sees them and absent from
+    ``deconstruct()``, so turning one on adds no migration.
+    """
+
+    delete_replaced: bool = False
+    delete_on_delete: bool = False
+
+    def _take_cleanup_flags(self, kwargs: dict) -> None:
+        self.delete_replaced = bool(kwargs.pop(SnapFieldAttributeEnum.DELETE_REPLACED.value, False))
+        self.delete_on_delete = bool(
+            kwargs.pop(SnapFieldAttributeEnum.DELETE_ON_DELETE.value, False)
+        )
+
+    def contribute_to_class(
+        self, cls: type[models.Model], name: str, private_only: bool = False, **kwargs: Any
+    ) -> None:
+        super().contribute_to_class(cls, name, private_only=private_only, **kwargs)  # type: ignore[misc]
+        if (self.delete_replaced or self.delete_on_delete) and not cls._meta.abstract:
+            _connect_file_cleanup(cls)
+
+
+class SnapFileField(_SnapFileCleanupMixin, models.FileField, SnapField):
     """Django ``FileField`` with upload validation. See :class:`SnapField`."""
 
     def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
+        self._take_cleanup_flags(kwargs)
         allowed_extensions = kwargs.pop(SnapFieldAttributeEnum.ALLOWED_EXTENSIONS, None)
         allowed_encodings = kwargs.pop(SnapFieldAttributeEnum.ALLOWED_ENCODINGS, None)
         max_size_bytes = kwargs.pop(SnapFieldAttributeEnum.MAX_SIZE_BYTES, None)
@@ -852,12 +1022,13 @@ class SnapFileField(models.FileField, SnapField):
         return name, path, args, kwargs
 
 
-class SnapImageField(models.ImageField, SnapField):
+class SnapImageField(_SnapFileCleanupMixin, models.ImageField, SnapField):
     """Django ``ImageField`` with upload validation. See :class:`SnapField`."""
 
     def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
         kwargs = self._initializeSnapLogic(**kwargs)
+        self._take_cleanup_flags(kwargs)
         allowed_extensions = kwargs.pop(SnapFieldAttributeEnum.ALLOWED_EXTENSIONS, None)
         max_size_bytes = kwargs.pop(SnapFieldAttributeEnum.MAX_SIZE_BYTES, None)
         # allowed_encodings is a text-file concept and does not apply to images.
@@ -883,12 +1054,35 @@ class SnapImageField(models.ImageField, SnapField):
 
 
 class SnapBooleanField(models.BooleanField, SnapField):
-    """Django ``BooleanField`` with SnapAdmin metadata. See :class:`SnapField`."""
+    """Django ``BooleanField`` with SnapAdmin metadata. See :class:`SnapField`.
+
+    The form follows what the field asked for (#EXT3g). Snap fields derive
+    ``null=True`` from ``required=False``, which made every defaulted boolean a
+    three-way *Unknown / Yes / No* select whose *unknown* swallowed a browser
+    checkbox's ``"on"``. A boolean with a non-``None`` default renders as a
+    checkbox unless ``null=True`` was passed explicitly; one without a default,
+    or one that asked for ``null``, keeps the three states. The column is not
+    touched — changing ``null`` would be a migration in every project.
+    """
 
     def __init__(self, verbose_name: str | Promise | None = None, **kwargs):
         kwargs = _with_positional_verbose_name(verbose_name, kwargs)
+        self._snap_null_explicit = DjangoFieldAttributeEnum.NULL.value in kwargs
         kwargs = self._initializeSnapLogic(**kwargs)
         super().__init__(**self.handleDjangoKwargs(**kwargs))
+
+    @property
+    def _renders_as_checkbox(self) -> bool:
+        """Nullable only because ``required=False`` made it so, and defaulted."""
+        has_real_default = self.has_default() and self.get_default() is not None
+        return bool(
+            self.null and not self._snap_null_explicit and has_real_default and not self.choices
+        )
+
+    def formfield(self, **kwargs: Any) -> Any:
+        if self._renders_as_checkbox:
+            kwargs.setdefault("form_class", forms.BooleanField)
+        return super().formfield(**kwargs)
 
 
 class SnapJSONField(models.JSONField, SnapField):

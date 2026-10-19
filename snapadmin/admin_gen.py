@@ -37,20 +37,16 @@ from django.utils.safestring import mark_safe
 from snapadmin.conf import get_setting
 from snapadmin.fields import SnapFieldAttributeEnum
 from snapadmin.pagination import EstimatedCountPaginator
-from snapadmin.registry import get_model_meta, is_registered
+from snapadmin.registry import _declared_attributes, get_model_meta, is_registered
 from snapadmin.sanitize import sanitize_html
 from snapadmin import fields as snapfields
+from snapadmin.unfold_compat import detect_unfold
 
-# Unfold imports — mirrors the same detect-or-fall-back block every
-# admin-facing SnapAdmin module carries (snapadmin.admin has its own
-# independent copy for the same reason: neither module can import the other's
-# without a cycle, so each detects Unfold for itself).
-try:
-    if "unfold" not in settings.INSTALLED_APPS:
-        raise ImportError(
-            "Unfold not in INSTALLED_APPS"
-        )  # pragma: no cover - module-level branch, resolved at import
+# Unfold imports — the one process-wide decision snapadmin.admin shares
+# (snapadmin.unfold_compat), so the two modules can never disagree (#EXT3j).
+UNFOLD_INSTALLED, _UNFOLD_FALLBACK_REASON = detect_unfold()
 
+if UNFOLD_INSTALLED:
     from unfold.admin import ModelAdmin
     from unfold.contrib.filters.admin import (
         RangeDateFilter,
@@ -60,12 +56,7 @@ try:
         ChoicesDropdownFilter,
     )
     from unfold.decorators import display as unfold_display
-
-    UNFOLD_INSTALLED = True
-except (
-    ImportError,
-    RuntimeError,
-):  # pragma: no cover - the Unfold-absent half; covered by tests/test_unfold_optional.py re-importing this module
+else:  # pragma: no cover - the Unfold-absent half; covered by tests/test_unfold_optional.py re-importing this module
     from django.contrib.admin import ModelAdmin
 
     RangeDateFilter = admin.DateFieldListFilter
@@ -82,7 +73,16 @@ except (
 
         return decorator
 
-    UNFOLD_INSTALLED = False
+
+def _checkbox_widget(model_admin):
+    """The checkbox widget this admin's theme uses for a boolean — Unfold's switch
+    from its ``formfield_overrides``, Django's ``CheckboxInput`` on the stock admin."""
+    from django import forms
+
+    widget = model_admin.formfield_overrides.get(models.BooleanField, {}).get(
+        "widget", forms.CheckboxInput
+    )
+    return widget() if isinstance(widget, type) else widget
 
 
 def _wysiwyg_widget():
@@ -357,7 +357,9 @@ class AdminGenMixin:
         # accessor as an autocomplete field) and left forward one-to-ones out
         # (`autocomplete=True` on a SnapOneToOneField did nothing).
         meta_fields_related = {f.name: f for f in forward_fields if f.is_relation}
-        attr_fields = {fn: fo for fn, fo in cls.__dict__.items()}
+        # The model's own declarations plus those of its abstract bases and plain
+        # mixins (#EXT3o) — not only cls.__dict__.
+        attr_fields = _declared_attributes(cls)
 
         form_fields = [
             f.name
@@ -433,7 +435,8 @@ class AdminGenMixin:
             if isinstance(attr_value, snapfields.SnapFunctionField):
                 method_name = f"SnapFunctionField{attr_name.capitalize()}"
                 generated_overrides[method_name] = _function_field_display(attr_value)
-                list_display.append(method_name)
+                if attr_value.show_in_list:
+                    list_display.append(method_name)
 
         if pk_name in list_display:
             list_display.remove(pk_name)
@@ -604,6 +607,15 @@ class AdminGenMixin:
                 db_field, "wysiwyg", False
             ):
                 kwargs["widget"] = _wysiwyg_widget()
+            if (
+                isinstance(db_field, snapfields.SnapBooleanField)
+                and db_field._renders_as_checkbox
+                and "widget" not in kwargs
+            ):
+                # The theme's own checkbox: Unfold picks its three-way select for any
+                # boolean whose column is nullable, which every defaulted
+                # SnapBooleanField is (#EXT3g).
+                return db_field.formfield(widget=_checkbox_widget(self), **kwargs)
             return super(ModelAdmin, self).formfield_for_dbfield(db_field, request, **kwargs)
 
         def get_fieldsets(self, request, obj=None):
@@ -620,18 +632,35 @@ class AdminGenMixin:
                 fs = _drop_masked_fields(fs, masked)
             return _mark_row_fieldsets(fs) if UNFOLD_INSTALLED else fs
 
-        admin_attrs["formfield_for_dbfield"] = formfield_for_dbfield
-        admin_attrs["get_fieldsets"] = get_fieldsets
-        # Generated callables first, the project's own admin_overrides last —
-        # merge order is the precedence rule (#ADM2a).
-        admin_attrs.update(getattr(cls, "_admin_generated_overrides", {}))
+        # Every generated callable lives on a generated *base*, placed after the
+        # project's admin_mixins (#EXT3n): in the class's own namespace it shadowed
+        # them, so a mixin could neither override nor extend it through super().
+        # Precedence: admin_overrides (the class itself) > admin_mixins > generated
+        # > PIIMaskingAdminMixin > SnapSaveMixin > ModelAdmin — the merge-order rule
+        # of #ADM2a, kept by the MRO instead of by dict order.
+        generated_base = type(
+            f"{cls.__name__}GeneratedAdminBase",
+            (),
+            {
+                "formfield_for_dbfield": formfield_for_dbfield,
+                "get_fieldsets": get_fieldsets,
+                **getattr(cls, "_admin_generated_overrides", {}),
+                "snapadmin_generated_base": True,
+                "__module__": cls.__module__,
+            },
+        )
         admin_attrs.update(getattr(cls, "admin_overrides", {}))
 
         # Ecosystem admin mixins come first in the MRO so their
         # behaviour (import/export, versioning, history, object perms) wraps
         # SnapAdmin's, which in turn wraps Django/Unfold's ModelAdmin.
         extra_mixins = tuple(getattr(cls, "admin_mixins", []) or [])
-        parent_classes = extra_mixins + (PIIMaskingAdminMixin, SnapSaveMixin, ModelAdmin)
+        parent_classes = extra_mixins + (
+            generated_base,
+            PIIMaskingAdminMixin,
+            SnapSaveMixin,
+            ModelAdmin,
+        )
         # Set last, after admin_overrides, so a project cannot unset it by accident.
         # snapadmin.W015 reasons about the form *this* class would render, and the
         # registration below quietly loses to a project's own @admin.register — so
@@ -653,22 +682,9 @@ class AdminGenMixin:
 
     @staticmethod
     def register_all_admins(app_label: str | None = None) -> None:
-        from snapadmin.admin import APITokenAdmin, ErrorEventAdmin, SnapadminAuditLogAdmin
-        from snapadmin.models import APIToken, ErrorEvent, SnapadminAuditLog
+        from snapadmin.admin import register_builtin_admins
 
-        if _token_admin_enabled():
-            try:
-                admin.site.register(APIToken, APITokenAdmin)
-            except AlreadyRegistered:
-                pass
-        try:
-            admin.site.register(ErrorEvent, ErrorEventAdmin)
-        except AlreadyRegistered:
-            pass
-        try:
-            admin.site.register(SnapadminAuditLog, SnapadminAuditLogAdmin)
-        except AlreadyRegistered:
-            pass
+        register_builtin_admins()
 
         for model in apps.get_models():
             if not is_registered(model):

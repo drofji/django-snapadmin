@@ -5,7 +5,10 @@ Custom DRF authentication backend for SnapAdmin API Tokens.
 """
 
 import logging
+from datetime import timedelta
 
+from django.db.models import Q
+from django.utils import timezone
 from django.utils.module_loading import import_string
 from rest_framework import authentication, exceptions
 
@@ -113,7 +116,7 @@ class APITokenAuthentication(authentication.BaseAuthentication):
         if not token.user.is_active:
             raise exceptions.AuthenticationFailed("User account is disabled.")
 
-        token.touch()
+        self.touch_token(token)
 
         logger.debug(
             "api_token_authenticated",
@@ -124,6 +127,28 @@ class APITokenAuthentication(authentication.BaseAuthentication):
 
     def authenticate_header(self, request):
         return self.keyword
+
+    def touch_token(self, token: APIToken) -> None:
+        """Record that ``token`` was used — at most once per
+        ``SNAPADMIN_API_TOKEN_TOUCH_INTERVAL`` seconds (default 60; ``0`` = every
+        request).
+
+        Writing ``last_used_at`` on every request cost one more database round-trip
+        per call, and parallel requests with one token all wrote the same row
+        (#EXT3l). Inside the interval nothing is written — read off the token
+        already loaded, no extra query; past it, the ``UPDATE`` is conditional, so a
+        request holding a stale copy never rewrites a value another one just
+        refreshed. Override this method to record use differently.
+        """
+        interval = int(get_setting("SNAPADMIN_API_TOKEN_TOUCH_INTERVAL", 60) or 0)
+        now = timezone.now()
+        rows = APIToken.objects.filter(pk=token.pk)
+        if interval > 0:
+            threshold = now - timedelta(seconds=interval)
+            if token.last_used_at is not None and token.last_used_at >= threshold:
+                return
+            rows = rows.filter(Q(last_used_at__isnull=True) | Q(last_used_at__lt=threshold))
+        rows.update(last_used_at=now)
 
 
 def token_has_permission(

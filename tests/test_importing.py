@@ -512,7 +512,12 @@ class TestSingleFlightAndCancellation:
         job.status = SnapImportJob.Status.PROCESSING
         job.save(update_fields=["status"])
         summary = run_import_job(job, file_path=str(path))
-        assert summary == {"skipped": True, "reason": "already processing or finished"}
+        assert summary == {
+            "outcome": "job_skipped",
+            "job_skipped": True,
+            "skipped": True,
+            "reason": "already processing or finished",
+        }
         assert Category.objects.count() == 0
 
     def test_cancellation_stops_between_chunks_leaving_partial_progress(self, tmp_path):
@@ -738,18 +743,45 @@ class TestSnapadminImportCommand:
         assert SnapImportJob.objects.filter(app_label="demo", model="Category").count() == 1
 
     def test_cancelled_run_is_reported_without_raising(self, tmp_path):
+        # The real job, cancelled after its first chunk — never a hand-written
+        # summary, which is how the KeyError below went unseen (#EXT3e).
+        from io import StringIO
+
         path = tmp_path / "in.csv"
         _write_csv(path, ["name"], [{"name": f"C{i}"} for i in range(4)])
-        with patch("snapadmin.management.commands.snapadmin_import.run_import_job",
-                   return_value={"cancelled": True, "created": 2, "updated": 0, "skipped": 0, "failed": 0}):
-            call_command("snapadmin_import", "--model", "demo.Category", "--file", str(path))
+
+        def cancelling_run(job, **kwargs):
+            def cancel(running_job):
+                SnapImportJob.objects.filter(pk=running_job.pk).update(
+                    status=SnapImportJob.Status.CANCELLED
+                )
+
+            return run_import_job(job, file_path=kwargs["file_path"], chunk_size=2, on_progress=cancel)
+
+        out = StringIO()
+        with patch("snapadmin.management.commands.snapadmin_import.run_import_job", cancelling_run):
+            call_command("snapadmin_import", "--model", "demo.Category", "--file", str(path), stdout=out)
+
+        assert "cancelled — 2 created, 0 updated, 0 skipped, 0 failed so far" in out.getvalue()
+        assert Category.objects.count() == 2
 
     def test_skipped_run_is_reported(self, tmp_path):
+        # The real job, already claimed by another worker when this run starts.
+        from io import StringIO
+
         path = tmp_path / "in.csv"
         _write_csv(path, ["name"], [{"name": "A"}])
-        with patch("snapadmin.management.commands.snapadmin_import.run_import_job",
-                   return_value={"skipped": True, "reason": "already processing or finished"}):
-            call_command("snapadmin_import", "--model", "demo.Category", "--file", str(path))
+
+        def run_claimed_elsewhere(job, **kwargs):
+            SnapImportJob.objects.filter(pk=job.pk).update(status=SnapImportJob.Status.PROCESSING)
+            return run_import_job(job, file_path=kwargs["file_path"])
+
+        out = StringIO()
+        with patch("snapadmin.management.commands.snapadmin_import.run_import_job", run_claimed_elsewhere):
+            call_command("snapadmin_import", "--model", "demo.Category", "--file", str(path), stdout=out)
+
+        assert out.getvalue() == "skipped (already processing or finished)\n"
+        assert Category.objects.count() == 0
 
     def test_unresolvable_format_raises_via_start_import(self, tmp_path):
         from django.core.management import CommandError

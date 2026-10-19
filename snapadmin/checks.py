@@ -423,10 +423,22 @@ def check_unfold_theme(app_configs, **kwargs):
     fallback is active this emits one informational message (never an error, never
     blocks boot) so an operator who expected the themed UI can see why it isn't there.
     """
-    from snapadmin.admin import UNFOLD_INSTALLED
+    from snapadmin.unfold_compat import NOT_INSTALLED, detect_unfold
 
-    if UNFOLD_INSTALLED:
+    active, reason = detect_unfold()
+    if active:
         return []
+    if reason != NOT_INSTALLED:
+        return [
+            Warning(
+                f"'unfold' is in INSTALLED_APPS but could not be imported ({reason}), so "
+                "SnapAdmin fell back to Django's stock admin.",
+                hint="The usual cause is an import cycle: a custom user model (or another "
+                "module loaded during app setup) imports SnapAdmin, which then imports Unfold "
+                "half-loaded. Import SnapAdmin lazily there, and register admins from admin.py.",
+                id="snapadmin.W032",
+            )
+        ]
     return [
         Info(
             "SnapAdmin is running on Django's built-in admin theme — the optional "
@@ -1172,7 +1184,8 @@ def check_tenant_scoping(app_configs, **kwargs):
                     f"{field_name!r} — its tenant column cannot be resolved.",
                     hint=f"Add {field_name} = snapadmin.tenancy.tenant_field() to {label}, "
                     "or set tenant_field to the name of the column that already "
-                    "carries the tenant value.",
+                    "carries the tenant value (a ForeignKey by its field name or its "
+                    "_id column — both work).",
                     id="snapadmin.E009",
                 )
             )
@@ -2287,6 +2300,186 @@ def check_admin_sections_deprecated(app_configs, **kwargs) -> list[CheckMessage]
     ]
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Setting values SnapAdmin can never use (#EXT3f)
+#
+# A value that only fails where it is used fails late and far from its cause:
+# SNAPADMIN_THROTTLE_USER = "" (an unset environment variable) answered 500 on
+# every throttled request, and an int() over "" crashes a backup run or a list
+# endpoint. These checks move each of those to manage.py check.
+# ─────────────────────────────────────────────────────────────────────────────
+
+#: Every SNAPADMIN_* setting the package reads through int() or float(). The
+#: ``tests/test_settings_validation.py`` ast scan fails when a coerced setting is
+#: missing here, so a new one cannot skip validation.
+_NUMERIC_SETTINGS: dict[str, type] = {
+    "SNAPADMIN_API_MAX_PAGE_SIZE": int,
+    "SNAPADMIN_API_PAGE_SIZE": int,
+    "SNAPADMIN_API_TOKEN_TOUCH_INTERVAL": int,
+    "SNAPADMIN_AUDIT_RETENTION_DAYS": int,
+    "SNAPADMIN_BACKUP_FTP_PORT": int,
+    "SNAPADMIN_BACKUP_KEEP": int,
+    "SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS": int,
+    "SNAPADMIN_BACKUP_MEDIA_SIZE_WARNING_BYTES": int,
+    "SNAPADMIN_BACKUP_NETWORK_EVERY_HOURS": int,
+    "SNAPADMIN_BACKUP_REMOTE_EVERY_HOURS": int,
+    "SNAPADMIN_BACKUP_S3_EVERY_HOURS": int,
+    "SNAPADMIN_BACKUP_SFTP_EVERY_HOURS": int,
+    "SNAPADMIN_BACKUP_SFTP_PORT": int,
+    "SNAPADMIN_ERROR_ALERT_COOLDOWN_MINUTES": int,
+    "SNAPADMIN_ERROR_ALERT_THRESHOLD": int,
+    "SNAPADMIN_ERROR_ALERT_WINDOW_MINUTES": int,
+    "SNAPADMIN_ERROR_DIGEST_MAX_GROUPS": int,
+    "SNAPADMIN_ERROR_RETENTION_DAYS": int,
+    "SNAPADMIN_ESTIMATED_COUNT_THRESHOLD": int,
+    "SNAPADMIN_EXPORT_CHUNK_SIZE": int,
+    "SNAPADMIN_EXPORT_LIMIT_MAX": int,
+    "SNAPADMIN_EXPORT_MAX_ROWS": int,
+    "SNAPADMIN_FETCH_BY_MAX_VALUES": int,
+    "SNAPADMIN_HEALTH_ALERT_COOLDOWN_MINUTES": int,
+    "SNAPADMIN_IMPORT_CHUNK_SIZE": int,
+    "SNAPADMIN_RESTORE_SNAPSHOT_KEEP": int,
+    "SNAPADMIN_ALERT_WEBHOOK_TIMEOUT": float,
+}
+
+#: DRF's own rate grammar: ``<count>/<period>``, the period read by its first
+#: letter (s, m, h, d).
+_RATE_RE = re.compile(r"^\s*\d+\s*/\s*[smhd]")
+
+
+def _number_problem(value: object, kind: type) -> bool:
+    """Whether the call site's ``int()``/``float()`` would raise on ``value`` —
+    ``None`` and real numbers aside, which the call sites handle."""
+    if value is None or isinstance(value, (bool, int, float)):
+        return False
+    try:
+        kind(str(value).strip())
+    except ValueError:
+        return True
+    return False
+
+
+def check_setting_values(app_configs, **kwargs) -> list[CheckMessage]:
+    """``snapadmin.E029``: a numeric setting ``int()`` cannot read, or a throttle
+    rate DRF cannot parse — both would fail at use time, far from their cause."""
+    errors: list[CheckMessage] = []
+    for name, kind in sorted(_NUMERIC_SETTINGS.items()):
+        value = get_setting(name, None)
+        if _number_problem(value, kind):
+            errors.append(
+                Error(
+                    f"{name} is {value!r}, which is not a number — SnapAdmin cannot use it: "
+                    "most code paths that read it fail when they run, the rest fall back to "
+                    "the default without saying so.",
+                    hint=f"Set {name} to a number, or leave it unset for the default. An unset "
+                    "environment variable read with os.getenv() arrives here as an empty string.",
+                    id="snapadmin.E029",
+                )
+            )
+    for name in sorted(conf._THROTTLE_SETTINGS):
+        value = get_setting(name, None)
+        malformed_text = isinstance(value, str) and value.strip() and not _RATE_RE.match(value)
+        if malformed_text or (value is not None and not isinstance(value, str)):
+            errors.append(
+                Error(
+                    f"{name} is {value!r}, which is not a rate — every throttled API request "
+                    "would answer 500.",
+                    hint="Write <count>/<period> with the period second, minute, hour or day "
+                    "(e.g. '600/min'), or None to switch the throttle off.",
+                    id="snapadmin.E029",
+                )
+            )
+    return errors
+
+
+def check_throttle_rates(app_configs, **kwargs) -> list[CheckMessage]:
+    """``W029``: a blank throttle rate (it falls back); ``W028``: a DRF
+    ``user``/``anon`` rate that differs from what SnapAdmin's endpoints enforce."""
+    drf_config = getattr(settings, "REST_FRAMEWORK", {}) or {}
+    drf_rates = drf_config.get("DEFAULT_THROTTLE_RATES") or {}
+    warnings: list[CheckMessage] = []
+    for name, (scope, _default) in sorted(conf._THROTTLE_SETTINGS.items()):
+        effective = conf._resolve_throttle_rate(name, drf_rates)
+        configured = get_setting(name, None)
+        if isinstance(configured, str) and not configured.strip():
+            warnings.append(
+                Warning(
+                    f"{name} is blank, so SnapAdmin's endpoints use {effective!r} instead.",
+                    hint="Set a rate, or None to switch the throttle off. A blank value is "
+                    "what an unset environment variable becomes — it does not disable anything.",
+                    id="snapadmin.W029",
+                )
+            )
+        drf_scope = scope.removeprefix("snapadmin_")
+        drf_rate = drf_rates.get(drf_scope)
+        if drf_rate and drf_rate != effective:
+            warnings.append(
+                Warning(
+                    f"REST_FRAMEWORK['DEFAULT_THROTTLE_RATES'][{drf_scope!r}] is {drf_rate!r}, but "
+                    f"SnapAdmin's API endpoints enforce {effective!r} — that DRF rate applies to "
+                    "your own views only.",
+                    hint=f"Set {name} = {drf_rate!r} (or DEFAULT_THROTTLE_RATES[{scope!r}]) to "
+                    "apply it to SnapAdmin's endpoints too.",
+                    id="snapadmin.W028",
+                )
+            )
+    return warnings
+
+
+#: Removed from Django 5.1 and ignored without a word since.
+_REMOVED_STORAGE_SETTINGS = ("DEFAULT_FILE_STORAGE", "STATICFILES_STORAGE")
+
+
+def check_removed_storage_settings(app_configs, **kwargs) -> list[CheckMessage]:
+    """``snapadmin.W030``: a storage setting Django no longer reads.
+
+    SnapAdmin's file features — retention file deletion, file cleanup, exports,
+    media backups — use ``STORAGES["default"]``. A project still configuring the
+    old name runs them against a storage it did not choose; the test settings of
+    this very project did, for a year.
+    """
+    return [
+        Warning(
+            f"{name} is set, but Django removed it in 5.1 and ignores it — SnapAdmin's file "
+            "features use STORAGES instead.",
+            hint="Move the backend into STORAGES['default'] (or ['staticfiles']) and delete "
+            f"{name}.",
+            id="snapadmin.W030",
+        )
+        for name in _REMOVED_STORAGE_SETTINGS
+        if hasattr(settings, name)
+    ]
+
+
+def check_builtin_admins_registered(app_configs, **kwargs) -> list[CheckMessage]:
+    """``snapadmin.W031``: the error monitor records errors no admin page shows.
+
+    The built-in admins used to be reachable only through
+    ``SnapModel.register_all_admins()``; a project without SnapModels never calls
+    it, so ``SnapErrorMonitorMiddleware`` filled a table nobody could open (#EXT3i).
+    """
+    middleware = getattr(settings, "MIDDLEWARE", None) or []
+    if "snapadmin.middleware.SnapErrorMonitorMiddleware" not in middleware:
+        return []
+    if not get_setting("SNAPADMIN_ERROR_MONITOR_ENABLED", True):
+        return []
+    from django.contrib import admin as django_admin
+
+    from snapadmin.models import ErrorEvent
+
+    if django_admin.site.is_registered(ErrorEvent):
+        return []
+    return [
+        Warning(
+            "SnapErrorMonitorMiddleware records errors, but no admin page shows them — "
+            "ErrorEvent is not registered on admin.site.",
+            hint="Call snapadmin.admin.register_builtin_admins() from one of your admin.py "
+            "files (SnapModel.register_all_admins() does it for you).",
+            id="snapadmin.W031",
+        )
+    ]
+
+
 def check_startup_report_setting(app_configs, **kwargs) -> list[CheckMessage]:
     """Warn: ``SNAPADMIN_STARTUP_REPORT`` is not ``"auto"``, ``True`` or ``False``.
 
@@ -2348,6 +2541,10 @@ ALL_CHECKS = [
     check_masked_models_use_masking_admin,
     check_admin_sections_deprecated,
     check_startup_report_setting,
+    check_setting_values,
+    check_throttle_rates,
+    check_removed_storage_settings,
+    check_builtin_admins_registered,
 ]
 
 

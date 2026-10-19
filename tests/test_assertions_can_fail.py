@@ -15,8 +15,8 @@ Both were found by hand during #QA1b and both had shipped:
   *is* the absence of an exception), but the shape hides the illegitimate ones,
   so the set is frozen below and may only shrink.
 
-The rule this encodes lives in ``.claude/rules.md`` → "Testing rules";
-``QUALITY.md`` §13 and §30 are what it comes from.
+The rule this encodes is in ``CONTRIBUTING.md`` → *Testing methodology* (section 5,
+"Testing the tests"): an assertion you have never seen fail is a claim, not a test.
 """
 
 from __future__ import annotations
@@ -78,7 +78,6 @@ ASSERTION_FREE_TESTS = frozenset(
         "test_i18n.py::test_chart_data_is_json_serialisable",
         "test_importing.py::test_local_storage_is_a_no_op_when_paths_already_match",
         "test_importing.py::test_masked_field_is_allowed_for_a_superuser_requester",
-        "test_importing.py::test_skipped_run_is_reported",
         "test_importing.py::test_unmasked_writable_model_passes",
         "test_limits.py::test_decrement_swallows_an_already_expired_key",
         "test_models.py::test_register_already_registered_does_not_raise",

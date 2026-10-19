@@ -29,7 +29,10 @@ counts as a promise and what does not.
   blessed top-level re-exports (`from snapadmin import SnapModel, SnapCharField, …`).
 - **`SnapModel` class attributes and `Snap*Field` keyword arguments**, and their defaults.
 - **The generated-admin extension surface** — `register_admin()`, `admin_overrides` (a project's own
-  callable here always wins over anything the generator produces), `get_admin_fields()`'s return
+  callable here always wins over anything the generator produces), `admin_mixins` (placed before the
+  generated base, so a mixin extends `get_readonly_fields` / `get_fieldsets` /
+  `formfield_for_dbfield` through `super()`; precedence: `admin_overrides` > `admin_mixins` >
+  generated > `PIIMaskingAdminMixin` > `SnapSaveMixin` > `ModelAdmin`), `get_admin_fields()`'s return
   shape (the `AdminFieldSets` named tuple: `form_fields`, `list_display`, `search_fields`,
   `list_filter`, `autocomplete_fields`, in that order), `get_admin_media()` and `formatted_id`.
 - **`SNAPADMIN_*` settings** — names, defaults and meaning.
@@ -44,13 +47,13 @@ migrations.
 Most of this surface is pinned by `tests/test_public_contract.py`, so a breaking change fails the
 suite rather than reaching PyPI quietly.
 
-**The test suite (`tests/`) is not shipped in the wheel or sdist** — only `snapadmin/` and the docs
-are; see the [Contributing](README.md#contributing) section. That is a packaging-size choice, not a
-coverage gap: every security fix in `CHANGELOG.md`/the release notes has a regression test living
-next to the subsystem it fixed (masking, sanitization, permission checks, the audit trail, …), and
-CI runs the full suite on every push against the compatibility matrix — what actually ships is what
-that suite already verified against a clone of this repository, not a second, unverified copy
-trailing behind inside every install.
+**The test suite (`tests/`) ships in the sdist, never in the wheel.** An auditor or a downstream
+packager can unpack the sdist and run `python -m pytest` there (see
+[CONTRIBUTING.md](CONTRIBUTING.md)); an installed wheel stays lean. Every security fix in
+`CHANGELOG.md`/the release notes has a regression test living next to the subsystem it fixed
+(masking, sanitization, permission checks, the audit trail, …) and an entry in the security
+regression registry (`python -m pytest -m security_regression`), and CI runs the full suite on every
+push against the compatibility matrix.
 
 **Right now (the `0.x` beta series, before `1.0` ships):** breaking changes are possible but never
 silent. Each one is called out in [`CHANGELOG.md`](CHANGELOG.md) and the release notes, with a
@@ -327,9 +330,14 @@ Key protections:
   and export for anyone who may not read *every* masked field of that model raw, and is not
   searchable for them), Django's own admin history message (a masked field's before/after values
   are stored masked there, since that text is shown to anyone who may view the object), and the auto-generated REST
-  filter/ordering/search parameters — a masked field is silently excluded from `?field=`,
-  `?ordering=field` and `?search=` for a caller without PII access, so match/no-match, sort order or
-  search hits can't be used as an oracle to recover the value a masked response body never reveals raw.
+  filter/ordering/search parameters — a masked field is excluded from `?field=`, `?ordering=field`
+  and `?search=` for a caller without PII access, so match/no-match, sort order or search hits can't
+  be used as an oracle to recover the value a masked response body never reveals raw. With
+  `SNAPADMIN_API_STRICT_QUERY_PARAMS` on (the default since 0.1.0b11) such a parameter is answered
+  with `400` — exactly the message a field that does not exist gets, whatever its value, with no hint
+  listing the hidden field's lookups — instead of being dropped; a masked foreign key is hidden under
+  its column name (`<field>_id`) too. The same strict mode refuses any unknown query parameter, so a
+  filter the API does not understand can never return the whole table with a `200`.
 - **Per-field masking rules and permissions** — `SNAPADMIN_MASKING_RULES` sets, per field, how it is
   obfuscated (a regex `pattern`+`replacement`, or a flat `replacement` redaction) and which
   `permission` unlocks *that one field*, so raw access can be granted narrowly instead of through the
@@ -519,7 +527,9 @@ Key protections:
     `Collector` walk over every matched row, which also discovers cascade spillover the `subject_path`
     declarations alone would not show — so the preview matches what `--confirm` actually does. Any
     protected relation (`on_delete=PROTECT`) refuses the **whole** run up front and deletes nothing,
-    rather than deleting in dependency order to route around it.
+    rather than deleting in dependency order to route around it. **Stored files go with the rows**
+    (since 0.1.0b11): every file field of every erased row has its file removed unless another row
+    still names it; the dry run prints a count, never file names.
   - **The deletion audit entry cannot be swept away by a later request for the same subject** —
     `SnapadminAuditLog` is deliberately outside the general SnapAdmin registry (see the audit-trail
     entry above) and therefore carries no `subject_path` at all.

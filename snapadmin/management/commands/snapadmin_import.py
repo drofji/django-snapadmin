@@ -28,6 +28,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from snapadmin.importing import (
     SnapImportError,
+    _ImportSummary,
     export_dir,
     import_chunk_size,
     run_import_job,
@@ -135,12 +136,16 @@ class Command(BaseCommand):
         except User.DoesNotExist:
             raise CommandError(f"No user named {username!r}.") from None
 
-    def _report(self, summary: dict, report_path: str | None) -> None:
-        """Print one run's outcome, and fail the command when the run did."""
-        if summary.get("skipped"):
+    def _report(self, summary: _ImportSummary, report_path: str | None) -> None:
+        """Print one run's outcome, and fail the command when the run did.
+
+        Branches on ``outcome`` — never on ``skipped``, which is ``True`` for an
+        unclaimed job and a row count otherwise (#EXT3e).
+        """
+        if summary["outcome"] == "job_skipped":
             self.stdout.write(f"skipped ({summary['reason']})")
             return
-        if summary.get("cancelled"):
+        if summary["outcome"] == "cancelled":
             self.stdout.write(
                 self.style.WARNING(
                     f"cancelled — {summary['created']} created, {summary['updated']} updated, "
@@ -148,7 +153,7 @@ class Command(BaseCommand):
                 )
             )
             return
-        if "errors" in summary:
+        if summary["outcome"] == "failed":
             raise CommandError(f"Import failed: {summary['errors'][0]}")
 
         unmapped = summary.get("unmapped_columns") or []

@@ -45,7 +45,7 @@ A failing test leaves a Playwright trace in ``test-results/e2e/``; open it with
 * **English, UTC, a fixed viewport.** Text assertions must not depend on the
   machine's locale (the demo ships ten), and a layout that collapses the
   sidebar on a narrow window must not depend on the runner's screen.
-* **No sleeps, no retries, no raised timeouts** (``QUALITY.md`` §23). Timing is
+* **No sleeps, no retries, no raised timeouts** (``CONTRIBUTING.md``). Timing is
   Playwright's auto-waiting ``expect``; a scenario that is still unstable gets
   its cause found, not a rerun.
 """

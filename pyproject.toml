@@ -48,13 +48,28 @@ include = [
     # the wheel stays lean, and a downstream packager or auditor can unpack the sdist
     # and run `python -m pytest` there. The suite needs the demo project (its settings
     # module), the docs it checks for truth, and the CI/contributor files it pins.
+    # Named by what is tracked, never `<dir>/**/*`: an explicit include overrides
+    # .gitignore and `exclude` alike, so a blanket pattern packed a developer's local
+    # demo/.env into any sdist built from a working tree (#PKG1;
+    # tests/test_distribution_contents.py guards both directions).
     { path = "tests/**/*.py", format = ["sdist"] },
     { path = "conftest.py", format = ["sdist"] },
     { path = "pytest.ini", format = ["sdist"] },
-    { path = "demo/**/*", format = ["sdist"] },
-    { path = "docs/**/*", format = ["sdist"] },
+    { path = "demo/**/*.py", format = ["sdist"] },
+    { path = "demo/**/*.html", format = ["sdist"] },
+    { path = "demo/**/*.po", format = ["sdist"] },
+    { path = "demo/**/*.mo", format = ["sdist"] },
+    { path = "demo/*.yml", format = ["sdist"] },
+    { path = "demo/Dockerfile", format = ["sdist"] },
+    { path = "demo/README.md", format = ["sdist"] },
+    { path = "demo/dist.env", format = ["sdist"] },
+    { path = "demo/requirements.txt", format = ["sdist"] },
+    { path = "demo/scripts/*.sh", format = ["sdist"] },
+    { path = "docs/index.html", format = ["sdist"] },
+    { path = "docs/llms.txt", format = ["sdist"] },
+    { path = "docs/upstream/*.txt", format = ["sdist"] },
     { path = "CONTRIBUTING.md", format = ["sdist"] },
-    { path = ".github/**/*", format = ["sdist"] },
+    { path = ".github/**/*.yml", format = ["sdist"] },
     # The mutation-testing runner the CI jobs and CONTRIBUTING.md both call.
     { path = "scripts/*.py", format = ["sdist"] },
 ]

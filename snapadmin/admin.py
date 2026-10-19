@@ -4,9 +4,11 @@ Admin base classes and registration for SnapAdmin.
 Resolves the admin ``ModelAdmin``/inline/widget base lazily: django-unfold's themed
 classes when ``unfold`` is installed *and* in ``INSTALLED_APPS`` (``UNFOLD_INSTALLED``
 is then ``True``), otherwise Django's built-in admin — so the package renders either
-way. Also registers the package's own models (``APIToken``, ``ErrorEvent``) and exposes
-the public inline bases (``SnapTabularInline``/``SnapStackedInline``). The auto
-generated per-model ``ModelAdmin`` is built by ``register_admin`` /
+way. Owns the admins of the package's own models — the error log, the audit log and
+the API tokens, registered by :func:`register_builtin_admins` (which
+``register_all_admins()`` calls; a project without SnapModels calls it itself) —
+and the public inline bases (``SnapTabularInline``/``SnapStackedInline``). The
+auto-generated per-model ``ModelAdmin`` is built by ``register_admin`` /
 ``register_all_admins`` in :mod:`snapadmin.models`; this module owns the shared base
 classes those build on.
 """
@@ -23,23 +25,24 @@ from django.utils.safestring import mark_safe
 from django.utils.text import smart_split, unescape_string_literal
 from django.utils.translation import gettext_lazy as _
 
-try:
-    from django.conf import settings
+from snapadmin import audit
+from snapadmin.models import APIToken, ErrorEvent, SnapadminAuditLog
+from snapadmin.unfold_compat import detect_unfold
+from snapadmin.widgets import SmartModelSelectorWidget
 
-    if 'unfold' not in settings.INSTALLED_APPS:
-        raise ImportError("Unfold not in INSTALLED_APPS")
+# One process-wide decision, shared with snapadmin.admin_gen and the auth /
+# extra-settings styling, logged when Unfold is listed but fails to import (#EXT3j).
+UNFOLD_INSTALLED, _UNFOLD_FALLBACK_REASON = detect_unfold()
 
+if UNFOLD_INSTALLED:
     from unfold.admin import ModelAdmin, TabularInline, StackedInline
     from unfold.contrib.filters.admin import RelatedDropdownFilter, ChoicesDropdownFilter
     from unfold.decorators import display
-
-    UNFOLD_INSTALLED = True
-except (ImportError, RuntimeError):
+else:
     from django.contrib.admin import ModelAdmin, TabularInline, StackedInline
 
     RelatedDropdownFilter = admin.RelatedFieldListFilter
     ChoicesDropdownFilter = admin.ChoicesFieldListFilter
-    UNFOLD_INSTALLED = False
 
     def display(description=None, header=False, label=False, **kwargs):
         def decorator(func):
@@ -48,11 +51,6 @@ except (ImportError, RuntimeError):
             return func
 
         return decorator
-
-
-from snapadmin import audit
-from snapadmin.models import APIToken, ErrorEvent, SnapadminAuditLog
-from snapadmin.widgets import SmartModelSelectorWidget
 
 
 class SnapTabularInline(TabularInline):
@@ -541,3 +539,27 @@ class SnapadminAuditLogAdmin(ModelAdmin):
         if UNFOLD_INSTALLED:
             return res
         return res[0]
+
+
+def register_builtin_admins(site: admin.AdminSite | None = None) -> None:
+    """Register SnapAdmin's own admins — the error log, the audit log and (behind
+    its gate) the API tokens — on ``site`` (``admin.site`` by default).
+
+    ``SnapModel.register_all_admins()`` calls this. A project that uses the error
+    monitor, the audit trail or token auth **without** declaring a SnapModel calls
+    it from one of its own ``admin.py`` files — otherwise the middleware records
+    errors no admin page shows (``snapadmin.W031`` says so). Idempotent, and a
+    model the project already registered keeps the project's own admin.
+    """
+    from snapadmin.admin_gen import _token_admin_enabled
+
+    target = site if site is not None else admin.site
+    builtins: list[tuple[type, type]] = [
+        (ErrorEvent, ErrorEventAdmin),
+        (SnapadminAuditLog, SnapadminAuditLogAdmin),
+    ]
+    if _token_admin_enabled():
+        builtins.insert(0, (APIToken, APITokenAdmin))
+    for model, model_admin in builtins:
+        if not target.is_registered(model):
+            target.register(model, model_admin)

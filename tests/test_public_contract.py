@@ -118,6 +118,8 @@ PUBLIC_IMPORTS = [
     "snapadmin.admin.ErrorEventAdmin",
     "snapadmin.admin.SnapTabularInline",
     "snapadmin.admin.SnapStackedInline",
+    # 0.1.0b11 (#EXT3i): the built-in admins without a SnapModel.
+    "snapadmin.admin.register_builtin_admins",
     # API layer
     "snapadmin.api.authentication.APITokenAuthentication",
     "snapadmin.api.views.DynamicModelViewSet",

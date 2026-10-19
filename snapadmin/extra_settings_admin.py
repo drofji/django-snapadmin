@@ -65,13 +65,16 @@ def apply_unfold_styling() -> bool:
 
     from django.contrib import admin
 
-    try:
-        from unfold.admin import ModelAdmin as UnfoldModelAdmin
-    except ImportError:
+    from snapadmin.unfold_compat import detect_unfold
+
+    if not detect_unfold()[0]:
         # Unfold is an optional theme (``pip install django-snapadmin[theme]``).
         # Without it there is no Unfold styling to apply, so the extra_settings
         # ``Setting`` admin simply keeps its stock Django rendering — nothing to do.
+        # (A listed-but-broken Unfold is logged by snapadmin.unfold_compat.)
         return False
+
+    from unfold.admin import ModelAdmin as UnfoldModelAdmin
 
     changed = False
     # A snapshot of the items — we mutate the registry while iterating.

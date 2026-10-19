@@ -57,7 +57,10 @@ have chosen differently by reading the code):
    appending, so a re-run cannot duplicate a report line either.
 7. **Both a management command and a job.** ``manage.py snapadmin_import`` is
    the thin caller; :func:`run_import_job` (driving a
-   :class:`~snapadmin.models.SnapImportJob`) is the engine, reusing the job
+   :class:`~snapadmin.models.SnapImportJob`) is the engine — its summary names
+   its shape in ``outcome`` (``finished`` / ``cancelled`` / ``failed`` /
+   ``job_skipped``; read that, not ``skipped``, which is a row count in every
+   shape but the unclaimed job's) — reusing the job
    model shape, chunking and resumability from the export/reindex jobs rather
    than inventing a parallel mechanism.
 8. **The import path is a write surface from the first line, not a
@@ -78,10 +81,10 @@ import json
 import os
 import re
 from itertools import islice
-from typing import Any, Iterator
+from typing import Any, Iterator, Literal, TypedDict, Union
 
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, models, transaction
 from django.utils import timezone
 
 from snapadmin.conf import get_setting
@@ -89,7 +92,13 @@ from snapadmin.exporting import export_dir, get_export_storage
 from snapadmin.logging_config import get_logger
 from snapadmin.masking import get_masked_fields, user_can_view_pii
 from snapadmin.registry import get_model_meta
-from snapadmin.tenancy import get_current_tenant, is_tenant_scoped, tenant_field_name
+from snapadmin.tenancy import (
+    _tenant_attname,
+    _tenant_field_names,
+    get_current_tenant,
+    is_tenant_scoped,
+    tenant_field_name,
+)
 
 logger = get_logger(__name__)
 
@@ -292,7 +301,8 @@ def check_write_surface(model, field_names: set[str], *, requested_by=None) -> N
 
     if is_tenant_scoped(model):
         tenant_field = tenant_field_name(model)
-        if tenant_field in field_names:
+        # A foreign-key tenant column answers to its field name and its column alike.
+        if _tenant_field_names(model) & field_names:
             raise SnapImportError(
                 f"Column targets {tenant_field!r} on {model._meta.label}, a tenant-scoped "
                 "model's tenant column — import assigns it from --tenant, never from a file "
@@ -336,7 +346,20 @@ def _coerce(field, raw: Any) -> Any:
     """
     if raw == "" and field.null:
         return None
+    if isinstance(field, models.BooleanField) and isinstance(raw, str):
+        # Spreadsheets write "TRUE", "yes", "on"; Django's own parser takes only
+        # True/False, "t"/"f", "True"/"False" and "1"/"0" (#EXT3g).
+        token = raw.strip().lower()
+        if token in _TRUE_TOKENS:
+            return True
+        if token in _FALSE_TOKENS:
+            return False
     return field.to_python(raw)
+
+
+#: Boolean spellings a CSV or spreadsheet export uses, read case-insensitively.
+_TRUE_TOKENS = frozenset({"true", "t", "yes", "y", "on", "1"})
+_FALSE_TOKENS = frozenset({"false", "f", "no", "n", "off", "0"})
 
 
 def _build_field_values(model, column_map: dict[str, str], row: dict) -> dict[str, Any]:
@@ -421,9 +444,7 @@ def _process_row(
                 # check_write_surface already refused a column mapped to the
                 # tenant field itself — this is the only door a new row's
                 # tenant is ever assigned through (#FUT1b).
-                values[model._meta.get_field(tenant_field_name(model)).attname] = (
-                    get_current_tenant()
-                )
+                values[_tenant_attname(model)] = get_current_tenant()
             instance = model(**values)
             instance.full_clean()
             instance.save()
@@ -552,7 +573,48 @@ def start_import(
     )
 
 
-def run_import_job(job, *, file_path: str, chunk_size: int | None = None, on_progress=None) -> dict:
+class _ImportCounts(TypedDict):
+    created: int
+    updated: int
+    skipped: int
+    failed: int
+
+
+class _ImportFinished(_ImportCounts):
+    outcome: Literal["finished"]
+    total: int
+    unmapped_columns: list[str]
+
+
+class _ImportCancelled(_ImportCounts):
+    outcome: Literal["cancelled"]
+    cancelled: Literal[True]
+
+
+class _ImportFailed(_ImportCounts):
+    outcome: Literal["failed"]
+    errors: list[str]
+
+
+class _ImportJobSkipped(TypedDict):
+    outcome: Literal["job_skipped"]
+    job_skipped: Literal[True]
+    #: Kept for code written against the summary before ``outcome`` existed; in
+    #: every other shape ``skipped`` is a row count — the double meaning that made
+    #: ``snapadmin_import`` crash (#EXT3e). Read ``outcome`` instead.
+    skipped: Literal[True]
+    reason: str
+
+
+#: What :func:`run_import_job` returns: one shape per ``outcome``. A caller
+#: branches on ``summary["outcome"]`` — never on ``skipped``, whose meaning depends
+#: on the shape.
+_ImportSummary = Union[_ImportFinished, _ImportCancelled, _ImportFailed, _ImportJobSkipped]
+
+
+def run_import_job(
+    job, *, file_path: str, chunk_size: int | None = None, on_progress=None
+) -> _ImportSummary:
     """Execute (or resume) the import for ``job``. See the module docstring.
 
     Single-flight, like :func:`snapadmin.exporting.run_export_job`: the job
@@ -570,7 +632,12 @@ def run_import_job(job, *, file_path: str, chunk_size: int | None = None, on_pro
     ).update(status=Status.PROCESSING)
     if not claimed:
         logger.info("snapadmin.import.skipped", job=str(job.pk))
-        return {"skipped": True, "reason": "already processing or finished"}
+        return {
+            "outcome": "job_skipped",
+            "job_skipped": True,
+            "skipped": True,
+            "reason": "already processing or finished",
+        }
 
     job.refresh_from_db()
     # #FUT1b: replay the tenant captured on the job at start_import() time —
@@ -593,6 +660,7 @@ def run_import_job(job, *, file_path: str, chunk_size: int | None = None, on_pro
         job.finished_at = timezone.now()
         job.save(update_fields=["status", "error", "finished_at"])
         return {
+            "outcome": "failed",
             "errors": [str(exc)],
             "created": job.created_count,
             "updated": job.updated_count,
@@ -668,7 +736,7 @@ def _chunks(rows, chunk_size: int):
         yield chunk
 
 
-def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:
+def _run(job, *, file_path: str, chunk_size: int, on_progress) -> _ImportSummary:
     from snapadmin.models import SnapImportJob
 
     Status = SnapImportJob.Status
@@ -753,6 +821,7 @@ def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:
         if cancelled:
             logger.info("snapadmin.import.cancelled", job=str(job.pk), rows=job.processed_rows)
             return {
+                "outcome": "cancelled",
                 "cancelled": True,
                 "created": job.created_count,
                 "updated": job.updated_count,
@@ -760,7 +829,8 @@ def _run(job, *, file_path: str, chunk_size: int, on_progress) -> dict:
                 "failed": job.failed_count,
             }
 
-        summary = {
+        summary: _ImportFinished = {
+            "outcome": "finished",
             "created": job.created_count,
             "updated": job.updated_count,
             "skipped": job.skipped_count,

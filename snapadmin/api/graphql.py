@@ -10,10 +10,15 @@ resolved field values unless the caller holds PII access. Served at ``/graphql/`
 this module is imported only when the GraphQL feature is enabled.
 """
 
+import copy
+from typing import cast
+
 import graphene
 from graphene_django import DjangoObjectType
+from graphene_django import converter as graphene_converter
 from graphene_django.views import GraphQLView
 from django.apps import apps
+from django.db import models
 from django.db.models import Model, QuerySet
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
@@ -30,6 +35,33 @@ from snapadmin.masking import (
 from snapadmin.registry import get_model_meta, is_registered
 
 logger = get_logger(__name__)
+
+
+@graphene_converter.convert_django_field.register(models.GeneratedField)
+def _convert_generated_field(field: models.GeneratedField, registry=None):
+    """A database-generated column, exposed as its ``output_field``'s type (#EXT3h).
+
+    graphene-django has no converter for it, and the schema builder used to drop
+    the whole model over that one field. The schema is read-only, so nothing
+    more is needed than the type; nullability follows the generated field.
+    """
+    # output_field is a required keyword of GeneratedField; the stubs type it Optional.
+    output = copy.copy(cast(models.Field, field.output_field))
+    output.name, output.attname, output.null = field.name, field.attname, field.null
+    output.model = field.model
+    return graphene_converter.convert_django_field(output, registry)
+
+
+def _unconvertible_fields(model: type[Model]) -> dict[str, str]:
+    """Each concrete field graphene cannot convert, with the reason — asked only
+    after building a type failed, to drop those fields instead of the model."""
+    failures: dict[str, str] = {}
+    for field in model._meta.concrete_fields:
+        try:
+            graphene_converter.convert_django_field(field, None)
+        except Exception as exc:
+            failures[field.name] = str(exc)
+    return failures
 
 
 def _check_access(info, model) -> None:
@@ -187,6 +219,27 @@ class SnapGraphQLView(GraphQLView):
             return super().dispatch(request, *args, **kwargs)
 
 
+def _build_object_type(model: type[Model], type_name: str, type_attrs: dict, excluded: list[str]):
+    """Build one model's ``DjangoObjectType``; a field graphene cannot convert costs
+    that field, not the model (#EXT3h) — dropped, logged as
+    ``graphql_field_skipped``, and the type built again without it."""
+    try:
+        return type(type_name, (DjangoObjectType,), type_attrs)
+    except Exception:
+        unconvertible = _unconvertible_fields(model)
+        if not unconvertible:
+            raise
+    for skipped_field, reason in sorted(unconvertible.items()):
+        logger.warning(
+            "graphql_field_skipped", model=model.__name__, field=skipped_field, error=reason
+        )
+        type_attrs.pop(f"resolve_{skipped_field}", None)
+    type_attrs["Meta"] = type(
+        "Meta", (), {"model": model, "exclude": sorted({*excluded, *unconvertible})}
+    )
+    return type(type_name, (DjangoObjectType,), type_attrs)
+
+
 def get_dynamic_graphql_schema():
     # graphene.ObjectType collects its fields/resolvers via a metaclass at
     # class-creation time, so attributes must be passed in the namespace dict
@@ -227,7 +280,7 @@ def get_dynamic_graphql_schema():
                         type_attrs[f"resolve_{guarded_field}"] = _make_masked_resolver(
                             guarded_field
                         )
-                object_type = type(type_name, (DjangoObjectType,), type_attrs)
+                object_type = _build_object_type(model, type_name, type_attrs, excluded)
 
                 # Add fields to Query
                 field_name = f"{model._meta.app_label}_{model.__name__.lower()}"

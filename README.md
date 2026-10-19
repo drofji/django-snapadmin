@@ -162,6 +162,7 @@ None of these touch the database except `required`, so you can change your mind 
 | `filterable=True` | `False` | Adds a sidebar filter in the admin and a `?field=…` query filter in the API |
 | `required=True` | `False` | `null=False, blank=False`. The one kwarg that *does* change the column — set it instead of Django's two, so the database and the search index agree |
 | `updatable=False` | `True` | Write-once: the value can be set on create but never changed |
+| `delete_replaced=True` / `delete_on_delete=True` | `False` | File fields: a replaced file / a deleted row's file [leaves storage](https://drofji.github.io/django-snapadmin/#file-cleanup) once the transaction commits, unless another row still names it |
 
 On the model itself:
 
@@ -254,7 +255,8 @@ status badges, tabs, inlines, autocomplete · field-level change history · an
 connection
 
 **🔌 APIs** — [REST CRUD](https://drofji.github.io/django-snapadmin/#api-rest) with Swagger and
-auto-derived filters · [GraphQL](https://drofji.github.io/django-snapadmin/#api-graphql) with
+auto-derived filters ([an unknown query parameter is a `400`](https://drofji.github.io/django-snapadmin/#api-strict-query-params),
+never silently ignored) · [GraphQL](https://drofji.github.io/django-snapadmin/#api-graphql) with
 permissions on every traversed relation ·
 [API tokens](https://drofji.github.io/django-snapadmin/#api-tokens) hashed at rest ·
 [per-field](https://drofji.github.io/django-snapadmin/#field-permissions) read/write guards ·

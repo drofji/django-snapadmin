@@ -297,6 +297,31 @@ class TestSettingsGatedCapabilities:
     def test_rate_limiting_off_when_no_throttle(self):
         assert _collect()["rate_limiting"] is False
 
+    def test_file_cleanup_counts_the_demo_field_that_opts_in(self):
+        data = _collect(verbose=True)
+
+        assert data["file_cleanup"] is True
+        assert data["details"]["file_cleanup"] == "1 file field"
+
+    def test_file_cleanup_off_when_no_field_opts_in(self, monkeypatch):
+        from demo.apps.shop.models import Showcase
+
+        field = Showcase._meta.get_field("file_field")
+        monkeypatch.setattr(field, "delete_replaced", False)
+        monkeypatch.setattr(field, "delete_on_delete", False)
+
+        data = _collect(verbose=True)
+
+        assert data["file_cleanup"] is False
+        assert "file_cleanup" not in data["details"]
+
+    def test_strict_query_params_on_by_default(self):
+        assert _collect()["strict_query_params"] is True
+
+    @override_settings(SNAPADMIN_API_STRICT_QUERY_PARAMS=False)
+    def test_strict_query_params_off_when_switched_off(self):
+        assert _collect()["strict_query_params"] is False
+
     @override_settings(SNAPADMIN_API_DELETE_GUARD="demo.guards.can_delete")
     def test_delete_guard_on_when_configured(self):
         assert _collect()["delete_guard"] is True

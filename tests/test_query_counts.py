@@ -266,7 +266,9 @@ class TestRestListQueryCounts:
 
         assert f'"count":{LARGE}'.encode() in measured.body
         assert measured.small == measured.large
-        assert measured.large == 5
+        # 4 since 0.1.0b11 (#EXT3l): the token's last_used_at is no longer rewritten on
+        # a request inside the touch interval — the UPDATE this pin used to include.
+        assert measured.large == 4
 
     def test_orderitem_list_with_two_fks_is_constant(self, admin_user, client):
         url = reverse("model-list", args=["demo", "OrderItem"])
@@ -275,7 +277,7 @@ class TestRestListQueryCounts:
 
         assert f'"count":{LARGE}'.encode() in measured.body
         assert measured.small == measured.large
-        assert measured.large == 4
+        assert measured.large == 3  # one UPDATE fewer since #EXT3l, see above
 
     def test_masked_list_is_constant(self, django_user_model, client, settings):
         settings.SNAPADMIN_MASKING_RULES = MASKING_RULES_NOBODY_UNLOCKS
@@ -288,7 +290,7 @@ class TestRestListQueryCounts:
         assert b"raw-bio-" not in measured.body
         assert b"TAX-" not in measured.body  # the encrypted field is masked too
         assert measured.small == measured.large
-        assert measured.large == 6
+        assert measured.large == 5  # one UPDATE fewer since #EXT3l, see above
 
 
 # ── audit trail ─────────────────────────────────────────────────────────────

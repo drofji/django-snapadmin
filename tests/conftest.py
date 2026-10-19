@@ -129,6 +129,16 @@ def regular_user(db):
     )
 
 
+@pytest.fixture(autouse=True)
+def fresh_elasticsearch_state():
+    """Each test starts with no cached Elasticsearch client or ensured index
+    (#EXT3k): that cache is process state, and a test that swaps the client class
+    must not be handed the previous test's client."""
+    from snapadmin.models import _forget_es_state
+
+    _forget_es_state()
+
+
 @pytest.fixture(scope="session", autouse=True)
 def assert_no_model_leaked_into_the_app_registry():
     """Fail the session if a test left a model class in Django's app registry.

@@ -40,9 +40,11 @@ class TestQueryTypeIsPopulated:
         for model in apps.get_app_config("demo").get_models():
             if not is_registered(model) or not model._meta.managed:
                 continue
+            # Unconditional since #EXT3h: the old "if singular in field_names" let a model
+            # that had dropped out of the schema pass this test.
             singular = f"demo{model.__name__.capitalize()}"
-            if singular in field_names:
-                assert f"allDemo{model.__name__.capitalize()}s" in field_names
+            assert singular in field_names, f"{model._meta.label} is missing from the schema"
+            assert f"allDemo{model.__name__.capitalize()}s" in field_names
 
 
 @pytest.mark.django_db

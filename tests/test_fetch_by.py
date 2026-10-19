@@ -1,8 +1,7 @@
 """
 Tests for ``POST /api/models/<app_label>/<Model>/fetch-by/`` (#FETCH2a).
 
-D10 in ``.claude/parallel/DECISIONS.md``: ship it as a small delta on the
-export streaming path — a unique/indexed field only, a hard cap on ``values``
+Shipped as a small delta on the export streaming path — a unique/indexed field only, a hard cap on ``values``
 before the route exists, and the same streaming/permissions/masking as
 ``list``/``export``.
 """
@@ -236,10 +235,32 @@ def test_the_backend_header_can_be_switched_off_for_fetch_by(rates_client, rates
 
 
 @pytest.mark.django_db
-def test_a_masked_model_with_no_search_fields_still_lists(regular_user):
+def test_a_masked_model_with_no_search_fields_still_lists_and_refuses_the_masked_sort_key(regular_user):
     """#QA1d — masked fields strip themselves out of ``search_fields`` and
-    ``ordering``; a model with no searchable field has nothing to strip, and
-    ordering by the masked column is still refused as a sort key."""
+    ``ordering``; a model with no searchable field has nothing to strip. Since
+    #EXT3a, ordering by the masked column is answered with the 400 an unknown
+    ordering term gets, in both directions."""
+    from demo.apps.shop.models import Customer, CustomerProfile
+
+    CustomerProfile.objects.create(customer=Customer.objects.create(
+        first_name="A", last_name="A", email="a@example.com"), tax_id="ZZZ")
+    client = _client_with_permission(regular_user, "view_customerprofile")
+
+    unordered = client.get("/api/models/demo/CustomerProfile/")
+    by_masked = client.get("/api/models/demo/CustomerProfile/?ordering=tax_id")
+    by_masked_desc = client.get("/api/models/demo/CustomerProfile/?ordering=-tax_id")
+
+    assert unordered.status_code == 200
+    assert by_masked.status_code == by_masked_desc.status_code == 400
+    assert by_masked.json()["ordering"][0].startswith("Unknown ordering field(s): 'tax_id'.")
+    assert by_masked_desc.json()["ordering"][0].startswith("Unknown ordering field(s): '-tax_id'.")
+
+
+@pytest.mark.django_db
+@override_settings(SNAPADMIN_API_STRICT_QUERY_PARAMS=False)
+def test_a_masked_model_with_no_search_fields_still_lists_when_strict_mode_is_off(regular_user):
+    """#QA1d — the pre-0.1.0b11 behaviour: ordering by the masked column is
+    ignored as a sort key."""
     from demo.apps.shop.models import Customer, CustomerProfile
 
     first = CustomerProfile.objects.create(customer=Customer.objects.create(

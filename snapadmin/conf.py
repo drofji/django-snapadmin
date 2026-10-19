@@ -134,3 +134,39 @@ def get_setting(name: str, default: Any = None) -> Any:
     if name in preset:
         return preset[name]
     return default
+
+
+#: The two SnapAdmin throttles: setting name -> (DRF scope, library default).
+_THROTTLE_SETTINGS: dict[str, tuple[str, str]] = {
+    "SNAPADMIN_THROTTLE_ANON": ("snapadmin_anon", "60/min"),
+    "SNAPADMIN_THROTTLE_USER": ("snapadmin_user", "600/min"),
+}
+
+_UNSET = object()
+
+
+def _resolve_throttle_rate(name: str, drf_rates: dict[str, Any]) -> str | None:
+    """The rate one SnapAdmin throttle runs at (#EXT3f).
+
+    In order: the ``SNAPADMIN_THROTTLE_*`` setting — ``None`` switches the throttle
+    off, a non-blank value is the rate; a **blank** string (an unset environment
+    variable) is no value at all and falls through — then DRF's
+    ``DEFAULT_THROTTLE_RATES[<scope>]`` (``snapadmin_anon`` / ``snapadmin_user``),
+    then the library default. A blank rate used to reach DRF's parser and answer
+    ``500`` on every throttled request.
+    """
+    scope, default = _THROTTLE_SETTINGS[name]
+    configured = get_setting(name, _UNSET)
+    if configured is None:
+        return None
+    if isinstance(configured, str):
+        if configured.strip():
+            return configured.strip()
+    elif configured is not _UNSET:
+        # Not a string at all (600, not '600/min'): handed on as text, so DRF's own
+        # parser reports it; snapadmin.E029 has already flagged it at check time.
+        return str(configured)
+    from_drf = (drf_rates or {}).get(scope)
+    if from_drf:
+        return from_drf
+    return default

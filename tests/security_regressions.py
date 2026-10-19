@@ -245,11 +245,31 @@ REGISTRY: tuple[SecurityFix, ...] = (
             "tests/test_fuzz_api.py::TestExportApiUnderHostileFilters",
         ),
     ),
+    # ── 0.1.0b11 ────────────────────────────────────────────────────────────
+    SecurityFix(
+        "A GDPR subject-request delete removes the subject's stored files",
+        (
+            "tests/test_file_cleanup.py::TestSubjectRequestDeletesEveryFile",
+            "tests/test_file_cleanup.py::TestStorageOrphanInvariant",
+        ),
+    ),
+    SecurityFix(
+        "Inline edits are in the audit trail",
+        ("tests/test_tenancy_write_surfaces.py::TestAdminInlineFormset",),
+    ),
+    SecurityFix(
+        "A masked foreign key can no longer be filtered or ordered through its column",
+        (
+            "tests/test_api_strict_query_params.py::TestNoOracleOnAHiddenField",
+            "tests/test_fuzz_api.py::TestRestListUnderHostileQueries"
+            "::test_a_parameter_on_a_hidden_field_answers_the_same_whatever_its_value",
+        ),
+    ),
 )
 
 #: The registry only grows: a fix leaves it only if the code it guarded is gone,
 #: and then this number goes down in the same change, with the reason.
-REGISTRY_FLOOR = 31
+REGISTRY_FLOOR = 34
 
 
 def node_ids() -> frozenset[str]:

@@ -6,7 +6,7 @@ context var itself, the opt-in gate (``tenant_scoped``), and
 ``scope_queryset``'s three outcomes (no-op / filtered / empty). Per-surface
 cross-tenant leak tests (admin, REST, GraphQL, exports, imports, ES, the
 offline cache, the negative sweep) live alongside each surface's own test
-file — see ``.claude/roadmap.md``'s #FUT1b block for the full list.
+file (``grep -l tenant tests/`` lists them).
 """
 
 import pytest

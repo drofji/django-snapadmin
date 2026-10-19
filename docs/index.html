@@ -458,7 +458,7 @@ urlpatterns = [
   (<code>snapadmin.E010</code>) rather than at the first request.</p>
 
   <h3>Configuring <code>INSTALLED_APPS</code></h3>
-  <p>The <strong>Unfold theme is optional</strong> (<code>pip install django-snapadmin[theme]</code>) — with it you get the themed UI, without it SnapAdmin renders on Django's built-in admin. If you use Unfold, its contrib apps must come <em>before</em> <code>django.contrib.admin</code>. <code>manage.py check</code> surfaces the stock-admin fallback as one informational message (<code>snapadmin.I001</code>, never an error) so it is never silently mistaken for a bug.</p>
+  <p>The <strong>Unfold theme is optional</strong> (<code>pip install django-snapadmin[theme]</code>) — with it you get the themed UI, without it SnapAdmin renders on Django's built-in admin. If you use Unfold, its contrib apps must come <em>before</em> <code>django.contrib.admin</code>. <code>manage.py check</code> surfaces the stock-admin fallback as one informational message (<code>snapadmin.I001</code>, never an error) so it is never silently mistaken for a bug. If <code>'unfold'</code> <em>is</em> listed but cannot be imported — usually an import cycle, a custom user model that imports SnapAdmin while apps load — the fallback is logged (<code>snapadmin.unfold_import_failed</code>) and reported as the warning <code>snapadmin.W032</code> with the error; every SnapAdmin admin module shares that one decision, so the admin is never half-themed.</p>
   <pre><code>INSTALLED_APPS = [
     # Optional theme — only with the [theme] extra; must precede django.contrib.admin
     "unfold",
@@ -1248,6 +1248,14 @@ class Product(models.Model):
     <strong>See them all live</strong>
     The demo app's <code>Showcase</code> model exercises every field type across tabbed sections, and <code>SnapFunctionField</code>/<code>SnapOneToOneField</code> appear on <code>Showcase</code> and <code>CustomerProfile</code> respectively.
   </div>
+  <p id="snap-boolean"><strong>A boolean with a default is a checkbox.</strong> Snap fields derive
+  <code>null=True</code> from <code>required=False</code>, so <code>SnapBooleanField(default=False)</code> has
+  a nullable column — but its form is a checkbox (Unfold's switch on the themed admin), because a
+  default means the field is never "unknown". It stays a three-way <em>Unknown / Yes / No</em> select
+  only when it asked for that: <code>null=True</code> passed explicitly, or no default at all. The
+  column itself is unchanged, so no migration follows. The importer reads the usual spreadsheet
+  spellings — <code>true/false</code>, <code>yes/no</code>, <code>on/off</code>, <code>1/0</code>, any
+  case — for every boolean column.</p>
 
   <h3 id="snap-field-wrapper">🔌 The flags on any field — <code>snap_field()</code></h3>
   <p>A <code>Snap*Field</code> is sugar over two things: an ordinary Django field, plus the flags
@@ -1419,6 +1427,17 @@ SnapModel.register_all_admins()</code></pre>
 
   <p>To restrict registration to a specific app, pass the <code>app_label</code> argument:</p>
   <pre><code>SnapModel.register_all_admins(app_label="myapp")</code></pre>
+
+  <p id="builtin-admins"><strong>No SnapModel of your own?</strong> The error log, the audit log and
+  the API-token admin come from <code>register_builtin_admins()</code>, which
+  <code>register_all_admins()</code> calls. A project that uses the error monitor, the audit trail or
+  token auth without declaring a <code>SnapModel</code> calls it itself — otherwise
+  <code>SnapErrorMonitorMiddleware</code> records errors no admin page shows, and
+  <code>snapadmin.W031</code> says so. It is idempotent and keeps a project's own admin for any of
+  those models; pass <code>site=</code> for a custom <code>AdminSite</code>.</p>
+  <pre><code># admin.py
+from snapadmin.admin import register_builtin_admins
+register_builtin_admins()</code></pre>
 
   <div class="callout callout-info" id="token-admin-registration">
     <strong>Note</strong>
@@ -1833,7 +1852,10 @@ class AuditEvent(SnapModel):
   <h3 id="snap-action">🎬 User-defined REST actions — <code>@snap_action</code></h3>
   <p>CRUD covers create/read/update/delete; a real model usually also needs a handful of
   <em>operations</em> — approve, refund, recalculate, archive. <code>@snap_action</code> turns a
-  model method into a callable REST endpoint, without hand-wiring a view:</p>
+  model method into a callable REST endpoint, without hand-wiring a view. Declared on an abstract
+  base or a plain mixin, it reaches every model built on it — like a <code>SnapFunctionField</code> or
+  <code>@snap_property</code> column does; a concrete parent's actions (multi-table inheritance) stay
+  with the parent:</p>
   <pre><code>class Order(SnapModel):
     total = snap_fields.SnapDecimalField(max_digits=10, decimal_places=2)
 
@@ -1883,6 +1905,35 @@ class AuditEvent(SnapModel):
   <p><strong>GraphQL has no mutation counterpart, and none is planned.</strong> The GraphQL schema is
   read-only by design (see <a href="#api-graphql">GraphQL API</a>) — <code>@snap_action</code> is a
   REST-only surface, stated here explicitly rather than left to be discovered.</p>
+
+  <h3 id="api-strict-query-params">Strict query parameters — an unknown parameter is a <code>400</code>, never ignored</h3>
+  <p>Every query parameter on a model route is one of three things: a declared filter, a parameter the
+  API reads itself (<code>?search=</code>, <code>?ordering=</code>, <code>?page=</code>,
+  <code>?page_size=</code>, <code>?format=</code>, and <code>?limit=</code> on <code>export/</code>), or a
+  <code>400</code> that names it. A dropped filter would run unfiltered and answer <code>200</code> with
+  every row — the worst possible answer for a client about to export or delete "the matching rows" —
+  so <code>?url__iendswith=.pdf</code> on a field that does not offer that lookup is refused with the
+  lookups it does offer:</p>
+  <pre><code>GET /api/models/demo/Customer/?email__iendswith=.com
+HTTP 400
+{"filters": ["Unknown or disallowed filter parameter(s): 'email__iendswith'. Allowed for 'email': email, email__icontains, email__in, email__startswith."]}</code></pre>
+  <p>The same rule covers an unknown <code>?ordering=</code> term (<code>400</code> listing the valid
+  ones), <code>?search=</code> on a model with no searchable field left for the caller, and any filter
+  on an <code>ES_ONLY</code> model (use <code>?search=</code> there). It applies to <code>list</code>,
+  <code>count/</code>, <code>export/</code>, <code>fetch-by/</code> and the detail routes; a
+  <code>@snap_action</code> owns its own query string and is not checked.</p>
+  <p><strong>No oracle.</strong> A parameter on a field the caller may not see — masked PII, or an
+  <code>api_field_permissions</code> read guard they fail — is refused with exactly the message a
+  field that does not exist gets, whatever its value, and no hint ever lists that field's lookups. A
+  masked foreign key is hidden under its column name too (<code>customer</code> and
+  <code>customer_id</code>).</p>
+  <pre><code># settings.py
+SNAPADMIN_API_STRICT_QUERY_PARAMS = True          # default; False restores the pre-0.1.0b11 silence
+SNAPADMIN_API_EXTRA_QUERY_PARAMS = ["_"]          # accept a client's cache-buster on purpose</code></pre>
+  <p><strong>URL fields filter by their ending.</strong> A <code>URLField</code> adds
+  <code>?field__endswith=</code> and <code>?field__iendswith=</code> to the library default lookup set
+  (a URL is asked about by its ending as often as by its start). Like <code>icontains</code> they cannot
+  use an index; a model- or project-wide lookup set (below) replaces the default as usual.</p>
 
   <details class="info">
   <summary><span class="info-glyph">?</span> Filter configuration in depth — lookups, JSON columns, swapping the backend</summary>
@@ -2099,7 +2150,7 @@ SNAPADMIN_API_FULL_CLEAN = True    # a model's own api_full_clean still wins</co
   <h2 id="api-graphql">⚛️ GraphQL API</h2>
   <p>SnapAdmin provides a dynamic GraphQL interface powered by Graphene-Django.</p>
   <ul style="margin: 8px 0 14px 20px; font-size: 14px;">
-    <li><strong>Auto-Schema</strong>: All <code>SnapModel</code> subclasses are automatically added to the schema.</li>
+    <li><strong>Auto-Schema</strong>: All <code>SnapModel</code> subclasses are automatically added to the schema. A database-generated column (<code>models.GeneratedField</code>) appears as its <code>output_field</code>'s type, read-only; a field graphene cannot convert costs only that field — it is left out and logged as <code>graphql_field_skipped</code> — never the whole model.</li>
     <li><strong>Secured by default</strong>: every resolver requires authentication (admin session or API token) and the model's Django <code>view</code> permission — the same contract as REST — enforced on <strong>every relation the query traverses</strong>, not just top-level fields. Reading <code>A { relatedB { … } }</code> needs <code>view</code> on both models; a related object you may not view resolves as a <code>Permission denied.</code> error rather than leaking its data. Token <code>allowed_models</code> scopes apply on top.</li>
     <li><strong>PII masking</strong>: fields in <code>SNAPADMIN_MASKED_FIELDS</code> are masked in GraphQL output exactly as in the REST API — raw only for superusers, <code>snapadmin.view_raw_pii</code> holders, and (per field) holders of a permission named in <a href="#masking-rules"><code>SNAPADMIN_MASKING_RULES</code></a>, whose rules apply here too.</li>
     <li><strong>Unified Fetching</strong>: the <code>search</code> argument routes to Elasticsearch for <code>DUAL</code>/<code>ES_ONLY</code> models; <code>first</code>/<code>offset</code> paginate.</li>
@@ -2197,7 +2248,18 @@ new_raw_key = token.rotate()   # old key stops authenticating immediately
   <h2 id="quotas">🧮 Quotas &amp; Rate Limits</h2>
   <p><code>SnapAnonRateThrottle</code> / <code>SnapUserRateThrottle</code> (<code>SNAPADMIN_THROTTLE_ANON</code> /
   <code>SNAPADMIN_THROTTLE_USER</code>, above) give one global rate for every anonymous or authenticated
-  caller. <code>snapadmin.limits.reserve()</code> is the narrower primitive projects keep rebuilding on top
+  caller. The rate is resolved in this order: the setting (<code>None</code> switches the throttle off; a
+  <strong>blank</strong> value — what an unset environment variable becomes — is no value and falls
+  through, with <code>snapadmin.W029</code>), then <code>REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]</code>
+  under the scopes <code>snapadmin_anon</code> / <code>snapadmin_user</code>, then the default. The DRF
+  scopes <code>anon</code>/<code>user</code> belong to your own views; when they differ from what
+  SnapAdmin's endpoints enforce, <code>snapadmin.W028</code> says so. A rate DRF cannot parse — or any
+  numeric <code>SNAPADMIN_*</code> setting <code>int()</code> cannot read — fails <code>manage.py
+  check</code> with <code>snapadmin.E029</code> instead of answering <code>500</code> at the first
+  request, and a project still setting <code>DEFAULT_FILE_STORAGE</code>/<code>STATICFILES_STORAGE</code>
+  (removed in Django 5.1, ignored silently) gets <code>snapadmin.W030</code>, because SnapAdmin's file
+  features use <code>STORAGES</code>.</p>
+  <p><code>snapadmin.limits.reserve()</code> is the narrower primitive projects keep rebuilding on top
   of that: a <strong>per-tenant or per-token quota across several time windows at once</strong>, a
   <strong>concurrency cap</strong>, and a <strong>cooldown</strong> after an upstream service answers
   <code>429</code> — including for calls <em>your project</em> makes outbound to a third party, which a
@@ -3638,6 +3700,27 @@ AuditLog.purge_expired(dry_run=True)  # count what *would* be deleted, delete no
   <p><code>dry_run=True</code> touches nothing — no file is deleted and no row is counted as
   skipped, exactly as before <code>data_retention_files</code> existed.</p>
 
+  <h3 id="file-cleanup">Replaced and deleted files leave storage — <code>delete_replaced</code> / <code>delete_on_delete</code></h3>
+  <p>Django leaves a file in storage when its row's file is replaced or the row is deleted; with a dated
+  <code>upload_to</code> every replacement is another orphan, and storage keeps personal data the database
+  no longer points at. Two opt-in flags on <code>SnapFileField</code> / <code>SnapImageField</code> close
+  that:</p>
+  <pre><code>class Contract(SnapModel):
+    scan = snap_fields.SnapFileField(
+        upload_to="contracts/%Y/%m/",
+        delete_replaced=True,    # the old file goes once a replacement is saved
+        delete_on_delete=True,   # the file goes with its row — bulk deletes included
+    )</code></pre>
+  <p>A file is removed <strong>after the transaction commits</strong> (a rolled-back save or delete removes
+  nothing), and <strong>only when no other row of the model still names it</strong> — asked through the
+  base manager, so a row hidden from the current user or tenant still counts. Bulk deletes are covered
+  (<code>QuerySet.delete()</code> and the admin's "delete selected" fire the per-row signal once a field
+  opts in). A storage error is logged (<code>snapadmin.files.delete_failed</code>) and never raised into
+  the request. Both flags are Snap-only: no migration. A deferred field (<code>.only()</code>) has no
+  name to remove and is left alone. The retention purge's <code>data_retention_files</code> shares the
+  same "still named by another row" rule, and a <a href="#gdpr-subject-request">GDPR subject-request delete</a> removes
+  the files of every file field of the rows it erases, flags or not.</p>
+
   <h3>The audit log, and export/reindex job cleanup</h3>
   <p>Two more tables grow forever unless something purges them, and neither is a <code>SnapModel</code>
   — so <code>snapadmin.purge_expired_data</code> covers each explicitly, alongside the per-model sweep
@@ -3766,8 +3849,14 @@ python manage.py snapadmin_subject_request delete \
       --identifier alice@example.com --user dpo_operator --confirm
 REFUSED — deleting these rows is blocked by a protected relation: demo.Order
 Nothing was deleted. Resolve the blocking rows manually (delete or reassign them) before retrying.</code></pre>
+  <p><strong>Stored files go with the rows.</strong> Every file field of every row the run erases —
+  whatever its <a href="#file-cleanup">cleanup flags</a> — has its file removed from storage after the
+  rows are gone, unless another row still names the same file. The dry run prints the count
+  (<code>DRY RUN files: 2</code>), never the names: a file name is often personal data itself. A file
+  storage refuses to delete is reported (<code>FAILED files: …</code>) rather than raised — the rows are
+  already gone, and the operator must see what is left.</p>
   <p>A deletion audit entry is written after a successful run — action <code>delete</code>, model
-  <code>subject_access_deletion</code>, the per-model row counts, and the operator. This entry
+  <code>subject_access_deletion</code>, the per-model row counts, the number of files removed, and the operator. This entry
   <strong>cannot itself be swept away by a later deletion for the same subject</strong>:
   <code>SnapadminAuditLog</code> is deliberately outside the general SnapAdmin registry (see
   <a href="#audit-trail">Unalterable Audit Trail</a>), so it carries no <code>subject_path</code> at
@@ -4046,6 +4135,14 @@ class Order(snap_models.SnapModel):
   declare a real <code>ForeignKey</code> by hand instead if the tenant is itself a project model.
   <code>tenant_field</code> (the model attribute, distinct from the factory function above) renames the
   column when set — otherwise it is <code>"tenant_id"</code>.</p>
+  <pre><code>class Invoice(snap_models.SnapModel):
+    organisation = models.ForeignKey(Organisation, null=True, on_delete=models.PROTECT)
+    tenant_scoped = True
+    tenant_field = "organisation"   # the field name or its column, "organisation_id" — both work</code></pre>
+  <p>With a <code>ForeignKey</code> the resolver returns the tenant row's <strong>primary key</strong>
+  (not the row): SnapAdmin writes it to the column (<code>organisation_id</code>) on every create path —
+  the admin, its inlines, the REST API and the importer — and compares a value a request body names
+  by that key, so <code>tenant_field</code> may spell either the field name or the column.</p>
 
   <h3>Resolving the current tenant</h3>
   <p>Add the middleware, then point it at a resolver:</p>
@@ -4056,6 +4153,10 @@ MIDDLEWARE = [
 ]
 SNAPADMIN_TENANT_RESOLVER = "myproject.tenancy.resolve_tenant"       # request -&gt; tenant value | None
 SNAPADMIN_TENANT_USER_RESOLVER = "myproject.tenancy.resolve_for_user" # user -&gt; tenant value | None</code></pre>
+  <p>Both SnapAdmin middlewares — this one and <code>SnapErrorMonitorMiddleware</code> — run in sync
+  <em>and</em> async mode: under ASGI they keep the middleware chain async (a database-reading resolver
+  or the error recorder runs through <code>sync_to_async</code>) instead of making Django switch the whole
+  chain to sync mode with a thread hop per request.</p>
   <p><code>SNAPADMIN_TENANT_RESOLVER</code> runs once per request, resolving the caller's tenant from
   whatever a project's own auth carries — a claim on the session/JWT, a subdomain, an SSO group.
   <strong>Unset, every request resolves to no tenant</strong> — the correct fail-closed default until a
@@ -4699,6 +4800,15 @@ urlpatterns += [
 }
 # …or full control (cloud_id, sniffing, custom transport):
 SNAPADMIN_ES_CLIENT_FACTORY = "myproject.es.make_client"   # zero-arg callable → client</code></pre>
+  <p id="es-client-reuse"><strong>One client per process.</strong> The client built from
+  <code>ELASTICSEARCH_URL</code>/<code>ELASTICSEARCH_KWARGS</code> is created once per worker process
+  (a forked worker builds its own) and reused by every save, delete and search; changing one of those
+  settings builds a new one. A factory you configure is called as written — it owns its own caching.
+  An index's existence and mapping are ensured <strong>once per process</strong> before the first
+  document, not before every save (that was two extra round-trips per write, one of them a
+  cluster-state update); a failed indexing call forgets it, so the next save ensures again. Deleted an
+  index by hand? Run <code>snapadmin_reindex</code> — otherwise Elasticsearch may auto-create it with a
+  dynamic mapping on the next write.</p>
 
   <h3 id="bulk-reindex-command">Bulk reindex command</h3>
   <pre><code>python manage.py snapadmin_reindex                       # all ES-enabled SnapModels
@@ -4966,8 +5076,11 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset — no p
     <tr><td><code>SNAPADMIN_API_AUTHENTICATION_CLASSES</code></td><td>token auth</td><td>API authenticator dotted paths (add session / JWT) — see <a href="#integrating">Integrating</a></td></tr>
     <tr><td><code>SNAPADMIN_API_PAGE_SIZE</code></td><td><code>25</code></td><td>Default <code>list</code> page size on <code>DynamicModelViewSet</code></td></tr>
     <tr><td><code>SNAPADMIN_API_MAX_PAGE_SIZE</code></td><td><code>500</code></td><td>Hard ceiling on client-requested <code>?page_size=</code></td></tr>
-    <tr><td><code>SNAPADMIN_THROTTLE_ANON</code></td><td><code>60/min</code></td><td>Rate limit for anonymous callers, enforced by the viewset itself regardless of the host project's <code>REST_FRAMEWORK</code> config; <code>None</code> disables it</td></tr>
-    <tr><td><code>SNAPADMIN_THROTTLE_USER</code></td><td><code>600/min</code></td><td>Rate limit for authenticated callers, same enforcement; <code>None</code> disables it</td></tr>
+    <tr><td><code>SNAPADMIN_API_STRICT_QUERY_PARAMS</code></td><td><code>True</code></td><td>Answer an unknown query parameter, an unknown <code>?ordering=</code> term or a filter on a masked/read-gated field with <code>400</code> naming it, instead of dropping it (see <a href="#api-strict-query-params">Strict query parameters</a>); <code>False</code> restores the pre-0.1.0b11 silence</td></tr>
+    <tr><td><code>SNAPADMIN_API_TOKEN_TOUCH_INTERVAL</code></td><td><code>60</code></td><td>Seconds between writes of an API token's <code>last_used_at</code> — at most once per interval, so a busy client does not add an <code>UPDATE</code> to every request; <code>0</code> writes on every request. Override <code>APITokenAuthentication.touch_token()</code> to record use differently</td></tr>
+    <tr><td><code>SNAPADMIN_API_EXTRA_QUERY_PARAMS</code></td><td><code>[]</code></td><td>Query parameters strict mode accepts on purpose, e.g. a client's cache-buster <code>_</code></td></tr>
+    <tr><td><code>SNAPADMIN_THROTTLE_ANON</code></td><td><code>60/min</code></td><td>Rate limit for anonymous callers, enforced by the viewset itself regardless of the host project's <code>REST_FRAMEWORK</code> config; <code>None</code> disables it. A blank value keeps the default (see <a href="#quotas">Quotas &amp; Rate Limits</a>)</td></tr>
+    <tr><td><code>SNAPADMIN_THROTTLE_USER</code></td><td><code>600/min</code></td><td>Rate limit for authenticated callers, same enforcement; <code>None</code> disables it, a blank value keeps the default</td></tr>
     <tr><td><code>SNAPADMIN_API_DELETE_GUARD</code></td><td>—</td><td>Dotted path to a <code>Callable[[request, obj], bool]</code> vetoing API deletes (403); AND-ed with each model's <code>api_can_delete</code> hook</td></tr>
     <tr><td><code>SNAPADMIN_QUERY_BACKEND_HEADER</code></td><td><code>True</code></td><td>Expose the <code>X-Snap-Query-Backend</code> header on list responses</td></tr>
     <tr><td><code>SNAPADMIN_ANALYTICS_DB_ALIAS</code></td><td>—</td><td><code>DATABASES</code> alias for read-only list/retrieve routing; empty = no routing</td></tr>
@@ -5137,7 +5250,21 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset — no p
   </table>
   <p><code>admin_mixins</code> classes are placed <strong>first in the MRO</strong>, so their
   <code>get_queryset</code> / <code>changelist_view</code> / actions wrap SnapAdmin's, which in turn
-  wraps Django/Unfold's <code>ModelAdmin</code>.</p>
+  wraps Django/Unfold's <code>ModelAdmin</code>. The methods the generator builds —
+  <code>get_readonly_fields</code>, <code>get_fieldsets</code>, <code>formfield_for_dbfield</code> and the
+  generated display columns — live on a generated base <em>behind</em> the mixins, so a mixin extends
+  them through <code>super()</code>:</p>
+  <pre id="admin-precedence"><code>class AuditFieldsMixin:
+    def get_readonly_fields(self, request, obj=None):
+        return [*super().get_readonly_fields(request, obj), "reviewed_by"]
+
+class Invoice(SnapModel):
+    admin_mixins = [AuditFieldsMixin]
+
+# Precedence, first match wins:
+# admin_overrides  >  admin_mixins  >  generated  >  PIIMaskingAdminMixin  >  SnapSaveMixin  >  ModelAdmin</code></pre>
+  <p>Generated <em>attributes</em> (<code>list_display</code>, <code>ordering</code>, <code>Media</code>, …)
+  are set on the generated class itself — change them with <code>admin_overrides</code>.</p>
   <p>Beyond mixins, three more <code>SnapModel</code> attributes tune the <em>generated</em>
   <code>ModelAdmin</code> without an <code>admin.py</code>: <code>admin_overrides</code> — a dict of
   attributes/methods merged on <strong>last</strong> so they win over the defaults (e.g.
@@ -6298,7 +6425,7 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
     no JavaScript. It states what SnapAdmin is, carries the three-step quickstart, lists the facts an
     assistant should not have to infer — snap-only field kwargs add no migration, import paths are the
     public contract, the Unfold theme is optional, misconfiguration surfaces as
-    <code>snapadmin.W001</code>–<code>W027</code> and <code>snapadmin.E001</code>–<code>E028</code> —
+    <code>snapadmin.W001</code>–<code>W032</code> and <code>snapadmin.E001</code>–<code>E029</code> —
     and then links every section of this page with a
     line describing what it covers.
   </p>

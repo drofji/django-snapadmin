@@ -24,15 +24,25 @@ from rest_framework.views import APIView
 from drf_spectacular.utils import extend_schema
 
 from snapadmin.api.authentication import SnapAPIAuthMixin, token_has_permission
-from snapadmin.conf import get_setting
+from snapadmin.conf import _resolve_throttle_rate, get_setting
 from snapadmin.db import route_read
-from snapadmin.api.filters import get_api_filter_backends
+from snapadmin.api.filters import (
+    _hidden_filter_fields,
+    _strict_query_params,
+    get_api_filter_backends,
+)
 from snapadmin.logging_config import get_logger
-from snapadmin.masking import get_masked_fields, user_can_access_field, user_can_view_pii
 from snapadmin.models import APIToken, EsStorageMode
 from snapadmin.pagination import SnapDynamicPagination
-from snapadmin.registry import get_model_meta, is_registered
-from snapadmin.tenancy import ALL_TENANTS, get_current_tenant, is_tenant_scoped, tenant_field_name
+from snapadmin.registry import _declared_attributes, get_model_meta, is_registered
+from snapadmin.tenancy import (
+    ALL_TENANTS,
+    _tenant_attname,
+    _tenant_model_field_name,
+    _tenant_value,
+    get_current_tenant,
+    is_tenant_scoped,
+)
 from snapadmin.api.serializers import (
     APITokenCreateSerializer,
     APITokenRenameSerializer,
@@ -53,37 +63,52 @@ _model_field_cache: dict[str, tuple[list[str], list[str]]] = {}
 _NOT_SUPPLIED = object()
 
 
+def _names_another_tenant(supplied: object, current: object) -> bool:
+    """Whether a request body's tenant value differs from the bound tenant.
+
+    Absent or empty means "not named". A related row is compared by its key,
+    and both sides as text — a resolver may return ``"5"`` for the row whose
+    primary key is ``5``; they name the same tenant.
+    """
+    if supplied is _NOT_SUPPLIED or supplied in (None, ""):
+        return False
+    return str(_tenant_value(supplied)) != str(current)
+
+
 class IsTokenOwnerOrAdmin(permissions.BasePermission):
     def has_object_permission(self, request, view, obj: APIToken):
         return obj.user == request.user or request.user.is_superuser
 
 
 class SnapAnonRateThrottle(AnonRateThrottle):
-    """Anonymous-caller rate limit, read straight from ``SNAPADMIN_THROTTLE_ANON``.
+    """Anonymous-caller rate limit: ``SNAPADMIN_THROTTLE_ANON`` (default ``60/min``).
 
-    Overriding ``get_rate()`` bypasses DRF's ``DEFAULT_THROTTLE_RATES`` settings
-    dict entirely, so this applies even in a host project that sets no
-    ``REST_FRAMEWORK`` throttle config of its own. A falsy setting value (e.g.
-    ``None``) disables throttling for this scope.
+    Applies even in a host project that sets no ``REST_FRAMEWORK`` throttle
+    config of its own. ``None`` disables it; a blank value (an unset environment
+    variable) falls back to ``REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["snapadmin_anon"]``,
+    then the default — see :func:`snapadmin.conf._resolve_throttle_rate`.
     """
 
     scope = "snapadmin_anon"
 
     def get_rate(self) -> str | None:
-        return get_setting("SNAPADMIN_THROTTLE_ANON", "60/min")
+        return _resolve_throttle_rate(
+            "SNAPADMIN_THROTTLE_ANON", api_settings.DEFAULT_THROTTLE_RATES
+        )
 
 
 class SnapUserRateThrottle(UserRateThrottle):
-    """Authenticated-caller rate limit, read from ``SNAPADMIN_THROTTLE_USER``.
-
-    See :class:`SnapAnonRateThrottle` — same independence from DRF's
-    ``DEFAULT_THROTTLE_RATES``.
+    """Authenticated-caller rate limit: ``SNAPADMIN_THROTTLE_USER`` (default
+    ``600/min``). Resolved like :class:`SnapAnonRateThrottle`, under the scope
+    ``snapadmin_user``.
     """
 
     scope = "snapadmin_user"
 
     def get_rate(self) -> str | None:
-        return get_setting("SNAPADMIN_THROTTLE_USER", "600/min")
+        return _resolve_throttle_rate(
+            "SNAPADMIN_THROTTLE_USER", api_settings.DEFAULT_THROTTLE_RATES
+        )
 
 
 #: The Django permission verbs an action can be mapped to.
@@ -341,9 +366,9 @@ def snap_action(
     :class:`SnapActionError` to answer with an error.
 
     **Discovered the same way ``@snap_property`` is** — a marker stored on the
-    function object itself, read back off the model's *own* ``__dict__``
-    (mirrors the ``get_admin_fields()`` enumeration precedent: no inherited-
-    action lookup, the same documented scoping limit). Works unmodified on
+    function object itself, read back off the model, its abstract bases and its
+    plain mixins (never a concrete multi-table parent; #EXT3o,
+    :func:`snapadmin.registry._declared_attributes`). Works unmodified on
     both doors (a :class:`~snapadmin.models.SnapModel` subclass or a
     ``@snap_model``-decorated plain model) since it touches no model-class
     machinery at all — just a method carrying one extra attribute.
@@ -400,19 +425,19 @@ def snap_action(
 def get_snap_action(model_class: type, name: str) -> SnapActionSpec | None:
     """The :class:`SnapActionSpec` ``model_class`` declared under ``name``, or ``None``.
 
-    Looks only at ``model_class``'s own ``__dict__`` — an action inherited
-    from a parent class is not discovered, mirroring ``@snap_property``'s
-    same, already-documented scoping limit.
+    Declared on the model, an abstract base or a plain mixin (#EXT3o) — never a
+    concrete multi-table parent; see :func:`snapadmin.registry._declared_attributes`.
     """
-    func = model_class.__dict__.get(name)
+    func = _declared_attributes(model_class).get(name)
     return getattr(func, "__snapadmin_action__", None)
 
 
 def iter_snap_actions(model_class: type) -> list[SnapActionSpec]:
-    """Every ``@snap_action`` declared directly on ``model_class``, in definition order."""
+    """Every ``@snap_action`` of ``model_class`` (inherited ones first, then its own),
+    in definition order — see :func:`get_snap_action`."""
     return [
         spec
-        for attr in model_class.__dict__.values()
+        for attr in _declared_attributes(model_class).values()
         if (spec := getattr(attr, "__snapadmin_action__", None)) is not None
     ]
 
@@ -580,16 +605,18 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
                 f"No tenant is bound to this request — {model_class._meta.label} "
                 "is tenant-scoped and refuses to create a row with no tenant assigned."
             )
-        field = tenant_field_name(model_class)
-        supplied = serializer.validated_data.get(field, _NOT_SUPPLIED)
-        if supplied is not _NOT_SUPPLIED and supplied not in (None, "") and supplied != current:
+        field = _tenant_model_field_name(model_class)
+        # Popped, not read: the row is saved through the tenant *column* below, and a
+        # foreign key handed over under both its name and its column is ambiguous.
+        supplied = serializer.validated_data.pop(field, _NOT_SUPPLIED)
+        if _names_another_tenant(supplied, current):
             raise ValidationError(
                 {
                     field: f"{field!r} is assigned automatically from the request's tenant "
                     "and cannot be set to a different value."
                 }
             )
-        serializer.save(**{field: current})
+        serializer.save(**{_tenant_attname(model_class): current})
 
     def perform_update(self, serializer):
         """Refuse a write that would move an existing row to a different
@@ -606,9 +633,9 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             serializer.save()
             return
         current = get_current_tenant()
-        field = tenant_field_name(model_class)
+        field = _tenant_model_field_name(model_class)
         supplied = serializer.validated_data.get(field, _NOT_SUPPLIED)
-        if supplied is not _NOT_SUPPLIED and supplied not in (None, "") and supplied != current:
+        if _names_another_tenant(supplied, current):
             raise ValidationError({field: f"{field!r} cannot be changed."})
         serializer.save()
 
@@ -722,23 +749,11 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         ``view_raw_pii``). Either way this is the same field set the
         serializer excludes/stars out, so ``?field=``/``?ordering=field``/
         ``?search=`` can't be used to recover a value the response body never
-        reveals.
+        reveals. One definition, shared with the filter backend
+        (:func:`snapadmin.api.filters._hidden_filter_fields`), so filtering,
+        ordering and search can never disagree about what is hidden.
         """
-        user = self.request.user
-        fields = (
-            set()
-            if user_can_view_pii(user)
-            else set(get_masked_fields(model_class._meta.app_label, model_class._meta.model_name))
-        )
-        permissions = get_model_meta(model_class, "api_field_permissions", {}) or {}
-        fields |= {
-            field
-            for field, rule in permissions.items()
-            if isinstance(rule, dict)
-            and rule.get("read")
-            and not user_can_access_field(user, model_class, field, write=False)
-        }
-        return fields
+        return _hidden_filter_fields(self.request.user, model_class)
 
     def get_queryset(self):
         model_class = self._get_model_class()
@@ -752,6 +767,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         # Where did the query go? Exposed as the X-Snap-Query-Backend response
         # header so API consumers can verify the routing decision.
         self._query_backend = "database"
+        searched_on_the_database = False
         # When es_search already applied the search, DRF's SearchFilter must be
         # skipped — a second DB icontains pass would wrongly narrow the fuzzy,
         # relevance-ranked ES result.
@@ -779,6 +795,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             # database: native pagination, no ES round-trip, no row cap.
             qs = model_class.objects.all()
             self.search_fields = self._db_search_fields(model_class)
+            searched_on_the_database = True
 
         masked_fields = self._masked_fields_for_request(model_class)
         if masked_fields:
@@ -798,6 +815,24 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
                 )
                 if name not in masked_fields
             ]
+
+        # A search term with nothing to search in would make SearchFilter a
+        # no-op and return every row (#EXT3a). The one message covers both a
+        # model that declares no searchable field and one whose searchable
+        # fields are all masked for this caller, so it says nothing about which.
+        if (
+            searched_on_the_database
+            and search_query
+            and not self.search_fields
+            and _strict_query_params()
+        ):
+            raise ValidationError(
+                {
+                    api_settings.SEARCH_PARAM: [
+                        f"?{api_settings.SEARCH_PARAM}= is not available on this model."
+                    ]
+                }
+            )
 
         # The base manager no longer injects a default order (it would leak into
         # GROUP BY on aggregations), so guarantee a deterministic newest-first

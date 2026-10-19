@@ -148,3 +148,31 @@ def get_model_meta(model: type, name: str, default: Any = None) -> Any:
     from snapadmin.conf import get_setting
 
     return get_setting(f"SNAPADMIN_{name.upper()}", default)
+
+
+def _declared_attributes(cls: type) -> dict[str, Any]:
+    """What a model declares — itself, or through an abstract model base or a plain
+    mixin (#EXT3o).
+
+    ``SnapFunctionField`` / ``@snap_property`` columns and ``@snap_action``
+    routes used to be read from the concrete class's own ``__dict__`` only, so a
+    declaration shared through an abstract base reached none of the models built
+    on it. Walks the MRO from the most basic class down, so a subclass's own
+    declaration wins. Skipped: a concrete parent (multi-table inheritance — its
+    declarations belong to its own table and admin) and SnapAdmin's and Django's
+    own classes.
+    """
+    from django.db import models as django_models
+
+    collected: dict[str, Any] = {}
+    for klass in reversed(cls.__mro__):
+        if klass is object:
+            continue
+        if klass is not cls:
+            module = getattr(klass, "__module__", "") or ""
+            if module.startswith(("snapadmin.", "django.")):
+                continue
+            if issubclass(klass, django_models.Model) and not klass._meta.abstract:
+                continue
+        collected.update(vars(klass))
+    return collected

@@ -114,7 +114,9 @@ def test_every_single_choice_select_shows_its_value(page, log_in, admin_user):
     log_in(admin_user)
 
     page.goto(f"/admin/demo/product/{product.pk}/change/")
-    expect(page.locator('select[name="available"]')).to_have_value("true")
+    expect(page.locator('select[name="category"]')).to_have_value(str(laptops.pk))
+    # A defaulted boolean is a checkbox, not a three-way select (#EXT3g).
+    expect(page.locator('input[name="available"]')).to_be_checked()
 
     selects = page.evaluate(
         """() => [...document.querySelectorAll('select:not([multiple])')]
@@ -126,7 +128,8 @@ def test_every_single_choice_select_shows_its_value(page, log_in, admin_user):
                 return {name: select.name, contentHeight, fontSize: parseFloat(style.fontSize)};
             })"""
     )
-    assert {select["name"] for select in selects} >= {"available"}
+    assert {select["name"] for select in selects} >= {"category"}
+    assert "available" not in {select["name"] for select in selects}
     cramped = [select for select in selects if select["contentHeight"] < select["fontSize"]]
     assert cramped == [], f"select(s) with no room to show their value: {cramped}"
 

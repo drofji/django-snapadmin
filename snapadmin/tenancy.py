@@ -41,6 +41,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
+from asgiref.sync import iscoroutinefunction, markcoroutinefunction, sync_to_async
 from django.db import models as django_models
 from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
@@ -161,6 +162,61 @@ def tenant_field_name(model: type[django_models.Model]) -> str:
     return get_model_meta(model, "tenant_field", None) or "tenant_id"
 
 
+def _tenant_attname(model: type[django_models.Model]) -> str:
+    """The concrete column a tenant value is written to — the field's ``attname``.
+
+    ``tenant_field`` may name a plain column (``tenant_id = tenant_field()``) or a
+    ``ForeignKey``, by its field name (``organisation``) or by its column
+    (``organisation_id``); all three resolve to the column the resolver's raw value
+    can be assigned to. Assigning a raw value to a foreign key's *field name* raises
+    ``ValueError`` (it expects a model instance), which is how every create on such a
+    model used to fail (#EXT3b). A name that resolves to no field is returned as
+    written — ``snapadmin.E009`` reports it.
+    """
+    from django.core.exceptions import FieldDoesNotExist
+
+    name = tenant_field_name(model)
+    try:
+        field = model._meta.get_field(name)
+    except FieldDoesNotExist:
+        return name
+    # A reverse relation has no column of its own — a misconfiguration E009 reports.
+    return getattr(field, "attname", None) or name
+
+
+def _tenant_model_field_name(model: type[django_models.Model]) -> str:
+    """The tenant column's model-field ``name`` — ``organisation`` even when
+    ``tenant_field`` is spelled as the column ``organisation_id``. A serializer
+    and an Elasticsearch document both key a field by this name."""
+    from django.core.exceptions import FieldDoesNotExist
+
+    declared = tenant_field_name(model)
+    try:
+        return model._meta.get_field(declared).name
+    except FieldDoesNotExist:
+        return declared
+
+
+def _tenant_field_names(model: type[django_models.Model]) -> set[str]:
+    """Every name the tenant column answers to: as declared, the field's name and
+    its column (``{"organisation", "organisation_id"}`` for a foreign key)."""
+    from django.core.exceptions import FieldDoesNotExist
+
+    declared = tenant_field_name(model)
+    try:
+        field = model._meta.get_field(declared)
+    except FieldDoesNotExist:
+        return {declared}
+    return {declared, field.name, getattr(field, "attname", None) or declared}
+
+
+def _tenant_value(value: Any) -> Any:
+    """A tenant column's value in the resolver's terms: a related row reduced to
+    its primary key, anything else unchanged — so a validated foreign key can be
+    compared with the bound tenant."""
+    return getattr(value, "pk", value)
+
+
 def scope_queryset(model: type[django_models.Model], queryset: Any) -> Any:
     """Apply tenant scoping to ``queryset`` for a tenant-scoped ``model``.
 
@@ -272,13 +328,27 @@ class SnapTenantMiddleware:
     adds its own middleware, so this is rarely a real ordering concern).
     """
 
+    sync_capable = True
+    async_capable = True
+
     def __init__(self, get_response: Any) -> None:
         self.get_response = get_response
+        # Sync and async capable (#EXT3m): under ASGI the chain stays async.
+        if iscoroutinefunction(get_response):
+            markcoroutinefunction(self)
 
     def __call__(self, request: Any) -> Any:
+        if iscoroutinefunction(self):
+            return self.__acall__(request)
         tenant = resolve_tenant_for_request(request)
         with use_tenant(tenant):
             return self.get_response(request)
+
+    async def __acall__(self, request: Any) -> Any:
+        # The resolver may read the database (a membership table): off the loop.
+        tenant = await sync_to_async(resolve_tenant_for_request, thread_sensitive=True)(request)
+        with use_tenant(tenant):
+            return await self.get_response(request)
 
 
 if TYPE_CHECKING:  # pragma: no cover - typing only

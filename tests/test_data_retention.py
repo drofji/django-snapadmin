@@ -765,9 +765,14 @@ class TestPurgeExpiredFiles:
         self._age(obj, 31)
 
         p1, p2, p3 = self._retention(["file_field"])
+        # Patch whichever backend the default storage really is (in-memory in the
+        # test settings), not one particular class — the field's own storage is a
+        # lazy proxy that only forwards to it.
+        from django.core.files.storage import storages
+
         with p1, p2, p3, \
-             patch("django.core.files.storage.FileSystemStorage.delete",
-                   side_effect=OSError("disk full")):
+             patch.object(type(storages["default"]), "delete",
+                          side_effect=OSError("disk full")):
             with pytest.raises(SnapPurgeError):
                 Showcase.purge_expired()
 

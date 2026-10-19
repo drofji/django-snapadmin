@@ -80,6 +80,7 @@ MAPPED_MODULES = [
     "snapadmin.db",
     "snapadmin.tasks",
     "snapadmin.celery_compat",
+    "snapadmin.unfold_compat",
     "snapadmin.registry",
     "snapadmin.tenancy",
     "snapadmin.conf",

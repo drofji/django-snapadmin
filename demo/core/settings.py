@@ -356,6 +356,21 @@ SNAPADMIN_API_FILTER_BACKEND = (
     [s.strip() for s in os.getenv('SNAPADMIN_API_FILTER_BACKEND', '').split(',') if s.strip()]
     or None
 )
+# Strict query parameters (default on): a query parameter that is neither a declared
+# filter nor one the API reads itself (search, ordering, page, page_size, format, and
+# limit on export/) is answered with 400 naming it, instead of being dropped — a
+# dropped filter returns every row with a 200. A parameter on a masked or read-gated
+# field gets exactly the refusal a non-existent field gets. False restores the
+# pre-0.1.0b11 silence.
+SNAPADMIN_API_STRICT_QUERY_PARAMS = env_bool('SNAPADMIN_API_STRICT_QUERY_PARAMS', True)
+# How often (seconds) an API token's last_used_at is written: at most once per interval, so
+# a busy client does not add an UPDATE to every request. 0 writes on every request.
+SNAPADMIN_API_TOKEN_TOUCH_INTERVAL = int(os.getenv('SNAPADMIN_API_TOKEN_TOUCH_INTERVAL', '60'))
+# Extra query parameters strict mode accepts on purpose — e.g. a client's cache-buster
+# (?_=1700000000) or a tracing id. Comma-separated; unset (the default) accepts none.
+SNAPADMIN_API_EXTRA_QUERY_PARAMS = [
+    s.strip() for s in os.getenv('SNAPADMIN_API_EXTRA_QUERY_PARAMS', '').split(',') if s.strip()
+]
 # Row-scan ceiling for api_json_filters on a backend WITHOUT native JSON containment
 # (e.g. SQLite). List-membership there is a per-row Python scan, so past this many rows
 # the filter returns HTTP 400 instead of risking OOM. Ignored on PostgreSQL/MySQL (the
@@ -365,9 +380,17 @@ SNAPADMIN_API_JSON_FILTER_SCAN_CAP = int(os.getenv('SNAPADMIN_API_JSON_FILTER_SC
 # /api/models/<app>/<Model>/fetch-by/) — an unbounded list is a DoS vector, so a
 # request over this many values gets 400 rather than a truncation.
 SNAPADMIN_FETCH_BY_MAX_VALUES = int(os.getenv('SNAPADMIN_FETCH_BY_MAX_VALUES', '10000'))
-# DRF rate limits (e.g. '60/min'). Empty value disables that throttle.
-SNAPADMIN_THROTTLE_ANON = os.getenv('SNAPADMIN_THROTTLE_ANON', '60/min') or None
-SNAPADMIN_THROTTLE_USER = os.getenv('SNAPADMIN_THROTTLE_USER', '600/min') or None
+# API rate limits (e.g. '60/min'). 'off' switches a throttle off; an empty value
+# means "not set" and keeps the default — never "off", the mistake an `or None`
+# here used to make (SnapAdmin itself treats a blank value the same way and warns,
+# snapadmin.W029).
+def _throttle_rate(name, default):
+    raw = os.getenv(name, default).strip()
+    return None if raw.lower() == 'off' else (raw or default)
+
+
+SNAPADMIN_THROTTLE_ANON = _throttle_rate('SNAPADMIN_THROTTLE_ANON', '60/min')
+SNAPADMIN_THROTTLE_USER = _throttle_rate('SNAPADMIN_THROTTLE_USER', '600/min')
 # Which CACHES entry snapadmin.limits.reserve() stores its window/concurrency/cooldown
 # counters in — point it at a shared backend (Redis, Memcached, ...) before relying on
 # quotas across more than one worker process. 'default' (LocMemCache here) is fine for
@@ -857,9 +880,13 @@ REST_FRAMEWORK = {
         'rest_framework.throttling.AnonRateThrottle',
         'rest_framework.throttling.UserRateThrottle',
     ],
+    # The project's own DRF views get the same limits as SnapAdmin's endpoints
+    # (snapadmin.W028 warns when the two drift apart). DRF has no "off" for a
+    # scope rate, so a switched-off throttle falls back to DRF's default class
+    # behaviour of a generous limit here rather than None.
     'DEFAULT_THROTTLE_RATES': {
-        'anon': os.getenv('SNAPADMIN_THROTTLE_ANON', '60/min'),
-        'user': os.getenv('SNAPADMIN_THROTTLE_USER', '600/min'),
+        'anon': SNAPADMIN_THROTTLE_ANON or '1000000/day',
+        'user': SNAPADMIN_THROTTLE_USER or '1000000/day',
     },
 }
 

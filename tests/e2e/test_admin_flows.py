@@ -200,7 +200,8 @@ def test_a_failing_model_rule_keeps_the_form_and_writes_nothing(page, log_in, ad
 
     page.locator('input[name="name"]').fill("Free Sample")
     page.locator('input[name="price"]').fill("0")
-    page.locator('select[name="available"]').select_option("true")
+    # A defaulted boolean is a checkbox (#EXT3g) — ticked already, as its default says.
+    expect(page.locator('input[name="available"]')).to_be_checked()
     page.locator('input[name="_save"], button[name="_save"]').first.click()
 
     expect(page.get_by_text("An available product needs a price above zero.")).to_be_visible()

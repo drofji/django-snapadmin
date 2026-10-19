@@ -127,13 +127,10 @@ class TestRegistration:
         assert type(admin.site._registry[User]) is BaseUserAdmin
 
     def test_no_op_without_the_theme(self, monkeypatch, restore_registry):
-        from django.apps import apps as django_apps
+        from snapadmin import unfold_compat
 
-        real = django_apps.is_installed
-        monkeypatch.setattr(
-            django_apps, "is_installed",
-            lambda name: False if name == "unfold" else real(name),
-        )
+        # The theme decision is shared (snapadmin.unfold_compat, #EXT3j).
+        monkeypatch.setattr(unfold_compat, "_decision", (False, unfold_compat.NOT_INSTALLED))
         admin.site._registry[User] = BaseUserAdmin(User, admin.site)
         assert apply_unfold_auth_admin() == []
 

@@ -11,9 +11,17 @@ leading-wildcard substring search. Substring matching stays available through th
 explicit ``?field__icontains=value`` suffix (mirroring the ``__gte``/``__lte`` suffix
 pattern already used below for numeric and date fields). A model can widen or narrow
 the lookup set for one of its own fields via ``SnapModel.api_filter_lookups``.
+
+**Strict query parameters** (``SNAPADMIN_API_STRICT_QUERY_PARAMS``, default ``True``):
+a query parameter that is neither a declared filter nor one the API reads itself is
+answered with ``400`` naming it, instead of being dropped — a dropped filter returns
+every row with a ``200``, which is the worst possible answer for a client about to
+export or delete "the matching rows". A parameter on a field the caller may not see
+gets exactly the refusal a non-existent field gets, so it is no oracle either.
 """
 
 import django_filters
+from django.core.exceptions import FieldDoesNotExist
 from django.db import connections, models as django_models
 from django.db.models import Q, QuerySet
 from django.utils.module_loading import import_string
@@ -21,6 +29,7 @@ from django_filters.constants import EMPTY_VALUES
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework.exceptions import ValidationError
 from rest_framework.filters import BaseFilterBackend, OrderingFilter, SearchFilter
+from rest_framework.settings import api_settings
 
 from snapadmin.conf import get_setting
 from snapadmin.masking import get_masked_fields, user_can_access_field, user_can_view_pii
@@ -46,6 +55,105 @@ _TEXT_FIELD_TYPES = (
 # api_filter_lookups. "exact" is exposed on the bare field name (no suffix); every
 # other lookup is exposed as an explicit "<field>__<lookup>" suffix.
 _TEXT_LOOKUPS_DEFAULT: list[str] = ["exact", "icontains", "startswith", "in"]
+
+# A URL is asked about by its ending as often as by its start (".pdf", a path suffix),
+# so URL fields add the two ending lookups to the default. Like ``icontains`` they
+# cannot use an index; a project that minds narrows them like any other default.
+_URL_LOOKUPS_DEFAULT: list[str] = [*_TEXT_LOOKUPS_DEFAULT, "endswith", "iendswith"]
+
+#: Query parameters the generated viewset reads itself rather than through the
+#: filterset, accepted on every endpoint in strict mode. The search, ordering and
+#: format parameters come from DRF's own settings (see ``_allowed_query_params``).
+#: ``page``/``page_size`` change no row set, so a client reusing one query string for
+#: ``count/`` and the list is not refused for them.
+_RESERVED_QUERY_PARAMS: frozenset[str] = frozenset({"page", "page_size"})
+
+#: Parameters exactly one action reads. Accepted anywhere else they would be dropped
+#: without effect — the silence strict mode exists to refuse.
+_RESERVED_QUERY_PARAMS_BY_ACTION: dict[str, frozenset[str]] = {
+    "export": frozenset({"limit"}),
+}
+
+#: Actions whose handler owns its own query string: a project's ``@snap_action``
+#: reads whatever parameters it defines, which no filterset can know about.
+_ACTIONS_OWNING_THEIR_QUERY: frozenset[str] = frozenset({"dispatch_action"})
+
+
+def _strict_query_params() -> bool:
+    """Whether the generated REST API refuses query parameters it does not understand.
+
+    ``SNAPADMIN_API_STRICT_QUERY_PARAMS`` (default ``True``). ``False`` restores the
+    behaviour before 0.1.0b11: unknown filter parameters, unknown ordering terms and
+    filters on hidden fields are dropped without a word.
+    """
+    return bool(get_setting("SNAPADMIN_API_STRICT_QUERY_PARAMS", True))
+
+
+def _allowed_query_params(action: str | None) -> set[str]:
+    """Every non-filter parameter strict mode accepts for ``action``."""
+    allowed = set(_RESERVED_QUERY_PARAMS)
+    allowed |= _RESERVED_QUERY_PARAMS_BY_ACTION.get(action or "", frozenset())
+    allowed |= {api_settings.SEARCH_PARAM, api_settings.ORDERING_PARAM}
+    if api_settings.URL_FORMAT_OVERRIDE:
+        allowed.add(api_settings.URL_FORMAT_OVERRIDE)
+    allowed |= {str(name) for name in get_setting("SNAPADMIN_API_EXTRA_QUERY_PARAMS", None) or ()}
+    return allowed
+
+
+def _hidden_filter_fields(user, model_class: type[django_models.Model]) -> set[str]:
+    """Names a caller may neither filter, order nor search by on ``model_class``.
+
+    Two independent reasons feed the set: PII masking (unless the caller holds
+    ``view_raw_pii``) and an ``api_field_permissions`` read guard the caller fails.
+    A hidden foreign key is hidden under its column name too (``customer`` and
+    ``customer_id``), because the generated filters expose a foreign key by its
+    column — matching on the field name alone left ``?customer_id=`` as an oracle.
+    """
+    app_label, model_name = model_class._meta.app_label, model_class._meta.model_name or ""
+    hidden = set() if user_can_view_pii(user) else set(get_masked_fields(app_label, model_name))
+    permissions = get_model_meta(model_class, "api_field_permissions", {}) or {}
+    hidden |= {
+        field
+        for field, rule in permissions.items()
+        if isinstance(rule, dict)
+        and rule.get("read")
+        and not user_can_access_field(user, model_class, field, write=False)
+    }
+    for name in list(hidden):
+        try:
+            field = model_class._meta.get_field(name)
+        except FieldDoesNotExist:
+            continue
+        attname = getattr(field, "attname", None)
+        if attname and attname != name:
+            hidden.add(attname)
+    return hidden
+
+
+def _param_field(param: str) -> str:
+    """The field part of a filter parameter: ``"email__icontains"`` -> ``"email"``."""
+    return param.split("__", 1)[0]
+
+
+def _unknown_filters_message(unknown: list[str], visible: list[str]) -> str:
+    """The ``400`` text for parameters no visible filter answers to.
+
+    A field the caller may see gets its accepted parameters listed; a hidden field
+    and a non-existent one get nothing beyond their own name, so the two answers
+    cannot be told apart.
+    """
+    by_field: dict[str, list[str]] = {}
+    for name in visible:
+        by_field.setdefault(_param_field(name), []).append(name)
+    parts = [
+        "Unknown or disallowed filter parameter(s): "
+        + ", ".join(repr(name) for name in sorted(unknown))
+        + "."
+    ]
+    for field in sorted({_param_field(name) for name in unknown}):
+        if field in by_field:
+            parts.append(f"Allowed for {field!r}: {', '.join(sorted(by_field[field]))}.")
+    return " ".join(parts)
 
 
 class _CharInFilter(django_filters.BaseInFilter, django_filters.CharFilter):
@@ -184,15 +292,19 @@ def _text_filter_for_lookup(name: str, lookup: str) -> tuple[str, django_filters
 
 
 def _resolve_text_lookups(
-    model_class: type[django_models.Model], name: str, model_lookups: dict[str, list[str]]
+    model_class: type[django_models.Model],
+    name: str,
+    model_lookups: dict[str, list[str]],
+    library_default: list[str] = _TEXT_LOOKUPS_DEFAULT,
 ) -> list[str]:
     """The lookup set for one text field, first non-``None`` source winning.
 
     Order: the per-field ``api_filter_lookups`` entry (narrowest, model-authored),
     then the model-wide ``api_default_text_lookups``, then the project-wide
-    ``SNAPADMIN_API_TEXT_LOOKUPS`` setting, then the library default. This lets a
-    project drop the non-indexable ``icontains`` once — per-model or per-project —
-    without enumerating every column, while a per-field override still wins.
+    ``SNAPADMIN_API_TEXT_LOOKUPS`` setting, then ``library_default`` (the text
+    default, or the URL default with the ending lookups). This lets a project drop
+    the non-indexable ``icontains`` once — per-model or per-project — without
+    enumerating every column, while a per-field override still wins.
     """
     field_lookups = model_lookups.get(name)
     if field_lookups is not None:
@@ -203,7 +315,7 @@ def _resolve_text_lookups(
     project_default = get_setting("SNAPADMIN_API_TEXT_LOOKUPS", None)
     if project_default is not None:
         return project_default
-    return _TEXT_LOOKUPS_DEFAULT
+    return library_default
 
 
 def _build_filters_for_model(
@@ -234,7 +346,12 @@ def _build_filters_for_model(
         name = field.name
 
         if isinstance(field, _TEXT_FIELD_TYPES):
-            lookups = _resolve_text_lookups(model_class, name, model_lookups)
+            library_default = (
+                _URL_LOOKUPS_DEFAULT
+                if isinstance(field, django_models.URLField)
+                else _TEXT_LOOKUPS_DEFAULT
+            )
+            lookups = _resolve_text_lookups(model_class, name, model_lookups, library_default)
             for lookup in lookups:
                 key, filter_instance = _text_filter_for_lookup(name, lookup)
                 filters[key] = filter_instance
@@ -333,11 +450,91 @@ class SnapAdminFilterBackend(DjangoFilterBackend):
     def filter_queryset(self, request, queryset, view):
         from snapadmin.models import EsQuerySet
 
+        model_class = self._model_class(view)
+        if (
+            model_class is not None
+            and _strict_query_params()
+            and getattr(view, "action", None) not in _ACTIONS_OWNING_THEIR_QUERY
+        ):
+            self._refuse_unknown_parameters(request, queryset, view, model_class)
+
         # ES_ONLY models are served from an EsQuerySet, which django-filter
         # cannot operate on (it asserts a real QuerySet) — pass it through.
         if isinstance(queryset, EsQuerySet):
             return queryset
         return super().filter_queryset(request, queryset, view)
+
+    def _refuse_unknown_parameters(self, request, queryset, view, model_class) -> None:
+        """Raise ``400`` for every query parameter nothing will act on (strict mode).
+
+        Runs before any filtering, for every action that filters a queryset
+        (``list``, ``count``, ``export``, ``fetch_by`` and the detail routes,
+        through ``get_object()``). Filter parameters, then ordering terms; the
+        search parameter is the view's own check, since only the view knows
+        whether its search went to Elasticsearch.
+        """
+        from snapadmin.models import EsQuerySet
+
+        action = getattr(view, "action", None)
+        sent = [key for key in request.query_params if key not in _allowed_query_params(action)]
+        if isinstance(queryset, EsQuerySet):
+            if sent:
+                raise ValidationError(
+                    {
+                        "filters": [
+                            f"{model_class._meta.label} is stored in Elasticsearch only "
+                            "(ES_ONLY) and cannot be filtered by query parameters: "
+                            + ", ".join(repr(key) for key in sorted(sent))
+                            + f". Use ?{api_settings.SEARCH_PARAM}= instead."
+                        ]
+                    }
+                )
+            return
+
+        hidden = _hidden_filter_fields(request.user, model_class)
+        visible = [
+            name
+            for name in build_filterset_for_model(model_class).base_filters
+            if _param_field(name) not in hidden
+        ]
+        unknown = [key for key in sent if key not in visible]
+        if unknown:
+            raise ValidationError({"filters": [_unknown_filters_message(unknown, visible)]})
+        self._refuse_unknown_ordering(request, queryset, view)
+
+    @staticmethod
+    def _refuse_unknown_ordering(request, queryset, view) -> None:
+        """Raise ``400`` for ordering terms DRF's ``OrderingFilter`` would drop.
+
+        Reuses DRF's own validity rule (``remove_invalid_fields``), so a term is
+        refused exactly when it would otherwise have been ignored. A masked field
+        is missing from the view's ``ordering_fields`` and is refused with the
+        same text as a field that does not exist; the list of valid terms never
+        names it.
+        """
+        raw = request.query_params.get(api_settings.ORDERING_PARAM, "")
+        terms = [term.strip() for term in raw.split(",") if term.strip()]
+        if not terms:
+            return
+        ordering = OrderingFilter()
+        valid_terms = set(ordering.remove_invalid_fields(queryset, terms, view, request))
+        invalid = [term for term in terms if term not in valid_terms]
+        if invalid:
+            fields = sorted(
+                name
+                for name, _label in ordering.get_valid_fields(queryset, view, {"request": request})
+            )
+            raise ValidationError(
+                {
+                    "ordering": [
+                        "Unknown ordering field(s): "
+                        + ", ".join(repr(term) for term in invalid)
+                        + ". Order by one of: "
+                        + ", ".join(fields)
+                        + " (prefix with '-' to reverse)."
+                    ]
+                }
+            )
 
     def get_filterset_kwargs(self, request, queryset, view):
         """Drop any query param targeting a field the caller can't see.
@@ -349,43 +546,30 @@ class SnapAdminFilterBackend(DjangoFilterBackend):
         A field the caller cannot see at all must not be filterable either:
         even an exact match lets a caller use match/no-match (or the returned
         row count, for ``__icontains``) as an oracle to recover a value the
-        response body never reveals. The param is silently dropped (as if
-        never sent) rather than rejected with 400 — consistent with an
-        unknown query param, and it doesn't confirm *why* the field is
-        unfilterable. Two independent reasons feed the same drop set: PII
-        masking (unless the caller holds ``view_raw_pii``) and #FUT3b's
-        ``api_field_permissions`` read guard (a separate axis, unaffected by
-        PII privilege).
+        response body never reveals. In strict mode such a parameter never gets
+        this far — :meth:`_refuse_unknown_parameters` answers it with the same
+        ``400`` a non-existent field gets. With strict mode off it is dropped
+        here, as if never sent. The hidden set is :func:`_hidden_filter_fields`.
         """
         kwargs = super().get_filterset_kwargs(request, queryset, view)
-        model_class = view._get_model_class()
-        app_label, model_name = model_class._meta.app_label, model_class._meta.model_name
-        user = request.user
-        hidden = set() if user_can_view_pii(user) else set(get_masked_fields(app_label, model_name))
-        permissions = get_model_meta(model_class, "api_field_permissions", {}) or {}
-        hidden |= {
-            field
-            for field, rule in permissions.items()
-            if isinstance(rule, dict)
-            and rule.get("read")
-            and not user_can_access_field(user, model_class, field, write=False)
-        }
+        hidden = _hidden_filter_fields(request.user, view._get_model_class())
         if not hidden:
             return kwargs
 
         data = kwargs["data"].copy()
         for key in list(data.keys()):
-            field_name = key.split("__", 1)[0]
-            if field_name in hidden:
+            if _param_field(key) in hidden:
                 del data[key]
         kwargs["data"] = data
         return kwargs
 
-    def get_filterset_class(self, view, queryset=None):
+    @staticmethod
+    def _model_class(view) -> type[django_models.Model] | None:
         get_model = getattr(view, "_get_model_class", None)
-        if get_model is None:
-            return None
-        model_class = get_model()
+        return get_model() if get_model is not None else None
+
+    def get_filterset_class(self, view, queryset=None):
+        model_class = self._model_class(view)
         if model_class is None:
             return None
         return build_filterset_for_model(model_class)

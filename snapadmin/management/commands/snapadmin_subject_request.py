@@ -351,31 +351,45 @@ class Command(BaseCommand):
                 return
             for model, objs in collector.data.items():
                 report[model._meta.label] = report.get(model._meta.label, 0) + len(objs)
+        stored_files = _stored_files_of(collector) if collector is not None else []
 
         mode = "DRY RUN" if not confirm else "DELETED"
         for label, count in sorted(report.items()):
             self.stdout.write(f"  {mode} {label}: {count} row(s)")
 
         if not confirm:
+            # A count only: a stored file's name is often personal data itself.
+            self.stdout.write(f"  DRY RUN files: {len(stored_files)}")
             self.stdout.write("\nDry run complete — no data was deleted. Pass --confirm to delete.")
             return
 
         if collector is not None:
             collector.delete()
+        deleted_files, failed_files = _delete_stored_files(stored_files)
+        self.stdout.write(f"  DELETED files: {deleted_files}")
+        if failed_files:
+            self.stdout.write(
+                self.style.ERROR(
+                    f"  FAILED files: {len(failed_files)} — the rows are gone, these stored files "
+                    "are not; remove them by hand: " + "; ".join(failed_files)
+                )
+            )
         for model, rows in es_matches.items():
             # EsQuerySet.filter() only ever matches flat field=value (no
             # __in support), so the already-resolved instances are wrapped
             # directly rather than re-filtered — see its own docstring.
             EsQuerySet(model, rows).delete()
 
-        self._record_deletion_audit(operator, identifier, report)
+        self._record_deletion_audit(operator, identifier, report, files_deleted=deleted_files)
         self.stdout.write(
             self.style.SUCCESS(
                 f"\nDeleted {sum(report.values())} row(s) across {len(report)} model(s)."
             )
         )
 
-    def _record_deletion_audit(self, operator, identifier: str, report: dict[str, int]) -> None:
+    def _record_deletion_audit(
+        self, operator, identifier: str, report: dict[str, int], *, files_deleted: int = 0
+    ) -> None:
         from snapadmin.models import SnapadminAuditLog
 
         # SnapadminAuditLog is deliberately outside the general registry (see
@@ -390,8 +404,62 @@ class Command(BaseCommand):
             app_label="snapadmin",
             model="subject_access_deletion",
             object_repr=f"SAR deletion for subject {_identifier_fingerprint(identifier)}"[:255],
-            changes={"models_deleted": {"old": None, "new": report}},
+            changes={
+                "models_deleted": {"old": None, "new": report},
+                "files_deleted": {"old": None, "new": files_deleted},
+            },
         )
+
+
+def _stored_files_of(collector) -> list[tuple[type, object, str]]:
+    """Every stored file the collected rows name that no surviving row names.
+
+    All file fields, whatever their cleanup flags: an erasure that leaves the
+    subject's uploads in storage is not an erasure (decision 2026-10-17). A file
+    another row still names is left alone, and counted nowhere.
+    """
+    from django.db import models
+
+    from snapadmin.fields import _file_name, _file_referenced
+
+    found: dict[tuple[str, str, str], tuple[type, object, str]] = {}
+    for model, rows in collector.data.items():
+        doomed_pks = {row.pk for row in rows}
+        for field in model._meta.concrete_fields:
+            if not isinstance(field, models.FileField):
+                continue
+            for row in rows:
+                name = _file_name(row.__dict__.get(field.attname))
+                key = (model._meta.label, field.name, name)
+                if (
+                    name
+                    and key not in found
+                    and not _file_referenced(model, field.name, name, exclude_pks=doomed_pks)
+                ):
+                    found[key] = (model, field, name)
+    return list(found.values())
+
+
+def _delete_stored_files(stored_files) -> tuple[int, list[str]]:
+    """Remove each file after its rows are gone; ``(deleted, failures)``.
+
+    Re-checked after the delete, so a row that came to name the file in the
+    meantime keeps it. A storage error is reported, never raised — the rows are
+    already deleted, and the operator must see which files are left.
+    """
+    from snapadmin.fields import _file_referenced
+
+    deleted, failures = 0, []
+    for model, field, name in stored_files:
+        try:
+            if _file_referenced(model, field.name, name):
+                continue
+            if field.storage.exists(name):
+                field.storage.delete(name)
+                deleted += 1
+        except Exception as exc:
+            failures.append(f"{model._meta.label}.{field.name}: {exc}")
+    return deleted, failures
 
 
 def _subject_path_for(model) -> str:

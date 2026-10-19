@@ -96,10 +96,13 @@ Declaring models
         ``deconstructible`` validators: phone, colour, file type/size.
 
 Admin surface
-    ``snapadmin.admin``
-        Admin base classes and the auto-registration machinery. Uses Unfold's
-        themed classes when the ``[theme]`` extra is installed, stock Django
-        admin otherwise.
+    ``snapadmin.admin`` · ``snapadmin.unfold_compat``
+        Admin base classes, the auto-registration machinery and
+        ``register_builtin_admins()`` (the error-log, audit-log and token admins
+        for a project without SnapModels). Uses Unfold's themed classes when the
+        ``[theme]`` extra is installed, stock Django admin otherwise — one
+        process-wide decision (``unfold_compat.detect_unfold()``), logged and
+        reported as ``W032`` when Unfold is listed but fails to import.
     ``snapadmin.widgets`` · ``snapadmin.nesting`` · ``snapadmin.sanitize``
         Form widgets, nested-app grouping in the sidebar, HTML sanitization for
         wysiwyg values.

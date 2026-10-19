@@ -45,11 +45,18 @@ def _load_admin_without_unfold():
     without_unfold = [
         app for app in original if app != "unfold" and not app.startswith("unfold.")
     ]
+    from snapadmin import unfold_compat
+
+    # The theme is decided once per process (snapadmin.unfold_compat); a fresh
+    # decision for this one load, then the process's own decision back.
+    decided = unfold_compat._decision
     try:
         settings.INSTALLED_APPS = without_unfold
+        unfold_compat._decision = None
         spec.loader.exec_module(module)
     finally:
         settings.INSTALLED_APPS = original
+        unfold_compat._decision = decided
     return module
 
 
@@ -146,5 +153,8 @@ class TestExtraSettingsWithoutUnfold:
         """
         from snapadmin.extra_settings_admin import apply_unfold_styling
 
-        monkeypatch.setitem(sys.modules, "unfold.admin", None)
+        from snapadmin import unfold_compat
+
+        # The theme decision is shared (snapadmin.unfold_compat, #EXT3j).
+        monkeypatch.setattr(unfold_compat, "_decision", (False, unfold_compat.NOT_INSTALLED))
         assert apply_unfold_styling() is False

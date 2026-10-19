@@ -31,6 +31,7 @@ from decimal import Decimal
 import pytest
 from django.contrib.auth.models import Permission
 from django.db import transaction
+from django.test import override_settings
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from rest_framework.test import APIClient
@@ -140,11 +141,33 @@ class TestRestListUnderHostileQueries:
         lookup=LOOKUPS,
         value=HOSTILE_TEXT,
     )
-    def test_a_parameter_on_a_hidden_field_changes_nothing(
+    def test_a_parameter_on_a_hidden_field_answers_the_same_whatever_its_value(
         self, masked_profiles, staff_client, base, hidden_field, lookup, value
     ):
-        without = staff_client.get(LIST_URL, base)
-        with_hidden = staff_client.get(LIST_URL, [*base, (hidden_field + lookup, value)])
+        """Strict mode (#EXT3a) refuses a hidden-field parameter instead of
+        dropping it — so the law is no longer "changes nothing" but "reveals
+        nothing": the answer does not depend on the value, and no hint lists
+        the hidden field's lookups."""
+        with_value = staff_client.get(LIST_URL, [*base, (hidden_field + lookup, value)])
+        with_other_value = staff_client.get(LIST_URL, [*base, (hidden_field + lookup, value + "~")])
+
+        assert with_value.status_code == with_other_value.status_code == 400
+        assert with_value.content == with_other_value.content
+        assert f"Allowed for '{hidden_field}'".encode() not in with_value.content
+
+    @REUSES_READ_ONLY_FIXTURES
+    @given(
+        base=query_params(["newsletter", "id"]),
+        hidden_field=st.sampled_from(["bio", "tax_id", "tax_id_bi"]),
+        lookup=LOOKUPS,
+        value=HOSTILE_TEXT,
+    )
+    def test_a_parameter_on_a_hidden_field_changes_nothing_when_strict_mode_is_off(
+        self, masked_profiles, staff_client, base, hidden_field, lookup, value
+    ):
+        with override_settings(SNAPADMIN_API_STRICT_QUERY_PARAMS=False):
+            without = staff_client.get(LIST_URL, base)
+            with_hidden = staff_client.get(LIST_URL, [*base, (hidden_field + lookup, value)])
 
         assert with_hidden.status_code == without.status_code
         if without.status_code == 200:
@@ -152,11 +175,23 @@ class TestRestListUnderHostileQueries:
             assert with_hidden.json()["count"] == without.json()["count"]
 
     @REUSES_READ_ONLY_FIXTURES
-    @given(secret_guess=st.sampled_from([f"raw-bio-{i}" for i in range(6)] + ["nope"]))
+    @given(secret_guess=st.sampled_from([f"raw-bio-{i}" for i in range(6)]))
     def test_a_correct_guess_of_a_hidden_value_is_indistinguishable_from_a_wrong_one(
         self, masked_profiles, staff_client, secret_guess
     ):
-        response = staff_client.get(LIST_URL, {"bio": secret_guess})
+        right = staff_client.get(LIST_URL, {"bio": secret_guess})
+        wrong = staff_client.get(LIST_URL, {"bio": "nope"})
+
+        assert right.status_code == wrong.status_code == 400
+        assert right.content == wrong.content
+
+    @REUSES_READ_ONLY_FIXTURES
+    @given(secret_guess=st.sampled_from([f"raw-bio-{i}" for i in range(6)] + ["nope"]))
+    def test_a_correct_guess_is_indistinguishable_from_a_wrong_one_when_strict_mode_is_off(
+        self, masked_profiles, staff_client, secret_guess
+    ):
+        with override_settings(SNAPADMIN_API_STRICT_QUERY_PARAMS=False):
+            response = staff_client.get(LIST_URL, {"bio": secret_guess})
 
         assert response.status_code == 200
         assert _ids(response) == masked_profiles

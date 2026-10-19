@@ -307,8 +307,9 @@ class TestUnfoldTheme:
     def test_info_emitted_when_unfold_absent(self, monkeypatch):
         # With Unfold absent SnapAdmin falls back to the stock admin theme; the
         # check emits one informational (never error) message so it is not silent.
-        import snapadmin.admin as admin_module
-        monkeypatch.setattr(admin_module, "UNFOLD_INSTALLED", False)
+        from snapadmin import unfold_compat
+
+        monkeypatch.setattr(unfold_compat, "_decision", (False, unfold_compat.NOT_INSTALLED))
         result = checks.check_unfold_theme(None)
         assert [i.id for i in result] == ["snapadmin.I001"]
         assert result[0].level == 20  # Info

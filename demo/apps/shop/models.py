@@ -5,6 +5,7 @@ from decimal import Decimal
 from django.core import exceptions as django_exceptions
 from django.utils.translation import gettext_lazy as _
 from django.db import models as django_models
+from django.db.models.functions import Length
 from snapadmin import fields as snap_fields, models as snap_models
 from snapadmin import validators
 from snapadmin.admin import SnapTabularInline, SnapStackedInline
@@ -470,6 +471,17 @@ class Showcase(snap_models.SnapModel):
     # wysiwyg=True enables the rich-text editor (same as SnapRichTextField shorthand)
     wysiwyg_field = snap_fields.SnapTextField(verbose_name=_("WYSIWYG Field"), wysiwyg=True, show_in_form=True, tab=_("Text Content"), row="prose")
 
+    # A database-generated column (#EXT3h): computed by the database on every write,
+    # read-only on every surface — GraphQL (as its output type), REST, the admin form
+    # and the importer. db_persist=True is what PostgreSQL requires.
+    char_length = django_models.GeneratedField(
+        expression=Length("char_field"),
+        output_field=django_models.IntegerField(),
+        db_persist=True,
+        null=True,  # char_field is nullable, so its length can be NULL too
+        verbose_name=_("Char Length"),
+    )
+
     # Tab: Numeric Data — filterable fields show numeric range filters in the sidebar
     integer_field = snap_fields.SnapIntegerField(verbose_name=_("Integer Field"), show_in_form=True, filterable=True, tab=_("Numbers"))
     positive_integer = snap_fields.SnapPositiveIntegerField(verbose_name=_("Positive Int"), show_in_form=True, tab=_("Numbers"))
@@ -492,7 +504,10 @@ class Showcase(snap_models.SnapModel):
 
     # Tab: Files & Misc
     image_field = snap_fields.SnapImageField(upload_to="showcase/images/", verbose_name=_("Image Field"), show_in_form=True, blank=True, null=True, tab=_("Assets"))
-    file_field = snap_fields.SnapFileField(upload_to="showcase/files/", verbose_name=_("File Field"), show_in_form=True, blank=True, null=True, tab=_("Assets"))
+    # delete_replaced / delete_on_delete (#EXT3d): a replaced upload and a deleted
+    # row's upload leave storage once the transaction commits (unless another row
+    # still names the file). Snap-only flags — no migration.
+    file_field = snap_fields.SnapFileField(upload_to="showcase/files/", verbose_name=_("File Field"), show_in_form=True, blank=True, null=True, tab=_("Assets"), delete_replaced=True, delete_on_delete=True)
     boolean_field = snap_fields.SnapBooleanField(default=False, verbose_name=_("Boolean Field"), show_in_form=True, filterable=True, tab=_("Assets"))
     json_field = snap_fields.SnapJSONField(default=dict, verbose_name=_("JSON Field"), show_in_form=True, tab=_("Assets"))
 

@@ -82,7 +82,8 @@ class TestElasticsearchFailuresAreSwallowed:
 
     def test_ensuring_the_mapping_reports_failure_rather_than_raising(self):
         with override_settings(ELASTICSEARCH_ENABLED=True), self._client_that_cannot_connect():
-            assert Product._ensure_es_index_and_mapping() is None
+            # A failure is reported as False (#EXT3k: True means "remember it"), never raised.
+            assert Product._ensure_es_index_and_mapping() is False
 
     def test_indexing_a_row_reports_failure_rather_than_raising(self):
         product = Product(name="ES Err", price=Decimal("1.00"))

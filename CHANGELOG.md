@@ -12,7 +12,58 @@ the `0.x` beta series.
 
 ## Unreleased
 
-_Nothing yet._
+### Breaking
+- `SnapFunctionField`, `@snap_property` and `@snap_action` declared on an abstract base or a mixin now
+  reach the models built on it — an inherited action becomes a REST route on upgrade.
+- An unknown REST query parameter answers `400` naming it instead of being ignored (an ignored
+  filter returned every row): undeclared lookups, unknown `?ordering=` terms, `?search=` with no
+  searchable field, filters on `ES_ONLY` models and on masked fields. `SNAPADMIN_API_EXTRA_QUERY_PARAMS`
+  accepts a client's own parameters; `SNAPADMIN_API_STRICT_QUERY_PARAMS = False` restores the old
+  behaviour.
+
+- A `SnapBooleanField` with a default renders as a checkbox in the generated admin (it was a three-way
+  select whose "unknown" swallowed a browser's checkbox value); explicit `null=True` keeps three states.
+- An API token's `last_used_at` is written at most once per `SNAPADMIN_API_TOKEN_TOUCH_INTERVAL` (60 s)
+  instead of on every request; `0` restores the old behaviour.
+
+### Added
+- `snapadmin.admin.register_builtin_admins()` for projects without a `SnapModel`; `W031` when the
+  error monitor has no admin to show its records.
+- `SNAPADMIN_API_STRICT_QUERY_PARAMS` (default `True`) and `SNAPADMIN_API_EXTRA_QUERY_PARAMS`; a
+  refused filter lists the lookups its field accepts.
+- URL fields filter by their ending: `?field__endswith=` / `?field__iendswith=`.
+- `delete_replaced` / `delete_on_delete` on `SnapFileField` / `SnapImageField`: a replaced file or a
+  deleted row's file leaves storage after commit.
+
+### Fixed
+- `admin_mixins` can extend the generated `get_readonly_fields` / `get_fieldsets` / `formfield_for_dbfield`
+  through `super()` (they no longer shadow the mixins).
+- `SnapErrorMonitorMiddleware` and `SnapTenantMiddleware` are async-capable: an ASGI deployment keeps its
+  middleware chain async.
+- An Elasticsearch-mirrored save reuses one client per process and ensures the index once,
+  instead of a new client plus `indices.exists` + `put_mapping` per save.
+- An Unfold that is listed but fails to import is logged and reported (`W032`) instead of a
+  silent fallback; every admin module shares one theme decision.
+- A model with a `GeneratedField` stays in the GraphQL schema (the column is exposed as its output
+  type; an unconvertible field costs only itself).
+- The importer reads `true/false`, `yes/no`, `on/off` in any case for boolean columns.
+- A blank `SNAPADMIN_THROTTLE_*` falls back to the default instead of answering `500`; DRF's
+  `DEFAULT_THROTTLE_RATES['snapadmin_user'|'snapadmin_anon']` is honoured; `snapadmin-info` reports the
+  effective rate limiting.
+- Unusable setting values fail `manage.py check` (`E029`); new warnings `W028`–`W030`.
+- `snapadmin_import` no longer crashes with `KeyError: 'reason'` after a run that skipped rows; import
+  summaries carry `outcome`.
+- An sdist built from a working tree no longer packs git-ignored files such as a local
+  `demo/.env` (no published release was affected).
+
+- A `ForeignKey` tenant column works on every create path (admin, inlines, REST API, importer),
+  whether `tenant_field` names the field or its `_id` column.
+- A tenant-scoped row added in an admin inline gets its tenant instead of becoming an orphan.
+
+### Security
+- A GDPR subject-request delete removes the erased rows' stored files.
+- Rows created, changed or deleted in an admin inline are recorded in the audit trail.
+- A masked foreign key can no longer be filtered or ordered through its `<field>_id` column.
 
 ## 0.1.0b10 — 2026-10-02
 

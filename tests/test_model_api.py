@@ -1055,9 +1055,32 @@ class TestGlobalTextLookupDefaults:
         try:
             with override_settings(SNAPADMIN_API_TEXT_LOOKUPS=["exact", "startswith", "in"]):
                 r = auth_client.get("/api/models/demo/Product/?name__icontains=Laptop")
+            # icontains dropped project-wide → the param is unknown, and strict mode
+            # (#EXT3a) names it with the lookups that do exist instead of returning
+            # both rows as if the filter had applied.
+            assert r.status_code == 400
+            assert r.json() == {"filters": [
+                "Unknown or disallowed filter parameter(s): 'name__icontains'. "
+                "Allowed for 'name': name, name__in, name__startswith."
+            ]}
+        finally:
+            fm._filterset_cache.pop("demo.product", None)
+
+    def test_project_setting_drops_icontains_silently_when_strict_mode_is_off(self, auth_client):
+        from snapadmin.api import filters as fm
+        from demo.apps.shop.models import Product
+        Product.objects.create(name="Laptop Pro", price=Decimal("20.00"))
+        Product.objects.create(name="Desktop", price=Decimal("30.00"))
+        fm._filterset_cache.pop("demo.product", None)
+        try:
+            with override_settings(
+                SNAPADMIN_API_TEXT_LOOKUPS=["exact", "startswith", "in"],
+                SNAPADMIN_API_STRICT_QUERY_PARAMS=False,
+            ):
+                r = auth_client.get("/api/models/demo/Product/?name__icontains=Laptop")
             assert r.status_code == 200
-            # icontains dropped project-wide → the param is unknown and ignored, so
-            # BOTH rows come back (an active icontains filter would return only one).
+            # The pre-0.1.0b11 behaviour: the unknown param is ignored, so BOTH rows
+            # come back (an active icontains filter would return only one).
             assert len(r.json()["results"]) == 2
         finally:
             fm._filterset_cache.pop("demo.product", None)
@@ -1586,9 +1609,20 @@ class TestAutoFilterJsonFieldLookups:
 
     def test_unknown_key_path_is_not_filterable(self, auth_client, showcase_records):
         # A key-path that isn't declared in api_json_filters has no
-        # corresponding filter field at all — django-filter silently ignores
-        # unrecognised query params, so the request behaves exactly as if the
-        # param had not been sent (every row is returned, unfiltered).
+        # corresponding filter field at all; strict mode (#EXT3a) refuses it and
+        # lists the key paths that are declared.
+        r = auth_client.get("/api/models/demo/Showcase/?json_field__unknown__path=anything")
+        assert r.status_code == 400
+        assert r.json() == {"filters": [
+            "Unknown or disallowed filter parameter(s): 'json_field__unknown__path'. "
+            "Allowed for 'json_field': json_field__a__b, json_field__tags."
+        ]}
+
+    @override_settings(SNAPADMIN_API_STRICT_QUERY_PARAMS=False)
+    def test_unknown_key_path_is_ignored_when_strict_mode_is_off(self, auth_client, showcase_records):
+        # The pre-0.1.0b11 behaviour: django-filter silently ignores unrecognised
+        # query params, so the request behaves exactly as if the param had not
+        # been sent (every row is returned, unfiltered).
         r = auth_client.get("/api/models/demo/Showcase/?json_field__unknown__path=anything")
         assert r.status_code == 200
         names = {item["char_field"] for item in r.json()["results"]}
@@ -1784,7 +1818,23 @@ class TestMaskedFieldsExcludedFromApiQuerying:
         return client
 
     @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
-    def test_filter_on_masked_field_ignored_for_unprivileged(self, regular_user):
+    def test_filter_on_masked_field_refused_like_an_unknown_one_for_unprivileged(self, regular_user):
+        from demo.apps.shop.models import Product
+        Product.objects.create(name="Laptop", price=Decimal("10.00"))
+        client = self._regular_client_with_product_view(regular_user)
+
+        masked = client.get("/api/models/demo/Product/?name=Laptop")
+        absent = client.get("/api/models/demo/Product/?no_such_field=Laptop")
+
+        # Strict mode (#EXT3a): the same 400 a non-existent field gets, whatever
+        # the value — still no match/no-match oracle on the masked value.
+        assert masked.status_code == absent.status_code == 400
+        assert masked.json() == {"filters": ["Unknown or disallowed filter parameter(s): 'name'."]}
+
+    @override_settings(
+        SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]}, SNAPADMIN_API_STRICT_QUERY_PARAMS=False
+    )
+    def test_filter_on_masked_field_ignored_for_unprivileged_when_strict_mode_is_off(self, regular_user):
         from demo.apps.shop.models import Product
         laptop = Product.objects.create(name="Laptop", price=Decimal("10.00"))
         desktop = Product.objects.create(name="Desktop", price=Decimal("20.00"))
@@ -1809,7 +1859,21 @@ class TestMaskedFieldsExcludedFromApiQuerying:
         assert names == {"Laptop"}
 
     @override_settings(SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]})
-    def test_ordering_by_masked_field_ignored_for_unprivileged(self, regular_user):
+    def test_ordering_by_masked_field_refused_like_an_unknown_one_for_unprivileged(self, regular_user):
+        client = self._regular_client_with_product_view(regular_user)
+
+        masked = client.get("/api/models/demo/Product/?ordering=name")
+        absent = client.get("/api/models/demo/Product/?ordering=no_such_field")
+
+        assert masked.status_code == absent.status_code == 400
+        assert masked.json()["ordering"][0].replace("'name'", "'no_such_field'") == (
+            absent.json()["ordering"][0]
+        )
+
+    @override_settings(
+        SNAPADMIN_MASKED_FIELDS={"demo.Product": ["name"]}, SNAPADMIN_API_STRICT_QUERY_PARAMS=False
+    )
+    def test_ordering_by_masked_field_ignored_for_unprivileged_when_strict_mode_is_off(self, regular_user):
         from demo.apps.shop.models import Product
         alpha = Product.objects.create(name="Alpha", price=Decimal("1"))  # pk1, created first
         bravo = Product.objects.create(name="Bravo", price=Decimal("2"))  # pk2, created second
@@ -1891,7 +1955,18 @@ class TestFieldPermissionsExcludedFromApiQuerying:
         client.credentials(HTTP_AUTHORIZATION=f"Token {token.token_key}")
         return client
 
-    def test_filter_on_denied_field_ignored(self, monkeypatch, regular_user):
+    def test_filter_on_denied_field_refused_like_an_unknown_one(self, monkeypatch, regular_user):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_field_permissions", self.NAME_READ_GATED, raising=False)
+        client = self._regular_client_with_product_view(regular_user)
+
+        r = client.get("/api/models/demo/Product/?name=Laptop")
+
+        assert r.status_code == 400
+        assert r.json() == {"filters": ["Unknown or disallowed filter parameter(s): 'name'."]}
+
+    @override_settings(SNAPADMIN_API_STRICT_QUERY_PARAMS=False)
+    def test_filter_on_denied_field_ignored_when_strict_mode_is_off(self, monkeypatch, regular_user):
         from demo.apps.shop.models import Product
         monkeypatch.setattr(Product, "api_field_permissions", self.NAME_READ_GATED, raising=False)
         laptop = Product.objects.create(name="Laptop", price=Decimal("10.00"))
@@ -1917,7 +1992,19 @@ class TestFieldPermissionsExcludedFromApiQuerying:
         names = {row["name"] for row in r.json()["results"]}
         assert names == {"Laptop"}
 
-    def test_ordering_by_denied_field_ignored(self, monkeypatch, regular_user):
+    def test_ordering_by_denied_field_refused(self, monkeypatch, regular_user):
+        from demo.apps.shop.models import Product
+        monkeypatch.setattr(Product, "api_field_permissions", self.NAME_READ_GATED, raising=False)
+        client = self._regular_client_with_product_view(regular_user)
+
+        r = client.get("/api/models/demo/Product/?ordering=name")
+
+        assert r.status_code == 400
+        assert r.json()["ordering"][0].startswith("Unknown ordering field(s): 'name'.")
+        assert "name" not in r.json()["ordering"][0].split("Order by one of:", 1)[1]
+
+    @override_settings(SNAPADMIN_API_STRICT_QUERY_PARAMS=False)
+    def test_ordering_by_denied_field_ignored_when_strict_mode_is_off(self, monkeypatch, regular_user):
         from demo.apps.shop.models import Product
         monkeypatch.setattr(Product, "api_field_permissions", self.NAME_READ_GATED, raising=False)
         alpha = Product.objects.create(name="Alpha", price=Decimal("1"))

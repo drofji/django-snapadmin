@@ -110,10 +110,14 @@ class TestAdminOverridesPrecedence:
         try:
             Product.register_admin()
             admin_class = type(admin.site._registry[Product])
-            assert "get_readonly_fields" in admin_class.__dict__
+            # Since #EXT3n they live on the generated base, not in the class's own
+            # namespace — that is what lets an admin_mixins entry extend them.
+            assert "get_readonly_fields" not in admin_class.__dict__
             # Product.description is a wysiwyg field shown in list_display.
-            assert "safe_html_description" in admin_class.__dict__
-            assert admin_class.__dict__["get_readonly_fields"] is (
+            assert admin_class.safe_html_description is (
+                Product._admin_generated_overrides["safe_html_description"]
+            )
+            assert admin_class.get_readonly_fields is (
                 Product._admin_generated_overrides["get_readonly_fields"]
             )
         finally:

@@ -14,8 +14,8 @@ removed, renamed or added without anyone updating either list. There is no way
 to delete or rename a public function/class here without this test failing,
 whether the change was deliberate or an accidental side effect of a refactor —
 including one made by an AI assistant, which is exactly the failure mode this
-file exists to catch (see the "Stable public surface" rule in
-``.claude/rules.md``).
+file exists to catch (see ``SECURITY.md`` → "API stability and compatibility
+policy").
 
 A failure here is not automatically wrong. Adding a genuinely new public helper
 is normal — allowed in any ``1.x`` minor per SECURITY.md's semver table — and
@@ -98,6 +98,7 @@ SNAPSHOT: dict[str, list[str]] = {
         "SnapTabularInline",
         "SnapadminAuditLogAdmin",
         "display",
+        "register_builtin_admins",
     ],
     "snapadmin.admin_gen": [
         "AdminGenMixin",
@@ -174,6 +175,10 @@ SNAPSHOT: dict[str, list[str]] = {
         "store_s3",
         "write_manifest",
     ],
+    # 0.1.0b11 (#EXT3j): the one process-wide Unfold decision.
+    "snapadmin.unfold_compat": [
+        "detect_unfold",
+    ],
     "snapadmin.celery_compat": [
         "UnavailableTask",
         "shared_task",
@@ -181,6 +186,11 @@ SNAPSHOT: dict[str, list[str]] = {
     "snapadmin.checks": [
         "check_admin_sections_deprecated",
         "check_startup_report_setting",
+        # 0.1.0b11 (#EXT3f): unusable setting values (E029) and the quiet cases (W028–W030).
+        "check_setting_values",
+        "check_throttle_rates",
+        "check_removed_storage_settings",
+        "check_builtin_admins_registered",
         "check_analytics_db_alias",
         "check_api_extras_installed",
         "check_api_read_only",
