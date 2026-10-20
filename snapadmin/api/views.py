@@ -600,15 +600,25 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             serializer.save()
             return
         current = get_current_tenant()
-        if current is None or current is ALL_TENANTS:
-            raise PermissionDenied(
-                f"No tenant is bound to this request — {model_class._meta.label} "
-                "is tenant-scoped and refuses to create a row with no tenant assigned."
-            )
         field = _tenant_model_field_name(model_class)
         # Popped, not read: the row is saved through the tenant *column* below, and a
         # foreign key handed over under both its name and its column is ambiguous.
         supplied = serializer.validated_data.pop(field, _NOT_SUPPLIED)
+        if current is ALL_TENANTS:
+            # An operator bound to every tenant names the one the row belongs to,
+            # the same rule as the admin form (#EXT3q); naming none is still refused.
+            if supplied is _NOT_SUPPLIED or supplied in (None, ""):
+                raise PermissionDenied(
+                    f"{model_class._meta.label} is tenant-scoped and this request is bound to "
+                    f"all tenants — name the tenant the new row belongs to in {field!r}."
+                )
+            serializer.save(**{_tenant_attname(model_class): _tenant_value(supplied)})
+            return
+        if current is None:
+            raise PermissionDenied(
+                f"No tenant is bound to this request — {model_class._meta.label} "
+                "is tenant-scoped and refuses to create a row with no tenant assigned."
+            )
         if _names_another_tenant(supplied, current):
             raise ValidationError(
                 {

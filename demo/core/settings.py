@@ -516,6 +516,19 @@ SNAPADMIN_MASKING_RULES = {
     },
 }
 
+# Who sees raw PII: a callable (user) -> bool, or its dotted path, replacing the
+# snapadmin.view_raw_pii permission check (superusers stay unmasked, anonymous and
+# inactive users stay masked; an error masks). Unset = the permission.
+SNAPADMIN_PII_ACCESS_CHECK = os.getenv('SNAPADMIN_PII_ACCESS_CHECK') or None
+
+# App labels whose masking above is written before the app is installed (a module
+# rollout). A key of a listed app that is not installed yet is Info (snapadmin.I002),
+# not the E001/E003 a typo gets; a listed app that is installed warns (W034).
+# Comma-separated; unset (the default) excuses nothing.
+SNAPADMIN_MASKING_PENDING_APPS = [
+    s.strip() for s in os.getenv('SNAPADMIN_MASKING_PENDING_APPS', '').split(',') if s.strip()
+]
+
 # Field-level encryption (#CRYPT1). One dict configures the keyset that encrypted
 # model fields are written and read with. Absent or empty = off: no encrypted
 # column, no dependency imported, nothing to configure. The demo runs without it
@@ -759,6 +772,12 @@ SNAPADMIN_ERROR_RETENTION_DAYS = int(os.getenv('SNAPADMIN_ERROR_RETENTION_DAYS',
 # NETWORK dir (a mounted share on another server), REMOTE offsite FTP.
 SNAPADMIN_BACKUP_ENABLED = env_bool('SNAPADMIN_BACKUP_ENABLED', False)
 SNAPADMIN_BACKUP_KEEP = int(os.getenv('SNAPADMIN_BACKUP_KEEP', '7'))
+# Grandfather-father-son tiers beside KEEP (#EXT3u): additionally keep the newest
+# backup of each of the N most recent days / ISO weeks / months that have one.
+# 0 (the default) switches a tier off — KEEP alone is then exactly the old rule.
+SNAPADMIN_BACKUP_KEEP_DAILY = int(os.getenv('SNAPADMIN_BACKUP_KEEP_DAILY', '0'))
+SNAPADMIN_BACKUP_KEEP_WEEKLY = int(os.getenv('SNAPADMIN_BACKUP_KEEP_WEEKLY', '0'))
+SNAPADMIN_BACKUP_KEEP_MONTHLY = int(os.getenv('SNAPADMIN_BACKUP_KEEP_MONTHLY', '0'))
 # Off: each destination's window is measured from its last *actual* run, so the
 # backup hour creeps forward by however long each run takes. On: the window is
 # measured from the planned slot, pinning the schedule to the clock time of the

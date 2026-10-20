@@ -73,6 +73,93 @@ def _masking_shape_error(message: str) -> Error:
     )
 
 
+def _pending_masking_apps() -> set[str] | None:
+    """``SNAPADMIN_MASKING_PENDING_APPS`` as lower-case app labels — ``None`` when
+    the value is not a list of labels (``check_masking_pending_apps`` reports it)."""
+    pending = get_setting("SNAPADMIN_MASKING_PENDING_APPS", None) or []
+    if not isinstance(pending, (list, tuple, set, frozenset)) or not all(
+        isinstance(label, str) for label in pending
+    ):
+        return None
+    return {label.lower() for label in pending}
+
+
+def _unresolved_masking_key(setting: str, key, error: Error) -> CheckMessage:
+    """What an ``'app.Model'`` key that resolves to no model is reported as (#EXT3s).
+
+    An Error — a typo fails open — unless the key's app is listed in
+    ``SNAPADMIN_MASKING_PENDING_APPS`` and is not installed: masking written
+    ahead of a module rollout is Info until the app arrives. Never downgraded
+    without the list, so a typo'd app label still errors.
+    """
+    app_label = str(key).split(".", 1)[0].lower()
+    installed = {config.label.lower() for config in apps.get_app_configs()}
+    if (
+        "." in str(key)
+        and app_label in (_pending_masking_apps() or set())
+        and (app_label not in installed)
+    ):
+        return Info(
+            f"{setting} key {key!r} belongs to {app_label!r}, which is listed in "
+            "SNAPADMIN_MASKING_PENDING_APPS and not installed yet — it is masked once the app "
+            "is installed.",
+            id="snapadmin.I002",
+        )
+    return error
+
+
+def check_masking_pending_apps(app_configs, **kwargs):
+    """``SNAPADMIN_MASKING_PENDING_APPS`` (#EXT3s): a list of app labels, none of them
+    installed — an installed one is a stale entry (Warning)."""
+    pending = get_setting("SNAPADMIN_MASKING_PENDING_APPS", None)
+    if not pending:
+        return []
+    labels = _pending_masking_apps()
+    if labels is None:
+        return [
+            _masking_shape_error(
+                "SNAPADMIN_MASKING_PENDING_APPS must be a list of app labels, "
+                f"got {type(pending).__name__}."
+            )
+        ]
+    installed = {config.label.lower() for config in apps.get_app_configs()}
+    return [
+        Warning(
+            f"SNAPADMIN_MASKING_PENDING_APPS lists {label!r}, which is installed — remove it.",
+            hint="The list only excuses keys of apps that are not installed yet; a stale entry "
+            "would excuse a typo in that app's keys if it were ever uninstalled.",
+            id="snapadmin.W034",
+        )
+        for label in sorted(labels & installed)
+    ]
+
+
+def check_pii_access_check(app_configs, **kwargs):
+    """Warn: ``SNAPADMIN_PII_ACCESS_CHECK`` cannot be used (#EXT3t).
+
+    The decision fails closed — everyone but superusers is masked — which is
+    safe, but it is a configuration nobody meant; say so at startup instead of
+    in a log line on the first masked page.
+    """
+    from snapadmin.masking import _resolve_pii_access_check
+
+    value = get_setting("SNAPADMIN_PII_ACCESS_CHECK", None)
+    if value in (None, ""):
+        return []
+    try:
+        _resolve_pii_access_check(value)
+    except ImproperlyConfigured as exc:
+        return [
+            Warning(
+                f"{exc} — raw PII is masked for everyone but superusers.",
+                hint="Point it at a callable taking the user and returning a bool, e.g. "
+                "'myproject.access.can_view_pii', or unset it to use snapadmin.view_raw_pii.",
+                id="snapadmin.W035",
+            )
+        ]
+    return []
+
+
 def check_masked_fields(app_configs, **kwargs):
     errors = []
     masked = get_setting("SNAPADMIN_MASKED_FIELDS", None) or {}
@@ -87,10 +174,16 @@ def check_masked_fields(app_configs, **kwargs):
         model = _resolve_model(key)
         if model is None:
             errors.append(
-                Error(
-                    f"SNAPADMIN_MASKED_FIELDS key {key!r} does not resolve to an installed model.",
-                    hint="Use 'app_label.ModelName', e.g. 'demo.Customer'.",
-                    id="snapadmin.E001",
+                _unresolved_masking_key(
+                    "SNAPADMIN_MASKED_FIELDS",
+                    key,
+                    Error(
+                        f"SNAPADMIN_MASKED_FIELDS key {key!r} does not resolve to an installed "
+                        "model.",
+                        hint="Use 'app_label.ModelName', e.g. 'demo.Customer'. For an app that "
+                        "is not installed yet, list its label in SNAPADMIN_MASKING_PENDING_APPS.",
+                        id="snapadmin.E001",
+                    ),
                 )
             )
             continue
@@ -148,11 +241,17 @@ def check_masking_rules(app_configs, **kwargs):
         model = _resolve_model(key)
         if model is None:
             errors.append(
-                Error(
-                    f"SNAPADMIN_MASKING_RULES key {key!r} does not resolve to an installed model.",
-                    hint="Use 'app_label.ModelName', e.g. 'demo.Customer'. Nothing is masked "
-                    "for a key that does not resolve.",
-                    id="snapadmin.E003",
+                _unresolved_masking_key(
+                    "SNAPADMIN_MASKING_RULES",
+                    key,
+                    Error(
+                        f"SNAPADMIN_MASKING_RULES key {key!r} does not resolve to an installed "
+                        "model.",
+                        hint="Use 'app_label.ModelName', e.g. 'demo.Customer'. Nothing is masked "
+                        "for a key that does not resolve. For an app that is not installed yet, "
+                        "list its label in SNAPADMIN_MASKING_PENDING_APPS.",
+                        id="snapadmin.E003",
+                    ),
                 )
             )
             continue
@@ -677,6 +776,73 @@ def _schedule_period_hours(schedule) -> float | None:
     if not isinstance(schedule, crontab):
         return None
     return _crontab_period_hours(schedule)
+
+
+#: Each retention tier and the hours its period spans (a month counted short, so a
+#: monthly destination is never told its tier is coarser than it is).
+_RETENTION_TIERS = (
+    ("SNAPADMIN_BACKUP_KEEP_DAILY", "keep_daily", "daily", 24, "days"),
+    ("SNAPADMIN_BACKUP_KEEP_WEEKLY", "keep_weekly", "weekly", 24 * 7, "weeks"),
+    ("SNAPADMIN_BACKUP_KEEP_MONTHLY", "keep_monthly", "monthly", 24 * 28, "months"),
+)
+
+
+def check_backup_retention(app_configs, **kwargs):
+    """``W036``: a retention value below its floor; ``W037``: a tier finer than a
+    destination's own cadence (#EXT3u).
+
+    ``SNAPADMIN_BACKUP_KEEP`` below 1 used to delete every backup, the one just
+    written included; the newest run is now always kept, so the value means 1 —
+    say so. A negative tier means off. A daily tier on a weekly destination keeps
+    one backup per run, so ``KEEP_DAILY = 7`` there spans seven weeks.
+    """
+    from snapadmin.backup import _INTERVAL_ATTRS, _active_destinations, get_backup_config
+
+    if _number_problem(get_setting("SNAPADMIN_BACKUP_KEEP", None), int) or any(
+        _number_problem(get_setting(name, None), int) for name, *_rest in _RETENTION_TIERS
+    ):
+        return []  # snapadmin.E029 reports a value that is not a number
+    config = get_backup_config()
+    messages: list[CheckMessage] = []
+    if config.keep < 1:
+        messages.append(
+            Warning(
+                f"SNAPADMIN_BACKUP_KEEP = {config.keep} keeps only the newest backup — it used to "
+                "delete every backup, the one just written included.",
+                hint="Set it to 1 or more (the default is 7).",
+                id="snapadmin.W036",
+            )
+        )
+    for name, attr, _label, _hours, _unit in _RETENTION_TIERS:
+        if getattr(config, attr) < 0:
+            messages.append(
+                Warning(
+                    f"{name} = {getattr(config, attr)} is treated as 0 (the tier is off).",
+                    hint="Set a tier to the number of periods to keep, or 0 to switch it off.",
+                    id="snapadmin.W036",
+                )
+            )
+    if not config.enabled:
+        return messages
+    for name, attr, label, hours, unit in _RETENTION_TIERS:
+        count = getattr(config, attr)
+        if count <= 0:
+            continue
+        for destination in _active_destinations(config):
+            every = getattr(config, _INTERVAL_ATTRS[destination])
+            if every <= hours:
+                continue
+            messages.append(
+                Warning(
+                    f"{name} = {count}, but the {destination!r} destination runs every {every} h "
+                    f"— its {label} tier keeps one backup per run: {count} of them span "
+                    f"{count * every // 24} days, not {count} {unit}.",
+                    hint=f"Run {destination!r} at least every {hours} h for a {label} tier, or "
+                    "rely on SNAPADMIN_BACKUP_KEEP and the coarser tiers there.",
+                    id="snapadmin.W037",
+                )
+            )
+    return messages
 
 
 def check_backup_schedule_cadence(app_configs, **kwargs):
@@ -1452,6 +1618,40 @@ def _generated_admin_would_render(model) -> bool:
     return not registered_anywhere
 
 
+def check_function_field_arguments(app_configs, **kwargs):
+    """Warn: a ``SnapFunctionField`` / ``@snap_property`` column was given an
+    argument it cannot use (#EXT3o).
+
+    The constructor accepted ``*args, **kwargs`` and dropped them, so a typo
+    (``show_in_fom=True``) or a flag only an editable field has
+    (``searchable=``, ``filterable=``, ``editable=``) did nothing, with no
+    signal. Every other Snap field rejects an unknown argument through Django's
+    own ``TypeError``; the computed column records what it ignored and this
+    check names it — declared on the model, an abstract base or a mixin.
+    """
+    from snapadmin.fields import SnapFunctionField
+    from snapadmin.registry import _declared_attributes
+
+    accepted = "func, verbose_name, show_in_list, show_in_form, safe_html, tab, row"
+    messages = []
+    for model in apps.get_models():
+        for name, value in _declared_attributes(model).items():
+            unused = getattr(value, "unused_arguments", ())
+            if not isinstance(value, SnapFunctionField) or not unused:
+                continue
+            messages.append(
+                Warning(
+                    f"SnapFunctionField {name!r} on {model._meta.label} ignores argument(s): "
+                    f"{', '.join(unused)}.",
+                    hint=f"A computed column accepts {accepted}; remove the others — they have "
+                    "no effect.",
+                    obj=model,
+                    id="snapadmin.W033",
+                )
+            )
+    return messages
+
+
 def check_empty_admin_forms(app_configs, **kwargs):
     """Warn: a registered model's generated admin would render an empty change form.
 
@@ -1483,6 +1683,8 @@ def check_empty_admin_forms(app_configs, **kwargs):
         if is_registered(model)
         and hasattr(model, "register_admin")
         and getattr(model, "admin_enabled", True)
+        # A view-only admin has no form to be empty; it shows the whole row (#EXT3p).
+        and not getattr(model, "admin_read_only", False)
         and _generated_admin_would_render(model)
         and not any(getattr(f, "show_in_form", None) for f in _forward_fields(model))
     )
@@ -2319,6 +2521,9 @@ _NUMERIC_SETTINGS: dict[str, type] = {
     "SNAPADMIN_AUDIT_RETENTION_DAYS": int,
     "SNAPADMIN_BACKUP_FTP_PORT": int,
     "SNAPADMIN_BACKUP_KEEP": int,
+    "SNAPADMIN_BACKUP_KEEP_DAILY": int,
+    "SNAPADMIN_BACKUP_KEEP_MONTHLY": int,
+    "SNAPADMIN_BACKUP_KEEP_WEEKLY": int,
     "SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS": int,
     "SNAPADMIN_BACKUP_MEDIA_SIZE_WARNING_BYTES": int,
     "SNAPADMIN_BACKUP_NETWORK_EVERY_HOURS": int,
@@ -2545,6 +2750,10 @@ ALL_CHECKS = [
     check_throttle_rates,
     check_removed_storage_settings,
     check_builtin_admins_registered,
+    check_function_field_arguments,
+    check_masking_pending_apps,
+    check_pii_access_check,
+    check_backup_retention,
 ]
 
 

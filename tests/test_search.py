@@ -155,9 +155,12 @@ class TestSearchProductsEsPath:
 class TestIndexProduct:
     def test_skips_when_es_unavailable(self, product):
         """index_product must be a no-op when ES is down."""
-        with patch("demo.apps.shop.search.is_es_available", return_value=False):
+        with patch("demo.apps.shop.search.is_es_available", return_value=False), \
+                patch("demo.apps.shop.search.get_es_client") as client:
             from demo.apps.shop.search import index_product
-            index_product(product)  # must not raise
+            index_product(product)
+
+        client.assert_not_called()  # must not raise
 
     def test_calls_es_index_when_available(self, product):
         mock_es = MagicMock()
@@ -187,9 +190,12 @@ class TestIndexProduct:
 @pytest.mark.django_db
 class TestDeleteProduct:
     def test_skips_when_es_unavailable(self):
-        with patch("demo.apps.shop.search.is_es_available", return_value=False):
+        with patch("demo.apps.shop.search.is_es_available", return_value=False), \
+                patch("demo.apps.shop.search.get_es_client") as client:
             from demo.apps.shop.search import delete_product
-            delete_product(99999)  # must not raise
+            delete_product(99999)
+
+        client.assert_not_called()  # must not raise
 
     def test_calls_es_delete_when_available(self):
         mock_es = MagicMock()

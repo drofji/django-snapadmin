@@ -366,7 +366,12 @@ class TestDashboardDynamicStringsLocalised:
         view = DashboardView()
         view.request, view.args, view.kwargs = request, [], {}
         with translation.override("ru"):
-            json.dumps(view.get_context_data()["chart_data"])
+            chart_data = view.get_context_data()["chart_data"]
+            rendered = json.dumps(chart_data, ensure_ascii=False)
+
+        assert json.loads(rendered) == chart_data  # nothing was coerced on the way
+        assert all(isinstance(label, str) for label in chart_data["labels"])
+        assert len(chart_data["labels"]) == len(chart_data["counts"]) > 0
 
     def test_chart_labels_are_not_pasted_raw_into_the_script(self, admin_client):
         html = admin_client.get("/dashboard/").content.decode()

@@ -106,6 +106,17 @@ class TestSettingsGatedCapabilities:
         data = _collect(verbose=True)
         assert data["details"]["backups"] == "db, destinations: local, schedule-aligned"
 
+    @override_settings(
+        SNAPADMIN_BACKUP_ENABLED=True, SNAPADMIN_BACKUP_KEEP_DAILY=7, SNAPADMIN_BACKUP_KEEP_MONTHLY=12
+    )
+    def test_backup_detail_reports_the_retention_tiers_in_use(self):
+        data = _collect(verbose=True)
+        assert data["details"]["backups"] == "db, destinations: local, retention tiers: daily 7 / monthly 12"
+
+    @override_settings(SNAPADMIN_BACKUP_ENABLED=True)
+    def test_backup_detail_omits_tiers_when_none_is_set(self):
+        assert "retention tiers" not in _collect(verbose=True)["details"]["backups"]
+
     @override_settings(SNAPADMIN_BACKUP_ENABLED=True, SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE=False)
     def test_backup_detail_omits_alignment_when_off(self):
         """The default must stay silent — an adoption audit reads a present clause
@@ -343,6 +354,29 @@ class TestSettingsGatedCapabilities:
         assert data["elasticsearch"] is False
         assert "elasticsearch" not in data.get("details", {})
 
+    def test_pii_access_check_off_by_default(self):
+        assert _collect()["pii_access_check"] is False
+
+    @override_settings(SNAPADMIN_PII_ACCESS_CHECK="tests.test_pii_access_check.dpo_only")
+    def test_pii_access_check_on_when_configured(self):
+        assert _collect()["pii_access_check"] is True
+
+    def test_masking_pending_apps_off_by_default(self):
+        data = _collect(verbose=True)
+        assert data["masking_pending_apps"] is False
+        assert "masking_pending_apps" not in data["details"]
+
+    @override_settings(SNAPADMIN_MASKING_PENDING_APPS=["crm", "billing"])
+    def test_masking_pending_apps_lists_the_labels(self):
+        data = _collect(verbose=True)
+        assert data["masking_pending_apps"] is True
+        assert data["details"]["masking_pending_apps"] == "billing, crm"
+
+    @override_settings(SNAPADMIN_MASKING_PENDING_APPS="billing")
+    def test_masking_pending_apps_in_the_wrong_shape_reports_off(self):
+        # check_masking_pending_apps reports the shape (E028); the audit lists nothing.
+        assert _collect()["masking_pending_apps"] is False
+
     def test_show_in_form_default_off_by_default(self):
         assert _collect()["show_in_form_default"] is False
 
@@ -387,6 +421,38 @@ class TestModelBasedCapabilities:
         data = _collect(verbose=True)
         assert data["read_only_models"] is True
         assert "model" in data["details"]["read_only_models"]
+
+    def test_read_only_admins_detected(self):
+        # demo.AuditLog ships admin_read_only=True (#EXT3p).
+        data = _collect(verbose=True)
+        assert data["read_only_admins"] is True
+        assert data["details"]["read_only_admins"] == "1 model"
+
+    def test_read_only_admins_off_when_no_model_opts_in(self, monkeypatch):
+        from demo.apps.shop.models import AuditLog
+
+        monkeypatch.setattr(AuditLog, "admin_read_only", False)
+        data = _collect(verbose=True)
+        assert data["read_only_admins"] is False
+        assert "read_only_admins" not in data["details"]
+
+    def test_custom_background_context_detected(self):
+        # demo.Order overrides snap_background_context (#EXT3r).
+        data = _collect(verbose=True)
+        assert data["custom_background_context"] is True
+        assert data["details"]["custom_background_context"] == "1 model"
+
+    def test_custom_background_context_off_when_no_model_overrides_it(self, monkeypatch):
+        from demo.apps.shop.models import Order
+
+        from snapadmin.models import SnapModel
+
+        monkeypatch.setattr(
+            Order, "snap_background_context", SnapModel.__dict__["snap_background_context"]
+        )
+        data = _collect(verbose=True)
+        assert data["custom_background_context"] is False
+        assert "custom_background_context" not in data["details"]
 
     def test_model_validation_detected(self):
         # demo.Product ships api_full_clean=True (#EXT1k).

@@ -159,3 +159,24 @@ def test_a_rich_text_editor_fits_a_phone_width_window(page, log_in, admin_user, 
         f"the form scrolls sideways: {layout['documentWidth']}px of content in a "
         f"{layout['windowWidth']}px window"
     )
+
+
+def test_a_computed_column_is_shown_read_only_on_the_change_form_only(
+    page, log_in, admin_user, order, product
+):
+    """``@snap_property(show_in_form=True)`` (#EXT3o): the line total is a read-only
+    row of the change form — not an input — and the add form has no such row."""
+    from demo.apps.shop.models import OrderItem
+
+    item = OrderItem.objects.create(order=order, product=product, quantity=3, price=Decimal("2.50"))
+    log_in(admin_user)
+
+    page.goto(f"/admin/demo/orderitem/{item.pk}/change/")
+    cell = page.locator(".readonly", has_text="7.50")
+    expect(cell).to_be_visible()
+    expect(page.get_by_text(re.compile(r"^Line Total:?$"))).to_be_visible()
+    expect(page.locator('[name="snap_form_line_total"]')).to_have_count(0)
+
+    page.goto("/admin/demo/orderitem/add/")
+    expect(page.locator('input[name="quantity"]')).to_be_visible()
+    expect(page.get_by_text(re.compile(r"^Line Total:?$"))).to_have_count(0)

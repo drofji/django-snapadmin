@@ -40,9 +40,17 @@ class TestAdminRegistration:
         assert APIToken in admin.site._registry
 
     def test_register_admin_idempotent(self):
-        """Calling register_admin twice must not raise."""
+        """Calling register_admin twice must not raise — nor replace the admin
+        already serving the model (a second instance would drop any state the
+        first was given, and AlreadyRegistered is swallowed on purpose)."""
+        from django.contrib import admin
+
         from demo.apps.shop.models import Product
-        Product.register_admin()  # already registered – must be silent
+
+        serving = admin.site._registry[Product]
+        Product.register_admin()
+
+        assert admin.site._registry[Product] is serving  # already registered – must be silent
 
     def test_product_admin_has_list_display(self):
         from demo.apps.shop.models import Product

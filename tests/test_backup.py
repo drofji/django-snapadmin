@@ -995,7 +995,11 @@ class TestWriteManifest:
         config = _with_age(get_backup_config(), recipients=[recipient])
         dump = create_encrypted_db_dump(out_dir, config)
         manifest_path = write_manifest(out_dir, config, "20260826-000000", {"db": dump})
-        json.loads(manifest_path.read_text())  # plain JSON, no decryption needed
+        manifest = json.loads(manifest_path.read_text())
+
+        assert not manifest_path.read_bytes().startswith(b"age-encryption.org")
+        assert manifest["encrypted"] is True
+        assert manifest["parts"]["db"]["filename"] == dump.name  # plain JSON, no decryption needed
 
 
 class TestBuildBackupBundle:

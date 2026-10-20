@@ -231,13 +231,13 @@ first. Ambiguous business logic is a question for the maintainers, never a guess
 
 | Escape route | What slips through | Countermeasure |
 |---|---|---|
-| **Homogeneous fixtures** — every test uses one shape (a string tenant column, fields declared on the concrete class) | a bug that only exists on another shape (a `ForeignKey` tenant column, a field inherited from an abstract base) | test models covering each supported shape; suites parametrised over the shapes |
+| **Homogeneous fixtures** — every test uses one shape (a string tenant column, fields declared on the concrete class) | a bug that only exists on another shape (a `ForeignKey` tenant column, a field inherited from an abstract base) | test models covering each supported shape (`tests/shape_matrix.py` builds the ones fixtures used to miss); suites parametrised over the shapes |
 | **Mocks hide cost and call patterns** — a mock accepts any number of calls, for free | a network round-trip per save, an N+1 against a service | call and query budgets; tests against the real service (`pytest -m real_es`, the PostgreSQL job) |
 | **The test client is not a browser** — it posts whatever the test writes | a widget/parser mismatch (a checkbox posts `on`, never `true`) | browser E2E (`pytest -m e2e`); posting forms back exactly as a browser serialises them |
 | **WSGI only** | sync-only code that blocks or degrades an ASGI deployment | async tests (`AsyncClient`) for every middleware and async-capable view |
 | **Inputs from the environment never tried** | an empty string from an unset variable crashing at request time | hostile-input cases (empty, whitespace, wrong type, very long, Unicode); validation in a system check |
 | **Negative paths and state combinations** | an unknown parameter silently ignored; a crash on a line covered by a different state | explicit negative tests; property-based and fuzz tests. Coverage proves a line ran, not that every state reached it |
-| **Swallowed exceptions** — a broad `except` that logs and carries on | a feature that disappears with nothing but a log line | tests asserting that nothing was logged; every silent fallback justified in writing |
+| **Swallowed exceptions** — a broad `except` that logs and carries on | a feature that disappears with nothing but a log line | tests asserting that nothing was logged (`tests/test_startup_is_quiet.py` starts the demo in a fresh process and fails on any startup warning); every silent fallback justified in writing |
 | **Clean-checkout CI** | a problem that only exists in a working tree (e.g. an ignored local file picked up by a build) | guards comparing build output with the tracked tree |
 | **A test that cannot fail** | everything — it protects nothing and still counts | `tests/test_assertions_can_fail.py`; mutation testing |
 
@@ -256,7 +256,8 @@ test fail, revert. An assertion you have never seen fail is a claim, not a test.
 **Tests that check the suite and the docs follow this method:**
 
 - `tests/test_assertions_can_fail.py` — no `assert True`, no `assert … or True`, and no test without
-  an assertion beyond a frozen list that may only shrink.
+  an assertion beyond a frozen list that may only shrink, each entry with the reason that "it did not
+  raise" is its whole contract (a call to a local `_assert_*` helper that itself asserts counts).
 - `tests/test_public_contract.py` + `tests/test_public_surface_snapshot.py` — a public name cannot
   change or disappear silently; `tests/test_critical_path_smoke.py` — the layers still agree end to
   end.

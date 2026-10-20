@@ -423,7 +423,16 @@ class TestRunExportJob:
         assert job.status == "completed" and job.processed_rows == 5
 
     def test_missing_job_is_a_noop(self, db):
-        exporting.run_export_job(uuid.uuid4())  # no such job → returns quietly
+        from structlog.testing import capture_logs
+
+        from snapadmin.models import SnapExportJob
+
+        missing = uuid.uuid4()
+        with capture_logs() as emitted:
+            exporting.run_export_job(missing)
+
+        assert [(e["event"], e["job"]) for e in emitted] == [("snapadmin.export.skipped", str(missing))]
+        assert not SnapExportJob.objects.exists()  # no such job → returns quietly
 
     @override_settings(SNAPADMIN_EXPORT_CHUNK_SIZE=2)
     def test_concurrent_second_call_is_rejected(self, products):

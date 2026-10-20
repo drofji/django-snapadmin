@@ -218,7 +218,10 @@ class TestPerShardRetention:
             (directory / f"snapadmin-db-shard_1-2026010{i}-000000.sql.gz").write_bytes(b"x")
             (directory / f"snapadmin-db-shard_2-2026010{i}-000000.sql.gz").write_bytes(b"x")
 
-        backup_module._prune_directory(directory, keep=2, prefix="snapadmin-db-shard_1-")
+        # The retention rule is a policy since #EXT3u; keep_last=2 is the old keep=2.
+        backup_module._prune_directory(
+            directory, policy=backup_module._RetentionPolicy(keep_last=2), prefix="snapadmin-db-shard_1-"
+        )
 
         remaining = sorted(p.name for p in directory.iterdir())
         shard_1_remaining = [n for n in remaining if "shard_1" in n]

@@ -1952,6 +1952,13 @@ class SnapFunctionField(SnapNotDatabaseField):
 
     Pass ``safe_html=True`` only for markup you generate yourself; the returned
     value is escaped otherwise.
+
+    ``show_in_form=True`` also shows the value **read-only on the change form**
+    (never on the add form — there is no saved row to compute from yet), in its
+    ``tab=`` and ``row=`` and in declaration order among the model's fields. The
+    read-only row is the admin method ``snap_form_<name>``; that is the name to
+    use in a hand-written ``fieldsets``. Default ``False`` — unlike editable
+    fields, ``SNAPADMIN_SHOW_IN_FORM_DEFAULT`` does not apply here.
     """
 
     def __init__(
@@ -1959,9 +1966,11 @@ class SnapFunctionField(SnapNotDatabaseField):
         func,
         verbose_name=None,
         show_in_list=True,
-        show_in_form=True,
+        show_in_form=False,
         safe_html=False,
         *args,
+        tab: str | Promise | None = None,
+        row: str | None = None,
         **kwargs,
     ):
         if not callable(func):
@@ -1971,6 +1980,22 @@ class SnapFunctionField(SnapNotDatabaseField):
         self.show_in_list = show_in_list
         self.show_in_form = show_in_form
         self.safe_html = safe_html
+        self.tab = tab
+        self.row = row
+        # What the column cannot use. It used to be dropped silently — a typo such
+        # as show_in_fom=True, or searchable= (an editable-field flag), did nothing
+        # with no signal; snapadmin.W033 now names each one at startup.
+        extra_positional = (
+            (f"{len(args)} extra positional argument{'s' if len(args) > 1 else ''}",)
+            if args
+            else ()
+        )
+        self.unused_arguments: tuple[str, ...] = (*extra_positional, *sorted(kwargs))
+        # Where the column sits among the model's fields on the change form: a
+        # Django field takes ``Field.creation_counter`` and increments it, so the
+        # value read here is the counter of the next field declared after this
+        # column (#EXT3o).
+        self.declaration_order = models.Field.creation_counter
         super().__init__()
 
     def get_display_value(self, obj):

@@ -217,15 +217,94 @@ def _function_field_display(field):
     return _display
 
 
-def _group_fields_by_row(model, field_names: list[str]) -> list:
+def _function_field_form_display(field):
+    """The change form's read-only row for one :class:`SnapFunctionField` (#EXT3o).
+
+    Separate from the changelist column: under Unfold that column is a "header"
+    cell returning a ``[value, None, None]`` triple, which a read-only form row
+    would print as a Python list.
+    """
+
+    @unfold_display(description=getattr(field, "verbose_name", "") or "")
+    def _display(self, obj):
+        return field.get_display_value(obj)
+
+    return _display
+
+
+def _operator_tenant_field(model) -> str | None:
+    """The tenant field an operator bound to all tenants names on an add form
+    (#EXT3q) — ``None`` when the model is not tenant-scoped or the request is
+    bound to one tenant (stamped server-side) or to none (refused)."""
+    from snapadmin.tenancy import (
+        ALL_TENANTS,
+        _tenant_model_field_name,
+        get_current_tenant,
+        is_tenant_scoped,
+    )
+
+    if not is_tenant_scoped(model) or get_current_tenant() is not ALL_TENANTS:
+        return None
+    return _tenant_model_field_name(model)
+
+
+def _with_leading_field(fieldsets, name: str):
+    """The same fieldsets with ``name`` first in the untabbed one (added when absent)."""
+    if any(name in _flat_names(options.get("fields", [])) for _title, options in fieldsets):
+        return fieldsets
+    for index, (title, options) in enumerate(fieldsets):
+        if title is None and "tab" not in options.get("classes", ()):
+            updated = (title, {**options, "fields": [name, *options.get("fields", [])]})
+            return [*fieldsets[:index], updated, *fieldsets[index + 1 :]]
+    return [(None, {"fields": [name]}), *fieldsets]
+
+
+def _flat_names(entries) -> list[str]:
+    names: list[str] = []
+    for entry in entries:
+        names.extend(entry if isinstance(entry, (tuple, list)) else [entry])
+    return names
+
+
+def _read_only_permissions() -> dict[str, Any]:
+    """The permission methods of an ``admin_read_only`` model's generated admin
+    (#EXT3p): view only, for everyone — a superuser included."""
+
+    def has_add_permission(self, request, obj=None):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    return {
+        "has_add_permission": has_add_permission,
+        "has_change_permission": has_change_permission,
+        "has_delete_permission": has_delete_permission,
+    }
+
+
+def _layout_source(model, name: str, displays: dict[str, Any]):
+    """What carries ``tab=`` / ``row=`` for one form entry: the model field, or
+    the :class:`SnapFunctionField` behind a ``snap_form_<name>`` display."""
+    if name in displays:
+        return displays[name]
+    try:
+        return model._meta.get_field(name)
+    except FieldDoesNotExist:
+        return None
+
+
+def _group_fields_by_row(
+    model, field_names: list[str], displays: dict[str, Any] | None = None
+) -> list:
     """Fold fields that share a ``row=`` name into one Django fieldset row."""
     grouped: list = []
     rows: dict[str, list[str]] = {}
     for name in field_names:
-        try:
-            row_name = getattr(model._meta.get_field(name), "row", None)
-        except FieldDoesNotExist:
-            row_name = None
+        row_name = getattr(_layout_source(model, name, displays or {}), "row", None)
         if not row_name:
             grouped.append(name)
             continue
@@ -260,15 +339,28 @@ def _forward_fields(model) -> list:
     return sorted([*model._meta.fields, *editable_many_to_many], key=lambda f: f.creation_counter)
 
 
-def _fieldsets_for(model, form_fields: list[str]) -> list:
-    """The form's fieldsets: one per ``tab=`` name, plus the untabbed fields."""
+def _form_entries(model, form_fields: list[str], displays: dict[str, Any]) -> list[str]:
+    """The model's form fields with the read-only computed rows merged in, in
+    declaration order: a column sorts just before the field declared after it."""
+    if not displays:
+        return list(form_fields)
+    # form_fields come from _forward_fields(), so every name is a real field.
+    keyed = [(model._meta.get_field(name).creation_counter, 1, name) for name in form_fields]
+    keyed.extend((field.declaration_order, 0, name) for name, field in displays.items())
+    return [name for _counter, _kind, name in sorted(keyed, key=lambda item: item[:2])]
+
+
+def _fieldsets_for(model, form_fields: list[str], displays: dict[str, Any] | None = None) -> list:
+    """The form's fieldsets: one per ``tab=`` name, plus the untabbed fields.
+
+    ``displays`` maps each ``snap_form_<name>`` read-only row of a computed
+    column declared ``show_in_form=True`` to its field (#EXT3o).
+    """
+    displays = displays or {}
     tabs: dict[str, list[str]] = {}
     untabbed: list[str] = []
-    for name in form_fields:
-        try:
-            tab_name = getattr(model._meta.get_field(name), "tab", None)
-        except FieldDoesNotExist:
-            tab_name = None
+    for name in _form_entries(model, form_fields, displays):
+        tab_name = getattr(_layout_source(model, name, displays), "tab", None)
         if tab_name:
             tabs.setdefault(tab_name, []).append(name)
         else:
@@ -276,23 +368,29 @@ def _fieldsets_for(model, form_fields: list[str]) -> list:
 
     fieldsets: list = []
     if untabbed:
-        fieldsets.append((None, {"fields": _group_fields_by_row(model, untabbed)}))
+        fieldsets.append((None, {"fields": _group_fields_by_row(model, untabbed, displays)}))
     for tab_name, names in tabs.items():
         fieldsets.append(
-            (tab_name, {"fields": _group_fields_by_row(model, names), "classes": ("tab",)})
+            (
+                tab_name,
+                {"fields": _group_fields_by_row(model, names, displays), "classes": ("tab",)},
+            )
         )
     return fieldsets
 
 
-def _drop_masked_fields(fieldsets, masked: set[str]):
+def _drop_masked_fields(fieldsets, masked: set[str], *, drop_emptied: bool = False):
     """The same fieldsets without the fields this viewer may not see raw.
 
     A masked field is shown starred on the changelist; on the change form there
     is no starred equivalent — an input holds the raw value — so it is removed
-    from the form entirely for a viewer without PII access.
+    from the form entirely for a viewer without PII access. Also drops the
+    computed rows from an add form (#EXT3o); ``drop_emptied`` then removes a
+    fieldset the removal left with no fields, so no empty tab is drawn.
     """
     filtered = []
     for name, options in fieldsets:
+        had_fields = bool(options.get("fields"))
         fields = []
         for entry in options.get("fields", []):
             if isinstance(entry, tuple):
@@ -301,6 +399,8 @@ def _drop_masked_fields(fieldsets, masked: set[str]):
                     fields.append(kept if len(kept) > 1 else kept[0])
             elif entry not in masked:
                 fields.append(entry)
+        if drop_emptied and had_fields and not fields:
+            continue
         filtered.append((name, {**options, "fields": fields}))
     return filtered
 
@@ -327,6 +427,7 @@ class AdminGenMixin:
         _meta: Any
         __name__: str
         admin_enabled: bool
+        admin_read_only: bool
         admin_mixins: list[type]
         admin_overrides: dict[str, Any]
         admin_tabs: list[dict[str, Any]]
@@ -366,6 +467,11 @@ class AdminGenMixin:
             for f in forward_fields
             if getattr(f, SnapFieldAttributeEnum.SHOW_IN_FORM.value, None)
         ]
+        read_only = bool(getattr(cls, "admin_read_only", False))
+        if read_only and not form_fields:
+            # A view-only admin with nothing flagged shows the whole row (#EXT3p):
+            # demanding show_in_form on fields nobody may edit was the workaround.
+            form_fields = [f.name for f in forward_fields if not f.auto_created]
         list_display = [
             fn
             for fn, fo in meta_fields.items()
@@ -392,11 +498,26 @@ class AdminGenMixin:
             if not getattr(fo, SnapFieldAttributeEnum.UPDATABLE.value, True)
         ]
 
+        # The read-only change-form rows of computed columns declared
+        # show_in_form=True (#EXT3o); the flag was stored and never read before.
+        form_displays = {
+            f"snap_form_{attr_name}": attr_value
+            for attr_name, attr_value in attr_fields.items()
+            if isinstance(attr_value, snapfields.SnapFunctionField) and attr_value.show_in_form
+        }
+
         def dynamic_get_readonly_fields(self, request, obj=None):
+            if read_only:
+                # Every entry, so the view page's form is built with no input at
+                # all — a non-editable column (auto_now_add) in a form is an error.
+                return [*form_fields, *form_displays]
             return [
-                fn
-                for fn, fo in all_fields_for_readonly.items()
-                if fn in editable_fields or (fn in updatable_fields and obj and obj.pk)
+                *(
+                    fn
+                    for fn, fo in all_fields_for_readonly.items()
+                    if fn in editable_fields or (fn in updatable_fields and obj and obj.pk)
+                ),
+                *form_displays,
             ]
 
         # Generated callables (this one, the wysiwyg safe_html_<field> displays
@@ -409,6 +530,8 @@ class AdminGenMixin:
         # (e.g. after a field's safe_html flag changes) always reflects the
         # current field state.
         generated_overrides = {"get_readonly_fields": dynamic_get_readonly_fields}
+        if read_only:
+            generated_overrides.update(_read_only_permissions())
 
         list_filter = _list_filter_for(meta_fields)
 
@@ -437,12 +560,15 @@ class AdminGenMixin:
                 generated_overrides[method_name] = _function_field_display(attr_value)
                 if attr_value.show_in_list:
                     list_display.append(method_name)
+        for method_name, field in form_displays.items():
+            generated_overrides[method_name] = _function_field_form_display(field)
 
         if pk_name in list_display:
             list_display.remove(pk_name)
         if show_pk:
             list_display.insert(0, pk_name)
         cls._admin_generated_overrides = generated_overrides
+        cls._admin_generated_form_displays = form_displays
         return AdminFieldSets(
             form_fields, list_display, search_fields, list_filter, autocomplete_fields
         )
@@ -535,7 +661,8 @@ class AdminGenMixin:
         list_filter = admin_fields.list_filter
         autocomplete_fields = admin_fields.autocomplete_fields
 
-        fieldsets = _fieldsets_for(cls, form_fields)
+        form_displays = getattr(cls, "_admin_generated_form_displays", {})
+        fieldsets = _fieldsets_for(cls, form_fields, form_displays)
 
         final_js, final_css = cls.get_admin_media()
 
@@ -616,7 +743,12 @@ class AdminGenMixin:
                 # boolean whose column is nullable, which every defaulted
                 # SnapBooleanField is (#EXT3g).
                 return db_field.formfield(widget=_checkbox_widget(self), **kwargs)
-            return super(ModelAdmin, self).formfield_for_dbfield(db_field, request, **kwargs)
+            formfield = super(ModelAdmin, self).formfield_for_dbfield(db_field, request, **kwargs)
+            if formfield is not None and db_field.name == _operator_tenant_field(cls):
+                # Nullable for the migration's sake, never optional here: a row an
+                # operator creates without a tenant would be an orphan (#EXT3q).
+                formfield.required = True
+            return formfield
 
         def get_fieldsets(self, request, obj=None):
             # If we have rows, Unfold needs specific layout classes
@@ -630,6 +762,15 @@ class AdminGenMixin:
             masked = set(get_masked_fields(cls._meta.app_label, cls._meta.model_name))
             if masked and not user_can_view_pii(request.user):
                 fs = _drop_masked_fields(fs, masked)
+            # A computed row needs a saved row to compute from; the add form (and
+            # "save as new", which takes the add path) leaves it out (#EXT3o).
+            if obj is None and form_displays:
+                fs = _drop_masked_fields(fs, set(form_displays), drop_emptied=True)
+            # An operator bound to all tenants names the new row's tenant (#EXT3q);
+            # under one tenant it stays server-side, and a change never moves a row.
+            operator_tenant = _operator_tenant_field(cls) if obj is None else None
+            if operator_tenant:
+                fs = _with_leading_field(fs, operator_tenant)
             return _mark_row_fieldsets(fs) if UNFOLD_INSTALLED else fs
 
         # Every generated callable lives on a generated *base*, placed after the

@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import contextvars
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import iscoroutinefunction, markcoroutinefunction, sync_to_async
@@ -146,6 +146,32 @@ def use_all_tenants() -> Iterator[None]:
         yield
     finally:
         _current_tenant.reset(token)
+
+
+#: What a cross-tenant background job tells :func:`_background_context` it is.
+BACKGROUND_PURPOSES: tuple[str, ...] = ("retention", "reindex", "subject_request")
+
+
+def _background_context(
+    model: type[django_models.Model], purpose: str
+) -> AbstractContextManager[None]:
+    """The context every cross-tenant background job runs ``model``'s reads in (#EXT3r).
+
+    The model's ``snap_background_context(purpose)`` hook when it has one — every
+    ``SnapModel``, or a plain model that declares the classmethod — otherwise
+    :func:`use_all_tenants`. One door, so a project whose own manager refuses to
+    run without its tenant context (or whose database enforces row-level
+    security) can supply that context to the purge, the reindex and the subject
+    request alike.
+    """
+    if purpose not in BACKGROUND_PURPOSES:
+        raise ValueError(
+            f"Unknown background purpose {purpose!r}; expected one of {BACKGROUND_PURPOSES}."
+        )
+    hook = getattr(model, "snap_background_context", None)
+    if hook is None:
+        return use_all_tenants()
+    return hook(purpose)
 
 
 def is_tenant_scoped(model: type[django_models.Model]) -> bool:

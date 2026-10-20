@@ -39,6 +39,29 @@ from snapadmin.diagnostics.registry import register
 from snapadmin.registry import get_model_meta, is_registered
 
 
+def _masking_pending_apps() -> tuple[bool, str]:
+    """Masking written ahead for apps not installed yet (#EXT3s) — on when
+    ``SNAPADMIN_MASKING_PENDING_APPS`` lists any label."""
+    pending = get_setting("SNAPADMIN_MASKING_PENDING_APPS", None) or []
+    if not isinstance(pending, (list, tuple, set, frozenset)):
+        return False, ""
+    labels = sorted(str(label) for label in pending)
+    return bool(labels), ", ".join(labels)
+
+
+def _overrides_background_context(model) -> bool:
+    """Whether ``model`` supplies its own cross-tenant job context (#EXT3r) — a
+    ``SnapModel`` overriding ``snap_background_context``, or a plain model
+    declaring one."""
+    from snapadmin.models import SnapModel
+
+    hook = getattr(model, "snap_background_context", None)
+    if hook is None:
+        return False
+    default = SnapModel.__dict__["snap_background_context"].__func__
+    return getattr(hook, "__func__", hook) is not default
+
+
 def _flag(name: str, default: bool) -> bool:
     return bool(getattr(settings, name, default))
 
@@ -147,6 +170,17 @@ def _backup_detail() -> str:
         detail += f", destinations: {'+'.join(_active_destinations(config))}"
         if config.align_to_schedule:
             detail += ", schedule-aligned"
+        tiers = [
+            f"{label} {count}"
+            for label, count in (
+                ("daily", config.keep_daily),
+                ("weekly", config.keep_weekly),
+                ("monthly", config.keep_monthly),
+            )
+            if count > 0
+        ]
+        if tiers:
+            detail += f", retention tiers: {' / '.join(tiers)}"
         if last_restore_run(config):
             detail += ", restored"
     return detail
@@ -367,6 +401,9 @@ def _capabilities(*, live: bool = True) -> list[tuple[str, bool | None, str]]:
         _resolve_throttle_rate(name, drf_rates) is not None for name in _THROTTLE_SETTINGS
     )
     read_only = sum(1 for m in models if get_model_meta(m, "api_read_only", False))
+    # A SnapModel-only attribute (the generated admin reads it), hence getattr.
+    read_only_admins = sum(1 for m in models if getattr(m, "admin_read_only", False))
+    custom_background = sum(1 for m in models if _overrides_background_context(m))
     # api_full_clean (#EXT1k) — "on" means at least one registered model runs its
     # own clean() on the API write path. Worth surfacing because the alternative
     # is silent: a cross-field rule the admin enforces and the API ignores looks
@@ -438,6 +475,12 @@ def _capabilities(*, live: bool = True) -> list[tuple[str, bool | None, str]]:
             ),
         ),
         ("pii_masking", masked_fields > 0, _masking_detail(masked_fields, ruled_fields)),
+        ("masking_pending_apps", *_masking_pending_apps()),
+        (
+            "pii_access_check",
+            get_setting("SNAPADMIN_PII_ACCESS_CHECK", None) not in (None, ""),
+            "",
+        ),
         ("field_encryption", *(_encryption() if live else _encryption_configured())),
         ("sharding", *_sharding()),
         ("api_tokens", *(_api_tokens() if live else (None, "needs the database"))),
@@ -452,6 +495,12 @@ def _capabilities(*, live: bool = True) -> list[tuple[str, bool | None, str]]:
         ),
         ("model_validation", full_clean_models > 0, _count(full_clean_models, "model")),
         ("read_only_models", read_only > 0, _count(read_only, "model")),
+        ("read_only_admins", read_only_admins > 0, _count(read_only_admins, "model")),
+        (
+            "custom_background_context",
+            custom_background > 0,
+            _count(custom_background, "model"),
+        ),
         ("write_allowlist", write_allowlist > 0, _count(write_allowlist, "model")),
         ("delete_guard", bool(get_setting("SNAPADMIN_API_DELETE_GUARD", None)), ""),
         ("decorated_models", decorated > 0, _count(decorated, "plain model")),

@@ -62,7 +62,8 @@ Declaring models
         metadata and registration only: no ES manager, no ``purge_expired()``, no
         generated admin), ``snap_property`` (a method decorator for a computed,
         display-only column — the decorator form of ``SnapFunctionField``, works
-        on either door), ``EsStorageMode``, ``APIToken``, ``ErrorEvent``, the ES
+        on either door; ``show_in_form=True`` adds it read-only to the change
+        form, ``snapadmin.W033`` names arguments it ignores), ``EsStorageMode``, ``APIToken``, ``ErrorEvent``, the ES
         manager/queryset.
     ``snapadmin.es``
         The Elasticsearch integration's model-layer pieces — ``EsStorageMode``,
@@ -164,7 +165,9 @@ Operations
         ``{field: {"old": …, "new": …}}`` diff and renders it; ``masking``
         resolves *which* fields are sensitive (``SNAPADMIN_MASKED_FIELDS``),
         *how* each is obfuscated and *who* may see it raw
-        (``SNAPADMIN_MASKING_RULES``) — ``mask_field()`` is the choke point
+        (``SNAPADMIN_MASKING_RULES``; keys of an app not installed yet are
+        excused only when ``SNAPADMIN_MASKING_PENDING_APPS`` lists it) —
+        ``mask_field()`` is the choke point
         every masking surface goes through. ``user_can_access_field()`` is a
         related but orthogonal guard: whether a field is present/writable at
         all, driven by a model's ``api_field_permissions`` rather than a
@@ -178,7 +181,9 @@ Operations
         (default ``["db"]``) optionally bundles ``media`` and an AGE-encrypted
         ``env`` alongside the database — loose per-part files sharing one run's
         timestamp, plus an always-unencrypted ``manifest.json`` sidecar.
-        Retention (``SNAPADMIN_BACKUP_KEEP``) applies per part. With
+        Retention (``SNAPADMIN_BACKUP_KEEP``, plus the optional
+        ``SNAPADMIN_BACKUP_KEEP_DAILY`` / ``_WEEKLY`` / ``_MONTHLY`` tiers, one
+        rule for every destination) applies per part. With
         ``SNAPADMIN_SHARDING`` enabled, the ``"db"`` part becomes one
         ``"db.<shard_name>"`` part per shard's primary (never a replica),
         each independently checksummed and retention-pruned — an unsharded
@@ -259,7 +264,9 @@ Operations
         (``use_tenant()``, or ``SnapTenantMiddleware`` per request via
         ``SNAPADMIN_TENANT_RESOLVER``) to see or write any row; with none
         bound, every read returns empty and every write is refused —
-        default-deny, never "every row". ``use_all_tenants()`` is the one
+        default-deny, never "every row". The cross-tenant jobs (purge, reindex,
+        subject request) enter ``SnapModel.snap_background_context(purpose)``,
+        whose default is ``use_all_tenants()``. ``use_all_tenants()`` is the one
         explicit, audited bypass, reserved for background code whose job is
         inherently cross-tenant (the retention purge, the Elasticsearch
         reindex). Isolation is *logical*, not physical — see ``SECURITY.md``.
@@ -315,7 +322,9 @@ Operations
         malformed path — see ``manage.py snapadmin_subject_request`` below.
         ``W015`` catches a registered model whose generated admin form would
         render with no fields at all (no ``show_in_form=True`` anywhere),
-        whatever the cause — see ``SNAPADMIN_SHOW_IN_FORM_DEFAULT`` below.
+        whatever the cause — see ``SNAPADMIN_SHOW_IN_FORM_DEFAULT`` below; a
+        model declaring ``admin_read_only = True`` (a view-only admin that shows
+        every field) is skipped.
         ``E009`` catches a **declared but unenforceable** ``tenant_scoped``
         (``snapadmin.tenancy``): the resolved tenant field does not exist on
         the model, or the model was registered via ``@snap_model`` rather

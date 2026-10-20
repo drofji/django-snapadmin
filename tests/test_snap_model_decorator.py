@@ -19,6 +19,7 @@ from decimal import Decimal
 from itertools import count
 
 import pytest
+from unittest.mock import MagicMock
 from django.apps import apps as global_apps
 from django.db import models as django_models
 from django.test import override_settings
@@ -396,10 +397,17 @@ class TestHonestAbsences:
     def test_the_post_migrate_es_hook_skips_it_instead_of_crashing(self, monkeypatch):
         from snapadmin.apps import sync_es_mappings
 
-        Ledger = _make_plain_model()
-        monkeypatch.setattr(global_apps, "get_models", lambda: [Ledger])
+        from demo.apps.shop.models import Product
 
-        sync_es_mappings(sender=None)  # must not raise
+        Ledger = _make_plain_model()
+        ensure = MagicMock()
+        monkeypatch.setattr(Product, "_ensure_es_index_and_mapping", ensure)
+        monkeypatch.setattr(global_apps, "get_models", lambda: [Ledger, Product])
+
+        sync_es_mappings(sender=None)
+
+        # Skipped the plain model and carried on to the SnapModel after it.
+        ensure.assert_called_once_with()  # must not raise
 
     def test_it_is_never_selected_for_reindexing(self, monkeypatch):
         from snapadmin import models as snap_models

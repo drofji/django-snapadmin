@@ -76,6 +76,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import ModuleType
+from collections.abc import Iterable
 from typing import IO, Any, BinaryIO, Callable, cast
 
 import django
@@ -153,6 +154,15 @@ class BackupConfig:
     env_file: str
     media_size_warning_bytes: int
     align_to_schedule: bool
+    # Grandfather-father-son tiers beside ``keep`` (#EXT3u); 0 = off.
+    keep_daily: int = 0
+    keep_weekly: int = 0
+    keep_monthly: int = 0
+
+    @property
+    def retention(self) -> "_RetentionPolicy":
+        """The policy every destination prunes with (:func:`_select_stale`)."""
+        return _RetentionPolicy(self.keep, self.keep_daily, self.keep_weekly, self.keep_monthly)
 
 
 def get_backup_config() -> BackupConfig:
@@ -197,6 +207,9 @@ def get_backup_config() -> BackupConfig:
             get_setting("SNAPADMIN_BACKUP_MEDIA_SIZE_WARNING_BYTES", 10 * 1024**3)
         ),
         align_to_schedule=bool(get_setting("SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE", False)),
+        keep_daily=int(get_setting("SNAPADMIN_BACKUP_KEEP_DAILY", 0)),
+        keep_weekly=int(get_setting("SNAPADMIN_BACKUP_KEEP_WEEKLY", 0)),
+        keep_monthly=int(get_setting("SNAPADMIN_BACKUP_KEEP_MONTHLY", 0)),
     )
 
 
@@ -769,12 +782,72 @@ def _part_prefix_for(name: str) -> str:
     return match.group(1) if match else BACKUP_PREFIX
 
 
-def _prune_directory(directory: Path, keep: int, prefix: str) -> int:
-    """Keep the newest `keep` files matching `prefix` in a directory, delete the rest."""
-    dumps = sorted(directory.glob(f"{prefix}*"))
-    stale = dumps[:-keep] if keep > 0 else dumps
-    for path in stale:
-        path.unlink()
+@dataclass(frozen=True)
+class _RetentionPolicy:
+    """What a destination keeps of one part's backups (#EXT3u).
+
+    ``keep_last`` newest runs, plus the newest backup of each of the
+    ``keep_daily`` most recent days, ``keep_weekly`` ISO weeks and
+    ``keep_monthly`` months **that have a backup** (the borg/restic reading:
+    counted over the backups, never over the clock). A tier of 0 is off.
+    """
+
+    keep_last: int
+    keep_daily: int = 0
+    keep_weekly: int = 0
+    keep_monthly: int = 0
+
+
+#: The run timestamp inside a part filename (or an S3 key carrying a prefix).
+_RUN_STAMP_RE = re.compile(r"(\d{8}-\d{6})\.")
+
+
+def _run_time(name: str) -> datetime | None:
+    match = _RUN_STAMP_RE.search(name)
+    if match is None:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%Y%m%d-%H%M%S")
+    except ValueError:
+        return None
+
+
+def _select_stale(names: Iterable[str], policy: _RetentionPolicy) -> list[str]:
+    """The backups ``policy`` lets go, oldest first — the one retention rule every
+    destination prunes with (#EXT3u).
+
+    Names sort chronologically (``{prefix}{YYYYMMDD-HHMMSS}.{ext}``), so the
+    newest ``keep_last`` are the last ones; with no tier set this is exactly the
+    ``names[:-keep]`` slice every destination used to carry its own copy of.
+    The newest backup is always kept: ``keep_last`` below 1 used to delete every
+    backup, the one just written included. A name with no readable timestamp
+    takes part in ``keep_last`` only.
+    """
+    ordered = sorted(set(names))
+    if not ordered:
+        return []
+    kept = set(ordered[-max(policy.keep_last, 1) :])
+    dated = [(name, stamp) for name in ordered if (stamp := _run_time(name)) is not None]
+    tiers = (
+        (policy.keep_daily, lambda stamp: stamp.date()),
+        (policy.keep_weekly, lambda stamp: stamp.isocalendar()[:2]),
+        (policy.keep_monthly, lambda stamp: (stamp.year, stamp.month)),
+    )
+    for count, period_of in tiers:
+        if count <= 0:
+            continue
+        newest_per_period: dict[Any, str] = {}
+        for name, stamp in dated:  # ascending, so the last name per period is its newest
+            newest_per_period[period_of(stamp)] = name
+        kept.update(list(newest_per_period.values())[-count:])
+    return [name for name in ordered if name not in kept]
+
+
+def _prune_directory(directory: Path, policy: _RetentionPolicy, prefix: str) -> int:
+    """Delete the files matching `prefix` in a directory that `policy` lets go."""
+    stale = _select_stale((path.name for path in directory.glob(f"{prefix}*")), policy)
+    for name in stale:
+        (directory / name).unlink()
     return len(stale)
 
 
@@ -783,7 +856,7 @@ def store_local(dump: Path, config: BackupConfig) -> str:
     target = config.local_dir / dump.name
     if dump.parent != config.local_dir:
         shutil.copy2(dump, target)
-    _prune_directory(config.local_dir, config.keep, _part_prefix_for(dump.name))
+    _prune_directory(config.local_dir, config.retention, _part_prefix_for(dump.name))
     return str(target)
 
 
@@ -794,7 +867,7 @@ def store_network(dump: Path, config: BackupConfig) -> str:
     directory.mkdir(parents=True, exist_ok=True)
     target = directory / dump.name
     shutil.copy2(dump, target)
-    _prune_directory(directory, config.keep, _part_prefix_for(dump.name))
+    _prune_directory(directory, config.retention, _part_prefix_for(dump.name))
     return str(target)
 
 
@@ -821,8 +894,8 @@ def store_remote_ftp(dump: Path, config: BackupConfig) -> str:
         # Retention on the remote end: timestamped names sort chronologically,
         # pruned per part prefix so media/env/manifest don't share db's budget.
         prefix = _part_prefix_for(dump.name)
-        dumps = sorted(name for name in ftp.nlst() if name.startswith(prefix))
-        for name in dumps[: -config.keep] if config.keep > 0 else dumps:
+        dumps = [name for name in ftp.nlst() if name.startswith(prefix)]
+        for name in _select_stale(dumps, config.retention):
             ftp.delete(name)
     finally:
         ftp.quit()
@@ -973,8 +1046,8 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
         # Retention on the remote end: timestamped names sort chronologically,
         # pruned per part prefix so media/env/manifest don't share db's budget.
         prefix = _part_prefix_for(dump.name)
-        dumps = sorted(name for name in sftp.listdir() if name.startswith(prefix))
-        for name in dumps[: -config.keep] if config.keep > 0 else dumps:
+        dumps = [name for name in sftp.listdir() if name.startswith(prefix)]
+        for name in _select_stale(dumps, config.retention):
             sftp.remove(name)
         sftp.close()
     finally:
@@ -1111,8 +1184,8 @@ def store_s3(dump: Path, config: BackupConfig) -> str:
     # configured on the bucket itself is the better answer for a real
     # deployment; this is a fallback for providers/setups without one.
     part_prefix = f"{_s3_prefix(config)}{_part_prefix_for(dump.name)}"
-    keys = sorted(_s3_list_keys(client, config.s3_bucket, part_prefix))
-    for stale in keys[: -config.keep] if config.keep > 0 else keys:
+    keys = _s3_list_keys(client, config.s3_bucket, part_prefix)
+    for stale in _select_stale(keys, config.retention):
         client.delete_object(Bucket=config.s3_bucket, Key=stale)
     return f"s3://{config.s3_bucket}/{key}"
 

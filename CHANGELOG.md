@@ -25,8 +25,30 @@ the `0.x` beta series.
   select whose "unknown" swallowed a browser's checkbox value); explicit `null=True` keeps three states.
 - An API token's `last_used_at` is written at most once per `SNAPADMIN_API_TOKEN_TOUCH_INTERVAL` (60 s)
   instead of on every request; `0` restores the old behaviour.
+- `snapadmin.E029` can stop `manage.py check` for a numeric setting `int()` cannot read (`""` from an
+  unset environment variable) or a malformed throttle rate.
+- A GDPR subject request finds and erases the subject's rows in tenant-scoped models too — run the dry
+  run first after upgrading.
+- `show_in_form` on `SnapFunctionField` / `@snap_property` defaults to `False` (it defaulted to `True`
+  and was never read, so nothing changes visibly).
 
 ### Added
+- A computed column with `show_in_form=True` is shown read-only on the change form, in its new
+  `tab=` / `row=`; never on the add form.
+- `admin_read_only = True` on a `SnapModel`: the generated admin is view-only (no add/change/delete
+  for anyone), shows every field read-only, and `W015` no longer asks for `show_in_form` flags.
+- `SnapModel.snap_background_context(purpose)`: the one context the retention purge, the reindex and the
+  GDPR subject request read every tenant's rows in (default `use_all_tenants()`; override for a
+  project's own tenancy or row-level security).
+- `SNAPADMIN_MASKING_PENDING_APPS`: masking keys of a listed app that is not installed yet are Info
+  (`I002`) instead of `E001`/`E003`; a listed app that is installed warns (`W034`).
+- `SNAPADMIN_PII_ACCESS_CHECK`: a callable `(user) -> bool` deciding who sees raw PII instead of the
+  `snapadmin.view_raw_pii` permission (fails closed; `W035` when it cannot be imported).
+- Backup retention tiers `SNAPADMIN_BACKUP_KEEP_DAILY` / `_WEEKLY` / `_MONTHLY` (default off), one
+  pruning rule for every destination; `W036` / `W037` for values below their floor or finer than a
+  destination's cadence.
+- `W033` names an argument a `SnapFunctionField` / `@snap_property` column ignores (a typo, or an
+  editable-field flag such as `searchable=`).
 - `snapadmin.admin.register_builtin_admins()` for projects without a `SnapModel`; `W031` when the
   error monitor has no admin to show its records.
 - `SNAPADMIN_API_STRICT_QUERY_PARAMS` (default `True`) and `SNAPADMIN_API_EXTRA_QUERY_PARAMS`; a
@@ -36,6 +58,13 @@ the `0.x` beta series.
   deleted row's file leaves storage after commit.
 
 ### Fixed
+- `SNAPADMIN_BACKUP_KEEP = 0` no longer deletes every backup, the one just written included.
+- `es_reindex_all()` (admin reindex API, `run_es_reindex` task) indexes every tenant's rows instead of
+  the caller's tenant's, or none.
+- Under the all-tenants binding the generated add form asks for the tenant (required) and the admin and
+  REST API create the row for the tenant named; naming none is still refused.
+- The importer refuses `ALL_TENANTS` as a tenant and fails a tenant-scoped row it has no tenant for,
+  instead of storing an invisible orphan.
 - `admin_mixins` can extend the generated `get_readonly_fields` / `get_fieldsets` / `formfield_for_dbfield`
   through `super()` (they no longer shadow the mixins).
 - `SnapErrorMonitorMiddleware` and `SnapTenantMiddleware` are async-capable: an ASGI deployment keeps its
@@ -61,6 +90,8 @@ the `0.x` beta series.
 - A tenant-scoped row added in an admin inline gets its tenant instead of becoming an orphan.
 
 ### Security
+- A GDPR subject request finds the subject's rows in tenant-scoped models (they were missed by the
+  export and left in place by the erasure).
 - A GDPR subject-request delete removes the erased rows' stored files.
 - Rows created, changed or deleted in an admin inline are recorded in the audit trail.
 - A masked foreign key can no longer be filtered or ordered through its `<field>_id` column.

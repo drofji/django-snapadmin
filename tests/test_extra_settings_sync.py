@@ -160,7 +160,10 @@ class TestStartupSync:
             raise RuntimeError("no such table")
 
         monkeypatch.setattr(esm.Setting.objects, "filter", boom)
-        ms.sync_managed_settings_to_django()  # must not raise
+        before = settings.SNAPADMIN_DASHBOARD_PUBLIC
+        ms.sync_managed_settings_to_django()
+
+        assert settings.SNAPADMIN_DASHBOARD_PUBLIC == before  # must not raise
 
 
 # ── seeding integration (EXTRA_SETTINGS_DEFAULTS) ────────────────────────────

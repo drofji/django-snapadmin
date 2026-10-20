@@ -1774,8 +1774,19 @@ class TestInstalledAppsEntry:
 class TestIntegration:
     def test_default_config_is_clean(self):
         # The demo project's default settings must not raise any SnapAdmin check error.
-        call_command("check")
+        from django.core.checks import run_checks
+
+        serious = [m.id for m in run_checks() if (m.id or "").startswith("snapadmin.") and m.is_serious()]
+
+        assert serious == []
 
     def test_register_is_idempotent(self):
+        from django.core.checks import registry
+
         checks.register_checks()
-        checks.register_checks()  # must not raise
+        checks.register_checks()
+
+        registered = list(registry.registry.registered_checks)
+        assert {check: registered.count(check) for check in checks.ALL_CHECKS} == {
+            check: 1 for check in checks.ALL_CHECKS
+        }  # must not raise

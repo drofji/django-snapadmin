@@ -878,7 +878,10 @@ class TestPublishReport:
         path = os.path.join(export_dir(), job.report_file_name)
         with open(path, "w") as fh:
             fh.write('{"row": 1}\n')
-        _publish_report(job)  # must not raise; local storage already IS the file
+        _publish_report(job)
+
+        with open(path) as fh:
+            assert fh.read() == '{"row": 1}\n'  # not deleted, not rewritten onto itself  # must not raise; local storage already IS the file
 
     def test_remote_storage_uploads_the_local_file(self):
         from unittest.mock import MagicMock

@@ -9,7 +9,7 @@ import string
 import os
 import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import timedelta
 from enum import Enum
 from typing import TYPE_CHECKING, Any, NamedTuple, NoReturn, cast
@@ -27,6 +27,7 @@ from django.contrib.admin.models import DELETION as DELETION
 from django.contrib.contenttypes.models import ContentType
 from django.db import models
 from django.utils import timezone
+from django.utils.functional import Promise
 from django.core.signals import setting_changed
 from django.db.models.signals import post_delete
 from django.utils.html import escape
@@ -723,6 +724,11 @@ class SnapSaveMixin:
         silently creating a row nobody can ever see again — the row would
         otherwise carry an empty tenant value that matches no tenant's
         filter, an orphan indistinguishable from a bug.
+
+        Under the all-tenants binding (an operator working across tenants) the
+        tenant the form names is kept — the generated add form exposes the
+        field, required, for exactly that binding (#EXT3q); with none named
+        the save is still refused.
         """
         from django.core.exceptions import PermissionDenied
 
@@ -737,14 +743,22 @@ class SnapSaveMixin:
         if not is_tenant_scoped(model):
             return
         current = get_current_tenant()
-        if current is None or current is ALL_TENANTS:
+        attname = _tenant_attname(model)
+        if current is ALL_TENANTS:
+            if getattr(obj, attname, None) in (None, ""):
+                raise PermissionDenied(
+                    f"{model._meta.label} is tenant-scoped and this request is bound to all "
+                    "tenants — name the tenant the new row belongs to."
+                )
+            return
+        if current is None:
             raise PermissionDenied(
                 f"No tenant is bound to this request — {model._meta.label} is "
                 "tenant-scoped and refuses to create a row with no tenant assigned."
             )
         # The column, not the field name: a ForeignKey tenant field takes a model
         # instance under its name and the raw tenant value only under its attname.
-        setattr(obj, _tenant_attname(model), current)
+        setattr(obj, attname, current)
 
     def save_model(self, request, obj, form, change):
         if not change:
@@ -1030,6 +1044,36 @@ class SnapModel(AdminGenMixin, models.Model):
     """
 
     admin_enabled = True
+    # A model the admin only shows (#EXT3p) — rows the application writes, a log.
+    # The generated admin refuses add, change and delete for everyone (a mixin in
+    # admin_mixins may still grant one back), and its view page shows every field
+    # read-only when none carries show_in_form. snapadmin.W015 skips it. Admin
+    # only: the REST API has api_read_only for the same intent.
+    admin_read_only: bool = False
+
+    #: The ``purpose`` values :meth:`snap_background_context` is called with.
+    BACKGROUND_PURPOSES: tuple[str, ...] = ("retention", "reindex", "subject_request")
+
+    @classmethod
+    def snap_background_context(cls, purpose: str) -> AbstractContextManager[None]:
+        """The context a cross-tenant background job reads this model's rows in (#EXT3r).
+
+        Entered by the retention purge (``purpose="retention"``), the
+        Elasticsearch reindex (``"reindex"``) and the GDPR subject request
+        (``"subject_request"``) — each of which must see every tenant's rows.
+        The default binds :func:`~snapadmin.tenancy.use_all_tenants`, which is
+        all SnapAdmin's own tenant scoping needs. Override it when the model's
+        rows sit behind a tenancy of the project's own — a manager that refuses
+        to run without its context, or PostgreSQL row-level security::
+
+            @classmethod
+            def snap_background_context(cls, purpose):
+                return my_tenancy.cross_tenant(reason=f"snapadmin:{purpose}")
+        """
+        from snapadmin.tenancy import use_all_tenants
+
+        return use_all_tenants()
+
     js_admin_files = []
     css_admin_files = []
     # Attributes/methods merged onto the generated ModelAdmin last, so they
@@ -2496,26 +2540,33 @@ class SnapModel(AdminGenMixin, models.Model):
         cls._ensure_es_index_and_mapping()
         index_name = cls.get_es_index_name()
 
-        qs = cls.objects.all()
-        # EsQuerySet (ES_ONLY models) is already materialised hits, single pass;
-        # DB querysets stream in bounded memory via the keyset paginator.
-        rows = iter(qs) if isinstance(qs, EsQuerySet) else cls._es_keyset_iter(qs, chunk_size)
+        from snapadmin.tenancy import _background_context
 
-        def actions():
-            for obj in rows:
-                yield {
-                    "_index": index_name,
-                    "_id": obj.pk,
-                    "_source": obj.get_es_document(),
-                }
+        # Every tenant's rows, read inside the model's own cross-tenant context
+        # (#EXT3r): the admin reindex API ran this under the caller's tenant and a
+        # worker under none, so a tenant-scoped model's index held one tenant's
+        # rows, or nothing.
+        with _background_context(cls, "reindex"):
+            qs = cls.objects.all()
+            # EsQuerySet (ES_ONLY models) is already materialised hits, single pass;
+            # DB querysets stream in bounded memory via the keyset paginator.
+            rows = iter(qs) if isinstance(qs, EsQuerySet) else cls._es_keyset_iter(qs, chunk_size)
 
-        try:
-            indexed, errors = helpers.bulk(
-                es, actions(), chunk_size=chunk_size, raise_on_error=False
-            )
-        except Exception as exc:
-            logger.warning("es_bulk_reindex_failed", model=cls.__name__, error=str(exc))
-            return {"indexed": 0, "errors": [str(exc)]}
+            def actions():
+                for obj in rows:
+                    yield {
+                        "_index": index_name,
+                        "_id": obj.pk,
+                        "_source": obj.get_es_document(),
+                    }
+
+            try:
+                indexed, errors = helpers.bulk(
+                    es, actions(), chunk_size=chunk_size, raise_on_error=False
+                )
+            except Exception as exc:
+                logger.warning("es_bulk_reindex_failed", model=cls.__name__, error=str(exc))
+                return {"indexed": 0, "errors": [str(exc)]}
 
         if errors:
             logger.warning(
@@ -2875,9 +2926,9 @@ class SnapModel(AdminGenMixin, models.Model):
         # the few legitimately cross-tenant operations (#FUT1b) — it must see
         # every tenant's rows, never only the caller's (there usually is no
         # caller; this runs from a scheduled task with no request in hand).
-        from snapadmin.tenancy import use_all_tenants
+        from snapadmin.tenancy import _background_context
 
-        with use_all_tenants():
+        with _background_context(cls, "retention"):
             qs = cls.objects.filter(
                 cls._retention_filter(now, retention_days, retention_field, date_field)
             )
@@ -3161,6 +3212,7 @@ _SNAP_MODEL_UNEXPOSED_ATTRIBUTES: frozenset[str] = frozenset(
         # onto get_model_meta() before these mean anything for a plain model
         # (#RFC1g row 3).
         "admin_enabled",
+        "admin_read_only",
         "admin_sections",
         "admin_list_display_pk",
         "admin_tabs",
@@ -3346,8 +3398,10 @@ def snap_property(
     *,
     verbose_name: str | None = None,
     show_in_list: bool = True,
-    show_in_form: bool = True,
+    show_in_form: bool = False,
     safe_html: bool = False,
+    tab: str | Promise | None = None,
+    row: str | None = None,
 ) -> Callable[[Callable[[models.Model], Any]], "snapfields.SnapFunctionField"]:
     """Turn a method into a computed, display-only admin column.
 
@@ -3402,11 +3456,14 @@ def snap_property(
         underscores turned into spaces, matching Django's own field default.
     :param show_in_list: Include the column on the admin changelist. Default
         ``True``.
-    :param show_in_form: Accepted for parity with :class:`SnapFunctionField`'s
-        constructor; that field is never included in ``form_fields`` (it is
-        not a real ``_meta`` field), so this has no observable effect today.
+    :param show_in_form: Also show the value read-only on the change form
+        (never the add form), through the admin method ``snap_form_<name>``.
+        Default ``False``.
     :param safe_html: Trust the returned value as pre-sanitised HTML instead of
         escaping it before display. Default ``False``.
+    :param tab: The change-form tab the read-only value sits in.
+    :param row: Group the read-only value onto one form row with the fields
+        sharing this ``row=`` name.
     """
 
     def decorator(func: Callable[[models.Model], Any]) -> "snapfields.SnapFunctionField":
@@ -3418,6 +3475,8 @@ def snap_property(
             show_in_list=show_in_list,
             show_in_form=show_in_form,
             safe_html=safe_html,
+            tab=tab,
+            row=row,
         )
 
     return decorator

@@ -21,13 +21,22 @@ class TestTaskModuleIsDiscoverable:
         assert importlib.util.find_spec("snapadmin.tasks") is not None
 
     def test_all_tasks_importable_from_snapadmin_tasks(self):
-        from snapadmin.tasks import (  # noqa: F401
+        from snapadmin.tasks import (
             purge_expired_data,
             purge_expired_tokens,
             run_db_backups,
             run_export,
             send_error_digest,
         )
+
+        # Celery routes by these names (beat schedules and settings name them).
+        assert [
+            task.name
+            for task in (purge_expired_data, purge_expired_tokens, run_db_backups, run_export, send_error_digest)
+        ] == [
+            "snapadmin.purge_expired_data", "snapadmin.purge_expired_tokens",
+            "snapadmin.run_db_backups", "snapadmin.run_export", "snapadmin.send_error_digest",
+        ]
 
 
 class TestTaskNamesAreNamespaced:

@@ -63,7 +63,7 @@ from __future__ import annotations
 
 import re
 from decimal import Decimal
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Callable, Protocol
 
 from snapadmin.conf import get_setting
 from snapadmin.logging_config import get_logger
@@ -252,6 +252,39 @@ def _rule_for(field: str | None, app_label: str | None, model_name: str | None) 
     return get_masking_rules(app_label, model_name).get(name)
 
 
+def _resolve_pii_access_check(value: object) -> Callable[[object], object]:
+    """``SNAPADMIN_PII_ACCESS_CHECK`` as the callable it names (#EXT3t).
+
+    Raises ``ImproperlyConfigured`` for a dotted path that does not import or a
+    value that is not callable; ``snapadmin.W035`` reports both at startup.
+    """
+    from django.core.exceptions import ImproperlyConfigured
+    from django.utils.module_loading import import_string
+
+    try:
+        check = import_string(value) if isinstance(value, str) else value
+    except ImportError as exc:
+        raise ImproperlyConfigured(f"SNAPADMIN_PII_ACCESS_CHECK does not import: {exc}") from exc
+    if not callable(check):
+        raise ImproperlyConfigured(
+            f"SNAPADMIN_PII_ACCESS_CHECK must be callable, got {type(check).__name__}"
+        )
+    return check
+
+
+def _pii_access_check_allows(value: object, user: UserLike) -> bool:
+    """Ask the project's check — fail closed: any error answers ``False``, logged."""
+    try:
+        return bool(_resolve_pii_access_check(value)(user))
+    except Exception as exc:
+        logger.warning(
+            "snapadmin.pii_access_check_failed",
+            error=str(exc),
+            user=getattr(user, "pk", None),
+        )
+        return False
+
+
 def user_can_view_pii(
     user: UserLike,
     field: str | None = None,
@@ -263,6 +296,9 @@ def user_can_view_pii(
 
     True for authenticated, active superusers and holders of
     ``snapadmin.view_raw_pii``; anonymous / inactive users always get masked.
+    ``SNAPADMIN_PII_ACCESS_CHECK`` — a callable ``(user) -> bool`` or its dotted
+    path — replaces the permission step when set (#EXT3t); one that raises or
+    cannot be imported answers ``False`` (masked) and is logged.
 
     Called with a ``field`` the answer becomes per-field: a rule declaring a
     ``permission`` in ``SNAPADMIN_MASKING_RULES`` also unlocks *that* field for
@@ -277,7 +313,11 @@ def user_can_view_pii(
         return False
     if user.is_superuser:
         return True
-    if user.has_perm(PII_PERMISSION):
+    check = get_setting("SNAPADMIN_PII_ACCESS_CHECK", None)
+    if check in (None, ""):
+        if user.has_perm(PII_PERMISSION):
+            return True
+    elif _pii_access_check_allows(check, user):
         return True
     permission = (_rule_for(field, app_label, model_name) or {}).get("permission")
     return bool(permission) and bool(user.has_perm(str(permission)))

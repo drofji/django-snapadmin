@@ -25,7 +25,8 @@ from django.test.utils import isolate_apps
 
 from snapadmin import fields as snap_fields
 from snapadmin.api.views import get_snap_action, iter_snap_actions, snap_action
-from snapadmin.models import SnapModel, snap_property
+from snapadmin.models import SnapModel
+from tests import shape_matrix
 
 
 def _approve(self, request):
@@ -37,43 +38,12 @@ def _function_field():
 
 
 def _declarations_on(where: str) -> SimpleNamespace:
-    """The same three declarations, placed on the model, an abstract base or a mixin."""
-    def label(self):
-        return "label"
-
-    def approve(self, request):
-        return {"ok": True}
-
-    body = {
-        "computed": _function_field(),
-        "label": snap_property(verbose_name="Label")(label),
-        "approve": snap_action()(approve),
-    }
-    with isolate_apps("snapadmin"):
-        if where == "model":
-            model = type("OnModel", (SnapModel,), {
-                "__module__": __name__, "name": models.CharField(max_length=10), **body,
-                "Meta": type("Meta", (), {"app_label": "snapadmin"}),
-            })
-        elif where == "abstract base":
-            base = type("SharedBase", (SnapModel,), {
-                "__module__": __name__, **body,
-                "Meta": type("Meta", (), {"app_label": "snapadmin", "abstract": True}),
-            })
-            model = type("OnAbstractBase", (base,), {
-                "__module__": __name__, "name": models.CharField(max_length=10),
-                "Meta": type("Meta", (), {"app_label": "snapadmin"}),
-            })
-        else:
-            mixin = type("SharedMixin", (), {"__module__": __name__, **body})
-            model = type("OnMixin", (mixin, SnapModel), {
-                "__module__": __name__, "name": models.CharField(max_length=10),
-                "Meta": type("Meta", (), {"app_label": "snapadmin"}),
-            })
-    return SimpleNamespace(model=model)
+    """The same three declarations, placed on the model, an abstract base or a mixin
+    (the shared builder in ``tests/shape_matrix.py``)."""
+    return SimpleNamespace(model=shape_matrix.declarations_on(where))
 
 
-PLACES = ["model", "abstract base", "mixin"]
+PLACES = list(shape_matrix.PLACES)
 
 
 class TestInheritanceParity:

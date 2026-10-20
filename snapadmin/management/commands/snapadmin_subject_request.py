@@ -186,11 +186,15 @@ class Command(BaseCommand):
             operator = User.objects.get(**{User.USERNAME_FIELD: username})
         except User.DoesNotExist as exc:
             raise CommandError(f"No user named {username!r}.") from exc
-        if not operator.has_perm("snapadmin.view_raw_pii"):
+        from snapadmin.masking import user_can_view_pii
+
+        # The one decision point every masking surface asks, so a project's own
+        # SNAPADMIN_PII_ACCESS_CHECK applies to the operator too (#EXT3t).
+        if not user_can_view_pii(operator):
             raise CommandError(
-                f"{username!r} does not hold snapadmin.view_raw_pii — a subject-access "
-                "export is unmasked by design, so the operator running it must already be "
-                "trusted with raw PII."
+                f"{username!r} may not see raw PII (snapadmin.view_raw_pii, or "
+                "SNAPADMIN_PII_ACCESS_CHECK when set) — a subject-access export is unmasked by "
+                "design, so the operator running it must already be trusted with raw PII."
             )
         return operator
 
@@ -202,6 +206,7 @@ class Command(BaseCommand):
         from django.apps import apps
 
         from snapadmin.registry import get_model_meta, is_registered
+        from snapadmin.tenancy import _background_context
 
         matches = {}
         for model in apps.get_models():
@@ -210,7 +215,11 @@ class Command(BaseCommand):
             path = get_model_meta(model, "subject_path", None)
             if not path:
                 continue
-            rows = list(model._default_manager.filter(**{path: identifier}))
+            # Every tenant's rows: a subject's data is theirs whatever tenant holds
+            # it, and with no request there is no tenant bound — a tenant-scoped
+            # model answered nothing, so the export and the erasure missed it (#EXT3r).
+            with _background_context(model, "subject_request"):
+                rows = list(model._default_manager.filter(**{path: identifier}))
             if rows:
                 matches[model] = rows
         return matches

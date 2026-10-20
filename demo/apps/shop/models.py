@@ -13,6 +13,8 @@ from snapadmin.api.views import snap_action
 from snapadmin.tenancy import tenant_field
 import uuid
 
+import structlog
+
 # ── api_write_fields, on every model below ───────────────────────────────────
 # Each model declares the exact set of fields an API client may supply on
 # create/update — the mass-assignment allowlist. Leaving it unset makes every
@@ -291,6 +293,16 @@ class Order(snap_models.SnapModel):
     # dogfood the feature. Default permission (no explicit override):
     # "shop.change_order", derived from methods=("post",) not being a
     # read-only method set.
+    # snap_background_context (#EXT3r) — the context the retention purge, the
+    # reindex and the GDPR subject request read every tenant's orders in. The
+    # demo's tenancy is SnapAdmin's own, so it keeps the default and only logs
+    # which job asked; a project with its own tenancy (its own manager, or
+    # PostgreSQL row-level security) returns that context here instead.
+    @classmethod
+    def snap_background_context(cls, purpose):
+        structlog.get_logger(__name__).info("demo_cross_tenant_job", model="Order", purpose=purpose)
+        return super().snap_background_context(purpose)
+
     @snap_action()
     def recalculate_total(self, request):
         self.total = sum(
@@ -349,15 +361,15 @@ class AuditLog(snap_models.SnapModel):
     Records older than data_retention_days are auto-deleted by the purge_expired_data
     Celery task. Run manually: python demo/manage.py snapadmin_purge_expired_data --dry-run
     """
-    action = snap_fields.SnapCharField(max_length=100, verbose_name=_("Action"), searchable=True, show_in_list=True, show_in_form=True)
-    user_email = snap_fields.SnapEmailField(verbose_name=_("User Email"), show_in_list=True, show_in_form=True)
+    action = snap_fields.SnapCharField(max_length=100, verbose_name=_("Action"), searchable=True, show_in_list=True)
+    user_email = snap_fields.SnapEmailField(verbose_name=_("User Email"), show_in_list=True)
     created_at = snap_fields.SnapDateTimeField(auto_now_add=True, verbose_name=_("Created At"), filterable=True)
     # A per-row deletion date, the way an upstream supplier delivers one: some
     # records arrive with an agreed expiry, most do not. Nullable on purpose —
     # a row that declares no deadline falls back to the 90-day window below,
     # which is exactly how every row behaved before this column existed.
     delete_at = snap_fields.SnapDateTimeField(
-        null=True, blank=True, verbose_name=_("Delete At"), filterable=True, show_in_form=True,
+        null=True, blank=True, verbose_name=_("Delete At"), filterable=True,
     )
 
     # Auto-delete records via the purge_expired_data Celery task. Two rules, and
@@ -367,6 +379,11 @@ class AuditLog(snap_models.SnapModel):
     data_retention_days = 90
     data_retention_field = "created_at"  # the DateTimeField used to calculate record age
     data_retention_date_field = "delete_at"  # this row's own expiry, when it has one
+
+    # admin_read_only → the application writes these rows, nobody edits them: the
+    # admin offers no add/change/delete, and the view page shows every field
+    # read-only (none needs show_in_form for that) — snapadmin.W015 stays quiet.
+    admin_read_only = True
 
     # api_exclude_fields → user_email (PII) never appears in the REST API,
     # GraphQL or /api/models/schema/ — the admin still shows it.
@@ -438,7 +455,8 @@ class OrderItem(snap_models.SnapModel):
     #   line_total = snap_fields.SnapFunctionField(
     #       func=lambda obj: f"{obj.quantity * obj.price:.2f}", verbose_name="Line Total",
     #   )
-    @snap_models.snap_property(verbose_name=_("Line Total"))
+    # show_in_form=True also shows it read-only on the change form (#EXT3o).
+    @snap_models.snap_property(verbose_name=_("Line Total"), show_in_form=True)
     def line_total(self):
         return f"{self.quantity * self.price:.2f}"
 
@@ -525,11 +543,14 @@ class Showcase(snap_models.SnapModel):
     # SnapFunctionField — a computed, read-only column rendered from a callable.
     # It is NOT a database column (no migration), so it's perfect for derived or
     # aggregated display values. safe_html=False escapes the output.
+    # show_in_form=True shows it read-only on the change form, here in the
+    # "Text Content" tab next to the field it summarises (#EXT3o).
     summary = snap_fields.SnapFunctionField(
         func=lambda obj: f"{obj.char_field or '—'} · int={obj.integer_field or 0}",
         verbose_name=_("Computed Summary"),
         show_in_list=True,
-        show_in_form=False,
+        show_in_form=True,
+        tab=_("Text Content"),
     )
 
     # Unfold: group fields into collapsible sections and warn on unsaved changes

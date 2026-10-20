@@ -265,11 +265,20 @@ REGISTRY: tuple[SecurityFix, ...] = (
             "::test_a_parameter_on_a_hidden_field_answers_the_same_whatever_its_value",
         ),
     ),
+    SecurityFix(
+        "A GDPR subject request now reaches the rows of tenant-scoped models",
+        (
+            "tests/test_background_context.py::TestTheDefaultHookCoversTenantScopedModels"
+            "::test_the_subject_request_collects_every_tenant_s_rows",
+            "tests/test_background_context.py::TestEveryJobRunsInsideTheProjectsHook"
+            "::test_the_subject_request_finds_every_tenant_s_rows",
+        ),
+    ),
 )
 
 #: The registry only grows: a fix leaves it only if the code it guarded is gone,
 #: and then this number goes down in the same change, with the reason.
-REGISTRY_FLOOR = 34
+REGISTRY_FLOOR = 35
 
 
 def node_ids() -> frozenset[str]:

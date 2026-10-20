@@ -1248,6 +1248,25 @@ class Product(models.Model):
     <strong>See them all live</strong>
     The demo app's <code>Showcase</code> model exercises every field type across tabbed sections, and <code>SnapFunctionField</code>/<code>SnapOneToOneField</code> appear on <code>Showcase</code> and <code>CustomerProfile</code> respectively.
   </div>
+  <p id="computed-columns"><strong>Computed columns on the change form.</strong>
+  <code>SnapFunctionField</code>, <code>@snap_property</code> and <code>SnapStatusBadgeField</code>
+  are changelist columns by default (<code>show_in_list=True</code>). <code>show_in_form=True</code>
+  also shows the value <strong>read-only on the change form</strong> — escaped unless
+  <code>safe_html=True</code>, in its <code>tab=</code> and <code>row=</code>, in declaration order among
+  the model's fields. The add form never shows it: there is no saved row to compute from yet (and
+  "Save as new" takes the add path). <code>show_in_form</code> defaults to <code>False</code> on these
+  columns and <code>SNAPADMIN_SHOW_IN_FORM_DEFAULT</code> does not apply to them. The read-only row is
+  the admin method <code>snap_form_&lt;name&gt;</code>; write that name in a hand-written
+  <code>fieldsets</code> (<code>admin_overrides</code>). An argument the column cannot use — a typo, or
+  a flag only editable fields have, such as <code>searchable=</code> — is ignored and reported as
+  <code>snapadmin.W033</code>.</p>
+<pre><code>class OrderItem(SnapModel):
+    quantity = SnapPositiveIntegerField(show_in_form=True)
+    price = SnapDecimalField(max_digits=10, decimal_places=2, show_in_form=True)
+
+    @snap_property(verbose_name="Line total", show_in_form=True)
+    def line_total(self):
+        return f"{self.quantity * self.price:.2f}"</code></pre>
   <p id="snap-boolean"><strong>A boolean with a default is a checkbox.</strong> Snap fields derive
   <code>null=True</code> from <code>required=False</code>, so <code>SnapBooleanField(default=False)</code> has
   a nullable column — but its form is a checkbox (Unfold's switch on the themed admin), because a
@@ -1455,6 +1474,14 @@ register_builtin_admins()</code></pre>
   <strong>integer keys only</strong>; a UUID key is noise in a list and is left out. Set
   <code>admin_list_display_pk = True</code> or <code>False</code> on the model to override that
   either way. Search still covers the key.</p>
+
+  <p id="admin-read-only"><strong>A model the admin only shows.</strong> Rows the application writes —
+  a log, an import record — set <code>admin_read_only = True</code>: the generated admin offers no add,
+  change or delete, to anyone (a superuser included; a mixin in <code>admin_mixins</code> may grant one
+  back, e.g. <code>has_delete_permission</code> for a clean-up), and the view page shows every field
+  read-only when none carries <code>show_in_form</code> — no flags on fields nobody may edit.
+  <code>snapadmin.W015</code> skips such a model. It is admin-only: the REST API's equivalent is
+  <code>api_read_only</code>; set both for a table nobody writes through either.</p>
 
   <p id="admin-sections-deprecated"><strong><code>admin_sections</code> is deprecated.</strong> It was
   declared on <code>SnapModel</code> but never read by anything; a model that sets it gets
@@ -3268,6 +3295,23 @@ SNAPADMIN_BACKUP_ENV_FILE = "/etc/snapadmin/project.env"</code></pre>
   dump's own <code>N</code>, so opting into media never starves the database backup's retention
   headroom.</p>
 
+  <h3 id="backup-retention-tiers">Daily, weekly and monthly retention</h3>
+  <p>"Keep the newest N" alone either keeps too little history or too much recent noise. Three tiers
+  sit beside it — <code>SNAPADMIN_BACKUP_KEEP_DAILY</code>, <code>_WEEKLY</code> and
+  <code>_MONTHLY</code> — each keeping the newest backup of the N most recent days, ISO weeks or months
+  <strong>that have a backup</strong> (counted over the backups, never over the clock, the way borg and
+  restic count). A backup survives when any rule keeps it, and the newest run is always kept — a
+  <code>KEEP</code> of 0 used to delete every backup, the one just written included
+  (<code>snapadmin.W036</code> now names it). Every destination — local, network, FTP, SFTP, S3 — prunes
+  through the one rule, per part, from the timestamp in the file name.</p>
+<pre><code>SNAPADMIN_BACKUP_KEEP = 3           # the last three runs, whatever their age
+SNAPADMIN_BACKUP_KEEP_DAILY = 7     # + one a day for a week
+SNAPADMIN_BACKUP_KEEP_WEEKLY = 4    # + one a week for a month
+SNAPADMIN_BACKUP_KEEP_MONTHLY = 12  # + one a month for a year</code></pre>
+  <p>A tier finer than a destination's own cadence keeps one backup per run there — a daily tier of 7
+  on a weekly offsite destination spans seven weeks — and <code>snapadmin.W037</code> says so per
+  destination. All three default to 0, which leaves <code>KEEP</code> alone, exactly as before.</p>
+
   <!-- ── Restore ───────────────────────────────────────────────────────────── -->
   <h2 id="restore">↩️ Restoring a Backup</h2>
   <div class="callout callout-warn">
@@ -3818,7 +3862,8 @@ python manage.py snapadmin_subject_request delete \
 python manage.py snapadmin_subject_request delete \
     --model demo.Customer --identifier alice@example.com --user dpo_operator --confirm</code></pre>
   <div class="callout callout-warn">
-    <strong><code>--user</code> must hold <code>snapadmin.view_raw_pii</code>.</strong>
+    <strong><code>--user</code> must hold <code>snapadmin.view_raw_pii</code></strong> (or pass
+    <code>SNAPADMIN_PII_ACCESS_CHECK</code>, when set).
     A subject-access export is <strong>unmasked by design</strong> — it goes to the subject, so masking
     it would defeat the point — which makes it a high-value artefact. The command is gated on the same
     permission that already unlocks raw PII everywhere else in SnapAdmin, and every run is written to
@@ -4207,6 +4252,45 @@ SNAPADMIN_TENANT_USER_RESOLVER = "myproject.tenancy.resolve_for_user" # user -&g
 with use_all_tenants():
     Order.objects.all()   # every tenant's rows, deliberately and audibly</code></pre>
 
+  <h3 id="background-context">Cross-tenant jobs under a project's own tenancy</h3>
+  <p>The retention purge, the Elasticsearch reindex (<code>snapadmin_reindex</code>, the admin reindex
+  API, <code>es_reindex_all()</code>) and the GDPR subject request read every tenant's rows. Each enters
+  the model's <code>snap_background_context(purpose)</code> — <code>purpose</code> is
+  <code>"retention"</code>, <code>"reindex"</code> or <code>"subject_request"</code> — and the default
+  returns <code>use_all_tenants()</code>, which is all SnapAdmin's own <code>tenant_scoped</code> needs.
+  When the rows sit behind a tenancy of the project's own — a manager that refuses to run without its
+  context, or PostgreSQL row-level security — return that context instead (keep
+  <code>use_all_tenants()</code> in it too if the model is also <code>tenant_scoped</code>):</p>
+  <pre><code>from contextlib import ExitStack, contextmanager
+
+from django.db import connection, transaction
+
+class Invoice(SnapModel):
+    @classmethod
+    @contextmanager
+    def snap_background_context(cls, purpose):
+        with ExitStack() as stack:
+            stack.enter_context(super().snap_background_context(purpose))  # SnapAdmin's scoping
+            stack.enter_context(transaction.atomic())
+            with connection.cursor() as cursor:  # RLS: this transaction may see every tenant
+                cursor.execute("SET LOCAL app.bypass_rls = 'on'")
+            yield</code></pre>
+  <p>The reindex runs its whole pass inside the context, so a long reindex holds that transaction
+  open; a project that would rather not can bind a context variable of its own instead. A plain
+  <code>@snap_model</code> model may declare the same classmethod; without one it gets
+  <code>use_all_tenants()</code>. The alternative is to move the model onto <code>tenant_scoped</code>.</p>
+
+  <h3 id="tenancy-operator-create">Creating rows as an operator bound to every tenant</h3>
+  <p>A resolver may return <code>snapadmin.tenancy.ALL_TENANTS</code> for an operator who works across
+  tenants — every tenant's rows become readable. Creating a row then needs the tenant it belongs to:
+  the generated <strong>add</strong> form shows the tenant field, required, and the REST API takes the
+  tenant named in the request body (a foreign-key tenant by its key). With no tenant named, the create
+  is refused exactly as with no binding at all; under a single-tenant binding the field stays hidden and
+  the bound tenant is forced, as before. The change form never shows it — an operator does not move rows
+  between tenants. The importer refuses <code>ALL_TENANTS</code> as its <code>tenant</code> (it is a
+  reading binding, not a tenant), and a row it would create with no single tenant bound fails instead of
+  becoming an orphan. The audit entry of an operator's create records the tenant chosen.</p>
+
   <h3>A <code>NULL</code> tenant is unassigned data, not shared data</h3>
   <p>The column is nullable so the migration it adds never breaks an existing row — but a row with no
   tenant value matches no tenant's filter, by ordinary SQL equality semantics. It is simply invisible
@@ -4248,12 +4332,15 @@ SNAPADMIN_ANALYTICS_DB_ALIAS = "read_replica"</code></pre>
   <h3 id="pii-masking">PII data masking</h3>
   <p>Declare sensitive fields once. They are obfuscated in the admin changelist, dropped from the
   admin change form, and masked in both REST API and GraphQL responses for anyone who is not a
-  superuser or a holder of the <code>snapadmin.view_raw_pii</code> permission. Emails become
+  superuser or a holder of the <code>snapadmin.view_raw_pii</code> permission — or, when
+  <a href="#pii-access-check"><code>SNAPADMIN_PII_ACCESS_CHECK</code></a> is set, anyone that callable
+  allows. Emails become
   <code>a***@domain.com</code> (just <code>***@domain.com</code> when the local part is one or two
   characters, so the first character is never the whole of it), other values <code>+3********78</code>. Masking is enforced on every
   path that could otherwise leak the raw value: a masked field can't be targeted by
   <code>?field=</code>, <code>?ordering=field</code> or <code>?search=</code> for an unprivileged
-  caller (silently ignored, not a 400), the async export (<code>POST /api/exports/</code>) masks
+  caller (it is answered exactly like a field that does not exist — a <code>400</code> under
+  <a href="#api-strict-query-params">strict query parameters</a>, the default), the async export (<code>POST /api/exports/</code>) masks
   rows unless the requester holds PII access, and the audit trail's <code>changes</code> diff is
   masked in the admin and in <code>snapadmin_audit_export</code> (pass <code>--reveal-pii</code>
   for the raw diff). An audit row's object label is <code>str(instance)</code> — often a name or an
@@ -4278,6 +4365,28 @@ SNAPADMIN_MASKED_FIELDS = {
   <code>e</code>, <code>m</code>, <code>a</code>…, and a list under
   <code>SNAPADMIN_MASKING_RULES</code> masks those fields with the built-in masker — and the check
   still stops the deploy until it is written properly.</p>
+  <p id="pii-access-check"><strong>Who may see raw PII — your rule instead of the permission.</strong>
+  Every masking surface (admin, REST, GraphQL, exports, the audit diff, the subject request) asks one
+  function, <code>snapadmin.masking.user_can_view_pii</code>. By default it answers with the
+  <code>snapadmin.view_raw_pii</code> permission; set <code>SNAPADMIN_PII_ACCESS_CHECK</code> to a
+  callable <code>(user) -&gt; bool</code> (or its dotted path) to decide by an SSO role, a membership
+  table — whatever the project's access model is. It replaces the permission step only: anonymous and
+  inactive users stay masked, superusers stay unmasked, and a per-field rule's
+  <code>permission</code> still unlocks its field. A callable that raises answers "masked" and logs
+  <code>snapadmin.pii_access_check_failed</code>; one that cannot be imported is
+  <code>snapadmin.W035</code> at startup — fail closed, never open.</p>
+<pre><code>SNAPADMIN_PII_ACCESS_CHECK = "myproject.access.can_view_pii"
+
+# myproject/access.py
+def can_view_pii(user):
+    return "dpo" in getattr(user, "sso_roles", ())</code></pre>
+  <p id="masking-pending-apps"><strong>Masking an app before it is installed.</strong> Rolling out
+  module by module, a project can write the masking of an app that is not installed yet: list its label
+  in <code>SNAPADMIN_MASKING_PENDING_APPS = ["billing"]</code>. A key of a listed app that is not
+  installed is reported as the informational <code>snapadmin.I002</code> ("masked once installed")
+  instead of <code>E001</code>/<code>E003</code>; once the app is installed its keys are checked like any
+  other, and <code>snapadmin.W034</code> asks to remove it from the list. Nothing is excused without
+  the list — a typo in an app label still errors, because it would otherwise unmask the app it meant.</p>
   <p id="masking-hand-written-admin"><strong>Hand-written admins.</strong> The changelist masking
   lives in <code>snapadmin.models.PIIMaskingAdminMixin</code>, which generated admins get
   automatically. A model you register yourself — a custom user model derived from
@@ -5116,6 +5225,8 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset — no p
   <table>
     <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
     <tr><td><code>SNAPADMIN_MASKING_RULES</code></td><td><code>{}</code></td><td>Per-field masking rules (regex / redaction) and per-field PII permissions</td></tr>
+    <tr><td><code>SNAPADMIN_PII_ACCESS_CHECK</code></td><td><em>unset</em></td><td>A callable <code>(user) -&gt; bool</code> (or dotted path) deciding who sees raw PII instead of <code>snapadmin.view_raw_pii</code>; fails closed (<a href="#pii-access-check">details</a>, <code>snapadmin.W035</code>)</td></tr>
+    <tr><td><code>SNAPADMIN_MASKING_PENDING_APPS</code></td><td><code>[]</code></td><td>App labels whose masking keys are written before the app is installed — reported as <code>snapadmin.I002</code> instead of <code>E001</code>/<code>E003</code> until it is (<a href="#masking-pending-apps">details</a>)</td></tr>
     <tr><td><code>SNAPADMIN_ENCRYPTION</code></td><td><code>{}</code></td><td>Field-encryption keyset and where it is read from — <code>KEY_PROVIDER</code> / <code>KEY_FILE</code> / <code>KEYS</code> / <code>STRICT</code> (see <a href="#field-encryption">Field Encryption</a>)</td></tr>
     <tr><td><code>SNAPADMIN_ENCRYPTION_KEYS</code></td><td>—</td><td><code>id:key</code> entries (comma- or newline-separated) configuring the same keyset from the environment</td></tr>
     <tr><td><code>SNAPADMIN_ENCRYPTION_KEY_FILE</code></td><td>—</td><td>Path to a mounted secret holding the same content</td></tr>
@@ -5149,7 +5260,8 @@ SNAPADMIN_PROFILE = "admin"  # "admin" | "api" | "full" (default: unset — no p
   <table>
     <tr><th>Variable</th><th>Default</th><th>Description</th></tr>
     <tr><td><code>SNAPADMIN_BACKUP_ENABLED</code></td><td><code>False</code></td><td>Enable scheduled 3-2-1 database backups</td></tr>
-    <tr><td><code>SNAPADMIN_BACKUP_KEEP</code></td><td><code>7</code></td><td>Dumps kept per destination (oldest pruned)</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_KEEP</code></td><td><code>7</code></td><td>Dumps kept per destination (oldest pruned; the newest is always kept)</td></tr>
+    <tr><td><code>SNAPADMIN_BACKUP_KEEP_DAILY</code> / <code>_WEEKLY</code> / <code>_MONTHLY</code></td><td><code>0</code></td><td>Also keep the newest backup of each of the N most recent days / ISO weeks / months that have one (<a href="#backup-retention-tiers">details</a>)</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_LOCAL_DIR</code></td><td><code>./backups</code></td><td>Copy 1: directory on the same server</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_ALIGN_TO_SCHEDULE</code></td><td><code>False</code></td><td>Measure each destination's window from its <em>planned</em> slot instead of its last actual run. Off, every run books the next one a full interval after it finished, so the backup hour creeps forward by whatever each run costs and eventually lands in working hours. On, the schedule is pinned to the clock time of the first run, and slots missed during downtime collapse into a single catch-up run rather than a burst</td></tr>
     <tr><td><code>SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS</code></td><td><code>24</code></td><td>How often the local copy becomes due</td></tr>
@@ -6425,7 +6537,7 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
     no JavaScript. It states what SnapAdmin is, carries the three-step quickstart, lists the facts an
     assistant should not have to infer — snap-only field kwargs add no migration, import paths are the
     public contract, the Unfold theme is optional, misconfiguration surfaces as
-    <code>snapadmin.W001</code>–<code>W032</code> and <code>snapadmin.E001</code>–<code>E029</code> —
+    <code>snapadmin.W001</code>–<code>W037</code> and <code>snapadmin.E001</code>–<code>E029</code> —
     and then links every section of this page with a
     line describing what it covers.
   </p>

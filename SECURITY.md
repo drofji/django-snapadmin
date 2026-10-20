@@ -302,6 +302,11 @@ Key protections:
   Both default to full CRUD; the `snapadmin.W007` check nudges a field-read-only model
   (`api_write_fields = []`) toward `api_read_only` so it returns a clean `405` instead of a
   blank-row insert.
+- **`admin_read_only`** is the admin's counterpart: the generated `ModelAdmin` of such a model
+  answers `False` to `has_add_permission` / `has_change_permission` / `has_delete_permission` for
+  every user, superusers included, so a log the application writes cannot be edited or deleted
+  through the admin. A project mixin in `admin_mixins` can widen one deliberately. It does not touch
+  the API — set `api_read_only` as well.
 - **`api_field_permissions`** gates an individual field's presence and writability behind a Django
   permission — `{"salary": {"read": "hr.view_salary", "write": "hr.change_salary"}}` — a third guard
   alongside `api_exclude_fields` (absolute) and `api_write_fields` (its own, unchanged, silent-drop
@@ -338,6 +343,16 @@ Key protections:
   listing the hidden field's lookups — instead of being dropped; a masked foreign key is hidden under
   its column name (`<field>_id`) too. The same strict mode refuses any unknown query parameter, so a
   filter the API does not understand can never return the whole table with a `200`.
+- **`SNAPADMIN_PII_ACCESS_CHECK`** replaces the `snapadmin.view_raw_pii` permission as the unlock for
+  raw PII with a project callable `(user) -> bool`. It is consulted by the one decision point every
+  masking surface uses (`user_can_view_pii`), the subject-request operator gate included; anonymous and
+  inactive users stay masked and superusers unmasked whatever it says; an exception inside it masks
+  (fails closed) and is logged as `snapadmin.pii_access_check_failed`; an unimportable path is
+  `snapadmin.W035`. A test keeps the permission name out of every other place in the package.
+- **A masking key that does not resolve stays an Error** (`E001`/`E003`) — a typo fails open. The one
+  exception is explicit: an app listed in `SNAPADMIN_MASKING_PENDING_APPS` and **not installed** has its
+  keys reported as Info (`I002`) until it is installed; a listed app that is installed warns (`W034`).
+  An app label is never excused without the list, so a typo in it still stops the check.
 - **Per-field masking rules and permissions** — `SNAPADMIN_MASKING_RULES` sets, per field, how it is
   obfuscated (a regex `pattern`+`replacement`, or a flat `replacement` redaction) and which
   `permission` unlocks *that one field*, so raw access can be granted narrowly instead of through the
@@ -723,10 +738,18 @@ Key protections:
   import all stamp the tenant server-side from the bound context, never from client/file input — a
   request body or import column naming a *different* tenant is refused outright (a `400` naming the
   field on REST, a rejected column on import), never silently overwritten or silently dropped.
+- **A create under the all-tenants binding names its tenant.** An operator whose resolver returns
+  `ALL_TENANTS` creates a row only for the tenant the add form or the REST body names (the generated
+  add form shows the field, required); naming none is refused like an unbound request, and the
+  importer refuses the sentinel outright — it never stores it, nor a row with no tenant, as a value.
 - **`use_all_tenants()` is the one explicit, audited escape hatch**, reserved for background code
   whose job is inherently cross-tenant: the retention purge (a row's age decides whether it is
   purged, not its tenant) and the Elasticsearch reindex (the index must stay complete across every
-  tenant). Application code must never reach for it to work around a scoping failure.
+  tenant). Application code must never reach for it to work around a scoping failure. Those jobs —
+  and the GDPR subject request — enter it through one hook, `SnapModel.snap_background_context(purpose)`
+  (default `use_all_tenants()`); a project with a tenancy of its own (its own manager, row-level
+  security) overrides that hook rather than the jobs, and a test keeps every other direct
+  `use_all_tenants()` call out of the package.
 - **`snapadmin.E009`** fails `manage.py check` when a model declares `tenant_scoped = True` but the
   declaration cannot actually be enforced — no resolvable tenant field, or the model is registered via
   `@snap_model` rather than subclassing `SnapModel` (the scoping hook lives in `SnapModel`'s

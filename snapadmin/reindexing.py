@@ -218,25 +218,37 @@ def run_reindex_job(
 
 
 def _run(job, *, chunk_size, parallel, tune, limit, on_progress) -> dict:
+    """Run the job inside the model's cross-tenant context (#EXT3r): a reindex must
+    cover every tenant's rows to keep the index complete — ``verify_index()``'s
+    count comparison against the whole index would otherwise mismatch by
+    construction for a tenant-scoped model. The whole run, not only building the
+    queryset: a project context such as row-level security applies to the
+    queries as they execute."""
+    from snapadmin.tenancy import _background_context
+
+    model = job.target_model()
+    with _background_context(model, "reindex"):
+        return _run_in_context(
+            job,
+            model,
+            chunk_size=chunk_size,
+            parallel=parallel,
+            tune=tune,
+            limit=limit,
+            on_progress=on_progress,
+        )
+
+
+def _run_in_context(job, model, *, chunk_size, parallel, tune, limit, on_progress) -> dict:
     from snapadmin.models import EsQuerySet, SnapReindexJob
 
     Status = SnapReindexJob.Status
-    model = job.target_model()
     es = model.get_es_client()
     model._ensure_es_index_and_mapping()
     index_name = model.get_es_index_name()
     pk_attname = model._meta.pk.attname
 
-    # #FUT1b: a reindex must cover every tenant's rows to keep the ES index
-    # complete — verify_index()'s count comparison against the whole index
-    # would otherwise mismatch by construction for a tenant-scoped model.
-    # Bypassing scoping here, once, at construction, is safe: the queryset
-    # this call returns carries (or doesn't carry) its tenant filter clause
-    # from this moment on, regardless of what tenant context is bound later.
-    from snapadmin.tenancy import use_all_tenants
-
-    with use_all_tenants():
-        qs = model.objects.all()
+    qs = model.objects.all()
     es_only = isinstance(qs, EsQuerySet)
 
     if job.started_at is None:

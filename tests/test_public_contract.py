@@ -189,6 +189,7 @@ def test_snapmodel_attribute_defaults():
 
     expected = {
         "admin_enabled": True,
+        "admin_read_only": False,
         "js_admin_files": [],
         "css_admin_files": [],
         "admin_overrides": {},
@@ -343,12 +344,42 @@ def test_snap_property_signature():
     from snapadmin.models import snap_property
 
     assert _params(snap_property) == [
-        "verbose_name", "show_in_list", "show_in_form", "safe_html",
+        "verbose_name", "show_in_list", "show_in_form", "safe_html", "tab", "row",
     ]
     assert all(
         param.kind is inspect.Parameter.KEYWORD_ONLY
         for param in inspect.signature(snap_property).parameters.values()
     )
+
+
+def test_snap_background_context_signature():
+    """The hook a project overrides for its own tenancy (#EXT3r); renaming it or
+    a purpose would leave every override silently unused."""
+    from snapadmin.models import SnapModel
+    from snapadmin.tenancy import BACKGROUND_PURPOSES
+
+    assert _params(SnapModel.snap_background_context) == ["purpose"]
+    assert SnapModel.BACKGROUND_PURPOSES == ("retention", "reindex", "subject_request")
+    assert BACKGROUND_PURPOSES == SnapModel.BACKGROUND_PURPOSES
+
+
+def test_computed_column_defaults():
+    """``show_in_form`` defaults to ``False`` since 0.1.0b11 (#EXT3o): it used to
+    default to ``True`` and was never read, so flipping it changed nothing
+    visible, while honouring the old default would have put every computed
+    column into every change form on upgrade."""
+    from snapadmin.fields import SnapFunctionField
+    from snapadmin.models import snap_property
+
+    for constructor in (SnapFunctionField.__init__, snap_property):
+        defaults = {
+            name: param.default for name, param in inspect.signature(constructor).parameters.items()
+        }
+        assert defaults["show_in_list"] is True
+        assert defaults["show_in_form"] is False
+        assert defaults["safe_html"] is False
+        assert defaults["tab"] is None
+        assert defaults["row"] is None
 
 
 def test_registry_signatures():

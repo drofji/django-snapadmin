@@ -162,6 +162,7 @@ None of these touch the database except `required`, so you can change your mind 
 | `filterable=True` | `False` | Adds a sidebar filter in the admin and a `?field=…` query filter in the API |
 | `required=True` | `False` | `null=False, blank=False`. The one kwarg that *does* change the column — set it instead of Django's two, so the database and the search index agree |
 | `updatable=False` | `True` | Write-once: the value can be set on create but never changed |
+| `show_in_form=True` on a `SnapFunctionField` / `@snap_property` | `False` | The computed value is also shown [read-only on the change form](https://drofji.github.io/django-snapadmin/#computed-columns), in its `tab=` / `row=` (never on the add form) |
 | `delete_replaced=True` / `delete_on_delete=True` | `False` | File fields: a replaced file / a deleted row's file [leaves storage](https://drofji.github.io/django-snapadmin/#file-cleanup) once the transaction commits, unless another row still names it |
 
 On the model itself:
@@ -173,6 +174,7 @@ On the model itself:
 | `data_retention_days = 365` | The GDPR purge deletes rows older than this — or `data_retention_date_field = "delete_at"` for a per-row deadline |
 | `es_storage_mode = EsStorageMode.DUAL` | Mirror rows to Elasticsearch. Pair it with `es_mapping` or `es_auto_mapping = True` — a mirror with neither would index ids only, so `snapadmin.E026` refuses it |
 | `tenant_scoped = True` | Row-level isolation: unreachable without a bound tenant |
+| `admin_read_only = True` | The generated admin only shows the rows — no add/change/delete, every field read-only, [no `show_in_form` needed](https://drofji.github.io/django-snapadmin/#admin-read-only) |
 
 30+ field types (`SnapPhoneField`, `SnapColorField`, `SnapStatusBadgeField`, …) and the layout kwargs
 (`tab`, `row`, `autocomplete`, `wysiwyg`, upload validation) are in
@@ -276,7 +278,7 @@ included
 **⚙️ Operations** — [audit trail](https://drofji.github.io/django-snapadmin/#audit-trail) ·
 [GDPR retention](https://drofji.github.io/django-snapadmin/#gdpr) ·
 [PII masking](https://drofji.github.io/django-snapadmin/#pii-masking) ·
-[backups](https://drofji.github.io/django-snapadmin/#backups) ·
+[backups](https://drofji.github.io/django-snapadmin/#backups) (with [daily/weekly/monthly retention](https://drofji.github.io/django-snapadmin/#backup-retention-tiers)) ·
 [alerts](https://drofji.github.io/django-snapadmin/#alert-channels) to email, Slack, Discord, Teams
 or Telegram · [structured logging](https://drofji.github.io/django-snapadmin/#logging) · 10 languages
 

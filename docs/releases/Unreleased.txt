@@ -39,9 +39,70 @@ Breaking
   ``60``; ``0`` restores writing on every request) bounds it; the write is conditional, so a request
   holding a stale copy never rewrites a newer value. ``APITokenAuthentication.touch_token()`` is the
   step to override for a different record of use.
+* **``snapadmin.E029`` can stop ``manage.py check``.** A numeric ``SNAPADMIN_*`` setting ``int()``
+  cannot read — typically ``""`` from an unset environment variable — or a throttle rate DRF cannot
+  parse is now an Error at startup instead of a crash at the first request or backup run that read it
+  (see *Fixed*). Fix: set a number, or leave the setting unset for its default.
+* **A GDPR subject request now finds — and ``delete --confirm`` now erases — the subject's rows in
+  tenant-scoped models.** It used to see none of them (see *Security*), so the same command deletes
+  more after the upgrade. Run it without ``--confirm`` first: the dry run lists every row it found.
+* **``show_in_form`` on a ``SnapFunctionField`` / ``@snap_property`` defaults to ``False`` now, and is
+  honoured.** It defaulted to ``True`` and nothing ever read it, so no computed value ever reached a
+  change form. Nothing changes visibly on upgrade — the old ``True`` had no effect; a column that
+  should appear on the change form now says ``show_in_form=True`` (see *Added*). Code that read
+  ``field.show_in_form`` to mean "shown in the form" now gets the truth.
 
 Added
 -----
+
+* **A computed column can be shown on the change form.** ``show_in_form=True`` on a
+  ``SnapFunctionField``, ``@snap_property`` or ``SnapStatusBadgeField`` shows its value read-only on the
+  change form — escaped unless ``safe_html=True``, in declaration order among the model's fields, and
+  in the ``tab=`` / ``row=`` the column names (both new parameters). The add form never shows it, as
+  there is no saved row to compute from (and "Save as new" takes the add path).
+  ``SNAPADMIN_SHOW_IN_FORM_DEFAULT`` does not apply to computed columns. The read-only row is the admin
+  method ``snap_form_<name>``, the name to use in a hand-written ``fieldsets``.
+* **``admin_read_only = True`` — a model the admin only shows.** A log model (rows the application
+  writes) had no declarative form: its generated admin offered add, change and delete, and leaving its
+  fields without ``show_in_form`` — the honest declaration — tripped ``snapadmin.W015``, so adopters
+  flagged fields nobody should edit just to silence it. The generated admin of such a model is now
+  view-only for everyone, superusers included (a mixin in ``admin_mixins`` may grant a permission
+  back), its view page shows every field read-only when none is flagged, and ``W015`` skips it.
+  Admin-only — ``api_read_only`` is the REST API's equivalent. ``snapadmin-info`` reports it under
+  ``read_only_admins``.
+* **``SnapModel.snap_background_context(purpose)`` — one hook for every cross-tenant background job.**
+  The retention purge, the Elasticsearch reindex and the GDPR subject request read every tenant's rows;
+  they bound ``use_all_tenants()``, which only SnapAdmin's own scoping understands, so a project whose
+  manager refuses to run without its own tenant context aborted the purge task, and PostgreSQL
+  row-level security showed zero rows. Each job now enters the model's
+  ``snap_background_context(purpose)`` (``"retention"``, ``"reindex"``, ``"subject_request"``); the
+  default is ``use_all_tenants()``, and a project returns its own context instead. A plain model may
+  declare the same classmethod.
+* **``SNAPADMIN_MASKING_PENDING_APPS`` — masking written before its app is installed.** A
+  ``SNAPADMIN_MASKED_FIELDS`` / ``SNAPADMIN_MASKING_RULES`` key that resolves to no installed model is
+  an Error (``E001`` / ``E003``), deliberately — a typo fails open. A project rolling out module by
+  module wrote the masking first and could not pass ``manage.py check`` until the app arrived. Listing
+  the app's label here reports its keys as Info ``snapadmin.I002`` while the app is not installed; an
+  installed app on the list is ``snapadmin.W034``. Nothing is excused without the list, so a mistyped
+  app label still errors.
+* **``SNAPADMIN_PII_ACCESS_CHECK`` — who may see raw PII, decided by the project.** The one decision
+  every masking surface asks (admin, REST, GraphQL, exports, the audit diff, the subject request) was
+  hard-wired to the ``snapadmin.view_raw_pii`` permission. A callable ``(user) -> bool`` — or its dotted
+  path — now replaces that step: an SSO role, a membership table. Anonymous and inactive users stay
+  masked and superusers unmasked whatever it answers, a per-field rule's ``permission`` still unlocks
+  its field, an exception masks (fails closed, logged as ``snapadmin.pii_access_check_failed``), and a
+  path that cannot be imported is ``snapadmin.W035`` at startup.
+* **Daily, weekly and monthly backup retention** (``SNAPADMIN_BACKUP_KEEP_DAILY`` / ``_WEEKLY`` /
+  ``_MONTHLY``, default ``0`` = off). "Keep the newest N" was the only rule. Each tier keeps the newest
+  backup of the N most recent days, ISO weeks or months that have one — counted over the backups, not
+  the clock — and a backup survives when any rule keeps it. All five destinations now prune through one
+  function instead of five copies of the same slice, so they can no longer disagree. ``snapadmin.W036``
+  flags a value below its floor and ``snapadmin.W037`` a tier finer than a destination's cadence.
+* **``snapadmin.W033``: an argument a computed column cannot use.** ``SnapFunctionField`` accepted any
+  extra argument and dropped it, so a typo (``show_in_fom=True``) or a flag only editable fields have
+  (``searchable=``, ``filterable=``) did nothing, with no signal. It still accepts them — rejecting them
+  would stop a project from starting after the upgrade — but records them, and the check names the
+  model, the column and each argument.
 
 * **``snapadmin.admin.register_builtin_admins()``** registers SnapAdmin's own admins — the error
   log, the audit log and (behind its gate) the API tokens — without ``SnapModel.register_all_admins()``,
@@ -69,6 +130,25 @@ Added
 
 Fixed
 -----
+
+* **An operator bound to every tenant can create rows again — for the tenant they name.** With
+  ``ALL_TENANTS`` bound (a resolver returning it for a cross-tenant operator) every create was refused,
+  even when the tenant was supplied. The generated add form now shows the tenant field for that binding,
+  required, and the admin and the REST API store the tenant named; naming none is still refused, and a
+  single-tenant binding still forces its own tenant. The audit entry records the tenant chosen.
+* **``es_reindex_all()`` indexes every tenant's rows.** Called from the admin reindex API it ran under
+  the caller's tenant, and from the ``run_es_reindex`` task under none — so a tenant-scoped model's
+  index held one tenant's rows, or nothing. It now reads inside the model's cross-tenant context like
+  ``snapadmin_reindex`` always did, and the reindex job runs its whole pass there (not only the
+  queryset's construction), so a project context such as row-level security applies to every query.
+* **``SNAPADMIN_BACKUP_KEEP = 0`` no longer deletes the backup it just wrote.** A value below 1 pruned
+  every dump of the part on every destination — the new one included — while the run reported
+  success. The newest run is now always kept, and ``snapadmin.W036`` names the setting.
+* **The importer no longer creates tenant-scoped rows with no tenant, or with the all-tenants sentinel
+  as their tenant.** ``start_import(tenant=ALL_TENANTS)`` stored the sentinel's ``str()`` as the rows'
+  tenant, and a row created with no tenant bound (a job created before the model became tenant-scoped)
+  was stored with none — both invisible to every tenant. The first is refused when the job is created;
+  the second fails the row with a message naming ``--tenant``.
 
 * **An sdist built from a git working tree no longer picks up git-ignored files.** The sdist's
   include patterns for the demo project, the docs and the CI files were blanket ``<dir>/**/*`` globs,
@@ -167,3 +247,8 @@ Security
   filtering, ordering and search share one definition of what is hidden. A filter on a hidden field
   is refused with exactly the message a field that does not exist gets, whatever its value, and no
   hint lists a hidden field's lookups.
+* **A GDPR subject request now reaches the rows of tenant-scoped models.** ``snapadmin_subject_request``
+  runs with no request, so no tenant was bound, and a ``tenant_scoped`` model answered its lookup with
+  nothing: the export left those rows out and ``delete --confirm`` left them in place, while the
+  summary looked complete. The collection now runs inside the model's cross-tenant context
+  (``snap_background_context("subject_request")``) and finds every tenant's rows for the subject.

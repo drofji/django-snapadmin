@@ -93,6 +93,7 @@ from snapadmin.logging_config import get_logger
 from snapadmin.masking import get_masked_fields, user_can_view_pii
 from snapadmin.registry import get_model_meta
 from snapadmin.tenancy import (
+    ALL_TENANTS,
     _tenant_attname,
     _tenant_field_names,
     get_current_tenant,
@@ -443,8 +444,16 @@ def _process_row(
             if is_tenant_scoped(model):
                 # check_write_surface already refused a column mapped to the
                 # tenant field itself — this is the only door a new row's
-                # tenant is ever assigned through (#FUT1b).
-                values[_tenant_attname(model)] = get_current_tenant()
+                # tenant is ever assigned through (#FUT1b). No tenant, or the
+                # all-tenants sentinel, would store an orphan no tenant sees
+                # (the sentinel as a value, even) — refuse the row (#EXT3q).
+                current = get_current_tenant()
+                if current is None or current is ALL_TENANTS:
+                    raise ValueError(
+                        f"{model._meta.label} is tenant-scoped and this import has no single "
+                        "tenant to assign the row to — run it with --tenant."
+                    )
+                values[_tenant_attname(model)] = current
             instance = model(**values)
             instance.full_clean()
             instance.save()
@@ -557,6 +566,12 @@ def start_import(
             raise SnapImportError(
                 f"{model._meta.label} is tenant-scoped — pass --tenant (a tenant this "
                 "import's rows are assigned to; there is no request here to resolve one from)."
+            )
+        if tenant is ALL_TENANTS:
+            # str() of the sentinel would be stored as the rows' tenant (#EXT3q).
+            raise SnapImportError(
+                f"{model._meta.label} is tenant-scoped — ALL_TENANTS is a reading binding, "
+                "not a tenant; pass the one tenant this import's rows belong to."
             )
         tenant_id = str(tenant)
 

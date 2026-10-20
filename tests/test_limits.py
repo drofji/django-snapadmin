@@ -250,7 +250,9 @@ class TestIncrementDecrementHelpers:
         from snapadmin.limits import _decrement
         cache = MagicMock()
         cache.decr.side_effect = ValueError("no such key")
-        _decrement(cache, "some-key")  # must not raise
+        _decrement(cache, "some-key")
+
+        cache.decr.assert_called_once_with("some-key")  # must not raise
 
 
 class TestReserveNoLimits:

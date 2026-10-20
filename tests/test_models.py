@@ -190,9 +190,16 @@ class TestAdminRegistration:
         assert Order in admin.site._registry
 
     def test_register_already_registered_does_not_raise(self):
-        """Calling register_admin twice must be silent."""
+        """Calling register_admin twice must be silent — and leave the admin that
+        already serves the model in place."""
+        from django.contrib import admin
+
         from demo.apps.shop.models import Product
-        Product.register_admin()  # already registered – should not raise
+
+        serving = admin.site._registry[Product]
+        Product.register_admin()
+
+        assert admin.site._registry[Product] is serving  # already registered – should not raise
 
     def test_admin_disabled_model_not_registered(self):
         """A model with admin_enabled=False should not appear in admin."""
