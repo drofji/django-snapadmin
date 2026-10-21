@@ -12,7 +12,20 @@ the `0.x` beta series.
 
 ## Unreleased
 
+## 0.1.0b11 — 2026-10-20
+
+The third round of production field reports, closed in full, plus fixes found by an independent review
+before the release (a stored XSS in status badges, a GraphQL search oracle on masked fields, a shard's
+newest backup deleted by retention). Read `Breaking` first — unknown REST query parameters are now a
+`400`, `snapadmin.E029` can stop `manage.py check`, and a GDPR erasure reaches more rows than before.
+
 ### Breaking
+- The `[wysiwyg]` extra needs `django-ckeditor-5>=0.2.8` (older releases read the `DEFAULT_FILE_STORAGE`
+  setting Django 5.1 removed).
+- An `admin_mixins` mixin's `get_readonly_fields` / `get_fieldsets` / `formfield_for_dbfield` now takes
+  effect (it was shadowed by the generated one).
+- A GDPR subject-request erasure also deletes the subject's stored files.
+- `SnapModel.snap_search()` returns no rows for a term no search field can match (it returned all).
 - `SnapFunctionField`, `@snap_property` and `@snap_action` declared on an abstract base or a mixin now
   reach the models built on it — an inherited action becomes a REST route on upgrade.
 - An unknown REST query parameter answers `400` naming it instead of being ignored (an ignored
@@ -58,6 +71,10 @@ the `0.x` beta series.
   deleted row's file leaves storage after commit.
 
 ### Fixed
+- Backup retention matches a part's files exactly — a shard named like the start of another (`eu` /
+  `eu-west`) no longer deletes its own newest dump.
+- `manage.py check` no longer crashes on a non-numeric backup setting (left to `E029`).
+- `snapadmin-new` projects set `SNAPADMIN_THROTTLE_ANON` / `_USER` instead of DRF's unused scopes.
 - `SNAPADMIN_BACKUP_KEEP = 0` no longer deletes every backup, the one just written included.
 - `es_reindex_all()` (admin reindex API, `run_es_reindex` task) indexes every tenant's rows instead of
   the caller's tenant's, or none.
@@ -89,7 +106,15 @@ the `0.x` beta series.
   whether `tenant_field` names the field or its `_id` column.
 - A tenant-scoped row added in an admin inline gets its tenant instead of becoming an orphan.
 
+### Deprecated
+- `skipped: True` on an unclaimed import job's summary (use `outcome == "job_skipped"`); removed at 1.0.
+- Arguments `W033` reports are planned to raise `TypeError` at 1.0.
+
 ### Security
+- Status badges escape a value with no matching choice (it rendered as HTML — stored XSS).
+- Search never matches a hidden field: prefixed (`^name`) and related (`customer__email`) search fields
+  are checked where they end, on REST and GraphQL; GraphQL `search` runs DRF's `SearchFilter`.
+- `@snap_action`s inherited from abstract bases or mixins are REST routes (review before upgrading).
 - A GDPR subject request finds the subject's rows in tenant-scoped models (they were missed by the
   export and left in place by the erasure).
 - A GDPR subject-request delete removes the erased rows' stored files.

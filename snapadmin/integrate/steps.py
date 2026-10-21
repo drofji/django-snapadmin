@@ -79,7 +79,8 @@ class Step:
     #: cannot tell without importing Django and touching a live database; the
     #: ``note`` names the live command that can, e.g. ``snapadmin_info --health-check``).
     #: Never reinterpret ``None`` as ``False`` — that would be exactly the false
-    #: green this doctor is required to never print (see ``rules.md``).
+    #: green this doctor is required to never print — it reports "not available",
+    #: never a pass it could not verify.
     present: bool | None
     snippet: str
     note: str = ""

@@ -21,6 +21,8 @@ import ast
 import pathlib
 
 import pytest
+
+from snapadmin import checks
 from django.test import override_settings
 
 from snapadmin.checks import (
@@ -200,3 +202,26 @@ class TestTheFeatureAuditReportsTheEffectiveRate:
     @override_settings(SNAPADMIN_THROTTLE_ANON=None, SNAPADMIN_THROTTLE_USER=None)
     def test_both_disabled_explicitly_means_off(self):
         assert self._features()["rate_limiting"] is False
+
+
+# ── Class guard: no check crashes on the value E029 exists to report ─────────
+
+
+@pytest.mark.parametrize("value", ["abc", ""])
+@pytest.mark.parametrize("name", sorted(checks._NUMERIC_SETTINGS))
+def test_no_check_crashes_when_a_numeric_setting_is_not_a_number(name, value, settings):
+    """``check_backup_retention`` called ``get_backup_config()`` — an ``int()`` over
+    every backup setting — after guarding only its own: ``SNAPADMIN_BACKUP_LOCAL_EVERY_HOURS
+    = "abc"`` made ``manage.py check`` die instead of reporting E029."""
+    settings.SNAPADMIN_BACKUP_ENABLED = True
+    setattr(settings, name, value)
+
+    crashed = []
+    for check in checks.ALL_CHECKS:
+        try:
+            check(None)
+        except (ValueError, TypeError) as exc:
+            crashed.append(f"{check.__name__}: {exc}")
+
+    assert crashed == [], f"review: these checks crash on {name}={value!r} instead of leaving it to E029: {crashed}"
+    assert "snapadmin.E029" in [m.id for m in checks.check_setting_values(None)]

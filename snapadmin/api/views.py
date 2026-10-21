@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from django.apps import apps
 from django.conf import settings
+from django.db import models as django_models
 from django.http import StreamingHttpResponse
 from django.urls import reverse
 from django.utils.module_loading import import_string
@@ -27,6 +28,7 @@ from snapadmin.api.authentication import SnapAPIAuthMixin, token_has_permission
 from snapadmin.conf import _resolve_throttle_rate, get_setting
 from snapadmin.db import route_read
 from snapadmin.api.filters import (
+    _visible_search_fields,
     _hidden_filter_fields,
     _strict_query_params,
     get_api_filter_backends,
@@ -63,16 +65,81 @@ _model_field_cache: dict[str, tuple[list[str], list[str]]] = {}
 _NOT_SUPPLIED = object()
 
 
-def _names_another_tenant(supplied: object, current: object) -> bool:
+def _names_another_tenant(supplied: object, current: object, model=None) -> bool:
     """Whether a request body's tenant value differs from the bound tenant.
 
-    Absent or empty means "not named". A related row is compared by its key,
-    and both sides as text — a resolver may return ``"5"`` for the row whose
-    primary key is ``5``; they name the same tenant.
+    Absent or empty means "not named". A related row is compared by the key its
+    relation targets — the primary key, or the ``to_field`` column — and both
+    sides as text: a resolver may return ``"5"`` for the row whose key is ``5``;
+    they name the same tenant.
     """
     if supplied is _NOT_SUPPLIED or supplied in (None, ""):
         return False
-    return str(_tenant_value(supplied)) != str(current)
+    return str(_tenant_key(model, supplied)) != str(current)
+
+
+def _tenant_key(model, value: object) -> object:
+    """A tenant value as its column stores it: a related row reduced to the field
+    its relation targets (``to_field`` honoured), anything else unchanged."""
+    if model is None or not isinstance(value, django_models.Model):
+        return _tenant_value(value)
+    field = model._meta.get_field(_tenant_model_field_name(model))
+    return getattr(value, field.target_field.attname)
+
+
+def _operator_named_tenant(model, field_name: str, supplied: object, request: object) -> object:
+    """The tenant column value an operator bound to all tenants named (#EXT3q), or
+    ``None`` when they named none.
+
+    The serializer drops the tenant when a write allowlist (``api_write_fields``)
+    leaves it out — the usual case, since a tenant is normally server-assigned —
+    so the request body is read directly then. A foreign-key tenant is stored by
+    the key its relation targets (``to_field`` included) and must exist: a
+    dangling one is a ``400`` naming the field, not a database error.
+    """
+    field = model._meta.get_field(field_name)
+    if supplied is _NOT_SUPPLIED or supplied in (None, ""):
+        supplied = _tenant_from_body(model, field, request)
+        if supplied in (None, ""):
+            return None
+    if isinstance(supplied, django_models.Model):
+        return _tenant_key(model, supplied)
+    if not field.is_relation:
+        return supplied
+    if not field.related_model._base_manager.filter(
+        **{field.target_field.attname: supplied}
+    ).exists():
+        raise ValidationError({field_name: f"{field_name!r} names no existing tenant."})
+    return supplied
+
+
+def _tenant_from_body(model, field, request: object) -> object:
+    """The tenant an operator named in the request body when the serializer dropped
+    it (a write allowlist leaves the tenant out) — validated as the serializer would
+    have: the field's write permission, a scalar, and the column's own type and
+    validators. Accepted under the field's name or, for a foreign key, its column."""
+    from django.core.exceptions import ValidationError as DjangoValidationError
+
+    from snapadmin.masking import user_can_access_field
+
+    data = getattr(request, "data", None) or {}
+    if not hasattr(data, "get"):
+        return None
+    raw = data.get(field.name, data.get(field.attname))
+    if raw in (None, ""):
+        return None
+    if not user_can_access_field(getattr(request, "user", None), model, field.name, write=True):
+        raise ValidationError({field.name: f"{field.name!r} may not be written by this user."})
+    if isinstance(raw, bool) or not isinstance(raw, (str, int)) or "\x00" in str(raw):
+        # A NUL character is refused like DRF's own CharField refuses it — PostgreSQL
+        # cannot store one, and it would surface as a 500.
+        raise ValidationError({field.name: f"{field.name!r} must name a tenant by its value."})
+    column = field.target_field if field.is_relation else field
+    try:
+        return column.clean(raw, None)
+    except (DjangoValidationError, ValueError, TypeError) as exc:
+        messages = getattr(exc, "messages", [str(exc)])
+        raise ValidationError({field.name: messages}) from exc
 
 
 class IsTokenOwnerOrAdmin(permissions.BasePermission):
@@ -542,7 +609,8 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             return None
         return model
 
-    def _es_routing_enabled(self, model_class) -> bool:
+    @staticmethod
+    def _es_routing_enabled(model_class) -> bool:
         """Whether full-text API queries for this model may be routed to ES.
 
         Requires all three switches on: the global ``SNAPADMIN_ES_QUERY_ROUTING``
@@ -607,19 +675,20 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         if current is ALL_TENANTS:
             # An operator bound to every tenant names the one the row belongs to,
             # the same rule as the admin form (#EXT3q); naming none is still refused.
-            if supplied is _NOT_SUPPLIED or supplied in (None, ""):
+            named = _operator_named_tenant(model_class, field, supplied, self.request)
+            if named is None:
                 raise PermissionDenied(
                     f"{model_class._meta.label} is tenant-scoped and this request is bound to "
                     f"all tenants — name the tenant the new row belongs to in {field!r}."
                 )
-            serializer.save(**{_tenant_attname(model_class): _tenant_value(supplied)})
+            serializer.save(**{_tenant_attname(model_class): named})
             return
         if current is None:
             raise PermissionDenied(
                 f"No tenant is bound to this request — {model_class._meta.label} "
                 "is tenant-scoped and refuses to create a row with no tenant assigned."
             )
-        if _names_another_tenant(supplied, current):
+        if _names_another_tenant(supplied, current, model_class):
             raise ValidationError(
                 {
                     field: f"{field!r} is assigned automatically from the request's tenant "
@@ -645,7 +714,7 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
         current = get_current_tenant()
         field = _tenant_model_field_name(model_class)
         supplied = serializer.validated_data.get(field, _NOT_SUPPLIED)
-        if _names_another_tenant(supplied, current):
+        if _names_another_tenant(supplied, current, model_class):
             raise ValidationError({field: f"{field!r} cannot be changed."})
         serializer.save()
 
@@ -807,12 +876,15 @@ class DynamicModelViewSet(SnapAPIAuthMixin, viewsets.ModelViewSet):
             self.search_fields = self._db_search_fields(model_class)
             searched_on_the_database = True
 
+        # Every search field the caller may not see is dropped — a prefixed one
+        # (``^name``) and one reached through a relation (``customer__email``)
+        # included, so ``?search=`` can never answer match/no-match on it.
+        if self.search_fields:
+            self.search_fields = (
+                _visible_search_fields(self.request.user, model_class, self.search_fields) or None
+            )
         masked_fields = self._masked_fields_for_request(model_class)
         if masked_fields:
-            if self.search_fields:
-                self.search_fields = (
-                    tuple(f for f in self.search_fields if f not in masked_fields) or None
-                )
             # A masked field must not be a valid `?ordering=` term either, or a
             # caller could infer its raw value from the sort order. Only
             # overridden when there's actually something to exclude — leave

@@ -100,6 +100,33 @@ def _allowed_query_params(action: str | None) -> set[str]:
     return allowed
 
 
+def _visible_search_fields(user, model_class, search_fields) -> tuple[str, ...]:
+    """The search fields ``user`` may match a term against on ``model_class``.
+
+    A search field may carry a DRF prefix (``^name``, ``=code``, ``@body``,
+    ``$re``) and may follow relations (``customer__email``): the prefix is not
+    part of the name, and a related model's hidden field is as hidden as one of
+    the model's own — comparing the raw entry with the hidden names let both
+    through, and a match/no-match on them is an oracle for the hidden value.
+    """
+    return tuple(name for name in search_fields if not _search_path_hidden(user, model_class, name))
+
+
+def _search_path_hidden(user, model_class, search_field: str) -> bool:
+    current = model_class
+    for part in search_field.lstrip("^=@$").split("__"):
+        if part in _hidden_filter_fields(user, current):
+            return True
+        try:
+            field = current._meta.get_field(part)
+        except FieldDoesNotExist:
+            return False  # a lookup name, not a field
+        if not field.is_relation or field.related_model is None:
+            return False
+        current = field.related_model
+    return False
+
+
 def _hidden_filter_fields(user, model_class: type[django_models.Model]) -> set[str]:
     """Names a caller may neither filter, order nor search by on ``model_class``.
 

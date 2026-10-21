@@ -15,7 +15,7 @@ receive backported patches — upgrade to the newest version to get security fix
 
 | Version | Supported |
 |---------|-----------|
-| Latest release on PyPI (currently `0.1.0b10`) | ✅ |
+| Latest release on PyPI (currently `0.1.0b11`) | ✅ |
 | Any older pre-`1.0` release | ❌ (upgrade) |
 
 ## API stability and compatibility policy
@@ -162,6 +162,9 @@ Key protections:
   `manage.py check` warns (`snapadmin.W009`) when an explicit setting silently disagrees with the
   active profile, so re-enabling a surface a profile turned off is never silent. See
   [`SNAPADMIN_PROFILE` presets](https://drofji.github.io/django-snapadmin/#profiles).
+- **An `@snap_action` declared on an abstract base or a plain mixin is a route of every model built on
+  it** (since 0.1.0b11; a concrete multi-table parent's actions stay with the parent), under exactly
+  the rules below — review the abstract bases of your models when upgrading.
 - **`@snap_action` (user-defined REST actions) can never widen a model's own write policy.** Every
   action URL is wired to every HTTP verb, but Django REST Framework rejects a verb outside the
   view's `http_method_names` — the exact same descriptor that already resolves `api_read_only` /
@@ -208,6 +211,10 @@ Key protections:
   — `True` for a project authenticating its own views with `APITokenAuthentication`.
 
 ### Injection / XSS
+- **Computed columns escape what they render** unless declared `safe_html=True` — on the changelist
+  and, with `show_in_form=True`, on the change form. `SnapStatusBadgeField` builds its badges with
+  `format_html` and escapes a value with no matching choice (before 0.1.0b11 such a value was returned
+  as trusted markup). A test feeds hostile data to every built-in computed column.
 - **Wysiwyg (rich-text) values are sanitized with `nh3` on write and on render.** The field's
   `pre_save()` cleans the value before it is stored, so every ORM write path — admin form, REST and
   GraphQL serializers, `Model.save()`, `bulk_create()` — puts sanitized HTML in the column; the
@@ -317,8 +324,9 @@ Key protections:
   explicit `400` naming the field, since a silently dropped write is a data-loss bug the caller
   cannot detect. The gate is checked upstream of PII masking (does the field appear at all, before
   whether what appears is raw or starred) and also removes a permission-denied field from
-  `?field=`/`?ordering=`/`?search=` — the same oracle-prevention rule masking already follows. Wired
-  into REST and GraphQL; the admin form and background export are a tracked follow-up, not silently
+  `?field=`/`?ordering=`/`?search=` — the same oracle-prevention rule masking already follows; GraphQL's
+  `search` argument uses the identical field set (since 0.1.0b11 — before, it searched every admin
+  search field, masked ones included). Wired into REST and GraphQL; the admin form and background export are a tracked follow-up, not silently
   unguarded — until they ship, treat a field's `api_field_permissions` rule as REST/GraphQL-only.
 
 ### Data protection & auditability
@@ -473,7 +481,9 @@ Key protections:
   rules. The raw `changes` JSON is excluded from the change form outright: it was previously only
   *replaced* in `readonly_fields`, which pushed the real field back into the form where Django
   rendered it read-only and unmasked next to the masked copy (fixed in the current release).
-- **Immutable audit trail** (`SNAPADMIN_AUDIT_LOG_ENABLED`) records every admin create/update/delete.
+- **Immutable audit trail** (`SNAPADMIN_AUDIT_LOG_ENABLED`) records every admin create/update/delete —
+  the rows an admin inline creates, changes or deletes included (each child gets its own entry since
+  0.1.0b11).
   A relation is recorded by its key — a foreign key as the key it holds, a many-to-many as the
   sorted list of primary keys — never by the related object's label: a label is whatever that
   model's `__str__` prints (often a name or an email), which the trail's masking cannot see because
@@ -531,7 +541,8 @@ Key protections:
   at all — not even `None`; `E012` catches a declared-but-malformed one: a subject model whose own path
   doesn't match its identifier, a path over 3 relation hops, one that doesn't resolve via this model's
   own *forward* relations, or a multi-hop path on an `ES_ONLY` model).
-  - **Gated on `snapadmin.view_raw_pii`** — a SAR export is unmasked by design (it goes to the
+  - **Gated on raw-PII access** (`snapadmin.view_raw_pii`, or `SNAPADMIN_PII_ACCESS_CHECK` when set —
+    the same decision every masking surface asks) — a SAR export is unmasked by design (it goes to the
     subject), which makes it a high-value artefact; `--user` must already be trusted with raw PII, and
     every run (export or deletion) is written to the audit trail against that operator.
   - **Export reuses the existing async-export machinery** (one `SnapExportJob` per matched model, the

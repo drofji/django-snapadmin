@@ -190,8 +190,15 @@ class TestPublicFilesNamePrivateToolingNowhere:
         {
             "e026f56c08dcdea441a2aa620ab410ce91162062609b2430f5a13bc9b7cf93f1",
             "ae669539d19742429b26622a8ae7210cbb7917ecbf5eb3da4425d255c3cc6de7",
+            # The project rules file and the task ledger inside it (found by the
+            # b11 audit: a shipped module comment pointed at the rules file).
+            "54ea723241231828f6cea5e58275577fb2860c25d321b75dac6e01c75e5c831b",
+            "51abe96bc493857fdfba599c6b70e3a6c09200cf29e130d15b599fef538e32df",
         }
     )
+    #: Release notes of a published version record what shipped and are never
+    #: rewritten (a durable decision); 0.1.0b9's names the rules file once.
+    PUBLISHED_NOTES = re.compile(r"^docs/releases/\d[\w.]*\.txt$")
     #: Candidate tokens: a dot-directory name, or a Markdown file name.
     CANDIDATE_RE = re.compile(r"(?<![\w])\.[A-Za-z][\w-]*|[\w-]+\.md")
 
@@ -201,6 +208,8 @@ class TestPublicFilesNamePrivateToolingNowhere:
 
         offenders = []
         for relative in sorted(git_tracked_files(REPO_ROOT)):
+            if self.PUBLISHED_NOTES.match(str(relative)):
+                continue
             path = REPO_ROOT / relative
             try:
                 text = path.read_text(encoding="utf-8")

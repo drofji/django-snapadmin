@@ -194,7 +194,10 @@ class TestAdminCreate:
             _admin_for(model).save_model(_request(admin_user), note, form, change=False)
 
         stored = model._base_manager.get(pk=note.pk)
-        assert getattr(stored, column) == tenant_value
+        assert getattr(stored, column) == tenant_value, (
+            f"review: the admin stamped the wrong tenant on a {shape} create — "
+            "SnapSaveMixin._stamp_tenant / tenancy._tenant_attname"
+        )
 
 
 class TestRestApiCreateAndUpdate:
@@ -210,7 +213,10 @@ class TestRestApiCreateAndUpdate:
         with tenancy.use_tenant(tenant_value):
             _viewset_for(model, admin_user).perform_create(serializer)
 
-        assert getattr(model._base_manager.get(text="created over REST"), column) == tenant_value
+        assert getattr(model._base_manager.get(text="created over REST"), column) == tenant_value, (
+            f"review: the REST API stamped the wrong tenant on a {shape} create — "
+            "DynamicModelViewSet.perform_create"
+        )
 
     @pytest.mark.parametrize("shape", ["FkTenantNote", "FkColumnTenantNote"])
     def test_create_accepts_the_bound_tenant_supplied_explicitly(self, tenant_models, admin_user, shape):

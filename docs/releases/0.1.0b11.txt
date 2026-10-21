@@ -1,0 +1,313 @@
+0.1.0b11 — 2026-10-20 — Eleventh Beta
+=====================================
+
+The third round of production field reports, closed in full. Every report was fixed together with
+the sibling places the same mistake could hide, a test that fails on the next instance of it, and a
+note on why the suite had missed it: unknown REST query parameters are refused instead of returning
+the whole table, tenancy holds on every write path (a ``ForeignKey`` tenant column, admin inlines,
+operators bound to every tenant, the importer, the GDPR subject request and the reindex), stored files
+leave storage with their rows, and settings that would fail at the first request fail
+``manage.py check`` instead. New, small and opt-in: computed columns on the change form, read-only
+admins, a hook for cross-tenant jobs under a project's own tenancy, project-defined raw-PII access,
+masking written before its app is installed, and daily/weekly/monthly backup retention.
+
+An independent review before the release found and fixed a stored XSS in ``SnapStatusBadgeField``, a
+GraphQL search oracle on masked fields and a backup-retention bug that could delete a shard's newest
+dump — all three older than this release. Read ``Breaking`` first.
+
+Breaking
+--------
+
+* **An unknown query parameter on the REST API is a ``400`` now, never ignored.** A parameter that
+  is neither a declared filter nor one the API reads itself — ``?search=``, ``?ordering=``,
+  ``?page=``, ``?page_size=``, ``?format=``, and ``?limit=`` on ``export/`` — used to be dropped, so
+  ``?url__iendswith=.pdf`` on a field without that lookup ran unfiltered and answered ``200`` with
+  every row. The same goes for an unknown ``?ordering=`` term, ``?search=`` on a model with no
+  searchable field left for the caller, a filter on an ``ES_ONLY`` model and a filter on a masked or
+  read-gated field. A client that sends parameters of its own (a cache-buster, a tracing id) lists
+  them in ``SNAPADMIN_API_EXTRA_QUERY_PARAMS``; ``SNAPADMIN_API_STRICT_QUERY_PARAMS = False`` restores
+  the old silence.
+* **Declarations on an abstract base or a plain mixin now count** — a ``SnapFunctionField``,
+  ``@snap_property`` column or ``@snap_action`` declared there reaches every model built on it (they
+  were read from the concrete class's own ``__dict__``). An action inherited that way **becomes a
+  REST route on upgrade**, under the usual action permission; review the abstract bases of models
+  with ``@snap_action`` before upgrading. A concrete parent's declarations (multi-table inheritance)
+  stay with the parent. ``show_in_list=False`` on a ``SnapFunctionField`` is now honoured.
+* **A boolean field with a default renders as a checkbox in the generated admin.** Snap fields derive
+  ``null=True`` from ``required=False``, so every ``SnapBooleanField(default=...)`` rendered as a
+  three-way *Unknown / Yes / No* select — and a browser checkbox's ``"on"`` read as *unknown*. Such a
+  field is now a checkbox (Unfold's switch on the themed admin); an unticked box saves ``False``, never
+  ``NULL``. A field that passed ``null=True`` explicitly, or has no default, keeps the three states.
+  No migration: the column does not change.
+* **An API token's ``last_used_at`` is written at most once a minute.** Every token-authenticated
+  request ran an ``UPDATE`` on the token row — one more round-trip per call, and parallel requests
+  with one token all writing the same row. ``SNAPADMIN_API_TOKEN_TOUCH_INTERVAL`` (seconds, default
+  ``60``; ``0`` restores writing on every request) bounds it; the write is conditional, so a request
+  holding a stale copy never rewrites a newer value. ``APITokenAuthentication.touch_token()`` is the
+  step to override for a different record of use.
+* **``snapadmin.E029`` can stop ``manage.py check``.** A numeric ``SNAPADMIN_*`` setting ``int()``
+  cannot read — typically ``""`` from an unset environment variable — or a throttle rate DRF cannot
+  parse is now an Error at startup instead of a crash at the first request or backup run that read it
+  (see *Fixed*). Fix: set a number, or leave the setting unset for its default.
+* **A GDPR subject request now finds — and ``delete --confirm`` now erases — the subject's rows in
+  tenant-scoped models.** It used to see none of them (see *Security*), so the same command deletes
+  more after the upgrade. Run it without ``--confirm`` first: the dry run lists every row it found.
+* **A method an ``admin_mixins`` mixin defines now takes effect** for ``get_readonly_fields``,
+  ``get_fieldsets`` and ``formfield_for_dbfield``: it used to be shadowed by the generated version (see
+  *Fixed*), so a mixin that defined one without effect changes the admin on upgrade.
+* **A GDPR subject-request erasure also deletes the subject's stored files** (see *Security*): run it
+  without ``--confirm`` first — the dry run counts them.
+* **``SnapModel.snap_search()`` returns no rows for a term no search field can match** — it returned
+  every row (see *Security*, search).
+* **The ``[wysiwyg]`` extra needs ``django-ckeditor-5>=0.2.8``** (was ``>=0.2.0``). Earlier releases of
+  it read ``settings.DEFAULT_FILE_STORAGE``, which Django removed in 5.1 — on the Django versions
+  SnapAdmin supports their upload view failed on import. The suite at the lowest declared dependencies
+  found it once the test settings stopped carrying the removed setting.
+* **``show_in_form`` on a ``SnapFunctionField`` / ``@snap_property`` defaults to ``False`` now, and is
+  honoured.** It defaulted to ``True`` and nothing ever read it, so no computed value ever reached a
+  change form. Nothing changes visibly on upgrade — the old ``True`` had no effect; a column that
+  should appear on the change form now says ``show_in_form=True`` (see *Added*). Code that read
+  ``field.show_in_form`` to mean "shown in the form" now gets the truth.
+
+Added
+-----
+
+* **A computed column can be shown on the change form.** ``show_in_form=True`` on a
+  ``SnapFunctionField``, ``@snap_property`` or ``SnapStatusBadgeField`` shows its value read-only on the
+  change form — escaped unless ``safe_html=True``, in declaration order among the model's fields, and
+  in the ``tab=`` / ``row=`` the column names (both new parameters). The add form never shows it, as
+  there is no saved row to compute from (and "Save as new" takes the add path).
+  ``SNAPADMIN_SHOW_IN_FORM_DEFAULT`` does not apply to computed columns. The read-only row is the admin
+  method ``snap_form_<name>``, the name to use in a hand-written ``fieldsets``.
+* **``admin_read_only = True`` — a model the admin only shows.** A log model (rows the application
+  writes) had no declarative form: its generated admin offered add, change and delete, and leaving its
+  fields without ``show_in_form`` — the honest declaration — tripped ``snapadmin.W015``, so adopters
+  flagged fields nobody should edit just to silence it. The generated admin of such a model is now
+  view-only for everyone, superusers included (a mixin in ``admin_mixins`` may grant a permission
+  back), its view page shows every field read-only when none is flagged, and ``W015`` skips it.
+  Admin-only — ``api_read_only`` is the REST API's equivalent. ``snapadmin-info`` reports it under
+  ``read_only_admins``.
+* **``SnapModel.snap_background_context(purpose)`` — one hook for every cross-tenant background job.**
+  The retention purge, the Elasticsearch reindex and the GDPR subject request read every tenant's rows;
+  they bound ``use_all_tenants()``, which only SnapAdmin's own scoping understands, so a project whose
+  manager refuses to run without its own tenant context aborted the purge task, and PostgreSQL
+  row-level security showed zero rows. Each job now enters the model's
+  ``snap_background_context(purpose)`` (``"retention"``, ``"reindex"``, ``"subject_request"``); the
+  default is ``use_all_tenants()``, and a project returns its own context instead. A plain model may
+  declare the same classmethod.
+* **``SNAPADMIN_MASKING_PENDING_APPS`` — masking written before its app is installed.** A
+  ``SNAPADMIN_MASKED_FIELDS`` / ``SNAPADMIN_MASKING_RULES`` key that resolves to no installed model is
+  an Error (``E001`` / ``E003``), deliberately — a typo fails open. A project rolling out module by
+  module wrote the masking first and could not pass ``manage.py check`` until the app arrived. Listing
+  the app's label here reports its keys as Info ``snapadmin.I002`` while the app is not installed; an
+  installed app on the list is ``snapadmin.W034``. Nothing is excused without the list, so a mistyped
+  app label still errors.
+* **``SNAPADMIN_PII_ACCESS_CHECK`` — who may see raw PII, decided by the project.** The one decision
+  every masking surface asks (admin, REST, GraphQL, exports, the audit diff, the subject request) was
+  hard-wired to the ``snapadmin.view_raw_pii`` permission. A callable ``(user) -> bool`` — or its dotted
+  path — now replaces that step: an SSO role, a membership table. Anonymous and inactive users stay
+  masked and superusers unmasked whatever it answers, a per-field rule's ``permission`` still unlocks
+  its field. It fails closed: only an answer that **is** ``True`` unlocks (``"False"`` is truthy, and so
+  is the coroutine an ``async def`` returns), an exception masks and is logged as
+  ``snapadmin.pii_access_check_failed``, and a path that cannot be imported, a value that is not
+  callable or an ``async`` function is ``snapadmin.W035`` at startup.
+* **Daily, weekly and monthly backup retention** (``SNAPADMIN_BACKUP_KEEP_DAILY`` / ``_WEEKLY`` /
+  ``_MONTHLY``, default ``0`` = off). "Keep the newest N" was the only rule. Each tier keeps the newest
+  backup of the N most recent days, ISO weeks or months that have one — counted over the backups, not
+  the clock — and a backup survives when any rule keeps it. All five destinations now prune through one
+  function instead of five copies of the same slice, so they can no longer disagree. ``snapadmin.W036``
+  flags a value below its floor and ``snapadmin.W037`` a tier finer than a destination's cadence.
+* **``snapadmin.W033``: an argument a computed column cannot use.** ``SnapFunctionField`` accepted any
+  extra argument and dropped it, so a typo (``show_in_fom=True``) or a flag only editable fields have
+  (``searchable=``, ``filterable=``) did nothing, with no signal. It still accepts them — rejecting them
+  would stop a project from starting after the upgrade — but records them, and the check names the
+  model, the column and each argument.
+
+* **``snapadmin.admin.register_builtin_admins()``** registers SnapAdmin's own admins — the error
+  log, the audit log and (behind its gate) the API tokens — without ``SnapModel.register_all_admins()``,
+  which calls it. A project using the error monitor without declaring a ``SnapModel`` used to collect
+  errors no admin page could show; ``snapadmin.W031`` now names that gap.
+* **Strict query parameters on the generated REST API** (``SNAPADMIN_API_STRICT_QUERY_PARAMS``,
+  default ``True``; ``SNAPADMIN_API_EXTRA_QUERY_PARAMS``). Every query parameter on a model route is
+  now a declared filter, a parameter the API reads itself, or a ``400`` naming it. A refused filter
+  lists the parameters its field does accept (``Allowed for 'email': email, email__icontains,
+  email__in, email__startswith.``); a refused ordering term lists the valid ones. It covers ``list``,
+  ``count/``, ``export/``, ``fetch-by/`` and the detail routes; a ``@snap_action`` owns its own query
+  string and is not checked. A dropped filter is the worst possible answer for a client about to
+  export or delete "the matching rows" — a ``200`` with the whole table.
+* **Replaced and deleted files can leave storage** (``delete_replaced=True`` /
+  ``delete_on_delete=True`` on ``SnapFileField`` and ``SnapImageField``). Django keeps a file when its
+  row's file is replaced or the row is deleted; with a dated ``upload_to`` every replacement is one
+  more orphan, and storage ends up holding personal data the database no longer points at. With the
+  flags, the file is removed after the transaction commits, and only when no other row of the model
+  still names it (asked through the base manager, so a row hidden from the current tenant still
+  counts). Bulk deletes are covered; a storage error is logged, never raised into the request. Both
+  flags are Snap-only and add no migration. ``snapadmin-info`` reports them under ``file_cleanup``.
+* **URL fields can be filtered by their ending.** A ``URLField`` adds ``?field__endswith=`` and
+  ``?field__iendswith=`` to the library default lookup set. A model- or project-wide lookup set
+  still replaces the default.
+
+Fixed
+-----
+
+* **An operator bound to every tenant can create rows again — for the tenant they name.** With
+  ``ALL_TENANTS`` bound (a resolver returning it for a cross-tenant operator) every create was refused,
+  even when the tenant was supplied. The generated add form now shows the tenant field for that binding,
+  required, and the admin and the REST API store the tenant named — on REST also when the model's
+  ``api_write_fields`` leaves the tenant out, and a foreign-key tenant must exist (``400`` otherwise) and
+  is stored by the key its relation targets, ``to_field`` included. Naming none is still refused, and a
+  single-tenant binding still forces its own tenant. The audit entry records the tenant chosen.
+* **``es_reindex_all()`` indexes every tenant's rows.** Called from the admin reindex API it ran under
+  the caller's tenant, and from the ``run_es_reindex`` task under none — so a tenant-scoped model's
+  index held one tenant's rows, or nothing. It now reads inside the model's cross-tenant context like
+  ``snapadmin_reindex`` always did, and the reindex job runs its whole pass there (not only the
+  queryset's construction), so a project context such as row-level security applies to every query.
+* **``SNAPADMIN_BACKUP_KEEP = 0`` no longer deletes the backup it just wrote.** A value below 1 pruned
+  every dump of the part on every destination — the new one included — while the run reported
+  success. The newest run is now always kept, and ``snapadmin.W036`` names the setting.
+* **Backup retention never prunes another part's or shard's files.** Destinations matched a part by
+  string prefix, so shard ``eu``'s ``snapadmin-db-eu-`` also matched shard ``eu-west``'s files — which sort
+  after it — and pruning kept those while deleting every ``eu`` dump, the one just written included; the
+  unsharded ``snapadmin-db-`` did the same to every shard's files after sharding was switched off. A file
+  now belongs to a part only when it carries a run timestamp and its own prefix is that part's,
+  exactly; anything else in the directory or bucket — a manual copy, another application's file — is
+  never deleted and never takes a kept slot.
+* **``manage.py check`` no longer crashes on a backup setting that is not a number.** Six backup checks
+  and the retention check read the backup configuration through ``int()`` before ``snapadmin.E029``
+  could report the value; they now leave it to E029.
+* **A project made by ``snapadmin-new`` sets SnapAdmin's own throttle rates.** Its settings passed
+  ``SNAPADMIN_THROTTLE_ANON`` / ``_USER`` into DRF's generic ``anon``/``user`` scopes, which SnapAdmin's
+  endpoints do not use (``snapadmin.W028``), so changing them did nothing. They now set
+  ``SNAPADMIN_THROTTLE_ANON`` / ``_USER`` (``off`` disables, blank keeps the default).
+* **The importer no longer creates tenant-scoped rows with no tenant, or with the all-tenants sentinel
+  as their tenant.** ``start_import(tenant=ALL_TENANTS)`` stored the sentinel's ``str()`` as the rows'
+  tenant, and a row created with no tenant bound (a job created before the model became tenant-scoped)
+  was stored with none — both invisible to every tenant. The first is refused when the job is created;
+  the second fails the row with a message naming ``--tenant``.
+
+* **An sdist built from a git working tree no longer picks up git-ignored files.** The sdist's
+  include patterns for the demo project, the docs and the CI files were blanket ``<dir>/**/*`` globs,
+  and an explicit include overrides ``.gitignore``: a local build packed a developer's
+  ``demo/.env`` (secret key, database and dashboard passwords) into the archive. No published
+  release was affected — every one was built in CI from a clean checkout, and all of them were
+  checked — but a downstream packager building from a clone would have shipped their own local
+  files. The patterns now name what is tracked, and the test suite fails if any of them matches an
+  ignored file, or leaves out a tracked one the sdist's test run needs.
+
+* **A tenant column declared as a ``ForeignKey`` works on every create path.** The docs recommend a
+  hand-written ``ForeignKey`` when the tenant is a project model, but only its ``_id`` column name
+  worked: with ``tenant_field = "organisation"`` the admin assigned the resolver's raw value to the
+  relation (``ValueError``), the REST API did the same through the serializer, and an update that
+  named the row's own tenant was refused because a related row never equals a raw value. Every
+  write path now writes the column and compares by key, so ``tenant_field`` may name the field or
+  its column; the importer also refuses a CSV column mapped onto either name.
+* **A tenant-scoped row created in an admin inline gets its tenant.** Django saves inline children
+  from the formset, never through ``save_model``, so a tenant-scoped child added inline was stored
+  with no tenant — invisible to every tenant, an orphan nobody could see or delete through
+  SnapAdmin. Inline children are now stamped exactly like the parent row, and refused when no tenant
+  is bound.
+
+* **``snapadmin_import`` no longer ends a re-run that skipped rows with ``KeyError: 'reason'``.** The
+  run's summary used ``skipped`` for two things — ``True`` for a job another worker had already
+  claimed, and the number of skipped rows otherwise — and the command read the first meaning: an
+  idempotent re-run with ``--on-conflict skip`` imported correctly and then looked like a crash. Every
+  summary of ``run_import_job`` now carries ``outcome`` (``finished``, ``cancelled``, ``failed`` or
+  ``job_skipped``) and the command branches on it; the older keys stay as they were.
+
+* **A blank throttle rate no longer answers ``500`` on every API request.** ``SNAPADMIN_THROTTLE_USER
+  = ""`` — what an unset environment variable becomes — reached DRF's rate parser, which raised while
+  the throttle was built. A blank value now means "not set": the rate falls back to
+  ``REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]["snapadmin_user"]`` (``snapadmin_anon`` for the anonymous
+  throttle), then the default; ``None`` still switches a throttle off. The demo's settings had the
+  same mistake the other way round — they turned an empty variable into ``None`` and silently
+  disabled throttling; ``off`` now does that, an empty value keeps the default.
+* **``snapadmin-info`` reports rate limiting truthfully.** It said ``rate_limiting`` was off for a
+  project that never set either throttle setting, while both default throttles were on.
+* **A setting value SnapAdmin cannot use fails ``manage.py check``** (``snapadmin.E029``): a numeric
+  ``SNAPADMIN_*`` setting ``int()`` cannot read (``""``, ``"abc"``) crashed whatever read it — a list
+  endpoint, a backup run — and a malformed throttle rate answered ``500``. New warnings name the quiet
+  cases: ``W029`` a blank throttle rate, ``W028`` a DRF ``user``/``anon`` rate that SnapAdmin's
+  endpoints do not use, ``W030`` ``DEFAULT_FILE_STORAGE``/``STATICFILES_STORAGE`` (removed in Django
+  5.1 and ignored, while SnapAdmin's file features use ``STORAGES``).
+
+* **A model with a database-generated column is no longer missing from the GraphQL schema.**
+  graphene-django has no converter for ``models.GeneratedField``, and the schema builder dropped the
+  whole model over that one field, leaving only a ``graphql_model_skipped`` log line. The column is
+  now exposed as its ``output_field``'s type; any other field graphene cannot convert costs only
+  itself (``graphql_field_skipped``), never the model.
+* **A failed Unfold import no longer leaves an unthemed admin without a word.** Each admin-facing
+  module caught the ``ImportError`` around its Unfold imports on its own and fell back silently — an
+  import cycle (a custom user model importing SnapAdmin) produced a stock admin with nothing in the
+  log, and two modules could even decide differently. One shared decision now
+  (``snapadmin.unfold_compat``): logged as ``snapadmin.unfold_import_failed``, reported as
+  ``snapadmin.W032`` with the error; a theme that is simply not installed stays ``snapadmin.I001``.
+* **A save no longer costs a new Elasticsearch client and two extra round-trips.** ``index_in_es()``
+  ensured the index (``indices.exists`` plus ``put_mapping``, a cluster-state update) before every
+  document, and ``get_es_client()`` built a new client — a new connection pool and handshake — on every
+  call; an adopter measured ~44 ms per save. The client is now built once per process and
+  configuration, and the index ensured once per process (again after a failed indexing call). A
+  configured ``SNAPADMIN_ES_CLIENT_FACTORY`` is still called as written.
+* **Both middlewares run in async mode.** ``SnapErrorMonitorMiddleware`` and ``SnapTenantMiddleware``
+  were sync-only, so under ASGI Django switched the whole middleware chain to sync mode — a thread
+  hop per request. Both are now sync- and async-capable; the error recorder and a tenant resolver
+  that reads the database run through ``sync_to_async``.
+* **A mixin in ``admin_mixins`` can extend the generated admin's methods.** ``register_admin()`` put
+  ``get_readonly_fields``, ``get_fieldsets`` and ``formfield_for_dbfield`` into the generated class
+  itself, ahead of every mixin, so a project mixin's version of them was never reached and could not
+  call ``super()`` to add a read-only field or a section. They now live on a generated base behind the
+  mixins; precedence is ``admin_overrides`` > ``admin_mixins`` > generated > ``PIIMaskingAdminMixin``
+  > ``SnapSaveMixin`` > ``ModelAdmin``. A mixin that already defined one of those methods takes
+  effect now.
+* **The importer reads the usual boolean spellings.** ``TRUE``, ``yes``, ``on`` (and their opposites,
+  any case) failed the row, because Django's own parser accepts only ``True``/``False``, ``t``/``f``
+  and ``1``/``0``.
+
+Deprecated
+----------
+
+* **``skipped: True`` on the summary of an import job that was not claimed.** Read ``outcome ==
+  "job_skipped"`` (or ``job_skipped``) instead; the old key is kept for this release only and goes at
+  1.0.
+* **Arguments a ``SnapFunctionField`` / ``@snap_property`` column cannot use** (``snapadmin.W033``) are
+  planned to raise ``TypeError`` at 1.0, like every other Snap field.
+
+Security
+--------
+
+* **A GDPR subject-request delete removes the subject's stored files.** ``snapadmin_subject_request
+  delete --confirm`` deleted the rows and left every uploaded file in storage — an erasure that kept
+  the documents. It now removes the file of every file field of every erased row (unless another row
+  still names it), counts them in the dry run (a count only — file names are often personal data) and
+  in the audit entry, and reports a file storage refuses to delete instead of raising.
+* **Inline edits are in the audit trail.** A child row created, changed or deleted through an
+  admin inline left no audit entry — only the parent's own fields were recorded, so a change made
+  inline could not be traced to anyone. Each inline child now gets its own audit row, with the same
+  diff shape (and the same masking when read) as the parent's.
+
+* **A masked foreign key can no longer be filtered or ordered through its column.** The generated
+  filters expose a foreign key as ``<field>_id``, but the oracle check compared parameter names
+  against the field name — so with ``customer`` masked, ``?customer_id=<pk>`` still answered
+  match/no-match for the hidden relation. A hidden foreign key is now hidden under both names, and
+  filtering, ordering and search share one definition of what is hidden. A filter on a hidden field
+  is refused with exactly the message a field that does not exist gets, whatever its value, and no
+  hint lists a hidden field's lookups.
+* **A GDPR subject request now reaches the rows of tenant-scoped models.** ``snapadmin_subject_request``
+  runs with no request, so no tenant was bound, and a ``tenant_scoped`` model answered its lookup with
+  nothing: the export left those rows out and ``delete --confirm`` left them in place, while the
+  summary looked complete. Every phase now runs inside the model's cross-tenant context
+  (``snap_background_context("subject_request")``) — the lookup, the export job (which re-read the rows
+  under its own empty tenant and wrote an empty file while the manifest counted them) and the
+  erasure — and an export that writes fewer rows than it found fails instead of passing as complete.
+* **A status badge no longer renders an unmatched value as HTML.** ``SnapStatusBadgeField`` trusts its
+  own markup (``safe_html``), and a value with no matching choice was returned as it stood — so a status
+  written as ``<img src=x onerror=…>`` through the API or an import ran as script in the changelist
+  (and, with ``show_in_form=True``, the change form). The value is escaped now.
+* **Search never matches a field hidden from the caller — on REST or GraphQL.** A search field written
+  with a DRF prefix (``^name``) or through a relation (``customer__email``) was compared with the hidden
+  names as written, so a masked field kept answering ``?search=`` match/no-match. Each search field is
+  now checked where its path ends. GraphQL's ``all_*(search: …)`` also searched every admin search field,
+  masked ones included, and on the database returned the whole table for a term no field could match; it
+  now runs DRF's own ``SearchFilter`` over exactly the fields ``?search=`` uses.
+* **Actions inherited from an abstract base or a mixin are REST routes.** Since this release a
+  ``@snap_action`` declared there reaches every model built on it (see *Breaking*), under the usual
+  action permission and the model's verb policy; review abstract bases before upgrading.

@@ -466,6 +466,17 @@ class TestSnapStatusBadgeField:
         html = field.get_display_value(obj)
         assert "#FFF3CD" in html  # background of status_b
 
+    def test_an_unmatched_value_is_escaped(self):
+        """The field is ``safe_html`` (its own badges are built with format_html), so
+        an unmatched value returned raw was trusted markup: a status written as
+        ``<img src=x onerror=…>`` through the API or an import ran in the admin."""
+        field = self._make_badge_field()
+        obj = self._make_obj('<img src=x onerror="alert(1)">')
+
+        html = field.get_display_value(obj)
+
+        assert str(html) == "&lt;img src=x onerror=&quot;alert(1)&quot;&gt;"
+
     def test_fallback_for_unknown_value(self):
         field = self._make_badge_field()
         from types import SimpleNamespace
@@ -1457,3 +1468,40 @@ class TestBranchClosuresInFields:
         descriptor = _BlindIndexAttribute(MagicMock(attname="email_bi"))
 
         assert descriptor.__get__(None, object) is descriptor
+
+
+# ── Class guard: every built-in computed column that trusts its own markup ────
+
+HOSTILE = '<script>alert("x")</script>'
+
+
+def _badge_with_hostile_value():
+    from types import SimpleNamespace
+
+    field = SnapStatusBadgeField("status", choices=[SnapStatusBadgeFieldChoice("paid")])
+    return field, SimpleNamespace(status=HOSTILE)
+
+
+#: Each built-in SnapFunctionField subclass → (column, a row carrying HOSTILE data).
+#: A new subclass must join: it renders data as trusted HTML unless it escapes.
+BUILTIN_COMPUTED_COLUMNS = {SnapStatusBadgeField: _badge_with_hostile_value}
+
+
+def test_every_builtin_computed_column_is_in_the_hostile_value_table():
+    from snapadmin.fields import SnapFunctionField
+
+    assert set(SnapFunctionField.__subclasses__()) == set(BUILTIN_COMPUTED_COLUMNS), (
+        "review: a new built-in SnapFunctionField subclass — add it to BUILTIN_COMPUTED_COLUMNS "
+        "in tests/test_fields.py with a row carrying hostile data"
+    )
+
+
+@pytest.mark.parametrize("column_class", list(BUILTIN_COMPUTED_COLUMNS), ids=lambda c: c.__name__)
+def test_no_builtin_computed_column_passes_row_data_through_as_markup(column_class):
+    field, row = BUILTIN_COMPUTED_COLUMNS[column_class]()
+
+    rendered = str(field.get_display_value(row))
+
+    assert HOSTILE not in rendered, (
+        f"review: {column_class.__name__} renders row data as trusted HTML — escape it"
+    )

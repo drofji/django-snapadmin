@@ -266,19 +266,39 @@ REGISTRY: tuple[SecurityFix, ...] = (
         ),
     ),
     SecurityFix(
+        "A status badge no longer renders an unmatched value as HTML",
+        (
+            "tests/test_fields.py::TestSnapStatusBadgeField::test_an_unmatched_value_is_escaped",
+            "tests/test_fields.py::test_no_builtin_computed_column_passes_row_data_through_as_markup",
+        ),
+    ),
+    SecurityFix(
+        "Search never matches a field hidden from the caller — on REST or GraphQL",
+        ("tests/test_graphql_search.py",),
+    ),
+    SecurityFix(
+        "Actions inherited from an abstract base or a mixin are REST routes",
+        (
+            "tests/test_inherited_declarations.py::TestInheritanceParity::test_snap_actions_are_found",
+            "tests/test_inherited_declarations.py::TestInheritanceParity"
+            "::test_a_concrete_parent_s_declarations_stay_with_its_own_table",
+        ),
+    ),
+    SecurityFix(
         "A GDPR subject request now reaches the rows of tenant-scoped models",
         (
             "tests/test_background_context.py::TestTheDefaultHookCoversTenantScopedModels"
             "::test_the_subject_request_collects_every_tenant_s_rows",
             "tests/test_background_context.py::TestEveryJobRunsInsideTheProjectsHook"
             "::test_the_subject_request_finds_every_tenant_s_rows",
+            "tests/test_background_context.py::TestTheSubjectRequestRunsEveryPhaseInTheContext",
         ),
     ),
 )
 
 #: The registry only grows: a fix leaves it only if the code it guarded is gone,
 #: and then this number goes down in the same change, with the reason.
-REGISTRY_FLOOR = 35
+REGISTRY_FLOOR = 38
 
 
 def node_ids() -> frozenset[str]:

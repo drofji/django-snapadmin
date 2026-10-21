@@ -19,8 +19,9 @@ knows about one data subject, across every model that declares a
 that value — including the subject model itself, since a subject's own path
 equals its identifier (#FUT4a) — is swept.
 
-**Both actions are gated on ``snapadmin.view_raw_pii``**, the same permission
-that already unlocks unmasked PII elsewhere in the admin/API: a SAR export is
+**Both actions are gated on raw-PII access** — ``snapadmin.view_raw_pii``, or the
+project's ``SNAPADMIN_PII_ACCESS_CHECK`` when set — the same decision that already
+unlocks unmasked PII elsewhere in the admin/API: a SAR export is
 unmasked by design (it goes to the subject), so the operator running it must
 already be trusted with raw PII. ``--user`` names the operator for the audit
 trail and the permission check — running this command is not a bypass of
@@ -101,8 +102,8 @@ class Command(BaseCommand):
         parser.add_argument(
             "--user",
             required=True,
-            help="Username of the operator running this request — checked for "
-            "snapadmin.view_raw_pii and recorded in the audit trail",
+            help="Username of the operator running this request — checked for raw-PII access "
+            "(snapadmin.view_raw_pii, or SNAPADMIN_PII_ACCESS_CHECK) and recorded in the audit trail",
         )
         parser.add_argument(
             "--format",
@@ -172,9 +173,19 @@ class Command(BaseCommand):
                 recipients=options["recipient"],
             )
         else:
-            self._run_delete(
-                matches, identifier=identifier, operator=operator, confirm=options["confirm"]
-            )
+            from contextlib import ExitStack
+
+            from snapadmin.tenancy import _background_context
+
+            # The erasure runs inside every matched model's cross-tenant context, not
+            # only the lookup: a project's context (row-level security) must cover the
+            # DELETEs too, or they remove nothing while the report says they did.
+            with ExitStack() as stack:
+                for model in matches:
+                    stack.enter_context(_background_context(model, "subject_request"))
+                self._run_delete(
+                    matches, identifier=identifier, operator=operator, confirm=options["confirm"]
+                )
 
     # ------------------------------------------------------------------
 
@@ -233,8 +244,9 @@ class Command(BaseCommand):
     ) -> None:
         from django.utils import timezone
 
-        from snapadmin.exporting import export_file_name, get_export_storage, run_export_job
+        from snapadmin.exporting import _run_export_job, export_file_name, get_export_storage
         from snapadmin.models import SnapExportJob, SnapadminAuditLog
+        from snapadmin.tenancy import _background_context
 
         storage = get_export_storage()
         manifest = {
@@ -254,10 +266,18 @@ class Command(BaseCommand):
                 filters={path: identifier},
                 requested_by=operator,
             )
-            run_export_job(job.pk)
+            # Inside the same cross-tenant context the rows were collected in: the
+            # job's own tenant is empty here, and default-deny would export nothing.
+            _run_export_job(job.pk, _background_context(model, "subject_request"))
             job.refresh_from_db()
             if job.status != SnapExportJob.Status.COMPLETED:
                 raise CommandError(f"Export of {model._meta.label} failed: {job.error}")
+            if job.total_rows != len(rows):
+                # A subject's export that silently leaves rows out is worse than none.
+                raise CommandError(
+                    f"Export of {model._meta.label}: found {len(rows)} row(s) for the subject "
+                    f"but exported {job.total_rows} — refusing an incomplete subject export."
+                )
             manifest["files"].append(
                 {
                     "model": model._meta.label,

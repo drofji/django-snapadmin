@@ -1064,7 +1064,9 @@ class SnapModel(AdminGenMixin, models.Model):
         The default binds :func:`~snapadmin.tenancy.use_all_tenants`, which is
         all SnapAdmin's own tenant scoping needs. Override it when the model's
         rows sit behind a tenancy of the project's own — a manager that refuses
-        to run without its context, or PostgreSQL row-level security::
+        to run without its context, or PostgreSQL row-level security. On a
+        ``tenant_scoped`` model SnapAdmin enters ``use_all_tenants()`` around the
+        override itself, so the override returns only the project's part::
 
             @classmethod
             def snap_background_context(cls, purpose):
@@ -1779,6 +1781,10 @@ class SnapModel(AdminGenMixin, models.Model):
 
         if q_objects:
             return cls._tag_search_backend(cls.objects.filter(q_objects).distinct(), "database")
+        if query_string:
+            # A term with no field to match it against matches nothing — returning
+            # every row made a search look like it found the whole table (#EXT3a sweep).
+            return cls._tag_search_backend(cls.objects.none(), "database")
         return cls._tag_search_backend(cls.objects.all(), "database")
 
     @classmethod

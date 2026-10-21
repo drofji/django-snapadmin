@@ -61,6 +61,7 @@ are wired up this round).
 
 from __future__ import annotations
 
+import inspect
 import re
 from decimal import Decimal
 from typing import TYPE_CHECKING, Callable, Protocol
@@ -269,13 +270,27 @@ def _resolve_pii_access_check(value: object) -> Callable[[object], object]:
         raise ImproperlyConfigured(
             f"SNAPADMIN_PII_ACCESS_CHECK must be callable, got {type(check).__name__}"
         )
+    # An instance whose __call__ is async is as truthy-for-everyone as an async def.
+    call_method = vars(type(check)).get("__call__")
+    if inspect.iscoroutinefunction(check) or inspect.iscoroutinefunction(call_method):
+        # Its coroutine is truthy whatever it would answer — every user unmasked.
+        raise ImproperlyConfigured("SNAPADMIN_PII_ACCESS_CHECK must be a plain function, not async")
     return check
 
 
 def _pii_access_check_allows(value: object, user: UserLike) -> bool:
-    """Ask the project's check — fail closed: any error answers ``False``, logged."""
+    """Ask the project's check — fail closed: only ``True`` itself unlocks; anything
+    else masks, and an error, an async check or an awaitable answer is logged."""
+    from django.core.exceptions import ImproperlyConfigured
+
     try:
-        return bool(_resolve_pii_access_check(value)(user))
+        answer = _resolve_pii_access_check(value)(user)
+        if inspect.isawaitable(answer):
+            close = getattr(answer, "close", None)
+            if close is not None:
+                close()  # never awaited: do not leave a "never awaited" warning behind
+            raise ImproperlyConfigured("SNAPADMIN_PII_ACCESS_CHECK returned an awaitable")
+        return answer is True
     except Exception as exc:
         logger.warning(
             "snapadmin.pii_access_check_failed",

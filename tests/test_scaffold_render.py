@@ -408,3 +408,47 @@ def test_requirements_cover_every_third_party_app_in_installed_apps(tmp_path, fu
         + ", ".join(uncovered)
         + " — the generated project will not boot from its own requirements file"
     )
+
+
+class TestTheGeneratedThrottleSettings:
+    """#EXT3f's sweep: the generated project fed SNAPADMIN_THROTTLE_ANON / _USER into
+    DRF's generic ``anon``/``user`` scopes, which SnapAdmin's endpoints do not use —
+    changing the variable did nothing for them (and tripped W028), and a blank one
+    reached DRF's rate parser. They now set SnapAdmin's own settings."""
+
+    def _throttle_settings(self, tmp_path, monkeypatch, **env):
+        import ast
+
+        dest = tmp_path / "myshop"
+        render.generate_project(dest, project_name="myshop", app_name="catalog", full=False)
+        tree = ast.parse((dest / "myshop" / "settings.py").read_text(encoding="utf-8"))
+        wanted = [
+            node for node in tree.body
+            if (isinstance(node, ast.FunctionDef) and node.name == "_throttle_rate")
+            or (
+                isinstance(node, ast.Assign)
+                and any(getattr(t, "id", "").startswith("SNAPADMIN_THROTTLE_") for t in node.targets)
+            )
+        ]
+        for name, value in env.items():
+            monkeypatch.setenv(name, value)
+        namespace: dict = {"os": __import__("os")}
+        exec(compile(ast.Module(body=wanted, type_ignores=[]), "settings.py", "exec"), namespace)  # noqa: S102
+        return namespace["SNAPADMIN_THROTTLE_ANON"], namespace["SNAPADMIN_THROTTLE_USER"]
+
+    def test_the_variables_set_snapadmins_own_rates(self, tmp_path, monkeypatch):
+        assert self._throttle_settings(
+            tmp_path, monkeypatch, SNAPADMIN_THROTTLE_ANON="5/min", SNAPADMIN_THROTTLE_USER="off"
+        ) == ("5/min", None)
+
+    def test_a_blank_variable_keeps_the_default(self, tmp_path, monkeypatch):
+        assert self._throttle_settings(
+            tmp_path, monkeypatch, SNAPADMIN_THROTTLE_ANON="", SNAPADMIN_THROTTLE_USER=" "
+        ) == ("60/min", "600/min")
+
+    def test_drfs_generic_scopes_no_longer_read_the_variables(self, tmp_path):
+        dest = tmp_path / "myshop"
+        render.generate_project(dest, project_name="myshop", app_name="catalog", full=False)
+        settings_text = (dest / "myshop" / "settings.py").read_text(encoding="utf-8")
+
+        assert 'os.getenv("SNAPADMIN_THROTTLE' not in settings_text.split("REST_FRAMEWORK")[1].split("}\n")[0]

@@ -843,9 +843,33 @@ def _select_stale(names: Iterable[str], policy: _RetentionPolicy) -> list[str]:
     return [name for name in ordered if name not in kept]
 
 
+def _of_part(names: Iterable[str], prefix: str, strip: str = "") -> list[str]:
+    """The names that belong to exactly the part ``prefix`` names.
+
+    A string prefix is not enough: shard ``eu``'s ``snapadmin-db-eu-`` is a prefix
+    of shard ``eu-west``'s files, and the unsharded ``snapadmin-db-`` of every
+    shard's — which sort after it, so retention kept the other part's files and
+    deleted this one's, the dump just written included. ``strip`` is a location
+    prefix (an S3 key prefix) in front of the file name.
+    """
+    of_part = []
+    for name in names:
+        if not name.startswith(strip):
+            continue
+        # Only a file this module wrote — ``{prefix}{run timestamp}.{ext}`` — and whose
+        # own prefix is exactly this part's. A name with no run timestamp (a manual
+        # copy, a foreign file of a shared directory) is never this part's backup:
+        # retention neither deletes it nor lets it take a kept slot.
+        match = _STAMP_SUFFIX_RE.match(name[len(strip) :])
+        if match is not None and match.group(1) == prefix:
+            of_part.append(name)
+    return of_part
+
+
 def _prune_directory(directory: Path, policy: _RetentionPolicy, prefix: str) -> int:
-    """Delete the files matching `prefix` in a directory that `policy` lets go."""
-    stale = _select_stale((path.name for path in directory.glob(f"{prefix}*")), policy)
+    """Delete the files of the part `prefix` in a directory that `policy` lets go."""
+    names = _of_part((path.name for path in directory.glob(f"{prefix}*")), prefix)
+    stale = _select_stale(names, policy)
     for name in stale:
         (directory / name).unlink()
     return len(stale)
@@ -894,8 +918,7 @@ def store_remote_ftp(dump: Path, config: BackupConfig) -> str:
         # Retention on the remote end: timestamped names sort chronologically,
         # pruned per part prefix so media/env/manifest don't share db's budget.
         prefix = _part_prefix_for(dump.name)
-        dumps = [name for name in ftp.nlst() if name.startswith(prefix)]
-        for name in _select_stale(dumps, config.retention):
+        for name in _select_stale(_of_part(ftp.nlst(), prefix), config.retention):
             ftp.delete(name)
     finally:
         ftp.quit()
@@ -1046,8 +1069,7 @@ def store_remote_sftp(dump: Path, config: BackupConfig) -> str:
         # Retention on the remote end: timestamped names sort chronologically,
         # pruned per part prefix so media/env/manifest don't share db's budget.
         prefix = _part_prefix_for(dump.name)
-        dumps = [name for name in sftp.listdir() if name.startswith(prefix)]
-        for name in _select_stale(dumps, config.retention):
+        for name in _select_stale(_of_part(sftp.listdir(), prefix), config.retention):
             sftp.remove(name)
         sftp.close()
     finally:
@@ -1184,7 +1206,11 @@ def store_s3(dump: Path, config: BackupConfig) -> str:
     # configured on the bucket itself is the better answer for a real
     # deployment; this is a fallback for providers/setups without one.
     part_prefix = f"{_s3_prefix(config)}{_part_prefix_for(dump.name)}"
-    keys = _s3_list_keys(client, config.s3_bucket, part_prefix)
+    keys = _of_part(
+        _s3_list_keys(client, config.s3_bucket, part_prefix),
+        _part_prefix_for(dump.name),
+        strip=_s3_prefix(config),
+    )
     for stale in _select_stale(keys, config.retention):
         client.delete_object(Bucket=config.s3_bucket, Key=stale)
     return f"s3://{config.s3_bucket}/{key}"

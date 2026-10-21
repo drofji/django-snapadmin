@@ -64,6 +64,41 @@ def _unconvertible_fields(model: type[Model]) -> dict[str, str]:
     return failures
 
 
+def _search(model, user, term: str, limit: int | None):
+    """``all_*(search: …)`` by the REST API's ``?search=`` rules (#EXT3a sweep).
+
+    Routed to Elasticsearch exactly when REST routes it there; on the database it
+    matches only the fields the caller may search in — never a masked or
+    read-guarded one, whose match/no-match would reveal the hidden value — and a
+    term with no such field is an error, never the whole table.
+    """
+    from snapadmin.api.filters import _visible_search_fields
+    from snapadmin.api.views import DynamicModelViewSet
+    from snapadmin.models import EsStorageMode
+
+    mode = get_model_meta(model, "es_storage_mode", EsStorageMode.DB_ONLY)
+    if mode == EsStorageMode.ES_ONLY or (
+        mode == EsStorageMode.DUAL and DynamicModelViewSet._es_routing_enabled(model)
+    ):
+        return model.snap_search(term, limit=limit)
+    fields = list(
+        _visible_search_fields(user, model, DynamicModelViewSet._db_search_fields(model) or ())
+    )
+    if not fields:
+        raise GraphQLError("search is not available on this model.")
+    # DRF's own SearchFilter over the same fields, so a term is split and matched
+    # (``^``/``=``/``@``/``$`` prefixes included) exactly as ``?search=`` does.
+    from types import SimpleNamespace
+
+    from rest_framework.filters import SearchFilter
+    from rest_framework.settings import api_settings
+
+    request = SimpleNamespace(query_params={api_settings.SEARCH_PARAM: term})
+    return SearchFilter().filter_queryset(
+        request, model.objects.all(), SimpleNamespace(search_fields=fields)
+    )
+
+
 def _check_access(info, model) -> None:
     """Enforce authentication + per-model ``view`` permission on a resolver.
 
@@ -299,9 +334,7 @@ def get_dynamic_graphql_schema():
                     def resolve_list(self, info, search=None, first=None, offset=None):
                         _check_access(info, m)
                         if search:
-                            # snap_search routes to Elasticsearch for DUAL/ES_ONLY
-                            # models (same smart routing as the REST API).
-                            qs = m.snap_search(search, limit=first)
+                            qs = _search(m, info.context.user, search, first)
                         else:
                             qs = m.objects.all()
                         offset = offset or 0

@@ -68,6 +68,7 @@ import io
 import json
 import os
 import re
+from contextlib import AbstractContextManager
 from decimal import Decimal
 from typing import Any, Iterator, Protocol, cast
 
@@ -534,8 +535,31 @@ def run_export_job(job_id) -> None:
     # is_tenant_scoped().
     from snapadmin.tenancy import use_tenant
 
+    _run_claimed_job(job, use_tenant(job.tenant_id or None))
+
+
+def _run_export_job(job_id, context: AbstractContextManager[None]) -> None:
+    """Run ``job_id`` inside ``context`` instead of the job's own tenant — for a
+    caller that must read across tenants (the GDPR subject request, #EXT3r).
+    Claims the job exactly like :func:`run_export_job`."""
+    from snapadmin.models import SnapExportJob
+
+    Status = SnapExportJob.Status
+    claimed = SnapExportJob.objects.filter(
+        pk=job_id, status__in=[Status.PENDING, Status.FAILED]
+    ).update(status=Status.PROCESSING)
+    if not claimed:
+        logger.info("snapadmin.export.skipped", job=str(job_id))
+        return
+    _run_claimed_job(SnapExportJob.objects.get(pk=job_id), context)
+
+
+def _run_claimed_job(job, context: AbstractContextManager[None]) -> None:
+    from snapadmin.models import SnapExportJob
+
+    Status = SnapExportJob.Status
     try:
-        with use_tenant(job.tenant_id or None):
+        with context:
             _run(job)
     except Exception as exc:
         logger.exception("snapadmin.export.failed", job=str(job.pk))

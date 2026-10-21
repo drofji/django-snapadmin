@@ -281,10 +281,12 @@ class TestDeleteConfirm:
         from snapadmin import exporting
         from snapadmin.models import SnapExportJob
 
-        def fake_run(job_id):
+        def fake_run(job_id, context):
             SnapExportJob.objects.filter(pk=job_id).update(status=SnapExportJob.Status.FAILED, error="boom")
 
-        monkeypatch.setattr(exporting, "run_export_job", fake_run)
+        # The command runs its jobs inside the subject request's cross-tenant
+        # context since #EXT3r, through the runner that accepts one.
+        monkeypatch.setattr(exporting, "_run_export_job", fake_run)
         with pytest.raises(CommandError, match="failed: boom"):
             _call("export", model="demo.Customer", identifier=subject_customer.email, user=operator.username)
 

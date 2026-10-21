@@ -38,7 +38,7 @@ from __future__ import annotations
 
 import contextvars
 from collections.abc import Iterator
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager, ExitStack, contextmanager
 from typing import TYPE_CHECKING, Any
 
 from asgiref.sync import iscoroutinefunction, markcoroutinefunction, sync_to_async
@@ -171,7 +171,21 @@ def _background_context(
     hook = getattr(model, "snap_background_context", None)
     if hook is None:
         return use_all_tenants()
-    return hook(purpose)
+    if not is_tenant_scoped(model):
+        return hook(purpose)
+    # A tenant_scoped model also needs SnapAdmin's own bypass: a hook returning only
+    # the project's context would leave the scoping manager with no tenant, and
+    # every job would silently see no rows. Entered lazily, on ``with`` — a context
+    # built and never entered must bind nothing.
+    return _nested(use_all_tenants(), hook(purpose))
+
+
+@contextmanager
+def _nested(*contexts: AbstractContextManager[Any]) -> Iterator[None]:
+    with ExitStack() as stack:
+        for context in contexts:
+            stack.enter_context(context)
+        yield
 
 
 def is_tenant_scoped(model: type[django_models.Model]) -> bool:

@@ -84,6 +84,18 @@ def _pending_masking_apps() -> set[str] | None:
     return {label.lower() for label in pending}
 
 
+def _installed_app_names() -> set[str]:
+    """Every name an installed app answers to, lower-cased: its label, its dotted
+    module path and that path's last part (``demo.apps.shop`` is also ``shop``) —
+    so a pending list can never excuse an app that is in fact installed."""
+    names: set[str] = set()
+    for config in apps.get_app_configs():
+        names.update(
+            {config.label.lower(), config.name.lower(), config.name.rsplit(".", 1)[-1].lower()}
+        )
+    return names
+
+
 def _unresolved_masking_key(setting: str, key, error: Error) -> CheckMessage:
     """What an ``'app.Model'`` key that resolves to no model is reported as (#EXT3s).
 
@@ -93,7 +105,7 @@ def _unresolved_masking_key(setting: str, key, error: Error) -> CheckMessage:
     without the list, so a typo'd app label still errors.
     """
     app_label = str(key).split(".", 1)[0].lower()
-    installed = {config.label.lower() for config in apps.get_app_configs()}
+    installed = _installed_app_names()
     if (
         "." in str(key)
         and app_label in (_pending_masking_apps() or set())
@@ -122,7 +134,7 @@ def check_masking_pending_apps(app_configs, **kwargs):
                 f"got {type(pending).__name__}."
             )
         ]
-    installed = {config.label.lower() for config in apps.get_app_configs()}
+    installed = _installed_app_names()
     return [
         Warning(
             f"SNAPADMIN_MASKING_PENDING_APPS lists {label!r}, which is installed — remove it.",
@@ -633,9 +645,11 @@ def check_backup_offsite_requires_encryption(app_configs, **kwargs):
     :func:`snapadmin.backup._active_destinations` so this check and the code
     that actually ships the dump can never disagree about which are live.
     """
-    from snapadmin.backup import _active_destinations, get_backup_config
+    from snapadmin.backup import _active_destinations
 
-    config = get_backup_config()
+    config = _backup_config_for_checks()
+    if config is None:
+        return []  # snapadmin.E029 reports the setting int() cannot read
     if not config.enabled or config.age_recipients:
         return []
     offsite = [dest for dest in _active_destinations(config) if dest != "local"]
@@ -681,9 +695,9 @@ def check_backup_sftp_dir(app_configs, **kwargs):
     not open a network connection to find out, so the hint names both cases and
     the upload itself reports the directory the server resolved.
     """
-    from snapadmin.backup import get_backup_config
-
-    config = get_backup_config()
+    config = _backup_config_for_checks()
+    if config is None:
+        return []  # snapadmin.E029 reports the setting int() cannot read
     if not config.enabled or not config.sftp_host:
         return []
     directory = config.sftp_dir
@@ -787,6 +801,21 @@ _RETENTION_TIERS = (
 )
 
 
+def _backup_config_for_checks():
+    """``get_backup_config()``, or ``None`` when a numeric ``SNAPADMIN_BACKUP_*``
+    setting is not a number — ``int()`` would raise and take ``manage.py check``
+    down with it, before ``snapadmin.E029`` could say which setting is wrong."""
+    from snapadmin.backup import get_backup_config
+
+    if any(
+        _number_problem(get_setting(name, None), kind)
+        for name, kind in _NUMERIC_SETTINGS.items()
+        if name.startswith("SNAPADMIN_BACKUP_")
+    ):
+        return None
+    return get_backup_config()
+
+
 def check_backup_retention(app_configs, **kwargs):
     """``W036``: a retention value below its floor; ``W037``: a tier finer than a
     destination's own cadence (#EXT3u).
@@ -796,13 +825,11 @@ def check_backup_retention(app_configs, **kwargs):
     say so. A negative tier means off. A daily tier on a weekly destination keeps
     one backup per run, so ``KEEP_DAILY = 7`` there spans seven weeks.
     """
-    from snapadmin.backup import _INTERVAL_ATTRS, _active_destinations, get_backup_config
+    from snapadmin.backup import _INTERVAL_ATTRS, _active_destinations
 
-    if _number_problem(get_setting("SNAPADMIN_BACKUP_KEEP", None), int) or any(
-        _number_problem(get_setting(name, None), int) for name, *_rest in _RETENTION_TIERS
-    ):
-        return []  # snapadmin.E029 reports a value that is not a number
-    config = get_backup_config()
+    config = _backup_config_for_checks()
+    if config is None:
+        return []  # snapadmin.E029 reports the setting int() cannot read
     messages: list[CheckMessage] = []
     if config.keep < 1:
         messages.append(
@@ -857,9 +884,11 @@ def check_backup_schedule_cadence(app_configs, **kwargs):
     that combination is caught at ``manage.py check`` instead of discovered
     the day someone needs a backup that was never taken.
     """
-    from snapadmin.backup import _active_destinations, _INTERVAL_ATTRS, get_backup_config
+    from snapadmin.backup import _active_destinations, _INTERVAL_ATTRS
 
-    config = get_backup_config()
+    config = _backup_config_for_checks()
+    if config is None:
+        return []  # snapadmin.E029 reports the setting int() cannot read
     if not config.enabled:
         return []
 
@@ -1015,6 +1044,9 @@ def check_retention_purge_scheduled(app_configs, **kwargs):
     invisible here, so ``SNAPADMIN_PURGE_EXTERNAL = True`` declares one.
     """
     from snapadmin.models import SnapadminAuditLog, _retention_configured
+
+    if _number_problem(get_setting("SNAPADMIN_AUDIT_RETENTION_DAYS", None), int):
+        return []  # snapadmin.E029 reports it; reading it here would raise
 
     configured = (
         SnapadminAuditLog.data_retention_days() > 0
@@ -2383,9 +2415,8 @@ def check_backup_configured_but_disabled(app_configs, **kwargs) -> list[CheckMes
     nightly run ends in ``disabled`` and ``manage.py check`` stays silent
     (#EXT2c). The switch defaults to off, so forgetting it is the easy mistake.
     """
-    from snapadmin.backup import get_backup_config
-
-    if get_backup_config().enabled:
+    config = _backup_config_for_checks()
+    if config is not None and config.enabled:
         return []
     beat_schedule = getattr(settings, "CELERY_BEAT_SCHEDULE", None) or {}
     scheduled = any(
@@ -2417,9 +2448,9 @@ def check_backup_env_file_present(app_configs, **kwargs) -> list[CheckMessage]:
     backup reports success without the part the project asked for (#EXT2c).
     Only while backups are enabled — ``snapadmin.W023`` speaks for the rest.
     """
-    from snapadmin.backup import get_backup_config
-
-    config = get_backup_config()
+    config = _backup_config_for_checks()
+    if config is None:
+        return []  # snapadmin.E029 reports the setting int() cannot read
     if not config.enabled or "env" not in config.include:
         return []
     if not config.env_file:

@@ -250,7 +250,7 @@
 <aside class="sidebar" id="sidebar">
   <div class="sidebar-logo">
     <h2>⚡ SnapAdmin</h2>
-    <span>Documentation v0.1.0b10</span>
+    <span>Documentation v0.1.0b11</span>
   </div>
   <div class="nav-search">
     <input type="search" id="navSearch" placeholder="Filter sections…" autocomplete="off">
@@ -338,23 +338,22 @@
     <p class="subtitle">Automatic, beautiful, production-ready Django Admin — zero boilerplate. REST &amp; GraphQL, Elasticsearch, offline mode and GDPR retention, all from your model definitions.</p>
 
     <div class="callout callout-success" style="text-align: left; margin: 18px auto 0;">
-      <strong>What's New in v0.1.0b10 — tenth beta</strong>
-      The development server now says what SnapAdmin has switched on — which capabilities are on,
-      which are off and which lack their extra (<a href="#startup-report">startup report</a>).
-      A second round of production field reports closed eleven places that failed silently: a
-      manager replacing a mixin's own (<code>snapadmin.E027</code>), masking settings in the wrong
-      shape (<code>snapadmin.E028</code>), an unmapped REST action reachable with read-only rights,
-      purges and Elasticsearch deletes that reported success after failing, spreadsheet formulas in
-      CSV exports, and audit labels that slipped past masking. <a href="#restore-drill">Restore
-      drills</a> restore a backup into a throwaway database and count its rows.
-      <a href="#testing">Testing &amp; Quality Engineering</a> now runs in full on every push —
-      branch coverage, property-based and fuzz tests, mutation testing, browser end-to-end tests on
-      both themes and every dependency at its declared minimum, all reproduced by
-      <code>python scripts/gates.py</code>.
-      <strong>Breaking changes to know about before upgrading:</strong> two new system checks can
-      stop <code>manage.py check</code>, an action missing from the REST permission map is refused,
-      and five dependency minimums rise — all twelve are listed in the release notes under
-      <code>Breaking</code>.
+      <strong>What's New in v0.1.0b11 — eleventh beta</strong>
+      The third round of production field reports, closed in full: unknown REST query parameters
+      are refused (<a href="#api-strict-query-params">strict query parameters</a>) instead of
+      returning the whole table, tenancy holds on every write path — a
+      <code>ForeignKey</code> tenant column, admin inlines, <a href="#tenancy-operator-create">operators
+      bound to every tenant</a>, the importer, GDPR subject requests and reindexes — and stored files
+      leave storage with their rows (<a href="#file-cleanup">file cleanup</a>). New and opt-in:
+      <a href="#computed-columns">computed columns on the change form</a>,
+      <a href="#admin-read-only">read-only admins</a>, a <a href="#background-context">hook for
+      cross-tenant jobs</a>, <a href="#pii-access-check">project-defined raw-PII access</a>,
+      <a href="#masking-pending-apps">masking ahead of an app's installation</a> and
+      <a href="#backup-retention-tiers">daily/weekly/monthly backup retention</a>.
+      <strong>Breaking changes to know about before upgrading</strong> are listed in the release notes
+      under <code>Breaking</code> — among them the strict query parameters, <code>snapadmin.E029</code>
+      stopping <code>manage.py check</code> on an unusable setting, and a GDPR erasure that now reaches
+      tenant-scoped rows.
     </div>
 
     <div class="card-grid">
@@ -1016,7 +1015,7 @@ class Product(models.Model):
     overrides. A decorator running after the class already exists has nothing to hook into the same
     way; each row above needs its own retrofit (an opt-in mixin for ES, a shared classmethod for
     retention, an admin-generation refactor), not a keyword. The design for all three is signed off
-    — see <code>#RFC1g</code> in the project roadmap — but none has shipped yet. That is also why the
+    but none has shipped yet. That is also why the
     decorator accepts no <code>es_*</code> or <code>data_retention_*</code> keywords: storing them
     would promise machinery that never runs. Needing any ❌ row means subclassing
     <code>SnapModel</code> — both routes end up in the same registry, so switching later changes
@@ -2179,7 +2178,8 @@ SNAPADMIN_API_FULL_CLEAN = True    # a model's own api_full_clean still wins</co
   <ul style="margin: 8px 0 14px 20px; font-size: 14px;">
     <li><strong>Auto-Schema</strong>: All <code>SnapModel</code> subclasses are automatically added to the schema. A database-generated column (<code>models.GeneratedField</code>) appears as its <code>output_field</code>'s type, read-only; a field graphene cannot convert costs only that field — it is left out and logged as <code>graphql_field_skipped</code> — never the whole model.</li>
     <li><strong>Secured by default</strong>: every resolver requires authentication (admin session or API token) and the model's Django <code>view</code> permission — the same contract as REST — enforced on <strong>every relation the query traverses</strong>, not just top-level fields. Reading <code>A { relatedB { … } }</code> needs <code>view</code> on both models; a related object you may not view resolves as a <code>Permission denied.</code> error rather than leaking its data. Token <code>allowed_models</code> scopes apply on top.</li>
-    <li><strong>PII masking</strong>: fields in <code>SNAPADMIN_MASKED_FIELDS</code> are masked in GraphQL output exactly as in the REST API — raw only for superusers, <code>snapadmin.view_raw_pii</code> holders, and (per field) holders of a permission named in <a href="#masking-rules"><code>SNAPADMIN_MASKING_RULES</code></a>, whose rules apply here too.</li>
+    <li><strong>PII masking</strong>: fields in <code>SNAPADMIN_MASKED_FIELDS</code> are masked in GraphQL output exactly as in the REST API — raw only for superusers, <code>snapadmin.view_raw_pii</code> holders (or whoever <a href="#pii-access-check"><code>SNAPADMIN_PII_ACCESS_CHECK</code></a> allows), and (per field) holders of a permission named in <a href="#masking-rules"><code>SNAPADMIN_MASKING_RULES</code></a>, whose rules apply here too.</li>
+    <li><strong>Search</strong>: <code>search</code> on a list field follows the REST API's <code>?search=</code> — the same fields, never one masked or read-guarded for the caller (a match would reveal it), Elasticsearch only where REST routes there, and an error when no field is left to search.</li>
     <li><strong>Unified Fetching</strong>: the <code>search</code> argument routes to Elasticsearch for <code>DUAL</code>/<code>ES_ONLY</code> models; <code>first</code>/<code>offset</code> paginate.</li>
     <li><strong>Endpoint</strong>: <code>/api/graphql/</code>; GraphiQL follows <code>DEBUG</code> (override with <code>SNAPADMIN_GRAPHIQL_ENABLED</code>).</li>
   </ul>
@@ -4370,7 +4370,8 @@ SNAPADMIN_MASKED_FIELDS = {
   function, <code>snapadmin.masking.user_can_view_pii</code>. By default it answers with the
   <code>snapadmin.view_raw_pii</code> permission; set <code>SNAPADMIN_PII_ACCESS_CHECK</code> to a
   callable <code>(user) -&gt; bool</code> (or its dotted path) to decide by an SSO role, a membership
-  table — whatever the project's access model is. It replaces the permission step only: anonymous and
+  table — whatever the project's access model is. Only an answer that <em>is</em> <code>True</code>
+  unlocks; an <code>async</code> function is refused (its coroutine would be truthy for everyone). It replaces the permission step only: anonymous and
   inactive users stay masked, superusers stay unmasked, and a per-field rule's
   <code>permission</code> still unlocks its field. A callable that raises answers "masked" and logs
   <code>snapadmin.pii_access_check_failed</code>; one that cannot be imported is
@@ -4384,8 +4385,9 @@ def can_view_pii(user):
   module by module, a project can write the masking of an app that is not installed yet: list its label
   in <code>SNAPADMIN_MASKING_PENDING_APPS = ["billing"]</code>. A key of a listed app that is not
   installed is reported as the informational <code>snapadmin.I002</code> ("masked once installed")
-  instead of <code>E001</code>/<code>E003</code>; once the app is installed its keys are checked like any
-  other, and <code>snapadmin.W034</code> asks to remove it from the list. Nothing is excused without
+  instead of <code>E001</code>/<code>E003</code>; once the app is installed — under its label or its module
+  name — its keys are checked like any other, and <code>snapadmin.W034</code> asks to remove it from the
+  list. A field a rule names that the model does not have is <code>snapadmin.E004</code>. Nothing is excused without
   the list — a typo in an app label still errors, because it would otherwise unmask the app it meant.</p>
   <p id="masking-hand-written-admin"><strong>Hand-written admins.</strong> The changelist masking
   lives in <code>snapadmin.models.PIIMaskingAdminMixin</code>, which generated admins get
@@ -6058,7 +6060,7 @@ snapadmin-info --startup         # the short block runserver prints at startup</
   Ok: ✓
   Detail: run `manage.py check` for the full text
 📦 Version &amp; Status
-  Version: 0.1.0b10
+  Version: 0.1.0b11
   Status: pre-release
   Django: 6.0.6
   Python: 3.12.4
@@ -6112,7 +6114,7 @@ snapadmin-info --startup         # the short block runserver prints at startup</
   one short block to <strong>stderr</strong> — what is on, what is off, what is switched on without
   its optional package, whether the installed dependencies allow commercial use, and how to see more
   or silence it:</p>
-  <pre><code>SnapAdmin 0.1.0b10 · Django 5.2.7 · Python 3.12.4
+  <pre><code>SnapAdmin 0.1.0b11 · Django 5.2.7 · Python 3.12.4
   ✓ on           REST API · Audit trail · Error monitoring · Retention purge · PII masking ·
                  Field encryption · Background tasks · Rate limiting · Write allowlist · …
   ✗ off          Backups · Elasticsearch · Health alerts · Delete guard · SSO
@@ -6519,7 +6521,7 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
   </table>
 
   <div style="margin-top: 60px; padding-top: 20px; border-top: 1px solid var(--border); color: var(--muted); font-size: 13px; text-align: center;">
-    SnapAdmin v0.1.0b10 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
+    SnapAdmin v0.1.0b11 — MIT License — <a href="https://github.com/drofji/django-snapadmin">GitHub</a>
   </div>
 
   <!-- ── AI Assistants ─────────────────────────────────────────────────────── -->
@@ -6537,7 +6539,8 @@ yourproject/templates/snapadmin/email/error_digest.html   # rebrand the daily di
     no JavaScript. It states what SnapAdmin is, carries the three-step quickstart, lists the facts an
     assistant should not have to infer — snap-only field kwargs add no migration, import paths are the
     public contract, the Unfold theme is optional, misconfiguration surfaces as
-    <code>snapadmin.W001</code>–<code>W037</code> and <code>snapadmin.E001</code>–<code>E029</code> —
+    <code>snapadmin.W001</code>–<code>W037</code>, <code>snapadmin.E001</code>–<code>E029</code> and
+    <code>snapadmin.I001</code>–<code>I002</code> —
     and then links every section of this page with a
     line describing what it covers.
   </p>

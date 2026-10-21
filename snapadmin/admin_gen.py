@@ -32,6 +32,7 @@ from django.contrib import admin
 from django.contrib.admin.exceptions import AlreadyRegistered
 from django.core.exceptions import FieldDoesNotExist, ImproperlyConfigured
 from django.db import models
+from django.forms.utils import pretty_name
 from django.utils.safestring import mark_safe
 
 from snapadmin.conf import get_setting
@@ -201,13 +202,16 @@ def _wysiwyg_display(model, field_name: str):
     return _display
 
 
-def _function_field_display(field):
+def _function_field_label(field, attr_name: str) -> str:
+    """A computed column's heading: its ``verbose_name``, else its attribute name
+    the way Django labels a field (``line_total`` → "Line total")."""
+    return getattr(field, "verbose_name", "") or pretty_name(attr_name)
+
+
+def _function_field_display(field, attr_name: str):
     """A changelist column that renders one :class:`SnapFunctionField`."""
 
-    @unfold_display(
-        description=getattr(field, "verbose_name", "") or getattr(field, "name", ""),
-        header=True,
-    )
+    @unfold_display(description=_function_field_label(field, attr_name), header=True)
     def _display(self, obj):
         val = field.get_display_value(obj)
         if UNFOLD_INSTALLED:
@@ -217,7 +221,7 @@ def _function_field_display(field):
     return _display
 
 
-def _function_field_form_display(field):
+def _function_field_form_display(field, attr_name: str):
     """The change form's read-only row for one :class:`SnapFunctionField` (#EXT3o).
 
     Separate from the changelist column: under Unfold that column is a "header"
@@ -225,7 +229,7 @@ def _function_field_form_display(field):
     would print as a Python list.
     """
 
-    @unfold_display(description=getattr(field, "verbose_name", "") or "")
+    @unfold_display(description=_function_field_label(field, attr_name))
     def _display(self, obj):
         return field.get_display_value(obj)
 
@@ -517,7 +521,8 @@ class AdminGenMixin:
                     for fn, fo in all_fields_for_readonly.items()
                     if fn in editable_fields or (fn in updatable_fields and obj and obj.pk)
                 ),
-                *form_displays,
+                # Only on a change form: an add form has no saved row to compute from.
+                *(form_displays if obj is not None else ()),
             ]
 
         # Generated callables (this one, the wysiwyg safe_html_<field> displays
@@ -557,11 +562,13 @@ class AdminGenMixin:
         for attr_name, attr_value in attr_fields.items():
             if isinstance(attr_value, snapfields.SnapFunctionField):
                 method_name = f"SnapFunctionField{attr_name.capitalize()}"
-                generated_overrides[method_name] = _function_field_display(attr_value)
+                generated_overrides[method_name] = _function_field_display(attr_value, attr_name)
                 if attr_value.show_in_list:
                     list_display.append(method_name)
         for method_name, field in form_displays.items():
-            generated_overrides[method_name] = _function_field_form_display(field)
+            generated_overrides[method_name] = _function_field_form_display(
+                field, method_name.removeprefix("snap_form_")
+            )
 
         if pk_name in list_display:
             list_display.remove(pk_name)
@@ -662,7 +669,10 @@ class AdminGenMixin:
         autocomplete_fields = admin_fields.autocomplete_fields
 
         form_displays = getattr(cls, "_admin_generated_form_displays", {})
-        fieldsets = _fieldsets_for(cls, form_fields, form_displays)
+        # With no field flagged, Django's own fallback (every editable field, then
+        # the read-only ones) is the form; building fieldsets from the computed
+        # rows alone would leave it with no input at all.
+        fieldsets = _fieldsets_for(cls, form_fields, form_displays) if form_fields else []
 
         final_js, final_css = cls.get_admin_media()
 

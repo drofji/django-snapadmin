@@ -130,11 +130,21 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
     ],
-    "DEFAULT_THROTTLE_RATES": {
-        "anon": os.getenv("SNAPADMIN_THROTTLE_ANON", "60/min"),
-        "user": os.getenv("SNAPADMIN_THROTTLE_USER", "600/min"),
-    },
+    # The generic DRF scopes, for the project's own API views. SnapAdmin's endpoints
+    # throttle with their own scopes, set by SNAPADMIN_THROTTLE_ANON / _USER below.
+    "DEFAULT_THROTTLE_RATES": {"anon": "60/min", "user": "600/min"},
 }
+
+
+def _throttle_rate(name, default):
+    """'off' switches a throttle off; an empty value keeps the default."""
+    raw = os.getenv(name, default).strip()
+    return None if raw.lower() == "off" else (raw or default)
+
+
+# SnapAdmin's API rate limits (e.g. '60/min').
+SNAPADMIN_THROTTLE_ANON = _throttle_rate("SNAPADMIN_THROTTLE_ANON", "60/min")
+SNAPADMIN_THROTTLE_USER = _throttle_rate("SNAPADMIN_THROTTLE_USER", "600/min")
 
 SPECTACULAR_SETTINGS = {
     "TITLE": "$project_name API",

@@ -281,3 +281,123 @@ def test_only_the_hook_binds_use_all_tenants():
         f"review: {sorted(unexpected)} call use_all_tenants() directly — a cross-tenant job must "
         "enter tenancy._background_context(model, purpose) so a project's own tenancy applies"
     )
+
+
+@pytest.mark.django_db
+class TestTheSubjectRequestRunsEveryPhaseInTheContext:
+    """Collecting inside the hook was not enough: the export job re-read the rows
+    under the job's own (empty) tenant and wrote a header-only file while the
+    manifest counted the rows, and the erasure ran its DELETEs outside a project's
+    context (row-level security would have deleted nothing, reported as done)."""
+
+    @pytest.fixture
+    def operator(self, admin_user):
+        return admin_user
+
+    def _call(self, *args):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command("snapadmin_subject_request", *args, stdout=out, stderr=StringIO())
+        return out.getvalue()
+
+    def test_the_export_file_holds_every_tenant_s_rows(self, orders_of_two_tenants, customer, operator):
+        from snapadmin.exporting import export_file_name, get_export_storage
+        from snapadmin.models import SnapExportJob
+
+        self._call("export", "--model", "demo.Customer", "--identifier", customer.email,
+                   "--user", operator.username)
+
+        job = SnapExportJob.objects.get(model="order")
+        lines = get_export_storage().open(export_file_name(job)).read().decode().strip().splitlines()
+        assert job.total_rows == 2
+        assert len(lines) == 2  # NDJSON: one line per order, both tenants
+
+    def test_the_erasure_runs_inside_the_hook(self, orders_of_two_tenants, customer, operator, monkeypatch):
+        """Every Collector step — collecting the graph, then deleting it — sees the
+        cross-tenant context. (The demo's Order protects its Customer, so this run
+        stops at the refusal; the delete itself runs in the same block.)"""
+        from django.db.models.deletion import Collector
+
+        seen: list[bool] = []
+        original_collect = Collector.collect
+
+        def spying_collect(self, objs, *args, **kwargs):
+            seen.append(tenancy.get_current_tenant() is tenancy.ALL_TENANTS)
+            return original_collect(self, objs, *args, **kwargs)
+
+        monkeypatch.setattr(Collector, "collect", spying_collect)
+
+        self._call("delete", "--model", "demo.Customer", "--identifier", customer.email,
+                   "--user", operator.username, "--confirm")
+
+        assert seen and all(seen)
+
+    def test_an_export_that_writes_fewer_rows_than_it_found_fails_loudly(
+        self, orders_of_two_tenants, customer, operator, monkeypatch
+    ):
+        from django.core.management import CommandError
+
+        from snapadmin import exporting
+
+        monkeypatch.setattr(
+            exporting, "_run_export_job",
+            lambda job_id, context: exporting.run_export_job(job_id),  # the old, unscoped run
+        )
+
+        with pytest.raises(CommandError, match="demo.Order: found 2 row"):
+            self._call("export", "--model", "demo.Customer", "--identifier", customer.email,
+                       "--user", operator.username)
+
+
+@pytest.mark.django_db
+def test_an_override_on_a_tenant_scoped_model_still_sees_every_tenant(monkeypatch):
+    """The docstring's own example returns only the project's context; for a
+    ``tenant_scoped`` model SnapAdmin's scoping then saw no tenant and every job
+    silently did nothing. SnapAdmin's own bypass is entered around the hook."""
+    from contextlib import nullcontext
+
+    from demo.apps.shop.models import Order
+
+    entered: list[str] = []
+
+    def project_hook(cls, purpose):
+        entered.append(purpose)
+        return nullcontext()
+
+    monkeypatch.setattr(Order, "snap_background_context", classmethod(project_hook))
+
+    with tenancy._background_context(Order, "retention"):
+        assert tenancy.get_current_tenant() is tenancy.ALL_TENANTS
+
+    assert entered == ["retention"]
+
+
+def test_a_context_built_and_never_entered_binds_nothing():
+    """The export runner gets a context it may not enter (an unclaimed job); a context
+    that bound on construction leaked ALL_TENANTS into everything that ran next."""
+    from demo.apps.shop.models import Order
+
+    tenancy._background_context(Order, "subject_request")
+
+    assert tenancy.get_current_tenant() is None
+
+
+@pytest.mark.django_db
+def test_the_context_runner_leaves_an_unclaimed_job_alone(admin_user):
+    from structlog.testing import capture_logs
+
+    from snapadmin import exporting
+    from snapadmin.models import SnapExportJob
+
+    job = SnapExportJob.objects.create(
+        app_label="demo", model="order", export_format="csv", requested_by=admin_user,
+        status=SnapExportJob.Status.COMPLETED,
+    )
+    with capture_logs() as emitted:
+        exporting._run_export_job(job.pk, tenancy.use_all_tenants())
+
+    assert [e["event"] for e in emitted] == ["snapadmin.export.skipped"]
+    assert tenancy.get_current_tenant() is None

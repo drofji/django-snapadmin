@@ -53,6 +53,12 @@ CASES = {
         "demo.Custmer", "email", ["demo"],
         [("unresolved", django_checks.ERROR), ("snapadmin.W034", django_checks.WARNING)],
     ),
+    # The demo app is the module ``demo.apps.shop`` with the label ``demo``: a key
+    # written with the module's name is a key of an installed app — never excused.
+    "installed app named by its module, listed": (
+        "shop.Customer", "email", ["shop"],
+        [("unresolved", django_checks.ERROR), ("snapadmin.W034", django_checks.WARNING)],
+    ),
     # A typo in the *app label* is exactly what the list must never hide.
     "app label typo, the right app listed": (
         "biling.Invoice", "iban", ["billing"], [("unresolved", django_checks.ERROR)],

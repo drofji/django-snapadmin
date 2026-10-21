@@ -165,7 +165,8 @@ Operations
         ``{field: {"old": …, "new": …}}`` diff and renders it; ``masking``
         resolves *which* fields are sensitive (``SNAPADMIN_MASKED_FIELDS``),
         *how* each is obfuscated and *who* may see it raw
-        (``SNAPADMIN_MASKING_RULES``; keys of an app not installed yet are
+        (``SNAPADMIN_MASKING_RULES``, or a project callable via
+        ``SNAPADMIN_PII_ACCESS_CHECK``; keys of an app not installed yet are
         excused only when ``SNAPADMIN_MASKING_PENDING_APPS`` lists it) —
         ``mask_field()`` is the choke point
         every masking surface goes through. ``user_can_access_field()`` is a
@@ -286,8 +287,9 @@ Operations
         made ``SNAPADMIN_PROFILE = "api"`` invert to "API off" at 1.0 — so
         ``"full"`` and an unset profile are no longer the same thing.
     ``snapadmin.checks``
-        Django system checks — warnings ``snapadmin.W001``…``W018`` and errors
-        ``snapadmin.E001``…``E019`` catch misconfiguration at startup, so read
+        Django system checks — warnings ``snapadmin.W001``…``W037``, errors
+        ``snapadmin.E001``…``E029`` and infos ``I001``…``I002`` catch
+        misconfiguration at startup, so read
         them before debugging behaviour. The masking checks are *errors* because
         a mistyped rule fails open: it masks nothing and says nothing.
         ``E028`` is the same for a masking setting written in the wrong shape
@@ -417,7 +419,7 @@ Management commands
     reusing the existing ``SnapExportJob`` machinery) or delete (dry-run by
     default, ``--confirm`` to actually delete) everything reachable from one
     data subject via every registered model's ``subject_path``. ``--user`` must
-    hold ``snapadmin.view_raw_pii``.
+    hold ``snapadmin.view_raw_pii`` (or pass ``SNAPADMIN_PII_ACCESS_CHECK``).
 
 Settings
 --------

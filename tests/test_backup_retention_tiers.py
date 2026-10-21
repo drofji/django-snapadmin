@@ -139,6 +139,65 @@ def test_keep_zero_keeps_the_dump_just_written_everywhere(
     assert kept == {NEW}
 
 
+#: Shards ``eu`` and ``eu-west``: ``snapadmin-db-eu-`` is a plain prefix of the other
+#: shard's files, which sort after it — so a prefix match kept eu-west's files and
+#: deleted every eu dump, the one just written included.
+SHARD_HISTORY = [
+    f"snapadmin-db-eu-west-{START + timedelta(days=day):%Y%m%d-%H%M%S}.sql.gz" for day in range(3)
+] + [f"snapadmin-db-eu-{START + timedelta(days=day):%Y%m%d-%H%M%S}.sql.gz" for day in range(3)]
+SHARD_NEW = f"snapadmin-db-eu-{START + timedelta(days=5):%Y%m%d-%H%M%S}.sql.gz"
+
+
+@pytest.mark.parametrize("destination", sorted(DESTINATIONS))
+def test_a_shard_never_prunes_another_shard_whose_name_extends_its_own(
+    destination, tmp_path, monkeypatch, fake_ftp, fake_sftp, fake_s3  # noqa: F811
+):
+    global HISTORY, NEW, TIERS
+    saved = HISTORY, NEW, TIERS
+    HISTORY, NEW, TIERS = SHARD_HISTORY, SHARD_NEW, {"SNAPADMIN_BACKUP_KEEP": 2}
+    try:
+        kept = DESTINATIONS[destination](tmp_path, monkeypatch)
+    finally:
+        HISTORY, NEW, TIERS = saved
+
+    eu_west = {name for name in SHARD_HISTORY if "eu-west" in name}
+    assert kept == eu_west | {SHARD_NEW, SHARD_HISTORY[-1]}, (
+        f"review: {destination} pruned files of another part or shard — match the part prefix "
+        "exactly (_part_prefix_for), not as a string prefix"
+    )
+
+
+#: What else lives in a shared remote directory: none of it is a backup of this part.
+FOREIGN = [
+    "README.txt", "other-app-dump.sql", "snapadmin-media-latest.tar",
+    # Prefixed like a db dump but carrying no run timestamp: a manual copy, or another
+    # shard's unstamped file. Sorting after the dated dumps, it used to take keep_last's
+    # slots — and cost the newest real dump its place.
+    "snapadmin-db-latest.sql.gz", "snapadmin-db-eu-latest.sql.gz",
+]
+
+
+@pytest.mark.parametrize("destination", ["remote", "sftp", "s3"])
+def test_files_that_are_not_this_part_s_backups_are_never_touched(
+    destination, tmp_path, monkeypatch, fake_ftp, fake_sftp, fake_s3  # noqa: F811
+):
+    """A name with no timestamp maps to the db prefix by fallback; the exact-prefix
+    rule alone then took a remote directory's every unrelated file as a db dump."""
+    global HISTORY, TIERS
+    saved = HISTORY, TIERS
+    # KEEP alone, so no tier can rescue a dump a foreign file pushed out of keep_last.
+    HISTORY, TIERS = saved[0] + FOREIGN, {"SNAPADMIN_BACKUP_KEEP": 2}
+    try:
+        kept = DESTINATIONS[destination](tmp_path, monkeypatch)
+    finally:
+        HISTORY, TIERS = saved
+
+    assert set(FOREIGN) <= kept, f"review: {destination} deleted files that are not its backups"
+    assert kept - set(FOREIGN) == {NEW, HISTORY[-1]}, (
+        f"review: {destination} let a file with no run timestamp take a kept slot"
+    )
+
+
 class TestTheConfig:
     def test_the_tiers_default_to_off(self):
         config = get_backup_config()
@@ -217,3 +276,11 @@ def test_no_keep_slice_is_left_in_the_backup_module():
         f"review: snapadmin/backup.py lines {slices} prune with a negative slice — ask "
         "_select_stale(names, config.retention) so every destination keeps the same backups"
     )
+
+
+def test_a_key_outside_the_location_prefix_is_not_part_of_it():
+    from snapadmin.backup import _of_part
+
+    keys = [f"prod/{NEW}", f"staging/{NEW}"]
+
+    assert _of_part(keys, BACKUP_PREFIX, strip="prod/") == [f"prod/{NEW}"]

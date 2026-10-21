@@ -307,6 +307,12 @@ API token is stored in the repository**. Configure it once:
 > The GitHub Actions job runs in the `pypi` environment and requests `id-token: write`; both are
 > already declared in the workflow — no repository secret is required.
 
+> **Never build a distribution from your working tree to upload it by hand.** The sdist's include
+> patterns override `.gitignore`, so a local build can pick up files git ignores (a `demo/.env` with
+> secrets, a local database). If the tag pipeline is not an option, build from a fresh `git clone` of
+> the tagged commit; `tests/test_distribution_contents.py` checks that every file the build would pack
+> is tracked.
+
 ### Cutting a release
 
 1. Bump `version` in `pyproject.toml` (PEP 440: `0.1.0a7`, `0.1.0b1`, `1.0.0`). PyPI rejects

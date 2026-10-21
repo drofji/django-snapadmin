@@ -246,6 +246,16 @@ class TestTheFlagPlacesTheColumnOnTheChangeForm:
         assert display(model(pk=7)) == "v7"
         assert display.short_description == "Computed"
 
+    def test_a_column_without_verbose_name_is_labelled_from_its_name(self, isolated_site):
+        with isolate_apps("snapadmin"):
+            model = _isolated_model("Unlabelled", {
+                "line_total": snap_fields.SnapFunctionField(func=lambda obj: "x", show_in_form=True),
+            })
+        model_admin = _generated_admin(model, isolated_site)
+
+        assert getattr(model_admin, _form_name("line_total")).short_description == "Line total"
+        assert model_admin.SnapFunctionFieldLine_total.short_description == "Line total"
+
     def test_the_form_never_gets_an_input_for_it(self, isolated_site, staff_request):
         with isolate_apps("snapadmin"):
             model = _isolated_model("NoInput", {
@@ -276,6 +286,24 @@ class TestTheFlagPlacesTheColumnOnTheChangeForm:
         ]
         assert _form_name("computed") in model_admin.get_readonly_fields(staff_request, model(pk=1))
         assert list(model_admin.get_form(staff_request, model(pk=1)).base_fields) == ["name"]
+
+    def test_a_model_with_no_flagged_field_keeps_every_editable_field(
+        self, isolated_site, staff_request
+    ):
+        """With nothing flagged Django shows every editable field; a computed column
+        on the form must add to that, not replace it with a form holding no input."""
+        with isolate_apps("snapadmin"):
+            model = _isolated_model("NothingFlagged", {
+                "name": snap_fields.SnapCharField(max_length=10),
+                "computed": snap_fields.SnapFunctionField(func=lambda obj: "x", show_in_form=True),
+            })
+        model_admin = _generated_admin(model, isolated_site)
+        row = model(pk=1)
+
+        assert list(model_admin.get_form(staff_request, None).base_fields) == ["name"]
+        assert list(model_admin.get_form(staff_request, row).base_fields) == ["name"]
+        assert _flat(model_admin.get_fieldsets(staff_request, None)) == ["name"]
+        assert _flat(model_admin.get_fieldsets(staff_request, row)) == ["name", _form_name("computed")]
 
     def test_show_in_list_and_show_in_form_are_independent(self, isolated_site, staff_request):
         with isolate_apps("snapadmin"):
@@ -624,4 +652,6 @@ def test_show_in_form_works_wherever_the_column_is_declared(where, isolated_site
 
     names = _flat(model_admin.get_fieldsets(staff_request, model(pk=1)))
 
-    assert names == [_form_name("computed"), _form_name("label")]
+    # ``name`` carries no show_in_form flag (a plain models.CharField), so the form
+    # is Django's fallback — every editable field — with the computed rows after it.
+    assert names == ["name", _form_name("computed"), _form_name("label")]

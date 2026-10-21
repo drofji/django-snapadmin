@@ -55,15 +55,20 @@ class TestInheritanceParity:
 
         list_display = model.get_admin_fields().list_display
 
-        assert "SnapFunctionFieldComputed" in list_display
-        assert "SnapFunctionFieldLabel" in list_display
+        assert {"SnapFunctionFieldComputed", "SnapFunctionFieldLabel"} <= set(list_display), (
+            f"review: a computed column declared on the {where} is not discovered — "
+            "registry._declared_attributes() / get_admin_fields()"
+        )
 
     @pytest.mark.parametrize("where", PLACES)
     def test_snap_actions_are_found(self, where):
         model = _declarations_on(where).model
 
-        assert get_snap_action(model, "approve") is not None
-        assert [spec.name for spec in iter_snap_actions(model)] == ["approve"]
+        assert [spec.name for spec in iter_snap_actions(model)] == ["approve"], (
+            f"review: an @snap_action declared on the {where} is not discovered — "
+            "registry._declared_attributes() / iter_snap_actions()"
+        )
+        assert get_snap_action(model, "approve").name == "approve"
 
     def test_a_subclass_s_own_declaration_wins_over_the_base_s(self):
         with isolate_apps("snapadmin"):

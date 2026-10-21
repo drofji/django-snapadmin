@@ -653,3 +653,25 @@ def test_snap_model_admin_methods_come_from_admin_gen_mixin():
     for name in ("get_admin_fields", "get_admin_media", "register_admin", "register_all_admins"):
         assert name in admin_gen.AdminGenMixin.__dict__
         assert name not in SnapModel.__dict__, f"SnapModel shadows {name} instead of inheriting it"
+
+
+def test_token_touch_hook_signature():
+    """The step a project overrides for a different record of token use (#EXT3l)."""
+    from snapadmin.api.authentication import APITokenAuthentication
+
+    assert _params(APITokenAuthentication.touch_token) == ["self", "token"]
+
+
+def test_file_cleanup_flags_default_off():
+    """``delete_replaced`` / ``delete_on_delete`` (#EXT3d) are destructive by nature,
+    so they stay off unless a field asks — and add no migration either way."""
+    from snapadmin.fields import SnapFileField, SnapImageField
+
+    for field_class in (SnapFileField, SnapImageField):
+        plain = field_class(upload_to="x/")
+        flagged = field_class(upload_to="x/", delete_replaced=True, delete_on_delete=True)
+
+        assert (plain.delete_replaced, plain.delete_on_delete) == (False, False)
+        assert (flagged.delete_replaced, flagged.delete_on_delete) == (True, True)
+        assert "delete_replaced" not in flagged.deconstruct()[3]
+        assert "delete_on_delete" not in flagged.deconstruct()[3]

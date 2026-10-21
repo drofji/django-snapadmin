@@ -132,10 +132,39 @@ class TestAConfiguredCheckDecides:
 
         assert user_can_view_pii(dpo) is False
 
-    def test_a_truthy_non_bool_answer_counts_as_true(self, settings, dpo):
-        settings.SNAPADMIN_PII_ACCESS_CHECK = lambda user: "yes"
+    @pytest.mark.parametrize("answer", ["yes", "False", 1, object()])
+    def test_only_true_itself_unlocks(self, settings, dpo, answer):
+        """Fail closed means an answer that is not ``True`` masks: a string
+        ``"False"`` is truthy, and so is the coroutine an ``async def`` returns."""
+        settings.SNAPADMIN_PII_ACCESS_CHECK = lambda user: answer
 
-        assert user_can_view_pii(dpo) is True
+        assert user_can_view_pii(dpo) is False
+
+    def test_a_sync_check_returning_an_awaitable_masks_and_says_why(self, settings, dpo):
+        from structlog.testing import capture_logs
+
+        async def answer():
+            return True
+
+        settings.SNAPADMIN_PII_ACCESS_CHECK = lambda user: answer()
+        with capture_logs() as emitted:
+            allowed = user_can_view_pii(dpo)
+
+        assert allowed is False
+        assert [e["error"] for e in emitted] == ["SNAPADMIN_PII_ACCESS_CHECK returned an awaitable"]
+
+    def test_an_async_check_masks_and_is_logged(self, settings, dpo):
+        from structlog.testing import capture_logs
+
+        async def can_view(user):
+            return True
+
+        settings.SNAPADMIN_PII_ACCESS_CHECK = can_view
+        with capture_logs() as emitted:
+            allowed = user_can_view_pii(dpo)
+
+        assert allowed is False
+        assert [e["event"] for e in emitted] == ["snapadmin.pii_access_check_failed"]
 
 
 @pytest.mark.django_db
@@ -204,6 +233,26 @@ class TestTheStartupCheck:
         assert message.id == "snapadmin.W035"
         assert "masked for everyone but superusers" in message.msg
 
+    def test_an_async_check_warns(self, settings):
+        async def can_view(user):
+            return True
+
+        settings.SNAPADMIN_PII_ACCESS_CHECK = can_view
+
+        (message,) = checks.check_pii_access_check(None)
+
+        assert message.id == "snapadmin.W035"
+        assert "async" in message.msg
+
+    def test_an_object_with_an_async_call_warns(self, settings):
+        class AccessService:
+            async def __call__(self, user):
+                return True
+
+        settings.SNAPADMIN_PII_ACCESS_CHECK = AccessService()
+
+        assert [m.id for m in checks.check_pii_access_check(None)] == ["snapadmin.W035"]
+
     def test_a_value_that_is_not_callable_warns(self, settings):
         settings.SNAPADMIN_PII_ACCESS_CHECK = 42
 
@@ -260,3 +309,15 @@ def test_only_the_decision_function_names_the_permission():
         f"review: {sorted(unexpected)} name the raw-PII permission directly — ask "
         "snapadmin.masking.user_can_view_pii() so SNAPADMIN_PII_ACCESS_CHECK applies there too"
     )
+
+
+@pytest.mark.django_db
+def test_an_awaitable_that_is_not_a_coroutine_masks_too(settings, dpo):
+    class Pending:
+        def __await__(self):
+            yield
+            return True
+
+    settings.SNAPADMIN_PII_ACCESS_CHECK = lambda user: Pending()
+
+    assert user_can_view_pii(dpo) is False

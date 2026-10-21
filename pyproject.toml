@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "django-snapadmin"
-version = "0.1.0b10"
+version = "0.1.0b11"
 description = "Define your Django models once — instantly get an admin panel, REST API, GraphQL and full-text search. Zero boilerplate."
 authors = ["Alexander Wiese"]
 license = "MIT"
@@ -148,7 +148,7 @@ django-extra-settings = {version = ">=0.12.0", optional = true}
 # Optional: wysiwyg rich-text fields (SnapRichTextField / wysiwyg=True). django-ckeditor-5
 # bundles CKEditor 5, which is GPL / commercial-licensed — kept out of the core so the
 # base package carries no GPL/commercial editor unless you opt into rich-text editing.
-django-ckeditor-5 = {version = ">=0.2.0", optional = true}
+django-ckeditor-5 = {version = ">=0.2.8", optional = true}
 
 # Optional: django-admin-autocomplete-filter (LGPL-3.0). The package core does not import
 # it — kept out of core so the base tree is strictly permissive (MIT/BSD/Apache). Add it only
@@ -235,7 +235,7 @@ paramiko = ">=3.0.0"
 # Demo uses a dynamic Settings model; the package core does not depend on it.
 django-extra-settings = ">=0.12.0"
 # Demo uses wysiwyg rich-text fields; the package core does not depend on it.
-django-ckeditor-5 = ">=0.2.0"
+django-ckeditor-5 = ">=0.2.8"
 # Listed in the demo project's INSTALLED_APPS; the package core does not import it (LGPL, optional).
 django-admin-autocomplete-filter = ">=0.7.1"
 # The suite covers XLSX export end to end; the package core imports it lazily.

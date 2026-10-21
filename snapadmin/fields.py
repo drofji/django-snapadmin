@@ -22,7 +22,7 @@ from django.db.models.expressions import Col
 from django.db.models.lookups import Lookup
 from django.db.models.query_utils import DeferredAttribute
 from django.utils.functional import Promise, cached_property
-from django.utils.html import format_html
+from django.utils.html import conditional_escape, format_html
 from django.utils.safestring import mark_safe
 
 from snapadmin import validators as snap_validators
@@ -2101,4 +2101,6 @@ class SnapStatusBadgeField(SnapFunctionField):
         for choice in self.choices:
             if choice.status_string == field_value:
                 return choice.get_html_choice(field_display, self.style_arguments)
-        return field_display
+        # The column is safe_html (the badges above are format_html'd), so a value
+        # with no badge must be escaped here — a raw one would be trusted markup.
+        return conditional_escape(field_display)
